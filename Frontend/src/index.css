@@ -1,0 +1,87 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Material Symbols Font Setup */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+}
+
+/* Global Font Setup */
+html {
+  @apply scroll-smooth;
+}
+
+body {
+  @apply bg-background text-on-surface font-body;
+  font-family: 'Inter', sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6,
+.font-headline,
+.font-display {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+/* Selection Color */
+::selection {
+  @apply bg-primary-fixed text-primary;
+}
+
+/* Smooth Transitions */
+* {
+  @apply transition-colors transition-transform;
+}
+
+button {
+  @apply active:scale-95 transition-transform;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-surface-container;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-outline rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-outline-variant;
+}
+
+/* Focus Ring */
+:focus-visible {
+  @apply outline-2 outline-offset-2 outline-primary;
+}
+
+/* Placeholder Styling */
+::placeholder {
+  @apply text-outline/50;
+}
+
+/* Input Focus */
+input:focus,
+textarea:focus,
+select:focus {
+  @apply ring-2 ring-on-tertiary-container;
+}
