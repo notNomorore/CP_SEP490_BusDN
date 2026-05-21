@@ -1,4 +1,6 @@
-# CP_SEP490_BusDN - Veridian Transit Platform
+# CP_SEP490_BusDN
+nguyennhatminhnau@gmail.com | @Minh123 | admin
+huhuhichic64@gmail.com | @Minh123 | khách
 
 Modern bus transportation booking system with real-time tracking, ticketing, and comprehensive fleet management.
 
