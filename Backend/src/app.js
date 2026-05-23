@@ -12,6 +12,7 @@ import { responseHandler } from './utils/response.js';
 import { globalErrorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import logger from './utils/logger.js';
 import authRoutes from './modules/auth/authRoutes.js';
+import routeRoutes from './modules/routes/routeRoutes.js';
 
 export const createApp = () => {
   const app = express();
@@ -80,7 +81,7 @@ export const createApp = () => {
 
   // Routes will be mounted here
   app.use('/api/auth', authRoutes);
-  // app.use('/api/routes', routeRoutes);
+  app.use('/api/routes', routeRoutes);
   // etc...
 
   // 404 handler (must be after all routes)
