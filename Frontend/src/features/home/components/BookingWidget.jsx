@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const BookingWidget = () => {
+  const navigate = useNavigate();
   const [tripType, setTripType] = useState('bus');
   const [searchParams, setSearchParams] = useState({
     from: '',
@@ -17,8 +19,17 @@ const BookingWidget = () => {
   };
 
   const handleSearch = () => {
-    console.log('Search params:', searchParams);
-    // Navigate to search results page
+    const params = new URLSearchParams();
+
+    if (searchParams.from.trim()) {
+      params.set('from', searchParams.from.trim());
+    }
+
+    if (searchParams.to.trim()) {
+      params.set('to', searchParams.to.trim());
+    }
+
+    navigate(`/search?${params.toString()}`);
   };
 
   return (
