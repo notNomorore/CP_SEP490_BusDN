@@ -15,6 +15,16 @@ const StopSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    latitude: {
+      type: Number,
+      min: -90,
+      max: 90,
+    },
+    longitude: {
+      type: Number,
+      min: -180,
+      max: 180,
+    },
   },
   { _id: false }
 );

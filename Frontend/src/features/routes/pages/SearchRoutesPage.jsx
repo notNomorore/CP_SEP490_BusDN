@@ -27,7 +27,10 @@ const SearchRoutesPage = () => {
   const [from, setFrom] = useState(searchParams.get('from') || '');
   const [to, setTo] = useState(searchParams.get('to') || '');
   const [routes, setRoutes] = useState([]);
+  const [nearbyStops, setNearbyStops] = useState([]);
+  const [locationSummary, setLocationSummary] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
   const [error, setError] = useState('');
 
   const activeFilters = useMemo(() => ({
@@ -48,6 +51,8 @@ const SearchRoutesPage = () => {
 
         if (isMounted) {
           setRoutes(result.routes || []);
+          setNearbyStops([]);
+          setLocationSummary(null);
         }
       } catch (err) {
         if (isMounted) {
@@ -86,6 +91,60 @@ const SearchRoutesPage = () => {
     }
 
     setSearchParams(nextParams);
+  };
+
+  const handleUseCurrentLocation = () => {
+    setError('');
+
+    if (!navigator.geolocation) {
+      setError('Current location is not supported by this browser.');
+      return;
+    }
+
+    setIsLocating(true);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          const result = await routeService.searchNearbyRoutes({
+            latitude,
+            longitude,
+            radiusKm: 8,
+          });
+
+          setRoutes(result.routes || []);
+          setNearbyStops(result.nearbyStops || []);
+          setLocationSummary({
+            latitude,
+            longitude,
+            radiusKm: result.radiusKm || 8,
+          });
+        } catch (err) {
+          setError(err.message || 'Unable to find nearby routes.');
+          setRoutes([]);
+          setNearbyStops([]);
+          setLocationSummary(null);
+        } finally {
+          setIsLocating(false);
+        }
+      },
+      (geoError) => {
+        const messages = {
+          1: 'Location permission was denied.',
+          2: 'Current location is unavailable.',
+          3: 'Location request timed out.',
+        };
+
+        setError(messages[geoError.code] || 'Unable to read current location.');
+        setIsLocating(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000,
+      }
+    );
   };
 
   return (
@@ -154,6 +213,26 @@ const SearchRoutesPage = () => {
             </div>
           </form>
 
+          <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-outline-variant/60 bg-white p-5 shadow-sm md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="font-semibold text-primary">Search by current location</div>
+              <p className="mt-1 text-sm text-on-surface-variant">
+                Use your GPS location to find nearby bus stops and suggested routes.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleUseCurrentLocation}
+              disabled={isLocating}
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-primary px-5 font-bold text-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className="material-symbols-outlined">
+                {isLocating ? 'progress_activity' : 'my_location'}
+              </span>
+              {isLocating ? 'Finding...' : 'Use current location'}
+            </button>
+          </div>
+
           <div className="mt-8">
             {isLoading && (
               <div className="rounded-xl border border-outline-variant/60 bg-white px-5 py-4 text-on-surface-variant">
@@ -175,6 +254,41 @@ const SearchRoutesPage = () => {
 
             {!isLoading && !error && routes.length > 0 && (
               <div className="space-y-4">
+                {locationSummary && (
+                  <div className="rounded-2xl border border-on-tertiary-container/20 bg-on-tertiary-container/10 p-5">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="font-bold text-primary">Nearby route suggestions</div>
+                        <p className="mt-1 text-sm text-on-surface-variant">
+                          Showing stops within {locationSummary.radiusKm} km of your current location.
+                        </p>
+                      </div>
+                      <div className="text-sm font-semibold text-on-tertiary-fixed-variant">
+                        {nearbyStops.length} nearby stop{nearbyStops.length === 1 ? '' : 's'}
+                      </div>
+                    </div>
+
+                    {nearbyStops.length > 0 && (
+                      <div className="mt-4 grid gap-2 md:grid-cols-2">
+                        {nearbyStops.map((stop) => (
+                          <div
+                            key={`${stop.route.routeNumber}-${stop.order}-${stop.name}`}
+                            className="rounded-xl bg-white/80 px-4 py-3"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="font-semibold text-on-surface">{stop.name}</span>
+                              <span className="text-sm font-bold text-primary">{stop.distanceKm} km</span>
+                            </div>
+                            <div className="mt-1 text-sm text-on-surface-variant">
+                              {stop.route.routeNumber} - {stop.route.name}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="text-sm font-semibold text-on-surface-variant">
                   {routes.length} matching route{routes.length === 1 ? '' : 's'}
                 </div>

@@ -38,6 +38,14 @@ export const routeService = {
 
     return response.data;
   },
+
+  searchNearbyRoutes: async ({ latitude, longitude, radiusKm = 5 }) => {
+    const response = await apiClient.get('/routes/nearby', {
+      params: { latitude, longitude, radiusKm },
+    });
+
+    return response.data;
+  },
 };
 
 export default routeService;
