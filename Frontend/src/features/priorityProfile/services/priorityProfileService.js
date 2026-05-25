@@ -22,8 +22,34 @@ export const priorityProfileService = {
     return apiClient.get('/priority-profile/me');
   },
 
+  listMyRequests: async () => {
+    return apiClient.get('/priority-profile/me/requests');
+  },
+
   register: async (payload) => {
     return apiClient.post('/priority-profile/register', payload);
+  },
+
+  submit: async ({ profile, documentRows }) => {
+    const formData = new FormData();
+    Object.entries(profile).forEach(([key, value]) => {
+      formData.append(key, value ?? '');
+    });
+
+    const documentTypes = [];
+    documentRows.forEach((row) => {
+      Array.from(row.files).forEach((file) => {
+        formData.append('documents', file);
+        documentTypes.push(row.documentType);
+      });
+    });
+    formData.append('documentTypes', JSON.stringify(documentTypes));
+
+    return apiClient.post('/priority-profile/submit', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
   },
 
   uploadDocuments: async ({ documentType, files }) => {
@@ -47,12 +73,12 @@ export const priorityProfileService = {
     });
   },
 
-  getAdminRequestDetail: async (userId) => {
-    return apiClient.get(`/priority-profile/admin/requests/${userId}`);
+  getAdminRequestDetail: async (requestId) => {
+    return apiClient.get(`/priority-profile/admin/requests/${requestId}`);
   },
 
-  verifyAdminRequest: async (userId, payload) => {
-    return apiClient.patch(`/priority-profile/admin/requests/${userId}/verify`, payload);
+  verifyAdminRequest: async (requestId, payload) => {
+    return apiClient.patch(`/priority-profile/admin/requests/${requestId}/verify`, payload);
   },
 };
 

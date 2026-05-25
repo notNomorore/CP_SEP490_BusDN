@@ -37,6 +37,31 @@ export const RegisterPriorityProfileDTO = {
   },
 };
 
+export const SubmitPriorityProfileDTO = {
+  validate: (body, files) => {
+    const errors = RegisterPriorityProfileDTO.validate(body) || {};
+
+    if (!files || files.length === 0) {
+      errors.documents = 'At least one verification document is required';
+    }
+
+    let documentTypes = [];
+    try {
+      documentTypes = JSON.parse(body.documentTypes || '[]');
+    } catch (_error) {
+      errors.documentTypes = 'Document types must be valid JSON';
+    }
+
+    if (!Array.isArray(documentTypes) || documentTypes.length !== (files?.length || 0)) {
+      errors.documentTypes = 'Each uploaded document must have a document type';
+    } else if (documentTypes.some((type) => !DOCUMENT_TYPES.includes(type))) {
+      errors.documentTypes = 'Document type is invalid';
+    }
+
+    return Object.keys(errors).length === 0 ? null : errors;
+  },
+};
+
 export const UploadPriorityDocumentsDTO = {
   validate: (body, files) => {
     const errors = {};
@@ -86,16 +111,19 @@ export const VerifyPriorityProfileDTO = {
 };
 
 export const PriorityProfileResponseDTO = {
-  format: (user) => {
-    const profile = user.priorityProfile || {};
+  format: (source) => {
+    const isRequestDocument = Boolean(source.passenger);
+    const user = isRequestDocument ? source.passenger : source;
+    const profile = isRequestDocument ? source : source.priorityProfile || {};
 
     return {
-      userId: user._id,
-      isPriorityGroup: user.isPriorityGroup,
-      priorityStatus: user.priorityStatus,
+      requestId: isRequestDocument ? source._id : null,
+      userId: user?._id || source.passenger,
+      isPriorityGroup: user?.isPriorityGroup || false,
+      priorityStatus: user?.priorityStatus || profile.status || 'NONE',
       profile: {
         profileType: profile.profileType || null,
-        fullName: profile.fullName || user.fullName,
+        fullName: profile.fullName || user?.fullName || '',
         dateOfBirth: profile.dateOfBirth || null,
         identityNumber: profile.identityNumber || null,
         cardNumber: profile.cardNumber || null,

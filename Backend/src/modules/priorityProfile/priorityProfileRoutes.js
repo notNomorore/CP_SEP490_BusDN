@@ -21,10 +21,12 @@ const handlePriorityDocumentUpload = (req, res, next) => {
 router.use(authMiddleware);
 
 router.get('/admin/requests', authorizeRole('ADMIN'), PriorityProfileController.listRequests);
-router.get('/admin/requests/:userId', authorizeRole('ADMIN'), PriorityProfileController.getRequestDetail);
-router.patch('/admin/requests/:userId/verify', authorizeRole('ADMIN'), PriorityProfileController.verifyRequest);
+router.get('/admin/requests/:requestId', authorizeRole('ADMIN'), PriorityProfileController.getRequestDetail);
+router.patch('/admin/requests/:requestId/verify', authorizeRole('ADMIN'), PriorityProfileController.verifyRequest);
 
 router.get('/me', authorizeRole('PASSENGER'), PriorityProfileController.getStatus);
+router.get('/me/requests', authorizeRole('PASSENGER'), PriorityProfileController.listMyRequests);
+router.post('/submit', authorizeRole('PASSENGER'), handlePriorityDocumentUpload, PriorityProfileController.submit);
 router.post('/register', authorizeRole('PASSENGER'), PriorityProfileController.register);
 router.post('/documents', authorizeRole('PASSENGER'), handlePriorityDocumentUpload, PriorityProfileController.uploadDocuments);
 

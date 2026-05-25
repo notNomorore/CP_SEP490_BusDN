@@ -86,7 +86,7 @@ const AdminPriorityVerificationPage = () => {
   const selectedStatus = selectedRequest?.profile?.status || 'NONE';
   const selectedDocuments = selectedRequest?.profile?.documents || [];
   const hasDocuments = selectedDocuments.length > 0;
-  const isAlreadyApproved = selectedStatus === 'APPROVED';
+  const isProcessedRequest = ['APPROVED', 'REJECTED', 'EXPIRED'].includes(selectedStatus);
 
   const selectedProfileType = useMemo(() => (
     PROFILE_TYPES.find((type) => type.value === selectedRequest?.profile?.profileType)?.label || 'Chưa có'
@@ -116,13 +116,13 @@ const AdminPriorityVerificationPage = () => {
     loadRequests();
   }, [loadRequests]);
 
-  const loadDetail = async (userId) => {
+  const loadDetail = async (requestId) => {
     setIsDetailLoading(true);
     setError('');
     setMessage('');
 
     try {
-      const response = await priorityProfileService.getAdminRequestDetail(userId);
+      const response = await priorityProfileService.getAdminRequestDetail(requestId);
       const profileType = response.data?.profile?.profileType;
       const hasExpiryDate = Boolean(response.data?.profile?.expiryDate);
       const shouldDefaultNoExpiry = !hasExpiryDate
@@ -143,14 +143,14 @@ const AdminPriorityVerificationPage = () => {
   };
 
   const handleVerify = async (nextStatus) => {
-    if (!selectedRequest?.userId) return;
+    if (!selectedRequest?.requestId) return;
 
     setIsVerifying(true);
     setError('');
     setMessage('');
 
     try {
-      const response = await priorityProfileService.verifyAdminRequest(selectedRequest.userId, {
+      const response = await priorityProfileService.verifyAdminRequest(selectedRequest.requestId, {
         status: nextStatus,
         rejectionReason,
         noExpiry: nextStatus === 'APPROVED' ? noExpiry : undefined,
@@ -193,7 +193,7 @@ const AdminPriorityVerificationPage = () => {
             <div className="mb-5 flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-headline font-black text-primary">
-                  1. Yêu cầu hồ sơ
+                  Yêu cầu hồ sơ
                 </h2>
                 <p className="mt-2 text-sm text-on-surface-variant">
                   Danh sách passenger đã gửi hồ sơ ưu tiên.
@@ -242,13 +242,13 @@ const AdminPriorityVerificationPage = () => {
               <div className="space-y-3">
                 {requests.map((request) => {
                   const requestStatus = request.profile?.status || 'NONE';
-                  const isSelected = selectedRequest?.userId === request.userId;
+                  const isSelected = selectedRequest?.requestId === request.requestId;
 
                   return (
                     <button
-                      key={request.userId}
+                      key={request.requestId || request.userId}
                       type="button"
-                      onClick={() => loadDetail(request.userId)}
+                      onClick={() => loadDetail(request.requestId)}
                       className={`w-full rounded-2xl border p-4 text-left transition ${
                         isSelected
                           ? 'border-primary bg-primary-fixed/40'
@@ -278,7 +278,7 @@ const AdminPriorityVerificationPage = () => {
           <section className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-xl shadow-primary/5">
             <div className="mb-6">
               <h2 className="text-2xl font-headline font-black text-primary">
-                2. Xác minh giấy tờ
+                Xác minh giấy tờ
               </h2>
               <p className="mt-2 text-sm leading-6 text-on-surface-variant">
                 Kiểm tra thông tin hồ sơ và tài liệu upload trước khi duyệt hoặc từ chối.
@@ -377,16 +377,16 @@ const AdminPriorityVerificationPage = () => {
                   )}
                 </div>
 
-                {isAlreadyApproved ? (
+                {isProcessedRequest ? (
                   <div className="rounded-3xl border border-on-tertiary-container/20 bg-on-tertiary-container/10 p-5 text-on-tertiary-fixed-variant">
                     <div className="flex items-start gap-3">
-                      <span className="material-symbols-outlined mt-0.5">verified</span>
+                      <span className="material-symbols-outlined mt-0.5">lock</span>
                       <div>
                         <h3 className="text-lg font-headline font-black">
-                          Hồ sơ này đã được duyệt
+                          Hồ sơ này đã có kết quả xử lý
                         </h3>
                         <p className="mt-2 text-sm leading-6">
-                          Admin không thể duyệt hoặc từ chối lại hồ sơ đã approved để tránh thay đổi nhầm trạng thái của hành khách. Nếu quyền ưu tiên hết hạn, hệ thống sẽ tự chuyển sang trạng thái hết hạn và passenger có thể nộp hồ sơ mới.
+                          Admin chỉ có thể xem lại hồ sơ đã được chấp thuận, từ chối hoặc hết hạn. Hệ thống không cho thay đổi lại trạng thái để tránh ghi nhận sai kết quả xét duyệt của hành khách.
                         </p>
                       </div>
                     </div>

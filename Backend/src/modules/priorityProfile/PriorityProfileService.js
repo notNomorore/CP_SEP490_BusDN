@@ -1,5 +1,6 @@
 import path from 'path';
 import User from '../auth/User.js';
+import PriorityProfileRequest from './PriorityProfileRequest.js';
 
 export class PriorityProfileService {
   static getStartOfToday() {
@@ -26,12 +27,38 @@ export class PriorityProfileService {
     return this.getEndOfDate(priorityProfile.expiryDate) >= new Date();
   }
 
+  static buildDocuments(files, documentTypes) {
+    return files.map((file, index) => ({
+      type: documentTypes[index],
+      originalName: file.originalname,
+      fileName: file.filename,
+      mimeType: file.mimetype,
+      size: file.size,
+      url: `/uploads/priority-profiles/${path.basename(file.filename)}`,
+      uploadedAt: new Date(),
+    }));
+  }
+
   static async syncExpiredProfiles() {
+    const expiredRequests = await PriorityProfileRequest.find({
+      status: 'APPROVED',
+      expiryDate: { $lt: this.getStartOfToday() },
+    }).select('_id passenger');
+
+    if (!expiredRequests.length) {
+      return;
+    }
+
+    await PriorityProfileRequest.updateMany(
+      { _id: { $in: expiredRequests.map((request) => request._id) } },
+      { $set: { status: 'EXPIRED' } }
+    );
+
     await User.updateMany(
       {
+        _id: { $in: expiredRequests.map((request) => request.passenger) },
         priorityStatus: 'APPROVED',
         'priorityProfile.status': 'APPROVED',
-        'priorityProfile.expiryDate': { $lt: this.getStartOfToday() },
       },
       {
         $set: {
@@ -43,46 +70,69 @@ export class PriorityProfileService {
     );
   }
 
-  static async applyExpiryIfNeeded(user) {
-    if (!user?.priorityProfile?.expiryDate) {
-      return user;
-    }
+  static async getLatestRequest(userId) {
+    await this.syncExpiredProfiles();
 
-    if (
-      user.priorityProfile.status === 'APPROVED'
-      && !this.isApprovedProfileActive(user.priorityProfile)
-    ) {
-      user.priorityStatus = 'EXPIRED';
-      user.isPriorityGroup = false;
-      user.priorityProfile.status = 'EXPIRED';
-      await user.save();
-    }
-
-    return user;
+    return PriorityProfileRequest.findOne({ passenger: userId })
+      .sort({ submittedAt: -1, createdAt: -1 })
+      .populate('passenger');
   }
 
-  static buildPriorityProfileQuery(status) {
-    const query = {
-      priorityStatus: { $in: ['PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'] },
-      'priorityProfile.status': { $exists: true, $ne: 'NONE' },
-    };
+  static async getActiveApprovedRequest(userId) {
+    await this.syncExpiredProfiles();
 
-    if (status && status !== 'ALL') {
-      query.priorityStatus = status;
-      query['priorityProfile.status'] = status;
-    }
+    const request = await PriorityProfileRequest.findOne({
+      passenger: userId,
+      status: 'APPROVED',
+      $or: [
+        { expiryDate: { $exists: false } },
+        { expiryDate: null },
+        { expiryDate: { $gte: this.getStartOfToday() } },
+      ],
+    }).sort({ reviewedAt: -1, submittedAt: -1 });
 
-    return query;
+    return request;
+  }
+
+  static async getPendingRequest(userId) {
+    return PriorityProfileRequest.findOne({
+      passenger: userId,
+      status: 'PENDING',
+    }).sort({ submittedAt: -1, createdAt: -1 });
   }
 
   static async getProfile(userId) {
+    const request = await this.getLatestRequest(userId);
+
+    if (request) {
+      return request;
+    }
+
     const user = await User.findById(userId);
 
     if (!user) {
       throw new Error('User not found');
     }
 
-    return this.applyExpiryIfNeeded(user);
+    return user;
+  }
+
+  static async listPassengerRequests(userId) {
+    await this.syncExpiredProfiles();
+
+    return PriorityProfileRequest.find({ passenger: userId })
+      .sort({ submittedAt: -1, createdAt: -1 })
+      .populate('passenger');
+  }
+
+  static buildPriorityProfileQuery(status) {
+    const query = {};
+
+    if (status && status !== 'ALL') {
+      query.status = status;
+    }
+
+    return query;
   }
 
   static async listRequests({ status = 'PENDING', page = 1, limit = 20 }) {
@@ -93,11 +143,12 @@ export class PriorityProfileService {
     const query = this.buildPriorityProfileQuery(status);
 
     const [items, total] = await Promise.all([
-      User.find(query)
-        .sort({ 'priorityProfile.submittedAt': -1, updatedAt: -1 })
+      PriorityProfileRequest.find(query)
+        .populate('passenger')
+        .sort({ submittedAt: -1, createdAt: -1 })
         .skip((normalizedPage - 1) * normalizedLimit)
         .limit(normalizedLimit),
-      User.countDocuments(query),
+      PriorityProfileRequest.countDocuments(query),
     ]);
 
     return {
@@ -111,72 +162,87 @@ export class PriorityProfileService {
     };
   }
 
-  static async getRequestByUserId(userId) {
+  static async getRequestById(requestId) {
     await this.syncExpiredProfiles();
 
-    const user = await User.findOne({
-      _id: userId,
-      'priorityProfile.status': { $exists: true, $ne: 'NONE' },
-    });
+    const request = await PriorityProfileRequest.findById(requestId).populate('passenger');
 
-    if (!user) {
+    if (!request) {
       throw new Error('Priority profile request not found');
     }
 
-    return this.applyExpiryIfNeeded(user);
+    return request;
   }
 
-  static async verifyRequest(userId, data, reviewerId) {
-    const user = await this.getRequestByUserId(userId);
+  static async verifyRequest(requestId, data, reviewerId) {
+    const request = await this.getRequestById(requestId);
 
-    if (!user.priorityProfile?.documents?.length) {
+    if (!request.documents?.length) {
       throw new Error('Cannot verify profile without uploaded documents');
     }
 
-    if (user.priorityProfile.status === 'APPROVED') {
-      throw new Error('Approved priority profile cannot be verified again');
+    if (['APPROVED', 'REJECTED', 'EXPIRED'].includes(request.status)) {
+      throw new Error('Processed priority profile request cannot be verified again');
     }
 
     const isApproved = data.status === 'APPROVED';
 
-    user.priorityStatus = data.status;
-    user.isPriorityGroup = isApproved;
-    user.priorityProfile.status = data.status;
-    user.priorityProfile.rejectionReason = isApproved
-      ? undefined
-      : data.rejectionReason.trim();
-    if (isApproved) {
-      user.priorityProfile.expiryDate = data.noExpiry || !data.expiryDate
-        ? undefined
-        : new Date(data.expiryDate);
-    }
-    user.priorityProfile.reviewedAt = new Date();
-    user.priorityProfile.reviewedBy = reviewerId;
+    request.status = data.status;
+    request.rejectionReason = isApproved ? undefined : data.rejectionReason.trim();
+    request.expiryDate = isApproved && !data.noExpiry && data.expiryDate
+      ? new Date(data.expiryDate)
+      : undefined;
+    request.reviewedAt = new Date();
+    request.reviewedBy = reviewerId;
 
-    await user.save();
-    return user;
+    await request.save();
+
+    const user = await User.findById(request.passenger?._id || request.passenger);
+    if (user) {
+      user.priorityStatus = data.status;
+      user.isPriorityGroup = isApproved;
+      user.priorityProfile = {
+        profileType: request.profileType,
+        fullName: request.fullName,
+        dateOfBirth: request.dateOfBirth,
+        identityNumber: request.identityNumber,
+        cardNumber: request.cardNumber,
+        issuingAuthority: request.issuingAuthority,
+        reason: request.reason,
+        status: request.status,
+        rejectionReason: request.rejectionReason,
+        expiryDate: request.expiryDate,
+        submittedAt: request.submittedAt,
+        reviewedAt: request.reviewedAt,
+        reviewedBy: request.reviewedBy,
+        documents: request.documents,
+      };
+      await user.save();
+    }
+
+    return this.getRequestById(request._id);
   }
 
-  static async registerProfile(userId, data) {
+  static async submitProfile(userId, data, files) {
     const user = await User.findById(userId);
 
     if (!user) {
       throw new Error('User not found');
     }
 
-    await this.applyExpiryIfNeeded(user);
-
-    if (this.isApprovedProfileActive(user.priorityProfile)) {
+    const activeApprovedRequest = await this.getActiveApprovedRequest(userId);
+    if (this.isApprovedProfileActive(activeApprovedRequest)) {
       throw new Error('Your approved priority profile is still active. You can submit a new request after it expires.');
     }
 
-    const existingProfile = user.priorityProfile?.toObject?.() || user.priorityProfile || {};
-    const existingDocuments = existingProfile.documents || [];
+    const pendingRequest = await this.getPendingRequest(userId);
+    if (pendingRequest) {
+      throw new Error('Your priority profile request is pending review. You cannot submit another request until it is reviewed.');
+    }
 
-    user.isPriorityGroup = false;
-    user.priorityStatus = 'PENDING';
-    user.priorityProfile = {
-      ...existingProfile,
+    const documentTypes = JSON.parse(data.documentTypes || '[]');
+    const request = await PriorityProfileRequest.create({
+      passenger: userId,
       profileType: data.profileType,
       fullName: data.fullName.trim(),
       dateOfBirth: new Date(data.dateOfBirth),
@@ -185,51 +251,82 @@ export class PriorityProfileService {
       issuingAuthority: data.issuingAuthority?.trim(),
       reason: data.reason.trim(),
       status: 'PENDING',
-      rejectionReason: undefined,
       submittedAt: new Date(),
-      reviewedAt: undefined,
-      documents: existingDocuments,
-    };
+      documents: this.buildDocuments(files, documentTypes),
+    });
 
+    user.isPriorityGroup = false;
+    user.priorityStatus = 'PENDING';
+    user.priorityProfile = {
+      profileType: request.profileType,
+      fullName: request.fullName,
+      dateOfBirth: request.dateOfBirth,
+      identityNumber: request.identityNumber,
+      cardNumber: request.cardNumber,
+      issuingAuthority: request.issuingAuthority,
+      reason: request.reason,
+      status: request.status,
+      rejectionReason: undefined,
+      submittedAt: request.submittedAt,
+      reviewedAt: undefined,
+      documents: request.documents,
+    };
     await user.save();
-    return user;
+
+    return this.getRequestById(request._id);
+  }
+
+  static async registerProfile(userId, data) {
+    const activeApprovedRequest = await this.getActiveApprovedRequest(userId);
+    if (this.isApprovedProfileActive(activeApprovedRequest)) {
+      throw new Error('Your approved priority profile is still active. You can submit a new request after it expires.');
+    }
+
+    const pendingRequest = await this.getPendingRequest(userId);
+    if (pendingRequest) {
+      throw new Error('Your priority profile request is pending review. You cannot submit another request until it is reviewed.');
+    }
+
+    const request = await PriorityProfileRequest.create({
+      passenger: userId,
+      profileType: data.profileType,
+      fullName: data.fullName.trim(),
+      dateOfBirth: new Date(data.dateOfBirth),
+      identityNumber: data.identityNumber.trim(),
+      cardNumber: data.cardNumber?.trim(),
+      issuingAuthority: data.issuingAuthority?.trim(),
+      reason: data.reason.trim(),
+      status: 'PENDING',
+      submittedAt: new Date(),
+      documents: [],
+    });
+
+    return this.getRequestById(request._id);
   }
 
   static async uploadDocuments(userId, documentType, files) {
-    const user = await User.findById(userId);
+    const request = await PriorityProfileRequest.findOne({
+      passenger: userId,
+      status: { $in: ['PENDING', 'REJECTED'] },
+    }).sort({ submittedAt: -1, createdAt: -1 });
 
-    if (!user) {
-      throw new Error('User not found');
-    }
-
-    if (!user.priorityProfile || user.priorityProfile.status === 'NONE') {
+    if (!request) {
       throw new Error('Priority profile must be registered before uploading documents');
     }
 
-    if (user.priorityProfile.status === 'APPROVED') {
+    if (request.status === 'APPROVED') {
       throw new Error('Approved priority profile cannot be changed');
     }
 
-    const newDocuments = files.map((file) => ({
-      type: documentType,
-      originalName: file.originalname,
-      fileName: file.filename,
-      mimeType: file.mimetype,
-      size: file.size,
-      url: `/uploads/priority-profiles/${path.basename(file.filename)}`,
-      uploadedAt: new Date(),
-    }));
-
-    user.priorityStatus = 'PENDING';
-    user.priorityProfile.status = 'PENDING';
-    user.priorityProfile.documents = [
-      ...(user.priorityProfile.documents || []),
-      ...newDocuments,
+    request.status = 'PENDING';
+    request.documents = [
+      ...(request.documents || []),
+      ...this.buildDocuments(files, files.map(() => documentType)),
     ];
-    user.priorityProfile.submittedAt = user.priorityProfile.submittedAt || new Date();
+    request.submittedAt = request.submittedAt || new Date();
+    await request.save();
 
-    await user.save();
-    return user;
+    return this.getRequestById(request._id);
   }
 }
 

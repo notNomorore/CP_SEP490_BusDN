@@ -40,6 +40,6 @@ export const uploadPriorityDocuments = multer({
   fileFilter,
   limits: {
     fileSize: config.upload.maxSize,
-    files: 5,
+    files: 20,
   },
-}).array('documents', 5);
+}).array('documents', 20);

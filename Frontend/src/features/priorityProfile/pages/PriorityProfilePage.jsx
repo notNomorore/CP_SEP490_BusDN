@@ -5,7 +5,6 @@ import priorityProfileService, {
   DOCUMENT_TYPES,
   PROFILE_TYPES,
 } from '../services/priorityProfileService.js';
-import useAuthStore from '../../auth/stores/authStore.js';
 
 const STATUS_META = {
   NONE: {
@@ -108,8 +107,8 @@ const getErrorMessage = (error) => {
 };
 
 const PriorityProfilePage = () => {
-  const { user } = useAuthStore();
   const [profileData, setProfileData] = useState(null);
+  const [requestHistory, setRequestHistory] = useState([]);
   const [form, setForm] = useState(initialForm);
   const [documentRows, setDocumentRows] = useState([
     createDocumentRow('IDENTITY_FRONT'),
@@ -118,31 +117,51 @@ const PriorityProfilePage = () => {
   const [viewerFile, setViewerFile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
   const status = profileData?.profile?.status || 'NONE';
   const statusMeta = STATUS_META[status] || STATUS_META.NONE;
   const documents = profileData?.profile?.documents || [];
+  const currentApplicantName = profileData?.profile?.status === 'NONE'
+    ? 'Chưa có'
+    : profileData?.profile?.fullName || 'Chưa có';
   const hasActiveApprovedProfile = isApprovedPriorityActive(
     status,
     profileData?.profile?.expiryDate
   );
+  const hasPendingProfile = status === 'PENDING';
+  const isSubmissionBlocked = hasPendingProfile || hasActiveApprovedProfile;
+  const submissionBlockMessage = hasPendingProfile
+    ? 'Hồ sơ ưu tiên của bạn đang chờ xét duyệt. Bạn không thể gửi hồ sơ mới cho đến khi admin duyệt hoặc từ chối hồ sơ hiện tại.'
+    : 'Hồ sơ ưu tiên của bạn đang còn hiệu lực. Bạn chỉ cần nộp hồ sơ mới sau khi quyền ưu tiên hết hạn.';
 
-  const canUploadDocuments = useMemo(() => (
-    ['PENDING', 'REJECTED'].includes(status)
+  const canSubmitProfile = useMemo(() => (
+    !isSubmissionBlocked
+    && form.profileType
+    && form.fullName.trim()
+    && form.dateOfBirth
+    && form.identityNumber.trim()
+    && form.reason.trim()
     && documentRows.some((row) => row.files.length > 0)
-  ), [documentRows, status]);
+  ), [documentRows, form, isSubmissionBlocked]);
+
+  const rejectedRequests = useMemo(() => (
+    requestHistory.filter((request) => request.profile?.status === 'REJECTED')
+  ), [requestHistory]);
 
   const loadProfile = useCallback(async () => {
     setIsLoading(true);
     setError('');
 
     try {
-      const response = await priorityProfileService.getStatus();
+      const [response, historyResponse] = await Promise.all([
+        priorityProfileService.getStatus(),
+        priorityProfileService.listMyRequests(),
+      ]);
       const nextProfile = response.data;
       setProfileData(nextProfile);
+      setRequestHistory(historyResponse.data || []);
 
       if (nextProfile?.profile?.status && nextProfile.profile.status !== 'NONE') {
         setForm({
@@ -156,18 +175,13 @@ const PriorityProfilePage = () => {
           issuingAuthority: nextProfile.profile.issuingAuthority || '',
           reason: nextProfile.profile.reason || '',
         });
-      } else if (user?.fullName) {
-        setForm((current) => ({
-          ...current,
-          fullName: user.fullName,
-        }));
       }
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
-  }, [user?.fullName]);
+  }, []);
 
   useEffect(() => {
     loadProfile();
@@ -198,12 +212,12 @@ const PriorityProfilePage = () => {
     }));
   };
 
-  const handleRegister = async (event) => {
+  const handleSubmitProfile = async (event) => {
     event.preventDefault();
 
-    if (hasActiveApprovedProfile) {
+    if (isSubmissionBlocked) {
       setError('');
-      setMessage('Hồ sơ ưu tiên của bạn đang còn hiệu lực. Bạn chỉ cần nộp hồ sơ mới sau khi quyền ưu tiên hết hạn.');
+      setMessage(submissionBlockMessage);
       return;
     }
 
@@ -212,8 +226,16 @@ const PriorityProfilePage = () => {
     setMessage('');
 
     try {
-      const response = await priorityProfileService.register(form);
+      const response = await priorityProfileService.submit({
+        profile: form,
+        documentRows: documentRows.filter((row) => row.files.length > 0),
+      });
       setProfileData(response.data);
+      const historyResponse = await priorityProfileService.listMyRequests();
+      setRequestHistory(historyResponse.data || []);
+      setDocumentRows([
+        createDocumentRow('IDENTITY_FRONT'),
+      ]);
       setMessage('Hồ sơ ưu tiên đã được gửi và đang chờ xác minh.');
     } catch (err) {
       setError(getErrorMessage(err));
@@ -250,37 +272,6 @@ const PriorityProfilePage = () => {
     ));
   };
 
-  const handleUpload = async (event) => {
-    event.preventDefault();
-    setIsUploading(true);
-    setError('');
-    setMessage('');
-
-    try {
-      const rowsWithFiles = documentRows.filter((row) => row.files.length > 0);
-      let latestResponse = null;
-
-      for (const row of rowsWithFiles) {
-        latestResponse = await priorityProfileService.uploadDocuments({
-          documentType: row.documentType,
-          files: row.files,
-        });
-      }
-
-      if (latestResponse) {
-        setProfileData(latestResponse.data);
-      }
-
-      setDocumentRows([
-        createDocumentRow('IDENTITY_FRONT'),
-      ]);
-      setMessage('Tài liệu xác minh đã được tải lên thành công.');
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setIsUploading(false);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -303,11 +294,6 @@ const PriorityProfilePage = () => {
                   </p>
                 </div>
               </div>
-
-              <div className={`inline-flex items-center gap-3 rounded-full px-5 py-3 text-sm font-bold ${statusMeta.className}`}>
-                <span className="material-symbols-outlined">{statusMeta.icon}</span>
-                {statusMeta.label}
-              </div>
             </div>
           </div>
         </section>
@@ -327,13 +313,13 @@ const PriorityProfilePage = () => {
             )}
 
             <form
-              onSubmit={handleRegister}
+              onSubmit={handleSubmitProfile}
               className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-xl shadow-primary/5"
             >
               <div className="mb-6 flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-headline font-black text-primary">
-                    1. Đăng ký hồ sơ ưu tiên
+                    Đăng ký hồ sơ ưu tiên
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-on-surface-variant">
                     Thông tin này được dùng để nhân viên xác minh quyền ưu tiên hoặc giảm giá của hành khách.
@@ -344,15 +330,21 @@ const PriorityProfilePage = () => {
                 </span>
               </div>
 
-              {hasActiveApprovedProfile && (
+              {isSubmissionBlocked && (
                 <div className="mb-5 rounded-2xl border border-on-tertiary-container/20 bg-on-tertiary-container/10 px-4 py-3 text-sm leading-6 text-on-tertiary-fixed-variant">
-                  Hồ sơ ưu tiên của bạn đã được duyệt và đang còn hiệu lực đến{' '}
-                  <span className="font-bold">
-                    {profileData?.profile?.expiryDate
-                      ? formatDate(profileData.profile.expiryDate)
-                      : 'không thời hạn'}
-                  </span>
-                  . Bạn không cần đăng ký lại trong thời gian này.
+                  {hasPendingProfile ? (
+                    submissionBlockMessage
+                  ) : (
+                    <>
+                      Hồ sơ ưu tiên của bạn đã được duyệt và đang còn hiệu lực đến{' '}
+                      <span className="font-bold">
+                        {profileData?.profile?.expiryDate
+                          ? formatDate(profileData.profile.expiryDate)
+                          : 'không thời hạn'}
+                      </span>
+                      . Bạn không cần đăng ký lại trong thời gian này.
+                    </>
+                  )}
                 </div>
               )}
 
@@ -378,7 +370,7 @@ const PriorityProfilePage = () => {
                     value={form.fullName}
                     onChange={(event) => handleChange('fullName', event.target.value)}
                     className="w-full rounded-2xl border-outline-variant/70 bg-white px-4 py-3 text-on-surface focus:border-on-tertiary-container focus:ring-on-tertiary-container"
-                    placeholder="Nguyễn Văn A"
+                    placeholder="Điền tên khách hàng"
                   />
                 </label>
 
@@ -440,27 +432,11 @@ const PriorityProfilePage = () => {
                 />
               </label>
 
-              <button
-                type="submit"
-                disabled={isSubmitting || hasActiveApprovedProfile}
-                className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-4 text-base font-bold text-on-primary shadow-lg shadow-primary/15 hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60 md:w-auto"
-              >
-                <span className="material-symbols-outlined">send</span>
-                {isSubmitting
-                  ? 'Đang gửi...'
-                  : hasActiveApprovedProfile
-                    ? 'Hồ sơ đang còn hiệu lực'
-                    : 'Gửi hồ sơ xác minh'}
-              </button>
-            </form>
 
-            <form
-              onSubmit={handleUpload}
-              className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-xl shadow-primary/5"
-            >
+            <section className="mt-8 border-t border-outline-variant/30 pt-6">
               <div className="mb-6">
                 <h2 className="text-2xl font-headline font-black text-primary">
-                  2. Tải lên giấy tờ xác minh
+                  Tải lên giấy tờ xác minh
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-on-surface-variant">
                   Có thể tải nhiều nhóm giấy tờ như CCCD mặt trước, CCCD mặt sau và giấy chứng minh ưu tiên. Mỗi nhóm nhận JPG, PNG, WEBP hoặc PDF, tối đa 5 file.
@@ -574,12 +550,19 @@ const PriorityProfilePage = () => {
 
               <button
                 type="submit"
-                disabled={isUploading || !canUploadDocuments}
-                className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-full bg-on-tertiary-fixed-variant px-6 py-4 text-base font-bold text-on-tertiary-fixed shadow-lg shadow-primary/10 hover:bg-primary disabled:cursor-not-allowed disabled:opacity-60 md:w-auto"
+                disabled={isSubmitting || !canSubmitProfile}
+                className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-4 text-base font-bold text-on-primary shadow-lg shadow-primary/20 hover:bg-primary-container hover:text-on-primary-container disabled:cursor-not-allowed disabled:bg-surface-container-high disabled:text-on-surface-variant disabled:shadow-none md:w-auto"
               >
                 <span className="material-symbols-outlined">upload_file</span>
-                {isUploading ? 'Đang tải lên...' : 'Tải lên tài liệu'}
+                {isSubmitting
+                  ? 'Đang gửi...'
+                  : isSubmissionBlocked
+                    ? hasPendingProfile
+                      ? 'Hồ sơ đang chờ duyệt'
+                      : 'Hồ sơ đang còn hiệu lực'
+                    : 'Gửi hồ sơ xác minh'}
               </button>
+            </section>
             </form>
           </div>
 
@@ -588,7 +571,7 @@ const PriorityProfilePage = () => {
               <div className="mb-5 flex items-center justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-headline font-black text-primary">
-                    3. Trạng thái phê duyệt
+                    Trạng thái phê duyệt
                   </h2>
                   <p className="mt-2 text-sm text-on-surface-variant">
                     Cập nhật mới nhất từ hệ thống xác minh.
@@ -617,7 +600,7 @@ const PriorityProfilePage = () => {
 
                   <dl className="grid gap-3 text-sm">
                     <InfoRow label="Nhóm ưu tiên" value={PROFILE_TYPES.find((type) => type.value === profileData?.profile?.profileType)?.label || 'Chưa có'} />
-                    <InfoRow label="Người đăng ký" value={profileData?.profile?.fullName || 'Chưa có'} />
+                    <InfoRow label="Người đăng ký" value={currentApplicantName} />
                     <InfoRow label="Ngày sinh" value={formatDate(profileData?.profile?.dateOfBirth)} />
                     <InfoRow label="Ngày gửi" value={formatDate(profileData?.profile?.submittedAt)} />
                     <InfoRow label="Ngày duyệt" value={formatDate(profileData?.profile?.reviewedAt)} />
@@ -679,6 +662,94 @@ const PriorityProfilePage = () => {
                 </ul>
               )}
             </section>
+
+            {rejectedRequests.length > 0 && (
+              <section className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-xl shadow-primary/5">
+                <h3 className="text-xl font-headline font-black text-primary">
+                  Hồ sơ đã bị từ chối
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                  Các hồ sơ cũ vẫn được lưu để bạn xem lại lý do từ chối và tài liệu đã gửi.
+                </p>
+
+                <div className="mt-4 space-y-4">
+                  {rejectedRequests.map((request) => {
+                    const requestDocuments = request.profile?.documents || [];
+
+                    return (
+                      <article
+                        key={request.requestId}
+                        className="rounded-2xl border border-error/20 bg-error-container/30 p-4"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-bold text-on-surface">
+                              {request.profile?.fullName || 'Chưa có tên người đăng ký'}
+                            </p>
+                            <p className="mt-1 text-xs text-on-surface-variant">
+                              Gửi ngày {formatDate(request.profile?.submittedAt)}
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-error-container px-3 py-1 text-xs font-bold text-on-error-container">
+                            Bị từ chối
+                          </span>
+                        </div>
+
+                        <dl className="mt-4 grid gap-2 text-sm">
+                          <InfoRow label="Nhóm ưu tiên" value={PROFILE_TYPES.find((type) => type.value === request.profile?.profileType)?.label || 'Chưa có'} />
+                          <InfoRow label="Người đăng ký" value={request.profile?.fullName || 'Chưa có'} />
+                          <InfoRow label="Ngày duyệt" value={formatDate(request.profile?.reviewedAt)} />
+                        </dl>
+
+                        {request.profile?.rejectionReason && (
+                          <div className="mt-3 rounded-2xl bg-white/80 p-3 text-sm text-on-surface">
+                            <p className="font-bold">Lý do từ chối</p>
+                            <p className="mt-1 leading-6 text-on-surface-variant">
+                              {request.profile.rejectionReason}
+                            </p>
+                          </div>
+                        )}
+
+                        {requestDocuments.length > 0 && (
+                          <ul className="mt-3 space-y-2">
+                            {requestDocuments.map((document) => (
+                              <li
+                                key={document._id || document.fileName}
+                                className="rounded-2xl border border-outline-variant/30 bg-white p-3"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-bold text-on-surface">
+                                      {document.originalName}
+                                    </p>
+                                    <p className="mt-1 text-xs text-on-surface-variant">
+                                      {DOCUMENT_TYPES.find((type) => type.value === document.type)?.label || document.type}
+                                      {' '}• {formatFileSize(document.size)}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setViewerFile({
+                                      name: document.originalName,
+                                      url: getDocumentUrl(document.url),
+                                      mimeType: document.mimeType,
+                                    })}
+                                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary px-3 py-2 text-xs font-bold text-on-primary hover:bg-primary-container"
+                                  >
+                                    <span className="material-symbols-outlined text-sm">visibility</span>
+                                    Xem
+                                  </button>
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
           </aside>
         </section>
       </main>

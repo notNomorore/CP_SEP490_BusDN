@@ -1,6 +1,7 @@
 import PriorityProfileService from './PriorityProfileService.js';
 import {
   RegisterPriorityProfileDTO,
+  SubmitPriorityProfileDTO,
   UploadPriorityDocumentsDTO,
   VerifyPriorityProfileDTO,
   PriorityProfileResponseDTO,
@@ -25,7 +26,7 @@ export class PriorityProfileController {
 
   static async getRequestDetail(req, res, next) {
     try {
-      const user = await PriorityProfileService.getRequestByUserId(req.params.userId);
+      const user = await PriorityProfileService.getRequestById(req.params.requestId);
 
       return res.json({
         success: true,
@@ -58,7 +59,7 @@ export class PriorityProfileController {
       }
 
       const user = await PriorityProfileService.verifyRequest(
-        req.params.userId,
+        req.params.requestId,
         req.body,
         req.user.userId
       );
@@ -75,6 +76,7 @@ export class PriorityProfileController {
         error.message.includes('not found')
         || error.message.includes('without uploaded documents')
         || error.message.includes('cannot be verified again')
+        || error.message.includes('Processed priority profile request')
       ) {
         return res.status(400).json({
           success: false,
@@ -96,6 +98,20 @@ export class PriorityProfileController {
       });
     } catch (error) {
       logger.error('Get priority profile status error:', error);
+      next(error);
+    }
+  }
+
+  static async listMyRequests(req, res, next) {
+    try {
+      const requests = await PriorityProfileService.listPassengerRequests(req.user.userId);
+
+      return res.json({
+        success: true,
+        data: requests.map((request) => PriorityProfileResponseDTO.format(request)),
+      });
+    } catch (error) {
+      logger.error('List passenger priority profile requests error:', error);
       next(error);
     }
   }
@@ -122,7 +138,44 @@ export class PriorityProfileController {
     } catch (error) {
       logger.error('Register priority profile error:', error);
 
-      if (error.message.includes('still active')) {
+      if (error.message.includes('still active') || error.message.includes('pending review')) {
+        return res.status(409).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async submit(req, res, next) {
+    try {
+      const validationErrors = SubmitPriorityProfileDTO.validate(req.body, req.files);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const request = await PriorityProfileService.submitProfile(
+        req.user.userId,
+        req.body,
+        req.files
+      );
+
+      return res.status(201).json({
+        success: true,
+        message: 'Priority profile submitted for verification',
+        data: PriorityProfileResponseDTO.format(request),
+      });
+    } catch (error) {
+      logger.error('Submit priority profile error:', error);
+
+      if (error.message.includes('still active') || error.message.includes('pending review')) {
         return res.status(409).json({
           success: false,
           message: error.message,
