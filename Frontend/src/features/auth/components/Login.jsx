@@ -3,14 +3,14 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import useAuthStore from '../stores/authStore.js';
 import AuthShell from '../components/AuthShell.jsx';
 
-const Login = ({ onClose }) => {
+const Login = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { login, isLoading, error, clearError, isAuthenticated } = useAuthStore();
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword] = useState(false);
   const [rememberDevice, setRememberDevice] = useState(false);
   const [message, setMessage] = useState('');
   const [view, setView] = useState('login'); // 'login' | 'forgot-email' | 'forgot-otp' | 'forgot-reset'
@@ -20,7 +20,6 @@ const Login = ({ onClose }) => {
   const [forgotOtp, setForgotOtp] = useState('');
   const [forgotPassword, setForgotPassword] = useState('');
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
-  const [forgotResetToken, setForgotResetToken] = useState('');
   const [forgotResendCountdown, setForgotResendCountdown] = useState(0);
 
   // Check for messages from redirects
@@ -131,7 +130,6 @@ const Login = ({ onClose }) => {
     setForgotOtp('');
     setForgotPassword('');
     setForgotConfirmPassword('');
-    setForgotResetToken('');
   };
 
   return (
@@ -238,7 +236,7 @@ const Login = ({ onClose }) => {
 
             {/* Register Link */}
             <div className="text-center text-sm text-on-surface-variant">
-              Don't have an account?{' '}
+              Do not have an account?{' '}
               <button
                 type="button"
                 onClick={() => navigate('/auth/register')}

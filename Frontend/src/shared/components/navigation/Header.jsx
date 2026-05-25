@@ -5,7 +5,7 @@ import useAuthStore from '../../../features/auth/stores/authStore.js';
 const Header = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isAuthenticated, logout } = useAuthStore();
+  const { user, isAuthenticated, isAdmin, logout } = useAuthStore();
   const [isScrolled, setIsScrolled] = useState(false);
 
   useEffect(() => {
@@ -90,6 +90,33 @@ const Header = () => {
 
           {isAuthenticated ? (
             <div className="flex items-center gap-3">
+              {isAdmin() ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/admin/priority-verification')}
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                  >
+                    Verify Profiles
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/admin/customer-support')}
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                  >
+                    Customer Support
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => navigate('/priority-profile')}
+                  className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                >
+                  Priority Profile
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => navigate('/')}

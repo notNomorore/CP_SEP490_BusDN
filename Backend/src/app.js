@@ -6,12 +6,15 @@ import morgan from 'morgan';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import session from 'express-session';
+import path from 'path';
 
 import { config } from './config/environment.js';
 import { responseHandler } from './utils/response.js';
 import { globalErrorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import logger from './utils/logger.js';
 import authRoutes from './modules/auth/authRoutes.js';
+import priorityProfileRoutes from './modules/priorityProfile/priorityProfileRoutes.js';
+import customerSupportRoutes from './modules/customerSupport/customerSupportRoutes.js';
 
 export const createApp = () => {
   const app = express();
@@ -20,7 +23,9 @@ export const createApp = () => {
   app.set('trust proxy', 1);
 
   // Security middleware
-  app.use(helmet());
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  }));
   app.use(cors(config.cors));
 
   // Compression middleware
@@ -36,6 +41,7 @@ export const createApp = () => {
   // Body parsing middleware
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
+  app.use('/uploads', express.static(path.join(config.paths.root, 'uploads')));
 
   // Rate limiting
   const limiter = rateLimit({
@@ -80,6 +86,8 @@ export const createApp = () => {
 
   // Routes will be mounted here
   app.use('/api/auth', authRoutes);
+  app.use('/api/priority-profile', priorityProfileRoutes);
+  app.use('/api/customer-support', customerSupportRoutes);
   // app.use('/api/routes', routeRoutes);
   // etc...
 

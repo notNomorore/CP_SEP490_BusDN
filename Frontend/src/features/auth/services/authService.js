@@ -12,7 +12,7 @@ const getApiBaseUrl = () => {
 };
 
 // Create axios instance
-const apiClient = axios.create({
+export const apiClient = axios.create({
   baseURL: getApiBaseUrl(),
   headers: {
     'Content-Type': 'application/json',

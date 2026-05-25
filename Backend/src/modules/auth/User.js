@@ -79,15 +79,47 @@ const UserSchema = new mongoose.Schema(
       default: 'NONE',
     },
     priorityProfile: {
-      cardImageFront: String,
-      cardImageBack: String,
+      profileType: {
+        type: String,
+        enum: ['STUDENT', 'SENIOR', 'DISABLED', 'PREGNANT', 'CHILD_UNDER_6', 'OTHER'],
+      },
+      fullName: String,
+      dateOfBirth: Date,
+      identityNumber: String,
       cardNumber: String,
+      issuingAuthority: String,
+      reason: String,
       status: {
         type: String,
         enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'],
         default: 'NONE',
       },
+      rejectionReason: String,
       expiryDate: Date,
+      submittedAt: Date,
+      reviewedAt: Date,
+      reviewedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+      documents: [
+        {
+          type: {
+            type: String,
+            enum: ['IDENTITY_FRONT', 'IDENTITY_BACK', 'PRIORITY_PROOF', 'PORTRAIT', 'OTHER'],
+            required: true,
+          },
+          originalName: String,
+          fileName: String,
+          mimeType: String,
+          size: Number,
+          url: String,
+          uploadedAt: {
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
     },
 
     // Wallet

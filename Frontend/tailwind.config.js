@@ -1,4 +1,4 @@
-import defaultConfig from 'tailwindcss/defaultConfig';
+import forms from '@tailwindcss/forms';
 
 export default {
   content: [
@@ -92,6 +92,6 @@ export default {
     },
   },
   plugins: [
-    require('@tailwindcss/forms'),
+    forms,
   ],
 };

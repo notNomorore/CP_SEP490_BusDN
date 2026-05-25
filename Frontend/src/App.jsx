@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import AppInitializer from './shared/components/AppInitializer';
 import { HomePage } from './features/home';
 import { LoginPage, RegisterPage, ProtectedRoute, PublicRoute, AdminRoute } from './features/auth';
+import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/priorityProfile';
+import { AdminCustomerSupportPage } from './features/customerSupport';
 
 function App() {
   return (
@@ -59,10 +61,32 @@ function App() {
           {/* <Route path="/track" element={<ProtectedRoute><TrackingPage /></ProtectedRoute>} /> */}
 
           {/* Profile Feature */}
-          {/* <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} /> */}
+          <Route
+            path="/priority-profile"
+            element={
+              <ProtectedRoute>
+                <PriorityProfilePage />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Admin Feature */}
-          {/* <Route path="/admin/*" element={<AdminRoute><AdminLayout /></AdminRoute>} /> */}
+          <Route
+            path="/admin/priority-verification"
+            element={
+              <AdminRoute>
+                <AdminPriorityVerificationPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/customer-support"
+            element={
+              <AdminRoute>
+                <AdminCustomerSupportPage />
+              </AdminRoute>
+            }
+          />
         </Routes>
       </AppInitializer>
     </Router>
