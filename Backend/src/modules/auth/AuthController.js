@@ -206,13 +206,21 @@ export class AuthController {
       logger.error('Login error:', error);
 
       if (
-        error.message.includes('Invalid email/phone')
+        error.code === 'ACCOUNT_LOCKED'
+        || error.message.includes('Invalid email/phone')
         || error.message.includes('not verified')
         || error.message.includes('locked')
       ) {
         return res.status(401).json({
           success: false,
           message: error.message,
+          ...(error.code === 'ACCOUNT_LOCKED'
+            ? {
+              code: error.code,
+              reason: error.reason,
+              lockedUntil: error.lockedUntil,
+            }
+            : {}),
         });
       }
 

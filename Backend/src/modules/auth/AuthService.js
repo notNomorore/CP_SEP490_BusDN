@@ -6,6 +6,19 @@ import logger from '../../utils/logger.js';
  * Auth Service - Handles authentication business logic
  */
 export class AuthService {
+  static createAccountLockedError(user) {
+    const reason = user.accountLock?.reason?.trim() || 'Không có lý do cụ thể';
+    const lockedUntil = user.accountLock?.lockedUntil;
+    const untilText = lockedUntil
+      ? ` Thời hạn khóa đến: ${new Date(lockedUntil).toLocaleString('vi-VN')}.`
+      : '';
+    const error = new Error(`Tài khoản đã bị khóa. Lý do: ${reason}.${untilText} Vui lòng liên hệ quản trị viên để được hỗ trợ.`);
+    error.code = 'ACCOUNT_LOCKED';
+    error.reason = reason;
+    error.lockedUntil = lockedUntil || null;
+    return error;
+  }
+
   static buildIdentifierConditions(email, phone) {
     const conditions = [];
 
@@ -175,18 +188,16 @@ export class AuthService {
     }
 
     // Check if user is locked
-    if (user.accountLock?.isLocked) {
-      if (user.accountLock.lockedUntil && new Date() < user.accountLock.lockedUntil) {
-        throw new Error('Account is temporarily locked');
-      }
-      // Unlock if lockout period has expired
-      user.accountLock = undefined;
-      await user.save();
-    }
+    if (user.accountLock?.isLocked || user.status === 'LOCKED') {
+      const hasExpiry = Boolean(user.accountLock?.lockedUntil);
+      const lockExpired = hasExpiry && new Date() >= user.accountLock.lockedUntil;
 
-    // Check if user is active
-    if (user.status === 'LOCKED') {
-      throw new Error('Account is locked by admin');
+      if (lockExpired && user.status !== 'LOCKED') {
+        user.accountLock = undefined;
+        await user.save();
+      } else {
+        throw this.createAccountLockedError(user);
+      }
     }
 
     // Verify password
