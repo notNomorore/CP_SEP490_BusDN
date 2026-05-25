@@ -12,6 +12,7 @@ import { responseHandler } from './utils/response.js';
 import { globalErrorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import logger from './utils/logger.js';
 import authRoutes from './modules/auth/authRoutes.js';
+import adminRoutes from './modules/admin/adminRoutes.js';
 
 export const createApp = () => {
   const app = express();
@@ -80,6 +81,7 @@ export const createApp = () => {
 
   // Routes will be mounted here
   app.use('/api/auth', authRoutes);
+  app.use('/api/admin', adminRoutes);
   // app.use('/api/routes', routeRoutes);
   // etc...
 

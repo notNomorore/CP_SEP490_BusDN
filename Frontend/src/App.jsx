@@ -2,7 +2,8 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import AppInitializer from './shared/components/AppInitializer';
 import { HomePage } from './features/home';
-import { LoginPage, RegisterPage, ProtectedRoute, PublicRoute, AdminRoute } from './features/auth';
+import { LoginPage, RegisterPage, PublicRoute, AdminRoute } from './features/auth';
+import { UserAccountsPage } from './features/admin';
 
 function App() {
   return (
@@ -62,7 +63,14 @@ function App() {
           {/* <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} /> */}
 
           {/* Admin Feature */}
-          {/* <Route path="/admin/*" element={<AdminRoute><AdminLayout /></AdminRoute>} /> */}
+          <Route
+            path="/admin/users"
+            element={(
+              <AdminRoute>
+                <UserAccountsPage />
+              </AdminRoute>
+            )}
+          />
         </Routes>
       </AppInitializer>
     </Router>

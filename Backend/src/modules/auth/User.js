@@ -37,7 +37,7 @@ const UserSchema = new mongoose.Schema(
     // Role & Status
     role: {
       type: String,
-      enum: ['PASSENGER', 'DRIVER', 'BUS ASSISTANT', 'ADMIN'],
+      enum: ['PASSENGER', 'DRIVER', 'CONDUCTOR', 'STAFF', 'BUS ASSISTANT', 'ADMIN'],
       default: 'PASSENGER',
     },
     status: {
@@ -110,6 +110,50 @@ const UserSchema = new mongoose.Schema(
     // Last Login
     lastLoginAt: Date,
     lastLoginIp: String,
+
+    // Staff performance metrics
+    staffMetrics: {
+      completedTrips: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      incidents: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      onTimeRate: {
+        type: Number,
+        default: 100,
+        min: 0,
+        max: 100,
+      },
+      performanceScore: {
+        type: Number,
+        default: 100,
+        min: 0,
+        max: 100,
+      },
+      lastActivityAt: Date,
+    },
+    activityReports: [
+      {
+        type: {
+          type: String,
+          enum: ['ACCOUNT_CREATED', 'TRIP_COMPLETED', 'INCIDENT_REPORTED', 'STATUS_UPDATED'],
+          default: 'ACCOUNT_CREATED',
+        },
+        message: {
+          type: String,
+          trim: true,
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
 
     // Metadata
     preferences: {

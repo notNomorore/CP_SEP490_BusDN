@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const DEFAULT_API_BASE_URL = 'http://localhost:3000/api';
+const DEFAULT_API_BASE_URL = 'http://localhost:5000/api';
 
 // Always prefer the current environment/default over stale browser storage.
 const getApiBaseUrl = () => {
@@ -204,4 +204,5 @@ export const authService = {
   },
 };
 
+export { apiClient };
 export default authService;
