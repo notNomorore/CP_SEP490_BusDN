@@ -46,6 +46,14 @@ export const routeService = {
 
     return response.data;
   },
+
+  findBestRoute: async ({ from, to }) => {
+    const response = await apiClient.get('/routes/best', {
+      params: { from, to },
+    });
+
+    return response.data;
+  },
 };
 
 export default routeService;

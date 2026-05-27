@@ -46,6 +46,26 @@ export class RouteController {
       next(error);
     }
   }
+
+  static async best(req, res, next) {
+    try {
+      const { from = '', to = '' } = req.query;
+      const result = await RouteService.findBestRoute({ from, to });
+
+      return res.success(result, 'Best route calculated successfully');
+    } catch (error) {
+      logger.error('Best route search error:', error);
+
+      if (error.message === 'Departure and destination are required') {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
 }
 
 export default RouteController;
