@@ -95,7 +95,7 @@ See [AUTH_DOCUMENTATION.md](./AUTH_DOCUMENTATION.md) for complete details.
 cd Backend
 
 # Install dependencies
-npm install
+npm install -g commitizen
 
 # Create .env.local file
 cp .env.example .env.local

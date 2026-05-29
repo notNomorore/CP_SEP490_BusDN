@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../stores/authStore.js';
+import authService from '../services/authService.js';
 import AuthShell from '../components/AuthShell.jsx';
 
 const Register = () => {
@@ -109,12 +110,9 @@ const Register = () => {
   const handleResendOtp = async () => {
     clearError();
     try {
-      await register({
-        fullName,
+      await authService.resendOtp({
         email: email || undefined,
         phone: phone || undefined,
-        password,
-        confirmPassword,
       });
 
       setOtpResendCountdown(60);

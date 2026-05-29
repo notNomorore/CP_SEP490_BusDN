@@ -25,11 +25,11 @@ const Header = () => {
   ];
 
   const authCta =
-    location.pathname === '/register'
-      ? { label: 'Sign In', path: '/login' }
-      : location.pathname === '/login'
-        ? { label: 'Create Account', path: '/register' }
-        : { label: 'Sign In', path: '/login' };
+    location.pathname === '/auth/register'
+      ? { label: 'Sign In', path: '/auth/login' }
+      : location.pathname === '/auth/login'
+        ? { label: 'Create Account', path: '/auth/register' }
+        : { label: 'Sign In', path: '/auth/login' };
 
   const displayName = user?.fullName?.trim() || 'Passenger';
   const profileInitial = displayName.charAt(0).toUpperCase();
@@ -92,7 +92,7 @@ const Header = () => {
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => navigate('/')}
+                onClick={() => navigate('/profile')}
                 className="flex items-center gap-3 rounded-full border border-white/10 bg-white/10 px-3 py-2 text-left text-surface-bright backdrop-blur-md hover:bg-white/15"
                 aria-label="Current user profile"
               >
