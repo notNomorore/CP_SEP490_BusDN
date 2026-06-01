@@ -5,6 +5,7 @@ import { HomePage } from './features/home';
 import { LoginPage, RegisterPage, ProtectedRoute, PublicRoute, AdminRoute } from './features/auth';
 import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/priorityProfile';
 import { AdminCustomerSupportPage } from './features/customerSupport';
+import { SearchRoutesPage } from './features/routes';
 
 function App() {
   return (
@@ -51,7 +52,14 @@ function App() {
           />
 
           {/* Route Feature */}
-          {/* <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} /> */}
+          <Route
+            path="/search"
+            element={
+              <ProtectedRoute>
+                <SearchRoutesPage />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Ticket Feature */}
           {/* <Route path="/booking" element={<ProtectedRoute><BookingPage /></ProtectedRoute>} />

@@ -20,7 +20,7 @@ const Header = () => {
   const navLinks = [
     { label: 'Manage Booking', href: '#' },
     { label: 'Become a Partner', href: '#' },
-    { label: 'Routes', href: '#' },
+    { label: 'Routes', href: '/search' },
     { label: 'Help', href: '#' }
   ];
 
@@ -60,17 +60,22 @@ const Header = () => {
           {/* Navigation - Hidden on mobile */}
           <nav className="hidden lg:flex items-center gap-6">
             {navLinks.map((link, idx) => (
-              <a
+              <button
                 key={idx}
-                href={link.href}
+                type="button"
+                onClick={() => {
+                  if (link.href !== '#') {
+                    navigate(link.href);
+                  }
+                }}
                 className={`text-label-md font-body transition-all ${
-                  idx === 0
+                  location.pathname === link.href
                     ? 'text-tertiary-fixed font-bold border-b-2 border-tertiary-fixed pb-1'
                     : 'text-surface-variant/80 hover:text-surface-bright hover:bg-primary-container/50 px-2 py-1 rounded'
                 }`}
               >
                 {link.label}
-              </a>
+              </button>
             ))}
           </nav>
         </div>
