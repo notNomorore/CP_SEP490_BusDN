@@ -16,6 +16,7 @@ import authRoutes from './modules/auth/authRoutes.js';
 import priorityProfileRoutes from './modules/priorityProfile/priorityProfileRoutes.js';
 import customerSupportRoutes from './modules/customerSupport/customerSupportRoutes.js';
 import routeRoutes from './modules/routes/routeRoutes.js';
+import adminRoutes from './modules/admin/adminRoutes.js';
 
 export const createApp = () => {
   const app = express();
@@ -89,6 +90,7 @@ export const createApp = () => {
   app.use('/api/auth', authRoutes);
   app.use('/api/priority-profile', priorityProfileRoutes);
   app.use('/api/customer-support', customerSupportRoutes);
+  app.use('/api/admin', adminRoutes);
   // app.use('/api/routes', routeRoutes);
   app.use('/api/routes', routeRoutes);
   // etc...

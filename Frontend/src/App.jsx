@@ -6,6 +6,7 @@ import { LoginPage, RegisterPage, ProtectedRoute, PublicRoute, AdminRoute } from
 import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/priorityProfile';
 import { AdminCustomerSupportPage } from './features/customerSupport';
 import { SearchRoutesPage } from './features/routes';
+import { UserAccountsPage } from './features/admin';
 
 function App() {
   return (
@@ -94,6 +95,12 @@ function App() {
                 <AdminCustomerSupportPage />
               </AdminRoute>
             }
+            path="/admin/users"
+            element={(
+              <AdminRoute>
+                <UserAccountsPage />
+              </AdminRoute>
+            )}
           />
         </Routes>
       </AppInitializer>
