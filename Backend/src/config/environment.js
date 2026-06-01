@@ -70,7 +70,11 @@ export const config = {
     port: toNumber(getEnv('SMTP_PORT', '587'), 587),
     user: getEnv('SMTP_USER'),
     password: getEnv('SMTP_PASSWORD'),
-    from: getEnv('EMAIL_FROM', 'noreply@veridian-transit.com'),
+  },
+
+  emailFrom: {
+    name: getEnv('EMAIL_FROM_NAME', 'BusDN'),
+    email: getEnv('EMAIL_FROM', 'noreply@veridian-transit.com'),
   },
 
   // CORS

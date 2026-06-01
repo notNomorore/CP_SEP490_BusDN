@@ -2,11 +2,19 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import AppInitializer from './shared/components/AppInitializer';
 import { HomePage } from './features/home';
-import { LoginPage, RegisterPage, ProtectedRoute, PublicRoute, AdminRoute } from './features/auth';
 import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/priorityProfile';
 import { AdminCustomerSupportPage } from './features/customerSupport';
 import { SearchRoutesPage } from './features/routes';
 import { UserAccountsPage } from './features/admin';
+import {
+  LoginPage,
+  RegisterPage,
+  RegisterVerifyOtpPage,
+  ProtectedRoute,
+  PublicRoute,
+  AdminRoute,
+} from './features/auth';
+import { ProfilePage } from './features/profile';
 
 function App() {
   return (
@@ -30,6 +38,14 @@ function App() {
             element={
               <PublicRoute>
                 <RegisterPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/auth/verify-otp"
+            element={
+              <PublicRoute>
+                <RegisterVerifyOtpPage />
               </PublicRoute>
             }
           />
@@ -77,6 +93,14 @@ function App() {
                 <PriorityProfilePage />
               </ProtectedRoute>
             }
+          />
+          <Route
+            path="/profile"
+            element={(
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            )}
           />
 
           {/* Admin Feature */}

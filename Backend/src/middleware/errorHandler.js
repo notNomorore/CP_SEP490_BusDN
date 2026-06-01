@@ -97,12 +97,31 @@ export const globalErrorHandler = (err, req, res, _next) => {
     });
   }
 
+  if (error.name === 'MulterError') {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({
+      success: false,
+      statusCode: HTTP_STATUS.BAD_REQUEST,
+      message: error.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   // Handle Mongoose errors
   if (error.name === 'MongooseError' || error.name === 'ValidationError') {
     return res.status(HTTP_STATUS.UNPROCESSABLE_ENTITY).json({
       success: false,
       statusCode: HTTP_STATUS.UNPROCESSABLE_ENTITY,
       message: 'Database validation error',
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  if (error.code === 11000) {
+    const duplicatedField = Object.keys(error.keyPattern || {})[0] || 'field';
+    return res.status(HTTP_STATUS.CONFLICT).json({
+      success: false,
+      statusCode: HTTP_STATUS.CONFLICT,
+      message: `${duplicatedField} already exists`,
       timestamp: new Date().toISOString(),
     });
   }
