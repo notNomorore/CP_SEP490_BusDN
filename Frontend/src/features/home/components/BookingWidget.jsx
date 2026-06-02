@@ -1,35 +1,44 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const BookingWidget = () => {
+  const navigate = useNavigate();
   const [tripType, setTripType] = useState('bus');
   const [searchParams, setSearchParams] = useState({
     from: '',
     to: '',
-    departDate: '',
-    returnDate: ''
+    departDate: ''
   });
 
   const handleInputChange = (field, value) => {
-    setSearchParams(prev => ({
+    setSearchParams((prev) => ({
       ...prev,
       [field]: value
     }));
   };
 
   const handleSearch = () => {
-    console.log('Search params:', searchParams);
-    // Navigate to search results page
+    const params = new URLSearchParams();
+
+    if (searchParams.from.trim()) {
+      params.set('from', searchParams.from.trim());
+    }
+
+    if (searchParams.to.trim()) {
+      params.set('to', searchParams.to.trim());
+    }
+
+    navigate(`/search?${params.toString()}`);
   };
 
   return (
     <div className="bg-surface-container-lowest p-8 rounded-[2rem] shadow-2xl border border-outline-variant/15 space-y-6">
-      {/* Trip Type Selector */}
       <div className="flex gap-4 p-1 bg-surface-container rounded-full w-fit">
         {[
           { id: 'bus', label: 'Xe khách' },
           { id: 'plane', label: 'Máy bay' },
           { id: 'train', label: 'Tàu hỏa' }
-        ].map(type => (
+        ].map((type) => (
           <button
             key={type.id}
             onClick={() => setTripType(type.id)}
@@ -44,9 +53,7 @@ const BookingWidget = () => {
         ))}
       </div>
 
-      {/* Input Fields */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* From */}
         <div className="space-y-1.5">
           <label className="text-xs font-bold text-secondary uppercase tracking-widest px-1">
             Nơi xuất phát
@@ -65,7 +72,6 @@ const BookingWidget = () => {
           </div>
         </div>
 
-        {/* To */}
         <div className="space-y-1.5">
           <label className="text-xs font-bold text-secondary uppercase tracking-widest px-1">
             Nơi đến
@@ -85,9 +91,7 @@ const BookingWidget = () => {
         </div>
       </div>
 
-      {/* Date Fields */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Departure Date */}
         <div className="space-y-1.5">
           <label className="text-xs font-bold text-secondary uppercase tracking-widest px-1">
             Ngày đi
@@ -105,7 +109,6 @@ const BookingWidget = () => {
           </div>
         </div>
 
-        {/* Search Button */}
         <div className="flex items-end pb-1">
           <button
             onClick={handleSearch}

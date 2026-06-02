@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import User from './User.js';
 import logger from '../../utils/logger.js';
+import emailService from '../../utils/emailService.js';
 
 /**
  * Auth Service - Handles authentication business logic
@@ -27,7 +28,7 @@ export class AuthService {
     }
 
     if (phone) {
-      conditions.push({ phone });
+      conditions.push({ phoneNumber: phone });
     }
 
     return conditions;
@@ -51,8 +52,9 @@ export class AuthService {
    * Register new user
    */
   static async registerUser(registerData) {
-    const { email, phone, fullName, password } = registerData;
-    const identifierConditions = this.buildIdentifierConditions(email, phone);
+    const { email, phone, phoneNumber, fullName, password } = registerData;
+    const normalizedPhone = phoneNumber || phone;
+    const identifierConditions = this.buildIdentifierConditions(email, normalizedPhone);
 
     if (identifierConditions.length === 0) {
       throw new Error('Email or phone is required');
@@ -74,7 +76,7 @@ export class AuthService {
     // Create new user
     const user = new User({
       email: email?.toLowerCase(),
-      phone,
+      phoneNumber: normalizedPhone,
       fullName: fullName.trim(),
       password,
       otp: {
@@ -87,7 +89,18 @@ export class AuthService {
 
     await user.save();
 
-    logger.info(`User registered: ${email || phone}`);
+    // Send verification OTP email
+    if (email) {
+      try {
+        await emailService.sendVerificationOTP(email, otp, fullName.trim());
+        logger.info(`Verification OTP email sent to: ${email}`);
+      } catch (emailError) {
+        logger.warn(`Failed to send verification OTP email to ${email}:`, emailError.message);
+        // Don't throw - registration should still succeed even if email fails
+      }
+    }
+
+    logger.info(`User registered: ${email || normalizedPhone}`);
 
     return {
       userId: user._id,
@@ -126,6 +139,17 @@ export class AuthService {
     user.otp = undefined;
     await user.save();
 
+    // Send welcome email
+    if (email) {
+      try {
+        await emailService.sendWelcomeEmail(email, user.fullName);
+        logger.info(`Welcome email sent to: ${email}`);
+      } catch (emailError) {
+        logger.warn(`Failed to send welcome email to ${email}:`, emailError.message);
+        // Don't throw - verification should still succeed even if email fails
+      }
+    }
+
     logger.info(`User verified: ${email || phone}`);
 
     return user;
@@ -157,6 +181,17 @@ export class AuthService {
     };
     await user.save();
 
+    // Send verification OTP email
+    if (email) {
+      try {
+        await emailService.sendVerificationOTP(email, otp, user.fullName);
+        logger.info(`Verification OTP email resent to: ${email}`);
+      } catch (emailError) {
+        logger.warn(`Failed to resend verification OTP email to ${email}:`, emailError.message);
+        // Don't throw - resend should still succeed even if email fails
+      }
+    }
+
     logger.info(`Verification OTP resent: ${email || phone}`);
 
     return {
@@ -174,7 +209,7 @@ export class AuthService {
     const user = await User.findOne({
       $or: [
         { email: identifier?.toLowerCase() },
-        { phone: identifier },
+        { phoneNumber: identifier },
       ],
     }).select('+password');
 
@@ -245,6 +280,17 @@ export class AuthService {
 
     await user.save();
 
+    // Send password reset OTP email
+    if (email) {
+      try {
+        await emailService.sendPasswordResetOTP(email, otp, user.fullName);
+        logger.info(`Password reset OTP email sent to: ${email}`);
+      } catch (emailError) {
+        logger.warn(`Failed to send password reset OTP email to ${email}:`, emailError.message);
+        // Don't throw - password reset should still succeed even if email fails
+      }
+    }
+
     logger.info(`Password reset requested for: ${email || phone}`);
 
     return {
@@ -286,7 +332,7 @@ export class AuthService {
     user.passwordReset = undefined;
     await user.save();
 
-    logger.info(`Password reset for: ${user.email || user.phone}`);
+    logger.info(`Password reset for: ${user.email || user.phoneNumber}`);
 
     return user;
   }

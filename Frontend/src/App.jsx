@@ -2,8 +2,19 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import AppInitializer from './shared/components/AppInitializer';
 import { HomePage } from './features/home';
-import { LoginPage, RegisterPage, PublicRoute, AdminRoute } from './features/auth';
+import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/priorityProfile';
+import { AdminCustomerSupportPage } from './features/customerSupport';
+import { SearchRoutesPage } from './features/routes';
 import { UserAccountsPage } from './features/admin';
+import {
+  LoginPage,
+  RegisterPage,
+  RegisterVerifyOtpPage,
+  ProtectedRoute,
+  PublicRoute,
+  AdminRoute,
+} from './features/auth';
+import { ProfilePage } from './features/profile';
 
 function App() {
   return (
@@ -30,6 +41,14 @@ function App() {
               </PublicRoute>
             }
           />
+          <Route
+            path="/auth/verify-otp"
+            element={
+              <PublicRoute>
+                <RegisterVerifyOtpPage />
+              </PublicRoute>
+            }
+          />
 
           {/* Backward compatibility - old paths */}
           <Route
@@ -50,7 +69,14 @@ function App() {
           />
 
           {/* Route Feature */}
-          {/* <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} /> */}
+          <Route
+            path="/search"
+            element={
+              <ProtectedRoute>
+                <SearchRoutesPage />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Ticket Feature */}
           {/* <Route path="/booking" element={<ProtectedRoute><BookingPage /></ProtectedRoute>} />
@@ -60,10 +86,39 @@ function App() {
           {/* <Route path="/track" element={<ProtectedRoute><TrackingPage /></ProtectedRoute>} /> */}
 
           {/* Profile Feature */}
-          {/* <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} /> */}
+          <Route
+            path="/priority-profile"
+            element={
+              <ProtectedRoute>
+                <PriorityProfilePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={(
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            )}
+          />
 
           {/* Admin Feature */}
           <Route
+            path="/admin/priority-verification"
+            element={
+              <AdminRoute>
+                <AdminPriorityVerificationPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/customer-support"
+            element={
+              <AdminRoute>
+                <AdminCustomerSupportPage />
+              </AdminRoute>
+            }
             path="/admin/users"
             element={(
               <AdminRoute>

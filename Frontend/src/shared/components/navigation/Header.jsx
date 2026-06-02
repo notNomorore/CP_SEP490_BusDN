@@ -5,7 +5,7 @@ import useAuthStore from '../../../features/auth/stores/authStore.js';
 const Header = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isAuthenticated, logout } = useAuthStore();
+  const { user, isAuthenticated, isAdmin, logout } = useAuthStore();
   const [isScrolled, setIsScrolled] = useState(false);
 
   useEffect(() => {
@@ -20,16 +20,16 @@ const Header = () => {
   const navLinks = [
     { label: 'Manage Booking', href: '#' },
     { label: 'Become a Partner', href: '#' },
-    { label: 'Routes', href: '#' },
+    { label: 'Routes', href: '/search' },
     { label: 'Help', href: '#' }
   ];
 
   const authCta =
-    location.pathname === '/register'
-      ? { label: 'Sign In', path: '/login' }
-      : location.pathname === '/login'
-        ? { label: 'Create Account', path: '/register' }
-        : { label: 'Sign In', path: '/login' };
+    location.pathname === '/auth/register'
+      ? { label: 'Sign In', path: '/auth/login' }
+      : location.pathname === '/auth/login'
+        ? { label: 'Create Account', path: '/auth/register' }
+        : { label: 'Sign In', path: '/auth/login' };
 
   const displayName = user?.fullName?.trim() || 'Passenger';
   const profileInitial = displayName.charAt(0).toUpperCase();
@@ -60,17 +60,22 @@ const Header = () => {
           {/* Navigation - Hidden on mobile */}
           <nav className="hidden lg:flex items-center gap-6">
             {navLinks.map((link, idx) => (
-              <a
+              <button
                 key={idx}
-                href={link.href}
+                type="button"
+                onClick={() => {
+                  if (link.href !== '#') {
+                    navigate(link.href);
+                  }
+                }}
                 className={`text-label-md font-body transition-all ${
-                  idx === 0
+                  location.pathname === link.href
                     ? 'text-tertiary-fixed font-bold border-b-2 border-tertiary-fixed pb-1'
                     : 'text-surface-variant/80 hover:text-surface-bright hover:bg-primary-container/50 px-2 py-1 rounded'
                 }`}
               >
                 {link.label}
-              </a>
+              </button>
             ))}
           </nav>
         </div>
@@ -90,9 +95,36 @@ const Header = () => {
 
           {isAuthenticated ? (
             <div className="flex items-center gap-3">
+              {isAdmin() ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/admin/priority-verification')}
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                  >
+                    Verify Profiles
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/admin/customer-support')}
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                  >
+                    Customer Support
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => navigate('/priority-profile')}
+                  className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                >
+                  Priority Profile
+                </button>
+              )}
+
               <button
                 type="button"
-                onClick={() => navigate('/')}
+                onClick={() => navigate('/profile')}
                 className="flex items-center gap-3 rounded-full border border-white/10 bg-white/10 px-3 py-2 text-left text-surface-bright backdrop-blur-md hover:bg-white/15"
                 aria-label="Current user profile"
               >

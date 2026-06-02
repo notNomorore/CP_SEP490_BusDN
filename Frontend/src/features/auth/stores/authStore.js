@@ -43,6 +43,8 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const result = await authService.verifyOTP(data);
+      set({ error: null });
+
       return result;
     } catch (error) {
       const errorMsg = error.message || 'OTP verification failed';
@@ -235,6 +237,14 @@ export const useAuthStore = create((set, get) => ({
    */
   clearError: () => {
     set({ error: null });
+  },
+
+  syncUser: (user) => {
+    authService.setStoredUser(user);
+    set({
+      user,
+      isAuthenticated: true,
+    });
   },
 
   /**

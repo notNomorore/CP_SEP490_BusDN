@@ -24,12 +24,19 @@ export class AuthController {
    */
   static async register(req, res, next) {
     try {
-      const { email, phone, fullName, password, confirmPassword } = req.body;
+      const {
+        email,
+        phone,
+        phoneNumber,
+        fullName,
+        password,
+        confirmPassword,
+      } = req.body;
 
       // Validate input
       const validationErrors = RegisterDTO.validate({
         email,
-        phone,
+        phone: phoneNumber || phone,
         fullName,
         password,
         confirmPassword,
@@ -46,7 +53,7 @@ export class AuthController {
       // Register user
       const result = await AuthService.registerUser({
         email,
-        phone,
+        phone: phoneNumber || phone,
         fullName,
         password,
       });
@@ -78,10 +85,14 @@ export class AuthController {
    */
   static async verifyOTP(req, res, next) {
     try {
-      const { email, phone, otp } = req.body;
+      const { email, phone, phoneNumber, otp } = req.body;
 
       // Validate input
-      const validationErrors = VerifyOtpDTO.validate({ email, phone, otp });
+      const validationErrors = VerifyOtpDTO.validate({
+        email,
+        phone: phoneNumber || phone,
+        otp,
+      });
 
       if (validationErrors) {
         return res.status(400).json({
@@ -92,17 +103,35 @@ export class AuthController {
       }
 
       // Verify OTP
-      const user = await AuthService.verifyOTP(email, phone, otp);
+      const user = await AuthService.verifyOTP(email, phoneNumber || phone, otp);
+
+      // Generate JWT token on successful verification (auto-login)
+      const token = jwt.sign(
+        {
+          userId: user._id,
+          email: user.email,
+          role: user.role,
+        },
+        config.jwt.secret,
+        { expiresIn: config.jwt.expire || '7d' }
+      );
 
       return res.json({
         success: true,
         message: 'Email verified successfully',
-        user: UserResponseDTO.format(user),
+        ...AuthResponseDTO.format(user, token),
       });
     } catch (error) {
       logger.error('OTP verification error:', error);
 
       if (error.message.includes('Invalid OTP') || error.message.includes('expired')) {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      if (error.message === 'No OTP request found') {
         return res.status(400).json({
           success: false,
           message: error.message,
@@ -126,9 +155,12 @@ export class AuthController {
    */
   static async resendOTP(req, res, next) {
     try {
-      const { email, phone } = req.body;
+      const { email, phone, phoneNumber } = req.body;
 
-      const validationErrors = ResendOtpDTO.validate({ email, phone });
+      const validationErrors = ResendOtpDTO.validate({
+        email,
+        phone: phoneNumber || phone,
+      });
 
       if (validationErrors) {
         return res.status(400).json({
@@ -138,7 +170,7 @@ export class AuthController {
         });
       }
 
-      const result = await AuthService.resendVerificationOTP(email, phone);
+      const result = await AuthService.resendVerificationOTP(email, phoneNumber || phone);
 
       return res.json({
         success: true,
@@ -234,10 +266,13 @@ export class AuthController {
    */
   static async forgotPassword(req, res, next) {
     try {
-      const { email, phone } = req.body;
+      const { email, phone, phoneNumber } = req.body;
 
       // Validate input
-      const validationErrors = ForgotPasswordDTO.validate({ email, phone });
+      const validationErrors = ForgotPasswordDTO.validate({
+        email,
+        phone: phoneNumber || phone,
+      });
 
       if (validationErrors) {
         return res.status(400).json({
@@ -248,7 +283,7 @@ export class AuthController {
       }
 
       // Request password reset
-      const result = await AuthService.requestPasswordReset(email, phone);
+      const result = await AuthService.requestPasswordReset(email, phoneNumber || phone);
 
       return res.json({
         success: true,
