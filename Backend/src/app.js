@@ -18,6 +18,7 @@ import customerSupportRoutes from './modules/customerSupport/customerSupportRout
 import routeRoutes from './modules/routes/routeRoutes.js';
 import adminRoutes from './modules/admin/adminRoutes.js';
 import profileRoutes from './modules/profile/profileRoutes.js';
+import scheduleOperationsRoutes from './modules/scheduleOperations/scheduleOperationsRoutes.js';
 
 export const createApp = () => {
   const app = express();
@@ -95,6 +96,7 @@ export const createApp = () => {
   app.use('/api/profile', profileRoutes);
   // app.use('/api/routes', routeRoutes);
   app.use('/api/routes', routeRoutes);
+  app.use('/api/schedule-operations', scheduleOperationsRoutes);
   // etc...
 
   // 404 handler (must be after all routes)

@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import AdminModel from './AdminModel.js';
 import logger from '../../utils/logger.js';
 
-const ALLOWED_MANAGED_ROLES = new Set(['DRIVER', 'CONDUCTOR', 'STAFF']);
+const ALLOWED_MANAGED_ROLES = new Set(['DRIVER', 'BUS_ASSISTANT']);
 
 const validateManagedUserPayload = (payload) => {
   const errors = {};
@@ -12,7 +12,7 @@ const validateManagedUserPayload = (payload) => {
   if (!email && !phone) errors.identifier = 'Email or phone is required';
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = 'Invalid email format';
   if (phone && !/^(\+84|0)[0-9]{9,10}$/.test(phone)) errors.phone = 'Invalid phone format';
-  if (!ALLOWED_MANAGED_ROLES.has(role)) errors.role = 'Role must be DRIVER, CONDUCTOR, or STAFF';
+  if (!ALLOWED_MANAGED_ROLES.has(role)) errors.role = 'Role must be DRIVER or BUS_ASSISTANT';
 
   if (!password) errors.password = 'Password is required';
   else if (password.length < 8) errors.password = 'Password must be at least 8 characters';

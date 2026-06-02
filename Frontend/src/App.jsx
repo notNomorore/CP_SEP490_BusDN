@@ -6,11 +6,13 @@ import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/p
 import { AdminCustomerSupportPage } from './features/customerSupport';
 import { SearchRoutesPage } from './features/routes';
 import { UserAccountsPage } from './features/admin';
+import { ScheduleOperationsPage } from './features/scheduleOperations';
 import {
   LoginPage,
   RegisterPage,
   RegisterVerifyOtpPage,
   ProtectedRoute,
+  OperationsRoute,
   PublicRoute,
   AdminRoute,
 } from './features/auth';
@@ -119,11 +121,23 @@ function App() {
                 <AdminCustomerSupportPage />
               </AdminRoute>
             }
+          />
+          <Route
             path="/admin/users"
             element={(
               <AdminRoute>
                 <UserAccountsPage />
               </AdminRoute>
+            )}
+          />
+
+          {/* Driver and Bus Assistant Feature */}
+          <Route
+            path="/operations/schedule"
+            element={(
+              <OperationsRoute>
+                <ScheduleOperationsPage />
+              </OperationsRoute>
             )}
           />
         </Routes>

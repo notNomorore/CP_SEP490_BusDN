@@ -4,7 +4,7 @@ const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
 const SORT_FIELDS = new Set(['createdAt', 'fullName', 'email', 'role', 'status', 'lastLoginAt']);
-const PERFORMANCE_ROLES = ['DRIVER', 'CONDUCTOR', 'STAFF'];
+const PERFORMANCE_ROLES = ['DRIVER', 'BUS_ASSISTANT'];
 
 const defaultSummary = {
   totalUsers: 0,

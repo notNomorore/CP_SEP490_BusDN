@@ -5,7 +5,7 @@ import useAuthStore from '../../../features/auth/stores/authStore.js';
 const Header = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isAuthenticated, isAdmin, logout } = useAuthStore();
+  const { user, isAuthenticated, isAdmin, isDriver, isBusAssistant, logout } = useAuthStore();
   const [isScrolled, setIsScrolled] = useState(false);
 
   useEffect(() => {
@@ -112,6 +112,14 @@ const Header = () => {
                     Customer Support
                   </button>
                 </>
+              ) : isDriver() || isBusAssistant() ? (
+                <button
+                  type="button"
+                  onClick={() => navigate('/operations/schedule')}
+                  className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                >
+                  Operations Schedule
+                </button>
               ) : (
                 <button
                   type="button"
