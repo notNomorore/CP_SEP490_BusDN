@@ -108,6 +108,26 @@ export class ScheduleOperationsController {
       next(error);
     }
   }
+
+  static async startTrip(req, res, next) {
+    try {
+      const assignment = await ScheduleOperationsService.startTrip(
+        req.user.userId,
+        req.user.role,
+        req.params.assignmentId
+      );
+
+      await ScheduleOperationsService.attachInspectionRecords([assignment]);
+
+      return res.success(
+        ShiftAssignmentResponseDTO.format(assignment, req.user.userId, req.user.role),
+        'Trip started successfully'
+      );
+    } catch (error) {
+      logger.error('Start trip error:', error);
+      next(error);
+    }
+  }
 }
 
 export default ScheduleOperationsController;

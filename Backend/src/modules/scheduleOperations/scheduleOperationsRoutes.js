@@ -9,6 +9,10 @@ router.use(authorizeCurrentUserRole('DRIVER', 'BUS_ASSISTANT'));
 
 router.get('/assigned-trips', ScheduleOperationsController.listAssignedTrips);
 router.get('/shift-schedule', ScheduleOperationsController.listShiftSchedule);
+router.patch(
+  '/assigned-trips/:assignmentId/start',
+  ScheduleOperationsController.startTrip
+);
 router.post(
   '/assigned-trips/:assignmentId/inspection/start',
   ScheduleOperationsController.startVehicleInspection

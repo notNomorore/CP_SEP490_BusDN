@@ -8,6 +8,7 @@ import {
   Clock3,
   ListChecks,
   MapPin,
+  PlayCircle,
   RefreshCw,
   Route,
   UserRound,
@@ -282,6 +283,63 @@ const VehicleOperationsPanel = ({
   );
 };
 
+const TripLifecyclePanel = ({
+  assignment,
+  canStartTrip,
+  isProcessing,
+  onStartTrip,
+}) => {
+  const isTripReady = assignment.tripStatus === 'READY';
+  const isTripInProgress = assignment.tripStatus === 'IN_PROGRESS';
+  const isTripClosed = ['COMPLETED', 'CANCELLED'].includes(assignment.tripStatus);
+  const isVehicleReady = assignment.inspection?.status === 'READY';
+  const canStart = canStartTrip && isTripReady && isVehicleReady && !isTripInProgress && !isTripClosed;
+
+  let helperText = 'Chỉ tài xế được phân công mới có thể bắt đầu chuyến.';
+
+  if (canStartTrip && !isVehicleReady) {
+    helperText = 'Cần xác nhận xe sẵn sàng trước khi bắt đầu chuyến.';
+  } else if (canStartTrip && !isTripReady && !isTripInProgress && !isTripClosed) {
+    helperText = 'Chuyến chưa ở trạng thái sẵn sàng để bắt đầu.';
+  } else if (isTripInProgress) {
+    helperText = 'Chuyến đang được thực hiện và đã được ghi nhận thời điểm bắt đầu.';
+  } else if (isTripClosed) {
+    helperText = 'Chuyến đã đóng nên không thể bắt đầu lại.';
+  } else if (canStart) {
+    helperText = 'Xe đã sẵn sàng. Tài xế có thể bắt đầu chuyến để hệ thống chuyển sang theo dõi vận hành.';
+  }
+
+  return (
+    <div className="mt-5 rounded-lg border border-blue-100 bg-blue-50/70 p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <PlayCircle className="h-5 w-5 text-blue-800" />
+            <h4 className="font-black text-slate-950">Vòng đời chuyến</h4>
+          </div>
+          <p className="mt-1 text-sm text-slate-600">
+            UC44 bắt đầu chuyến sau khi tài xế đã xác nhận phương tiện sẵn sàng.
+          </p>
+        </div>
+        <StatusBadge status={assignment.tripStatus} />
+      </div>
+
+      <div className="mt-4 flex flex-col gap-3 rounded-lg border border-blue-100 bg-white p-4 md:flex-row md:items-center md:justify-between">
+        <p className="text-sm text-slate-700">{helperText}</p>
+        <button
+          type="button"
+          onClick={() => onStartTrip(assignment.id)}
+          disabled={!canStart || isProcessing}
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 py-3 text-sm font-bold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <PlayCircle className="h-4 w-4" />
+          UC44 - Bắt đầu chuyến
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const AssignmentCard = ({
   assignment,
   canOperateVehicle = false,
@@ -289,6 +347,7 @@ const AssignmentCard = ({
   onStartInspection,
   onConfirmReady,
   onReportIssue,
+  onStartTrip,
 }) => (
   <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
     <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -342,6 +401,12 @@ const AssignmentCard = ({
       onStartInspection={onStartInspection}
       onConfirmReady={onConfirmReady}
       onReportIssue={onReportIssue}
+    />
+    <TripLifecyclePanel
+      assignment={assignment}
+      canStartTrip={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+      isProcessing={isProcessing}
+      onStartTrip={onStartTrip}
     />
   </article>
 );
@@ -493,6 +558,12 @@ const ScheduleOperationsPage = () => {
     'Đã gửi báo cáo lỗi xe.'
   );
 
+  const handleStartTrip = (assignmentId) => runVehicleAction(
+    assignmentId,
+    () => scheduleOperationsService.startTrip(assignmentId),
+    'Đã bắt đầu chuyến. Hệ thống chuyển sang theo dõi vận hành.'
+  );
+
   const scheduleByDate = useMemo(() => (
     shiftSchedule.reduce((groups, shift) => {
       const key = new Date(shift.scheduledStart).toISOString().slice(0, 10);
@@ -617,6 +688,7 @@ const ScheduleOperationsPage = () => {
                   onStartInspection={handleStartInspection}
                   onConfirmReady={handleConfirmReady}
                   onReportIssue={handleReportIssue}
+                  onStartTrip={handleStartTrip}
                 />
               )) : (
                 <EmptyState message="Không có chuyến xe nào được phân công trong khoảng thời gian này." />

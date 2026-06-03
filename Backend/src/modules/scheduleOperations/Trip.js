@@ -35,6 +35,14 @@ const TripSchema = new mongoose.Schema(
       default: 'SCHEDULED',
       index: true,
     },
+    actualStartAt: {
+      type: Date,
+      default: null,
+    },
+    actualEndAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

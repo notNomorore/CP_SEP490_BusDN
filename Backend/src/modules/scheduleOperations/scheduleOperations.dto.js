@@ -72,6 +72,8 @@ export const ShiftAssignmentResponseDTO = {
     busAssistant: formatStaff(assignment.busAssistant),
     scheduledStart: trip.scheduledStart,
     scheduledEnd: trip.scheduledEnd,
+    actualStartAt: trip.actualStartAt,
+    actualEndAt: trip.actualEndAt,
     dutyStart: addMinutes(trip.scheduledStart, -30),
     checkInDeadline: addMinutes(trip.scheduledStart, -15),
     dutyEnd: addMinutes(trip.scheduledEnd, 15),

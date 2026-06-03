@@ -468,6 +468,89 @@ export class ScheduleOperationsService {
 
     return inspection;
   }
+
+  static async assertDriverHasNoActiveTrip(userId, currentTripId) {
+    const activeAssignments = await ShiftAssignment.find({ driver: userId })
+      .populate('trip');
+
+    const activeAssignment = activeAssignments.find((assignment) => (
+      assignment.trip
+      && String(assignment.trip._id) !== String(currentTripId)
+      && assignment.trip.status === 'IN_PROGRESS'
+    ));
+
+    if (activeAssignment) {
+      const error = new Error('Driver already has another trip in progress');
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+
+  static async startTrip(userId, role, assignmentId) {
+    if (role !== 'DRIVER') {
+      const error = new Error('Only drivers can start assigned trips');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const assignment = await this.getDriverAssignment(userId, assignmentId);
+    const trip = assignment.trip;
+
+    if (assignment.shiftStatus === 'CANCELLED' || assignment.shiftStatus === 'COMPLETED') {
+      const error = new Error('Cannot start a cancelled or completed shift');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    if (trip.status === 'IN_PROGRESS') {
+      const error = new Error('Trip has already started');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    if (trip.status === 'COMPLETED' || trip.status === 'CANCELLED') {
+      const error = new Error('Cannot start a completed or cancelled trip');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const inspection = await VehicleInspection.findOne({ assignment: assignment._id });
+
+    if (inspection?.status !== 'READY' || trip.status !== 'READY') {
+      const error = new Error('Vehicle must be confirmed ready before starting the trip');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    await this.assertDriverHasNoActiveTrip(userId, trip._id);
+
+    await Promise.all([
+      Trip.updateOne(
+        { _id: trip._id },
+        {
+          $set: {
+            status: 'IN_PROGRESS',
+            actualStartAt: new Date(),
+          },
+        }
+      ),
+      Vehicle.updateOne(
+        { _id: trip.vehicle._id || trip.vehicle },
+        { $set: { status: 'IN_SERVICE' } }
+      ),
+    ]);
+
+    return ShiftAssignment.findById(assignment._id)
+      .populate({
+        path: 'trip',
+        populate: [
+          { path: 'route' },
+          { path: 'vehicle' },
+        ],
+      })
+      .populate('driver', 'fullName phoneNumber role')
+      .populate('busAssistant', 'fullName phoneNumber role');
+  }
 }
 
 export default ScheduleOperationsService;

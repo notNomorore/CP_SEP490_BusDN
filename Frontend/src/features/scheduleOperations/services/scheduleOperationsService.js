@@ -34,6 +34,13 @@ export const scheduleOperationsService = {
     );
     return response.data;
   },
+
+  startTrip: async (assignmentId) => {
+    const response = await apiClient.patch(
+      `/schedule-operations/assigned-trips/${assignmentId}/start`
+    );
+    return response.data;
+  },
 };
 
 export default scheduleOperationsService;
