@@ -52,6 +52,34 @@ const formatInspection = (inspection) => {
   };
 };
 
+export const OperationIncidentResponseDTO = {
+  format: (incident) => ({
+    id: incident._id,
+    incidentCode: incident.incidentCode,
+    type: incident.type,
+    severity: incident.severity,
+    status: incident.status,
+    trip: incident.trip,
+    assignment: incident.assignment,
+    route: incident.route,
+    vehicle: incident.vehicle,
+    driver: formatStaff(incident.driver),
+    locationText: incident.locationText,
+    latitude: incident.latitude,
+    longitude: incident.longitude,
+    estimatedDelayMinutes: incident.estimatedDelayMinutes,
+    description: incident.description,
+    injuriesReported: incident.injuriesReported,
+    policeNotified: incident.policeNotified,
+    canContinue: incident.canContinue,
+    requiresReplacementVehicle: incident.requiresReplacementVehicle,
+    reportedAt: incident.reportedAt,
+    acknowledgedAt: incident.acknowledgedAt,
+    resolvedAt: incident.resolvedAt,
+    adminNote: incident.adminNote,
+  }),
+};
+
 export const ShiftAssignmentResponseDTO = {
   format: (assignment, actorId, actorRole) => {
     const trip = assignment.trip || {};

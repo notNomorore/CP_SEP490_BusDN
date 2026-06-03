@@ -11,6 +11,7 @@ import {
   PlayCircle,
   RefreshCw,
   Route,
+  Send,
   UserRound,
   Wrench,
 } from 'lucide-react';
@@ -47,6 +48,19 @@ const ISSUE_CATEGORIES = [
   { value: 'ELECTRICAL', label: 'Điện / đèn' },
   { value: 'CLEANLINESS', label: 'Vệ sinh' },
   { value: 'OTHER', label: 'Khác' },
+];
+
+const INCIDENT_TYPES = [
+  { value: 'TRAFFIC_CONGESTION', label: 'UC46 - Báo kẹt xe' },
+  { value: 'ACCIDENT', label: 'UC47 - Báo tai nạn' },
+  { value: 'VEHICLE_BREAKDOWN', label: 'UC48 - Báo xe hỏng' },
+];
+
+const INCIDENT_SEVERITIES = [
+  { value: 'LOW', label: 'Thấp' },
+  { value: 'MEDIUM', label: 'Trung bình' },
+  { value: 'HIGH', label: 'Cao' },
+  { value: 'CRITICAL', label: 'Khẩn cấp' },
 ];
 
 const formatDate = (value) => new Intl.DateTimeFormat('vi-VN', {
@@ -340,6 +354,187 @@ const TripLifecyclePanel = ({
   );
 };
 
+const IncidentReportingPanel = ({
+  assignment,
+  canReportIncident,
+  isProcessing,
+  onReportIncident,
+}) => {
+  const [form, setForm] = useState({
+    type: 'TRAFFIC_CONGESTION',
+    severity: 'MEDIUM',
+    locationText: '',
+    estimatedDelayMinutes: 10,
+    description: '',
+    injuriesReported: false,
+    policeNotified: false,
+    canContinue: true,
+    requiresReplacementVehicle: false,
+  });
+
+  const isTripRunning = assignment.tripStatus === 'IN_PROGRESS';
+  const canSubmit = canReportIncident
+    && isTripRunning
+    && form.locationText.trim().length >= 3
+    && form.description.trim().length >= 10
+    && (form.type !== 'TRAFFIC_CONGESTION' || Number(form.estimatedDelayMinutes) >= 1);
+
+  const updateForm = (field, value) => {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  return (
+    <div className="mt-5 rounded-lg border border-red-100 bg-red-50/60 p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-red-700" />
+            <h4 className="font-black text-slate-950">Sự cố trong chuyến</h4>
+          </div>
+          <p className="mt-1 text-sm text-slate-600">
+            Chỉ báo sự cố khi chuyến đang vận hành. Báo cáo sẽ gửi về điều hành để xử lý.
+          </p>
+        </div>
+        <StatusBadge status={assignment.tripStatus} />
+      </div>
+
+      {!isTripRunning && (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Cần bắt đầu chuyến trước khi báo kẹt xe, tai nạn hoặc xe hỏng.
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <label className="space-y-1">
+          <span className="text-xs font-bold uppercase text-slate-500">Loại sự cố</span>
+          <select
+            value={form.type}
+            onChange={(event) => updateForm('type', event.target.value)}
+            disabled={!canReportIncident || !isTripRunning || isProcessing}
+            className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+          >
+            {INCIDENT_TYPES.map((type) => (
+              <option key={type.value} value={type.value}>{type.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1">
+          <span className="text-xs font-bold uppercase text-slate-500">Mức độ</span>
+          <select
+            value={form.severity}
+            onChange={(event) => updateForm('severity', event.target.value)}
+            disabled={!canReportIncident || !isTripRunning || isProcessing}
+            className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+          >
+            {INCIDENT_SEVERITIES.map((severity) => (
+              <option key={severity.value} value={severity.value}>{severity.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1">
+          <span className="text-xs font-bold uppercase text-slate-500">Vị trí</span>
+          <input
+            value={form.locationText}
+            onChange={(event) => updateForm('locationText', event.target.value)}
+            disabled={!canReportIncident || !isTripRunning || isProcessing}
+            placeholder="Ví dụ: gần cầu Rồng"
+            className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+          />
+        </label>
+      </div>
+
+      {form.type === 'TRAFFIC_CONGESTION' && (
+        <label className="mt-3 block space-y-1">
+          <span className="text-xs font-bold uppercase text-slate-500">Ước tính trễ phút</span>
+          <input
+            type="number"
+            min="1"
+            value={form.estimatedDelayMinutes}
+            onChange={(event) => updateForm('estimatedDelayMinutes', event.target.value)}
+            disabled={!canReportIncident || !isTripRunning || isProcessing}
+            className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500 md:w-56"
+          />
+        </label>
+      )}
+
+      {form.type === 'ACCIDENT' && (
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+            <input
+              type="checkbox"
+              checked={form.injuriesReported}
+              onChange={(event) => updateForm('injuriesReported', event.target.checked)}
+              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              className="rounded border-slate-300 text-red-600 focus:ring-red-500"
+            />
+            Có người bị thương
+          </label>
+          <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+            <input
+              type="checkbox"
+              checked={form.policeNotified}
+              onChange={(event) => updateForm('policeNotified', event.target.checked)}
+              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              className="rounded border-slate-300 text-red-600 focus:ring-red-500"
+            />
+            Đã báo cơ quan chức năng
+          </label>
+        </div>
+      )}
+
+      {form.type === 'VEHICLE_BREAKDOWN' && (
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+            <input
+              type="checkbox"
+              checked={form.canContinue}
+              onChange={(event) => updateForm('canContinue', event.target.checked)}
+              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              className="rounded border-slate-300 text-red-600 focus:ring-red-500"
+            />
+            Xe còn có thể tiếp tục chạy
+          </label>
+          <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+            <input
+              type="checkbox"
+              checked={form.requiresReplacementVehicle}
+              onChange={(event) => updateForm('requiresReplacementVehicle', event.target.checked)}
+              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              className="rounded border-slate-300 text-red-600 focus:ring-red-500"
+            />
+            Cần xe thay thế
+          </label>
+        </div>
+      )}
+
+      <label className="mt-3 block space-y-1">
+        <span className="text-xs font-bold uppercase text-slate-500">Mô tả</span>
+        <textarea
+          value={form.description}
+          onChange={(event) => updateForm('description', event.target.value)}
+          disabled={!canReportIncident || !isTripRunning || isProcessing}
+          placeholder="Mô tả rõ tình huống, mức ảnh hưởng và hành động đã thực hiện."
+          rows={3}
+          className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+        />
+      </label>
+
+      <button
+        type="button"
+        onClick={() => onReportIncident(assignment.id, form)}
+        disabled={!canSubmit || isProcessing}
+        className="mt-3 inline-flex items-center justify-center gap-2 rounded-lg bg-red-700 px-4 py-3 text-sm font-bold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Send className="h-4 w-4" />
+        Gửi báo cáo sự cố
+      </button>
+    </div>
+  );
+};
+
 const AssignmentCard = ({
   assignment,
   canOperateVehicle = false,
@@ -348,6 +543,7 @@ const AssignmentCard = ({
   onConfirmReady,
   onReportIssue,
   onStartTrip,
+  onReportIncident,
 }) => (
   <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
     <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -407,6 +603,12 @@ const AssignmentCard = ({
       canStartTrip={canOperateVehicle && assignment.actorRole === 'DRIVER'}
       isProcessing={isProcessing}
       onStartTrip={onStartTrip}
+    />
+    <IncidentReportingPanel
+      assignment={assignment}
+      canReportIncident={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+      isProcessing={isProcessing}
+      onReportIncident={onReportIncident}
     />
   </article>
 );
@@ -564,6 +766,12 @@ const ScheduleOperationsPage = () => {
     'Đã bắt đầu chuyến. Hệ thống chuyển sang theo dõi vận hành.'
   );
 
+  const handleReportIncident = (assignmentId, incidentPayload) => runVehicleAction(
+    assignmentId,
+    () => scheduleOperationsService.reportOperationIncident(assignmentId, incidentPayload),
+    'Đã gửi báo cáo sự cố vận hành.'
+  );
+
   const scheduleByDate = useMemo(() => (
     shiftSchedule.reduce((groups, shift) => {
       const key = new Date(shift.scheduledStart).toISOString().slice(0, 10);
@@ -689,6 +897,7 @@ const ScheduleOperationsPage = () => {
                   onConfirmReady={handleConfirmReady}
                   onReportIssue={handleReportIssue}
                   onStartTrip={handleStartTrip}
+                  onReportIncident={handleReportIncident}
                 />
               )) : (
                 <EmptyState message="Không có chuyến xe nào được phân công trong khoảng thời gian này." />

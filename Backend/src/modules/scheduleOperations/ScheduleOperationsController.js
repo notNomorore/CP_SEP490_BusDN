@@ -1,5 +1,6 @@
 import ScheduleOperationsService from './ScheduleOperationsService.js';
 import {
+  OperationIncidentResponseDTO,
   ShiftAssignmentResponseDTO,
   VehicleInspectionResponseDTO,
 } from './scheduleOperations.dto.js';
@@ -125,6 +126,46 @@ export class ScheduleOperationsController {
       );
     } catch (error) {
       logger.error('Start trip error:', error);
+      next(error);
+    }
+  }
+
+  static async reportOperationIncident(req, res, next) {
+    try {
+      const incident = await ScheduleOperationsService.reportOperationIncident(
+        req.user.userId,
+        req.user.role,
+        req.params.assignmentId,
+        req.body
+      );
+
+      return res.success(
+        OperationIncidentResponseDTO.format(incident),
+        'Operation incident reported successfully'
+      );
+    } catch (error) {
+      logger.error('Report operation incident error:', error);
+      next(error);
+    }
+  }
+
+  static async listOperationIncidents(req, res, next) {
+    try {
+      const incidents = await ScheduleOperationsService.listOperationIncidents(
+        req.user.userId,
+        req.user.role,
+        req.params.assignmentId
+      );
+
+      return res.success(
+        {
+          incidents: incidents.map((incident) => OperationIncidentResponseDTO.format(incident)),
+          count: incidents.length,
+        },
+        'Operation incidents retrieved successfully'
+      );
+    } catch (error) {
+      logger.error('List operation incidents error:', error);
       next(error);
     }
   }

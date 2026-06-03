@@ -3,6 +3,7 @@ import User from '../auth/User.js';
 import Route from '../routes/Route.js';
 import RouteService from '../routes/RouteService.js';
 import ShiftAssignment from './ShiftAssignment.js';
+import OperationIncident from './OperationIncident.js';
 import Trip from './Trip.js';
 import Vehicle from './Vehicle.js';
 import VehicleInspection from './VehicleInspection.js';
@@ -45,6 +46,9 @@ const parseDate = (value, fallback) => {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? fallback : parsed;
 };
+
+const INCIDENT_TYPES = ['TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN'];
+const INCIDENT_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
 export class ScheduleOperationsService {
   static buildActorQuery(userId, role) {
@@ -550,6 +554,147 @@ export class ScheduleOperationsService {
       })
       .populate('driver', 'fullName phoneNumber role')
       .populate('busAssistant', 'fullName phoneNumber role');
+  }
+
+  static buildIncidentCode(assignment, type) {
+    const timestamp = Date.now().toString(36).toUpperCase();
+    return `INC-${type}-${assignment.shiftCode}-${timestamp}`;
+  }
+
+  static validateIncidentPayload(payload = {}) {
+    const type = String(payload.type || '').trim();
+    const severity = String(payload.severity || '').trim();
+    const description = String(payload.description || '').trim();
+    const locationText = String(payload.locationText || '').trim();
+
+    if (!INCIDENT_TYPES.includes(type)) {
+      const error = new Error('Incident type is invalid');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (!INCIDENT_SEVERITIES.includes(severity)) {
+      const error = new Error('Incident severity is invalid');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (description.length < 10) {
+      const error = new Error('Incident description must be at least 10 characters');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (locationText.length < 3) {
+      const error = new Error('Incident location is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (type === 'TRAFFIC_CONGESTION') {
+      const estimatedDelayMinutes = Number(payload.estimatedDelayMinutes || 0);
+      if (!Number.isFinite(estimatedDelayMinutes) || estimatedDelayMinutes < 1) {
+        const error = new Error('Estimated delay must be at least 1 minute for traffic congestion');
+        error.statusCode = 400;
+        throw error;
+      }
+    }
+
+    if (type === 'ACCIDENT' && severity === 'LOW') {
+      const error = new Error('Accident severity must be medium or higher');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (type === 'VEHICLE_BREAKDOWN' && typeof payload.canContinue !== 'boolean') {
+      const error = new Error('Vehicle breakdown report must specify whether the vehicle can continue');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return {
+      type,
+      severity,
+      description,
+      locationText,
+    };
+  }
+
+  static async reportOperationIncident(userId, role, assignmentId, payload = {}) {
+    if (role !== 'DRIVER') {
+      const error = new Error('Only drivers can report operation incidents');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const assignment = await this.getDriverAssignment(userId, assignmentId);
+    const { type, severity, description, locationText } = this.validateIncidentPayload(payload);
+
+    if (assignment.trip.status !== 'IN_PROGRESS') {
+      const error = new Error('Operation incidents can only be reported while the trip is in progress');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const incident = await OperationIncident.create({
+      incidentCode: this.buildIncidentCode(assignment, type),
+      type,
+      severity,
+      trip: assignment.trip._id,
+      assignment: assignment._id,
+      route: assignment.trip.route._id || assignment.trip.route,
+      vehicle: assignment.trip.vehicle._id || assignment.trip.vehicle,
+      driver: userId,
+      locationText,
+      latitude: Number.isFinite(Number(payload.latitude)) ? Number(payload.latitude) : null,
+      longitude: Number.isFinite(Number(payload.longitude)) ? Number(payload.longitude) : null,
+      estimatedDelayMinutes: type === 'TRAFFIC_CONGESTION'
+        ? Number(payload.estimatedDelayMinutes)
+        : 0,
+      description,
+      injuriesReported: type === 'ACCIDENT'
+        ? Boolean(payload.injuriesReported)
+        : false,
+      policeNotified: type === 'ACCIDENT'
+        ? Boolean(payload.policeNotified)
+        : false,
+      canContinue: type === 'VEHICLE_BREAKDOWN'
+        ? Boolean(payload.canContinue)
+        : null,
+      requiresReplacementVehicle: type === 'VEHICLE_BREAKDOWN'
+        ? Boolean(payload.requiresReplacementVehicle)
+        : false,
+      reportedAt: new Date(),
+    });
+
+    if (type === 'VEHICLE_BREAKDOWN') {
+      await Vehicle.updateOne(
+        { _id: assignment.trip.vehicle._id || assignment.trip.vehicle },
+        { $set: { status: 'MAINTENANCE' } }
+      );
+    }
+
+    return OperationIncident.findById(incident._id)
+      .populate('driver', 'fullName phoneNumber role');
+  }
+
+  static async listOperationIncidents(userId, role, assignmentId) {
+    const assignment = role === 'DRIVER'
+      ? await this.getDriverAssignment(userId, assignmentId)
+      : await ShiftAssignment.findOne({
+        _id: assignmentId,
+        busAssistant: userId,
+      });
+
+    if (!assignment) {
+      const error = new Error('Assigned trip not found for this user');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    return OperationIncident.find({ assignment: assignment._id })
+      .sort({ reportedAt: -1 })
+      .populate('driver', 'fullName phoneNumber role');
   }
 }
 

@@ -13,6 +13,14 @@ router.patch(
   '/assigned-trips/:assignmentId/start',
   ScheduleOperationsController.startTrip
 );
+router.get(
+  '/assigned-trips/:assignmentId/incidents',
+  ScheduleOperationsController.listOperationIncidents
+);
+router.post(
+  '/assigned-trips/:assignmentId/incidents',
+  ScheduleOperationsController.reportOperationIncident
+);
 router.post(
   '/assigned-trips/:assignmentId/inspection/start',
   ScheduleOperationsController.startVehicleInspection

@@ -41,6 +41,21 @@ export const scheduleOperationsService = {
     );
     return response.data;
   },
+
+  reportOperationIncident: async (assignmentId, payload = {}) => {
+    const response = await apiClient.post(
+      `/schedule-operations/assigned-trips/${assignmentId}/incidents`,
+      payload
+    );
+    return response.data;
+  },
+
+  getOperationIncidents: async (assignmentId) => {
+    const response = await apiClient.get(
+      `/schedule-operations/assigned-trips/${assignmentId}/incidents`
+    );
+    return response.data;
+  },
 };
 
 export default scheduleOperationsService;
