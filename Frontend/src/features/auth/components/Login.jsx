@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import useAuthStore from '../stores/authStore.js';
+import authService from '../services/authService.js';
 import AuthShell from '../components/AuthShell.jsx';
 
 const Login = ({ onClose }) => {
@@ -76,12 +77,16 @@ const Login = ({ onClose }) => {
     }
 
     try {
-      // In a real app, call authService.requestPasswordReset
-      // For now, just move to OTP screen
+      const response = await authService.requestPasswordReset({
+        email: forgotEmail,
+      });
+      
+      setForgotResetToken(response.token);
       setView('forgot-otp');
       setForgotResendCountdown(60);
     } catch (err) {
-      // Handle error
+      // Error is already in store or response
+      console.error('Forgot password error:', err);
     }
   };
 
@@ -95,10 +100,10 @@ const Login = ({ onClose }) => {
     }
 
     try {
-      // In a real app, call verifyOTP
+      // Just verify that OTP is being handled - actual verification happens on password reset
       setView('forgot-reset');
     } catch (err) {
-      // Handle error
+      console.error('OTP verification error:', err);
     }
   };
 
@@ -116,12 +121,17 @@ const Login = ({ onClose }) => {
     }
 
     try {
-      // In a real app, call authService.resetPassword
-      // For now, go back to login
+      await authService.resetPassword({
+        token: forgotResetToken,
+        otp: forgotOtp,
+        newPassword: forgotPassword,
+        confirmPassword: forgotConfirmPassword,
+      });
+
       setMessage('✓ Password reset successful. Please sign in.');
       returnToLogin();
     } catch (err) {
-      // Handle error
+      console.error('Password reset error:', err);
     }
   };
 
@@ -132,6 +142,21 @@ const Login = ({ onClose }) => {
     setForgotPassword('');
     setForgotConfirmPassword('');
     setForgotResetToken('');
+  };
+
+  // Handle resend OTP for password reset
+  const handleResendPasswordResetOTP = async () => {
+    clearError();
+    try {
+      const response = await authService.requestPasswordReset({
+        email: forgotEmail,
+      });
+      
+      setForgotResetToken(response.token);
+      setForgotResendCountdown(60);
+    } catch (err) {
+      console.error('Resend OTP error:', err);
+    }
   };
 
   return (
@@ -359,10 +384,7 @@ const Login = ({ onClose }) => {
               ) : (
                 <button
                   type="button"
-                  onClick={() => {
-                    setForgotResendCountdown(60);
-                    // Resend OTP
-                  }}
+                  onClick={handleResendPasswordResetOTP}
                   className="text-primary font-semibold hover:underline"
                 >
                   Resend code

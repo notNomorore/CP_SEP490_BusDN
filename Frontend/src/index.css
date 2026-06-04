@@ -29,6 +29,9 @@ html {
 body {
   @apply bg-background text-on-surface font-body;
   font-family: 'Inter', sans-serif;
+  background:
+    radial-gradient(circle at top right, rgba(181, 239, 209, 0.42), transparent 26%),
+    linear-gradient(180deg, #f4faf7 0%, #eef6f2 45%, #f7fbf9 100%);
 }
 
 h1, h2, h3, h4, h5, h6,
@@ -49,6 +52,16 @@ h1, h2, h3, h4, h5, h6,
 
 button {
   @apply active:scale-95 transition-transform;
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(193, 200, 195, 0.35);
+}
+
+.soft-panel {
+  box-shadow: 0 20px 55px rgba(0, 26, 15, 0.08);
 }
 
 /* Scrollbar Styling */

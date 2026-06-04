@@ -2,7 +2,19 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import AppInitializer from './shared/components/AppInitializer';
 import { HomePage } from './features/home';
-import { LoginPage, RegisterPage, ProtectedRoute, PublicRoute, AdminRoute } from './features/auth';
+import {
+  LoginPage,
+  RegisterPage,
+  RegisterVerifyOtpPage,
+  ProtectedRoute,
+  PublicRoute,
+  AdminRoute,
+} from './features/auth';
+import { ProfilePage } from './features/profile';
+import {
+  PromotionManagementPage,
+  PromotionStatisticsPage,
+} from './features/admin/promotions';
 
 function App() {
   return (
@@ -26,6 +38,14 @@ function App() {
             element={
               <PublicRoute>
                 <RegisterPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/auth/verify-otp"
+            element={
+              <PublicRoute>
+                <RegisterVerifyOtpPage />
               </PublicRoute>
             }
           />
@@ -58,11 +78,32 @@ function App() {
           {/* Tracking Feature */}
           {/* <Route path="/track" element={<ProtectedRoute><TrackingPage /></ProtectedRoute>} /> */}
 
-          {/* Profile Feature */}
-          {/* <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} /> */}
+          <Route
+            path="/profile"
+            element={(
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            )}
+          />
 
           {/* Admin Feature */}
-          {/* <Route path="/admin/*" element={<AdminRoute><AdminLayout /></AdminRoute>} /> */}
+          <Route
+            path="/admin/promotions"
+            element={(
+              <AdminRoute>
+                <PromotionManagementPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/promotions/statistics"
+            element={(
+              <AdminRoute>
+                <PromotionStatisticsPage />
+              </AdminRoute>
+            )}
+          />
         </Routes>
       </AppInitializer>
     </Router>

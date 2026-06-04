@@ -17,19 +17,21 @@ const Header = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'STAFF';
   const navLinks = [
-    { label: 'Manage Booking', href: '#' },
+    { label: 'Manage Booking', path: '/profile', requiresAuth: true },
+    { label: 'Promotions', path: '/admin/promotions', requiresAuth: true, adminOnly: true },
     { label: 'Become a Partner', href: '#' },
     { label: 'Routes', href: '#' },
     { label: 'Help', href: '#' }
-  ];
+  ].filter((link) => !link.adminOnly || isAdmin);
 
   const authCta =
-    location.pathname === '/register'
-      ? { label: 'Sign In', path: '/login' }
-      : location.pathname === '/login'
-        ? { label: 'Create Account', path: '/register' }
-        : { label: 'Sign In', path: '/login' };
+    location.pathname === '/auth/register'
+      ? { label: 'Sign In', path: '/auth/login' }
+      : location.pathname === '/auth/login'
+        ? { label: 'Create Account', path: '/auth/register' }
+        : { label: 'Sign In', path: '/auth/login' };
 
   const displayName = user?.fullName?.trim() || 'Passenger';
   const profileInitial = displayName.charAt(0).toUpperCase();
@@ -37,6 +39,25 @@ const Header = () => {
   const handleLogout = async () => {
     await logout();
     navigate('/');
+  };
+
+  const handleNavClick = (event, link) => {
+    if (!link.path) {
+      return;
+    }
+
+    event.preventDefault();
+    if (link.requiresAuth && !isAuthenticated) {
+      navigate('/auth/login');
+      return;
+    }
+
+    if (link.adminOnly && !isAdmin) {
+      navigate('/');
+      return;
+    }
+
+    navigate(link.path);
   };
 
   return (
@@ -59,19 +80,24 @@ const Header = () => {
 
           {/* Navigation - Hidden on mobile */}
           <nav className="hidden lg:flex items-center gap-6">
-            {navLinks.map((link, idx) => (
-              <a
-                key={idx}
-                href={link.href}
-                className={`text-label-md font-body transition-all ${
-                  idx === 0
-                    ? 'text-tertiary-fixed font-bold border-b-2 border-tertiary-fixed pb-1'
-                    : 'text-surface-variant/80 hover:text-surface-bright hover:bg-primary-container/50 px-2 py-1 rounded'
-                }`}
-              >
-                {link.label}
-              </a>
-            ))}
+            {navLinks.map((link) => {
+              const isActive = link.path && location.pathname.startsWith(link.path);
+
+              return (
+                <a
+                  key={link.label}
+                  href={link.path || link.href}
+                  onClick={(event) => handleNavClick(event, link)}
+                  className={`text-label-md font-body transition-all ${
+                    isActive
+                      ? 'text-tertiary-fixed font-bold border-b-2 border-tertiary-fixed pb-1'
+                      : 'text-surface-variant/80 hover:text-surface-bright hover:bg-primary-container/50 px-2 py-1 rounded'
+                  }`}
+                >
+                  {link.label}
+                </a>
+              );
+            })}
           </nav>
         </div>
 
@@ -92,7 +118,7 @@ const Header = () => {
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => navigate('/')}
+                onClick={() => navigate('/profile')}
                 className="flex items-center gap-3 rounded-full border border-white/10 bg-white/10 px-3 py-2 text-left text-surface-bright backdrop-blur-md hover:bg-white/15"
                 aria-label="Current user profile"
               >
