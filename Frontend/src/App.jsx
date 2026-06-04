@@ -5,11 +5,12 @@ import { HomePage } from './features/home';
 import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/priorityProfile';
 import { AdminCustomerSupportPage } from './features/customerSupport';
 import { SearchRoutesPage } from './features/routes';
-import { UserAccountsPage } from './features/admin';
+import { RouteControlPage, UserAccountsPage } from './features/admin';
 import {
   LoginPage,
   RegisterPage,
   RegisterVerifyOtpPage,
+  ForcePasswordChangePage,
   ProtectedRoute,
   PublicRoute,
   AdminRoute,
@@ -21,10 +22,8 @@ function App() {
     <Router>
       <AppInitializer>
         <Routes>
-          {/* Home Page */}
           <Route path="/" element={<HomePage />} />
 
-          {/* Auth Routes */}
           <Route
             path="/auth/login"
             element={
@@ -49,8 +48,15 @@ function App() {
               </PublicRoute>
             }
           />
+          <Route
+            path="/auth/force-change-password"
+            element={
+              <ProtectedRoute allowFirstLogin>
+                <ForcePasswordChangePage />
+              </ProtectedRoute>
+            }
+          />
 
-          {/* Backward compatibility - old paths */}
           <Route
             path="/login"
             element={
@@ -68,7 +74,6 @@ function App() {
             }
           />
 
-          {/* Route Feature */}
           <Route
             path="/search"
             element={
@@ -77,15 +82,6 @@ function App() {
               </ProtectedRoute>
             }
           />
-
-          {/* Ticket Feature */}
-          {/* <Route path="/booking" element={<ProtectedRoute><BookingPage /></ProtectedRoute>} />
-          <Route path="/tickets" element={<ProtectedRoute><MyTicketsPage /></ProtectedRoute>} /> */}
-
-          {/* Tracking Feature */}
-          {/* <Route path="/track" element={<ProtectedRoute><TrackingPage /></ProtectedRoute>} /> */}
-
-          {/* Profile Feature */}
           <Route
             path="/priority-profile"
             element={
@@ -96,14 +92,13 @@ function App() {
           />
           <Route
             path="/profile"
-            element={(
+            element={
               <ProtectedRoute>
                 <ProfilePage />
               </ProtectedRoute>
-            )}
+            }
           />
 
-          {/* Admin Feature */}
           <Route
             path="/admin/priority-verification"
             element={
@@ -119,12 +114,22 @@ function App() {
                 <AdminCustomerSupportPage />
               </AdminRoute>
             }
+          />
+          <Route
+            path="/admin/routes"
+            element={
+              <AdminRoute>
+                <RouteControlPage />
+              </AdminRoute>
+            }
+          />
+          <Route
             path="/admin/users"
-            element={(
+            element={
               <AdminRoute>
                 <UserAccountsPage />
               </AdminRoute>
-            )}
+            }
           />
         </Routes>
       </AppInitializer>
