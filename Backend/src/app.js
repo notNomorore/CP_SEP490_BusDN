@@ -15,6 +15,7 @@ import logger from './utils/logger.js';
 import authRoutes from './modules/auth/authRoutes.js';
 import profileRoutes from './modules/profile/profileRoutes.js';
 import promotionRoutes from './modules/promotions/promotionRoutes.js';
+import revenueReportRoutes from './modules/revenue/revenueReport.routes.js';
 
 export const createApp = () => {
   const app = express();
@@ -86,6 +87,7 @@ export const createApp = () => {
   app.use('/api/auth', authRoutes);
   app.use('/api/profile', profileRoutes);
   app.use('/api/admin/promotions', promotionRoutes);
+  app.use('/api/admin/revenue', revenueReportRoutes);
   // app.use('/api/routes', routeRoutes);
   // etc...
 

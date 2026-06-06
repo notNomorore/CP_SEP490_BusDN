@@ -21,6 +21,7 @@ const Header = () => {
   const navLinks = [
     { label: 'Manage Booking', path: '/profile', requiresAuth: true },
     { label: 'Promotions', path: '/admin/promotions', requiresAuth: true, adminOnly: true },
+    { label: 'Revenue', path: '/admin/revenue', requiresAuth: true, adminOnly: true },
     { label: 'Become a Partner', href: '#' },
     { label: 'Routes', href: '#' },
     { label: 'Help', href: '#' }

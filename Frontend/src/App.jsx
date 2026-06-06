@@ -15,6 +15,7 @@ import {
   PromotionManagementPage,
   PromotionStatisticsPage,
 } from './features/admin/promotions';
+import { RevenueReportsPage } from './features/admin/revenue';
 
 function App() {
   return (
@@ -101,6 +102,14 @@ function App() {
             element={(
               <AdminRoute>
                 <PromotionStatisticsPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/revenue"
+            element={(
+              <AdminRoute>
+                <RevenueReportsPage />
               </AdminRoute>
             )}
           />
