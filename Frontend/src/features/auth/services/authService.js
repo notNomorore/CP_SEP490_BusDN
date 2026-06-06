@@ -57,12 +57,15 @@ export const authService = {
       confirmPassword: data.confirmPassword,
     }),
 
-  changePassword: async (data) =>
-    apiClient.post('/auth/change-password', {
+  changePassword: async (data) => {
+    const response = await apiClient.post('/auth/change-password', {
       currentPassword: data.currentPassword,
       newPassword: data.newPassword,
       confirmPassword: data.confirmPassword,
-    }),
+    });
+    persistSession(localStorage.getItem('authToken'), response.user);
+    return response;
+  },
 
   getCurrentUser: async () => {
     const response = await apiClient.get('/auth/me');

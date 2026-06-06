@@ -10,8 +10,24 @@ router.use(authorizeCurrentUserRole('DRIVER', 'BUS_ASSISTANT'));
 router.get('/assigned-trips', ScheduleOperationsController.listAssignedTrips);
 router.get('/shift-schedule', ScheduleOperationsController.listShiftSchedule);
 router.patch(
+  '/assigned-trips/:assignmentId/accept',
+  ScheduleOperationsController.acceptAssignedTrip
+);
+router.patch(
+  '/assigned-trips/:assignmentId/reject',
+  ScheduleOperationsController.rejectAssignedTrip
+);
+router.patch(
   '/assigned-trips/:assignmentId/start',
   ScheduleOperationsController.startTrip
+);
+router.patch(
+  '/assigned-trips/:assignmentId/complete',
+  ScheduleOperationsController.completeTrip
+);
+router.patch(
+  '/assigned-trips/:assignmentId/gps-sync',
+  ScheduleOperationsController.syncTripGps
 );
 router.get(
   '/assigned-trips/:assignmentId/incidents',

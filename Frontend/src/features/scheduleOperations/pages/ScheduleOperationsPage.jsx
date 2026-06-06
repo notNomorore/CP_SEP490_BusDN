@@ -1,4 +1,14 @@
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  MapContainer,
+  Marker,
+  Polyline,
+  TileLayer,
+  useMap,
+  ZoomControl,
+} from 'react-leaflet';
 import {
   AlertTriangle,
   BusFront,
@@ -22,6 +32,9 @@ import scheduleOperationsService from '../services/scheduleOperationsService.js'
 
 const STATUS_META = {
   ASSIGNED: { label: 'Đã phân công', className: 'bg-amber-100 text-amber-900' },
+  PENDING: { label: 'Chờ tiếp nhận', className: 'bg-amber-100 text-amber-900' },
+  ACCEPTED: { label: 'Đã tiếp nhận', className: 'bg-emerald-100 text-emerald-800' },
+  REJECTED: { label: 'Đã từ chối', className: 'bg-red-100 text-red-800' },
   CONFIRMED: { label: 'Đã xác nhận', className: 'bg-blue-100 text-blue-800' },
   COMPLETED: { label: 'Hoàn thành', className: 'bg-green-100 text-green-800' },
   CANCELLED: { label: 'Đã hủy', className: 'bg-red-100 text-red-800' },
@@ -56,6 +69,27 @@ const INCIDENT_TYPES = [
   { value: 'VEHICLE_BREAKDOWN', label: 'UC48 - Báo xe hỏng' },
 ];
 
+const IN_TRIP_INCIDENT_TYPES = INCIDENT_TYPES.filter(
+  (type) => type.value === 'TRAFFIC_CONGESTION'
+);
+
+const TRAFFIC_CATEGORIES = [
+  { value: 'HEAVY_TRAFFIC', label: 'Ùn tắc đông phương tiện' },
+  { value: 'ROADWORK', label: 'Thi công / rào chắn đường' },
+  { value: 'FLOODING', label: 'Ngập nước / thời tiết xấu' },
+  { value: 'EVENT_CROWD', label: 'Sự kiện đông người' },
+  { value: 'STOP_OVERLOAD', label: 'Điểm dừng quá tải' },
+  { value: 'TEMPORARY_BLOCK', label: 'Đường bị chặn tạm thời' },
+  { value: 'OTHER', label: 'Khác' },
+];
+
+const AFFECTED_DIRECTIONS = [
+  { value: 'CURRENT_DIRECTION', label: 'Chiều đang chạy' },
+  { value: 'OPPOSITE_DIRECTION', label: 'Chiều ngược lại' },
+  { value: 'BOTH_DIRECTIONS', label: 'Cả hai chiều' },
+  { value: 'UNKNOWN', label: 'Chưa xác định' },
+];
+
 const INCIDENT_SEVERITIES = [
   { value: 'LOW', label: 'Thấp' },
   { value: 'MEDIUM', label: 'Trung bình' },
@@ -86,6 +120,89 @@ const getDateInputValue = (date) => {
   return new Date(date.getTime() - offset * 60 * 1000).toISOString().slice(0, 10);
 };
 
+const toLatLng = ({ latitude, longitude }) => [latitude, longitude];
+
+const isValidLocation = (location) => (
+  location?.latitude !== null
+  && location?.latitude !== undefined
+  && location?.longitude !== null
+  && location?.longitude !== undefined
+  && Number.isFinite(Number(location.latitude))
+  && Number.isFinite(Number(location.longitude))
+  && !(Number(location.latitude) === 0 && Number(location.longitude) === 0)
+);
+
+const driverLocationIcon = L.divIcon({
+  className: '',
+  iconAnchor: [24, 24],
+  html: `
+    <div class="relative flex h-12 w-12 items-center justify-center">
+      <span class="absolute h-12 w-12 rounded-full bg-emerald-400/25"></span>
+      <span class="absolute h-7 w-7 rounded-full bg-emerald-500/25"></span>
+      <span class="relative flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-emerald-600 shadow-lg">
+        <span class="h-1.5 w-1.5 rounded-full bg-white"></span>
+      </span>
+    </div>
+  `,
+});
+
+const routeStopIcon = (index, isTerminal = false) => L.divIcon({
+  className: '',
+  iconAnchor: [14, 14],
+  html: `
+    <div style="
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9999px;
+      border: 2px solid white;
+      background: ${isTerminal ? '#047857' : '#0f766e'};
+      color: white;
+      font-size: 11px;
+      font-weight: 800;
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.22);
+    ">${index}</div>
+  `,
+});
+
+const DriverLocationAutoFocus = ({ location }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (isValidLocation(location)) {
+      map.setView(toLatLng(location), 16, { animate: true });
+    }
+  }, [location, map]);
+
+  return null;
+};
+
+const TripRouteAutoFocus = ({ points }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    const positions = points
+      .filter(isValidLocation)
+      .map((point) => toLatLng({
+        latitude: Number(point.latitude),
+        longitude: Number(point.longitude),
+      }));
+
+    if (positions.length > 1) {
+      map.fitBounds(positions, { padding: [28, 28] });
+      return;
+    }
+
+    if (positions.length === 1) {
+      map.setView(positions[0], 15);
+    }
+  }, [points, map]);
+
+  return null;
+};
+
 const getInitialFilters = () => {
   const from = new Date();
   const to = new Date();
@@ -100,6 +217,50 @@ const getInitialFilters = () => {
 const getErrorMessage = (error) => (
   error?.message || 'Không thể tải lịch vận hành. Vui lòng thử lại.'
 );
+
+const GPS_RETRY_LIMIT = 3;
+
+const requestCurrentPosition = () => new Promise((resolve, reject) => {
+  if (!navigator.geolocation) {
+    reject(new Error('Trình duyệt không hỗ trợ GPS.'));
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(resolve, reject, {
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeout: 6000,
+  });
+});
+
+const captureStartGpsPayload = async () => {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= GPS_RETRY_LIMIT; attempt += 1) {
+    try {
+      const position = await requestCurrentPosition();
+
+      return {
+        gps: {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracyMeters: position.coords.accuracy,
+          capturedAt: new Date(position.timestamp).toISOString(),
+          retryCount: attempt - 1,
+        },
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  return {
+    gps: {
+      retryCount: GPS_RETRY_LIMIT,
+      message: lastError?.message || 'Không thể đồng bộ GPS sau nhiều lần thử.',
+    },
+  };
+};
 
 const StatusBadge = ({ status }) => {
   const meta = STATUS_META[status] || {
@@ -125,6 +286,309 @@ const InfoItem = ({ icon: Icon, label, value }) => (
     </div>
   </div>
 );
+
+const TripRouteMap = ({ assignment }) => {
+  const route = assignment.route || {};
+  const stops = Array.isArray(route.stops) ? route.stops.filter(isValidLocation) : [];
+  const pathPoints = Array.isArray(route.pathPoints) && route.pathPoints.length
+    ? route.pathPoints.filter(isValidLocation)
+    : stops;
+  const mapPoints = pathPoints.map((point) => ({
+    ...point,
+    latitude: Number(point.latitude),
+    longitude: Number(point.longitude),
+  }));
+  const center = mapPoints[0] || stops[0];
+
+  if (!isValidLocation(center)) {
+    return (
+      <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        Chưa có dữ liệu bản đồ tuyến cho chuyến này. Admin cần cấu hình trạm dừng hoặc đường đi trong phần quản lý tuyến.
+      </div>
+    );
+  }
+
+  const routeSummary = [
+    stops.length ? `${stops.length} trạm` : null,
+    route.estimatedDistanceKm ? `${route.estimatedDistanceKm} km` : null,
+    route.estimatedDurationMinutes ? `${route.estimatedDurationMinutes} phút` : null,
+  ].filter(Boolean).join(' • ');
+
+  return (
+    <div className="mt-5 overflow-hidden rounded-lg border border-emerald-100 bg-white">
+      <div className="flex flex-col gap-2 border-b border-emerald-100 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Route className="h-5 w-5 text-emerald-700" />
+            <h4 className="font-black text-slate-950">Bản đồ chuyến đi</h4>
+          </div>
+          <p className="mt-1 text-sm text-slate-600">
+            {route.origin} - {route.destination}
+          </p>
+        </div>
+        {routeSummary && (
+          <span className="w-fit rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
+            {routeSummary}
+          </span>
+        )}
+      </div>
+
+      <div className="h-72">
+        <MapContainer
+          center={toLatLng(center)}
+          className="h-full w-full"
+          scrollWheelZoom={false}
+          zoom={13}
+          zoomControl={false}
+        >
+          <TileLayer
+            attribution="&copy; OpenStreetMap"
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <TripRouteAutoFocus points={mapPoints.length ? mapPoints : stops} />
+          {mapPoints.length > 1 && (
+            <Polyline
+              pathOptions={{ color: '#047857', opacity: 0.9, weight: 5 }}
+              positions={mapPoints.map(toLatLng)}
+            />
+          )}
+          {stops.map((stop, index) => (
+            <Marker
+              key={`${stop.stopOrder || index}-${stop.stopName || index}`}
+              position={toLatLng({
+                latitude: Number(stop.latitude),
+                longitude: Number(stop.longitude),
+              })}
+              icon={routeStopIcon(index + 1, index === 0 || index === stops.length - 1)}
+              title={stop.stopName}
+            />
+          ))}
+          <ZoomControl position="bottomright" />
+        </MapContainer>
+      </div>
+
+      {stops.length > 0 && (
+        <div className="border-t border-emerald-100 px-4 py-3">
+          <p className="text-xs font-black uppercase text-slate-500">Các trạm chính trên tuyến</p>
+          <div className="mt-3 max-h-80 overflow-y-auto pr-1">
+            <div className="grid gap-2 md:grid-cols-2">
+            {stops.map((stop, index) => (
+              <div
+                key={`${stop.stopOrder || index}-${stop.stopName || index}-summary`}
+                className="flex items-start gap-3 rounded-lg bg-slate-50 px-3 py-2"
+              >
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-xs font-black text-white">
+                  {stop.stopOrder || index + 1}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-slate-900">{stop.stopName || 'Trạm dừng'}</p>
+                  <p className="mt-0.5 truncate text-xs text-slate-500">{stop.address || 'Chưa có địa chỉ'}</p>
+                </div>
+              </div>
+            ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const DriverLocationMap = ({ assignment }) => {
+  const location = assignment.startLocation;
+  const gpsStatus = assignment.gpsSync?.status || 'NOT_REQUESTED';
+
+  if (gpsStatus === 'FAILED') {
+    return (
+      <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        Không thể đồng bộ GPS khi bắt đầu chuyến. Hãy kiểm tra quyền vị trí của trình duyệt hoặc thiết bị GPS rồi thử lại ở chuyến tiếp theo.
+      </div>
+    );
+  }
+
+  if (gpsStatus !== 'SYNCED' || !isValidLocation(location)) {
+    return null;
+  }
+
+  const normalizedLocation = {
+    latitude: Number(location.latitude),
+    longitude: Number(location.longitude),
+  };
+  const hasAccuracy = location.accuracyMeters !== null
+    && location.accuracyMeters !== undefined
+    && Number.isFinite(Number(location.accuracyMeters));
+  const accuracyText = hasAccuracy
+    ? `${Math.round(Number(location.accuracyMeters))} m`
+    : 'Chưa có';
+
+  return (
+    <div className="mt-4 overflow-hidden rounded-lg border border-emerald-100 bg-white">
+      <div className="flex flex-col gap-2 border-b border-emerald-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-black text-slate-950">Vị trí tài xế khi bắt đầu chuyến</p>
+          <p className="mt-1 text-xs text-slate-500">
+            GPS được đồng bộ tự động khi bấm UC44 - Bắt đầu chuyến.
+          </p>
+        </div>
+        <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
+          Độ chính xác: {accuracyText}
+        </span>
+      </div>
+      <div className="h-64">
+        <MapContainer
+          center={toLatLng(normalizedLocation)}
+          className="h-full w-full"
+          scrollWheelZoom={false}
+          zoom={16}
+          zoomControl={false}
+        >
+          <TileLayer
+            attribution="&copy; OpenStreetMap"
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <DriverLocationAutoFocus location={normalizedLocation} />
+          <Marker position={toLatLng(normalizedLocation)} icon={driverLocationIcon} />
+          <ZoomControl position="bottomright" />
+        </MapContainer>
+      </div>
+      <div className="grid gap-2 border-t border-emerald-100 px-4 py-3 text-xs text-slate-600 sm:grid-cols-3">
+        <span><strong>Latitude:</strong> {normalizedLocation.latitude.toFixed(6)}</span>
+        <span><strong>Longitude:</strong> {normalizedLocation.longitude.toFixed(6)}</span>
+        <span><strong>GPS:</strong> {assignment.gpsSync?.status || 'NOT_REQUESTED'}</span>
+      </div>
+    </div>
+  );
+};
+
+const OperationRouteMap = ({ assignment }) => {
+  const location = assignment.startLocation;
+  const gpsStatus = assignment.gpsSync?.status || 'NOT_REQUESTED';
+  const route = assignment.route || {};
+  const stops = Array.isArray(route.stops) ? route.stops.filter(isValidLocation) : [];
+  const pathPoints = Array.isArray(route.pathPoints) && route.pathPoints.length
+    ? route.pathPoints.filter(isValidLocation)
+    : stops;
+
+  if (gpsStatus === 'FAILED') {
+    return (
+      <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        Không thể đồng bộ GPS khi bắt đầu chuyến. Hãy kiểm tra quyền vị trí của trình duyệt hoặc thiết bị GPS rồi bấm Reload GPS.
+      </div>
+    );
+  }
+
+  if (gpsStatus !== 'SYNCED' || !isValidLocation(location)) {
+    return null;
+  }
+
+  const normalizedLocation = {
+    latitude: Number(location.latitude),
+    longitude: Number(location.longitude),
+  };
+  const hasAccuracy = location.accuracyMeters !== null
+    && location.accuracyMeters !== undefined
+    && Number.isFinite(Number(location.accuracyMeters));
+  const accuracyText = hasAccuracy
+    ? `${Math.round(Number(location.accuracyMeters))} m`
+    : 'Chưa có';
+  const mapPoints = pathPoints.map((point) => ({
+    ...point,
+    latitude: Number(point.latitude),
+    longitude: Number(point.longitude),
+  }));
+  const focusPoints = [normalizedLocation, ...mapPoints, ...stops];
+
+  return (
+    <div className="mt-4 overflow-hidden rounded-lg border border-emerald-100 bg-white">
+      <div className="flex flex-col gap-2 border-b border-emerald-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-black text-slate-950">Bản đồ vận hành chuyến</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Theo dõi vị trí tài xế hiện tại và các trạm cần đi trong chuyến.
+          </p>
+        </div>
+        <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
+          Độ chính xác: {accuracyText}
+        </span>
+      </div>
+
+      <div className="grid xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="h-[720px] min-h-[620px]">
+          <MapContainer
+            center={toLatLng(normalizedLocation)}
+            className="h-full w-full"
+            scrollWheelZoom
+            zoom={14}
+            zoomControl={false}
+          >
+            <TileLayer
+              attribution="&copy; OpenStreetMap"
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            <TripRouteAutoFocus points={focusPoints} />
+            {mapPoints.length > 1 && (
+              <Polyline
+                pathOptions={{ color: '#1d4ed8', opacity: 0.9, weight: 6 }}
+                positions={mapPoints.map(toLatLng)}
+              />
+            )}
+            {stops.map((stop, index) => (
+              <Marker
+                key={`${stop.stopOrder || index}-${stop.stopName || index}-operation`}
+                position={toLatLng({
+                  latitude: Number(stop.latitude),
+                  longitude: Number(stop.longitude),
+                })}
+                icon={routeStopIcon(index + 1, index === 0 || index === stops.length - 1)}
+                title={stop.stopName}
+              />
+            ))}
+            <Marker position={toLatLng(normalizedLocation)} icon={driverLocationIcon} title="Vị trí tài xế" />
+            <ZoomControl position="bottomright" />
+          </MapContainer>
+        </div>
+
+        <aside className="border-t border-emerald-100 bg-slate-50 xl:max-h-[720px] xl:overflow-y-auto xl:border-l xl:border-t-0">
+          <div className="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-3">
+            <p className="text-xs font-black uppercase text-slate-500">Trạm cần đi</p>
+            <p className="mt-1 text-sm font-bold text-slate-950">
+              {stops.length} trạm | {route.origin} - {route.destination}
+            </p>
+          </div>
+          <div className="space-y-2 p-4">
+            <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
+              <p className="text-xs font-black uppercase text-emerald-700">Vị trí tài xế</p>
+              <p className="mt-1 text-sm font-bold text-slate-900">
+                {normalizedLocation.latitude.toFixed(6)}, {normalizedLocation.longitude.toFixed(6)}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">GPS: {assignment.gpsSync?.status || 'NOT_REQUESTED'}</p>
+            </div>
+            {stops.map((stop, index) => (
+              <div
+                key={`${stop.stopOrder || index}-${stop.stopName || index}-operation-list`}
+                className="flex items-start gap-3 rounded-lg bg-white px-3 py-2"
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-700 text-xs font-black text-white">
+                  {stop.stopOrder || index + 1}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-slate-900">{stop.stopName || 'Trạm dừng'}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">{stop.address || 'Chưa có địa chỉ'}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </aside>
+      </div>
+
+      <div className="grid gap-2 border-t border-emerald-100 px-4 py-3 text-xs text-slate-600 sm:grid-cols-3">
+        <span><strong>Latitude:</strong> {normalizedLocation.latitude.toFixed(6)}</span>
+        <span><strong>Longitude:</strong> {normalizedLocation.longitude.toFixed(6)}</span>
+        <span><strong>GPS:</strong> {assignment.gpsSync?.status || 'NOT_REQUESTED'}</span>
+      </div>
+    </div>
+  );
+};
 
 const buildDefaultChecklist = (inspection) => (
   CHECKLIST_ITEMS.reduce((values, item) => ({
@@ -157,9 +621,10 @@ const VehicleOperationsPanel = ({
   const isIssueReported = inspection.status === 'ISSUE_REPORTED';
   const tripAllowsInspection = assignment.tripStatus === 'SCHEDULED';
   const canEdit = canOperateVehicle && tripAllowsInspection && !isReady && !isIssueReported;
-  const canStart = canEdit && (isNotStarted || isInProgress);
-  const canConfirm = canEdit && isInProgress && allChecked;
-  const canReport = canEdit && isInProgress && issueDescription.trim().length >= 5;
+  const canStart = canEdit && isNotStarted;
+  const canInspect = canEdit && isInProgress;
+  const canConfirm = canInspect && allChecked;
+  const canReport = canInspect && issueDescription.trim().length >= 5;
 
   const toggleChecklist = (key) => {
     setChecklist((current) => ({
@@ -167,6 +632,52 @@ const VehicleOperationsPanel = ({
       [key]: !current[key],
     }));
   };
+
+  if (isNotStarted) {
+    return (
+      <div className="mt-5 rounded-lg border border-emerald-100 bg-emerald-50/60 p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <ClipboardCheck className="h-5 w-5 text-emerald-800" />
+              <h4 className="font-black text-slate-950">UC41 - Bắt đầu kiểm tra xe</h4>
+            </div>
+            <p className="mt-1 text-sm text-slate-600">
+              Tài xế bắt đầu biên bản kiểm tra trước chuyến. Sau khi bắt đầu, hệ thống mới mở checklist để xác nhận xe sẵn sàng hoặc báo lỗi.
+            </p>
+          </div>
+          <StatusBadge status={inspection.status} />
+        </div>
+
+        {!canOperateVehicle && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Chỉ tài xế được phân công cho chuyến này mới có thể bắt đầu kiểm tra xe.
+          </div>
+        )}
+
+        {canOperateVehicle && !tripAllowsInspection && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Trạng thái chuyến này không còn cho phép bắt đầu kiểm tra xe trước chuyến.
+          </div>
+        )}
+
+        <div className="mt-4 rounded-lg border border-emerald-100 bg-white p-4">
+          <p className="text-sm text-slate-700">
+            Khi bấm bắt đầu, hệ thống tạo hồ sơ kiểm tra trong collection vehicleinspections và ghi nhận thời điểm bắt đầu để admin giám sát.
+          </p>
+          <button
+            type="button"
+            onClick={() => onStartInspection(assignment.id, buildDefaultChecklist(inspection))}
+            disabled={!canStart || isProcessing}
+            className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Wrench className="h-4 w-4" />
+            UC41 - Bắt đầu kiểm tra
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-5 rounded-lg border border-emerald-100 bg-emerald-50/60 p-4">
@@ -218,7 +729,7 @@ const VehicleOperationsPanel = ({
               type="checkbox"
               checked={Boolean(checklist[item.key])}
               onChange={() => toggleChecklist(item.key)}
-              disabled={!canStart || isProcessing}
+              disabled={!canInspect || isProcessing}
               className="rounded border-slate-300 text-emerald-700 focus:ring-emerald-600"
             />
             {item.label}
@@ -227,15 +738,6 @@ const VehicleOperationsPanel = ({
       </div>
 
       <div className="mt-4 flex flex-col gap-3 lg:flex-row">
-        <button
-          type="button"
-          onClick={() => onStartInspection(assignment.id, checklist)}
-          disabled={!canStart || isProcessing}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-700 px-4 py-3 text-sm font-bold text-emerald-800 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Wrench className="h-4 w-4" />
-          UC41 - Bắt đầu kiểm tra
-        </button>
         <button
           type="button"
           onClick={() => onConfirmReady(assignment.id, checklist)}
@@ -302,12 +804,16 @@ const TripLifecyclePanel = ({
   canStartTrip,
   isProcessing,
   onStartTrip,
+  onCompleteTrip,
+  onSyncTripGps,
 }) => {
   const isTripReady = assignment.tripStatus === 'READY';
   const isTripInProgress = assignment.tripStatus === 'IN_PROGRESS';
   const isTripClosed = ['COMPLETED', 'CANCELLED'].includes(assignment.tripStatus);
   const isVehicleReady = assignment.inspection?.status === 'READY';
   const canStart = canStartTrip && isTripReady && isVehicleReady && !isTripInProgress && !isTripClosed;
+  const canComplete = canStartTrip && isTripInProgress && !isTripClosed;
+  const gpsStatus = assignment.gpsSync?.status || 'NOT_REQUESTED';
 
   let helperText = 'Chỉ tài xế được phân công mới có thể bắt đầu chuyến.';
 
@@ -329,7 +835,7 @@ const TripLifecyclePanel = ({
         <div>
           <div className="flex items-center gap-2">
             <PlayCircle className="h-5 w-5 text-blue-800" />
-            <h4 className="font-black text-slate-950">Vòng đời chuyến</h4>
+            <h4 className="font-black text-slate-950">Vận hành chuyến</h4>
           </div>
           <p className="mt-1 text-sm text-slate-600">
             UC44 bắt đầu chuyến sau khi tài xế đã xác nhận phương tiện sẵn sàng.
@@ -338,8 +844,21 @@ const TripLifecyclePanel = ({
         <StatusBadge status={assignment.tripStatus} />
       </div>
 
-      <div className="mt-4 flex flex-col gap-3 rounded-lg border border-blue-100 bg-white p-4 md:flex-row md:items-center md:justify-between">
-        <p className="text-sm text-slate-700">{helperText}</p>
+      <div className="mt-4 flex flex-col gap-3 rounded-lg border border-blue-100 bg-white p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-sm text-slate-700">{helperText}</p>
+          {gpsStatus !== 'NOT_REQUESTED' && (
+            <p className={`mt-2 text-xs font-bold ${
+              gpsStatus === 'SYNCED' ? 'text-emerald-700' : 'text-amber-700'
+            }`}
+            >
+              GPS: {gpsStatus === 'SYNCED'
+                ? 'Đã đồng bộ khi bắt đầu chuyến'
+                : `Đồng bộ thất bại sau ${assignment.gpsSync?.retryCount || 0} lần thử`}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row">
         <button
           type="button"
           onClick={() => onStartTrip(assignment.id)}
@@ -349,7 +868,27 @@ const TripLifecyclePanel = ({
           <PlayCircle className="h-4 w-4" />
           UC44 - Bắt đầu chuyến
         </button>
+          <button
+            type="button"
+            onClick={() => onCompleteTrip(assignment.id)}
+            disabled={!canComplete || isProcessing}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+            <CheckCircle2 className="h-4 w-4" />
+            UC45 - Hoàn thành chuyến
+          </button>
+          <button
+            type="button"
+            onClick={() => onSyncTripGps(assignment.id)}
+            disabled={!isTripInProgress || isProcessing}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-700 px-4 py-3 text-sm font-bold text-emerald-800 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <MapPin className="h-4 w-4" />
+            Reload GPS
+          </button>
+        </div>
       </div>
+      <OperationRouteMap assignment={assignment} />
     </div>
   );
 };
@@ -362,6 +901,8 @@ const IncidentReportingPanel = ({
 }) => {
   const [form, setForm] = useState({
     type: 'TRAFFIC_CONGESTION',
+    trafficCategory: 'HEAVY_TRAFFIC',
+    affectedDirection: 'CURRENT_DIRECTION',
     severity: 'MEDIUM',
     locationText: '',
     estimatedDelayMinutes: 10,
@@ -377,6 +918,8 @@ const IncidentReportingPanel = ({
     && isTripRunning
     && form.locationText.trim().length >= 3
     && form.description.trim().length >= 10
+    && form.trafficCategory
+    && form.affectedDirection
     && (form.type !== 'TRAFFIC_CONGESTION' || Number(form.estimatedDelayMinutes) >= 1);
 
   const updateForm = (field, value) => {
@@ -392,10 +935,10 @@ const IncidentReportingPanel = ({
         <div>
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-red-700" />
-            <h4 className="font-black text-slate-950">Sự cố trong chuyến</h4>
+            <h4 className="font-black text-slate-950">UC46 - Báo kẹt xe</h4>
           </div>
           <p className="mt-1 text-sm text-slate-600">
-            Chỉ báo sự cố khi chuyến đang vận hành. Báo cáo sẽ gửi về điều hành để xử lý.
+            Chỉ báo kẹt xe khi chuyến đang vận hành. Báo cáo sẽ gửi về điều hành để xử lý.
           </p>
         </div>
         <StatusBadge status={assignment.tripStatus} />
@@ -403,21 +946,34 @@ const IncidentReportingPanel = ({
 
       {!isTripRunning && (
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Cần bắt đầu chuyến trước khi báo kẹt xe, tai nạn hoặc xe hỏng.
+          Cần bắt đầu chuyến trước khi báo kẹt xe.
         </div>
       )}
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <label className="space-y-1">
-          <span className="text-xs font-bold uppercase text-slate-500">Loại sự cố</span>
+          <span className="text-xs font-bold uppercase text-slate-500">Loại kẹt xe</span>
           <select
-            value={form.type}
-            onChange={(event) => updateForm('type', event.target.value)}
+            value={form.trafficCategory}
+            onChange={(event) => updateForm('trafficCategory', event.target.value)}
             disabled={!canReportIncident || !isTripRunning || isProcessing}
             className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
           >
-            {INCIDENT_TYPES.map((type) => (
-              <option key={type.value} value={type.value}>{type.label}</option>
+            {TRAFFIC_CATEGORIES.map((category) => (
+              <option key={category.value} value={category.value}>{category.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1">
+          <span className="text-xs font-bold uppercase text-slate-500">Chiều ảnh hưởng</span>
+          <select
+            value={form.affectedDirection}
+            onChange={(event) => updateForm('affectedDirection', event.target.value)}
+            disabled={!canReportIncident || !isTripRunning || isProcessing}
+            className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+          >
+            {AFFECTED_DIRECTIONS.map((direction) => (
+              <option key={direction.value} value={direction.value}>{direction.label}</option>
             ))}
           </select>
         </label>
@@ -539,12 +1095,153 @@ const AssignmentCard = ({
   assignment,
   canOperateVehicle = false,
   isProcessing = false,
+  onAcceptTrip,
+  onRejectTrip,
   onStartInspection,
   onConfirmReady,
   onReportIssue,
   onStartTrip,
+  onCompleteTrip,
+  onSyncTripGps,
   onReportIncident,
-}) => (
+}) => {
+  const isAccepted = assignment.acceptanceStatus === 'ACCEPTED';
+  const isRejected = assignment.acceptanceStatus === 'REJECTED';
+  const canRespond = canOperateVehicle
+    && assignment.actorRole === 'DRIVER'
+    && assignment.acceptanceStatus !== 'ACCEPTED'
+    && assignment.acceptanceStatus !== 'REJECTED'
+    && !['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(assignment.tripStatus);
+  const showVehicleStep = isAccepted && !isRejected;
+  const showVehiclePanel = showVehicleStep && assignment.inspection?.status !== 'READY';
+  const showLifecycleStep = showVehicleStep && (
+    assignment.inspection?.status === 'READY'
+    || ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(assignment.tripStatus)
+  );
+  const showIncidentStep = assignment.tripStatus === 'IN_PROGRESS';
+  const acceptedScreenTitle = assignment.tripStatus === 'IN_PROGRESS'
+    ? 'Chuyến đang vận hành'
+    : assignment.inspection?.status === 'READY'
+      ? 'Xe đã sẵn sàng - chuẩn bị vận hành'
+      : 'Đã tiếp nhận chuyến - chuyển sang kiểm tra xe';
+
+  if (assignment.tripStatus === 'COMPLETED') {
+    return (
+      <article className="rounded-lg border border-emerald-100 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-black text-white">
+                {assignment.route.routeNumber}
+              </span>
+              <span className="text-sm font-semibold text-slate-500">{assignment.tripCode}</span>
+            </div>
+            <h3 className="mt-3 text-lg font-black text-slate-950">
+              Chuyến đã hoàn thành
+            </h3>
+            <p className="mt-1 text-sm text-slate-600">
+              {assignment.route.origin} - {assignment.route.destination}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <StatusBadge status={assignment.acceptanceStatus || 'ACCEPTED'} />
+            <StatusBadge status={assignment.tripStatus} />
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-emerald-100 bg-emerald-50/70 p-4">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" />
+            <div>
+              <p className="font-black text-emerald-900">Bạn đã hoàn thành chuyến này.</p>
+              <p className="mt-1 text-sm text-emerald-800">
+                Hệ thống đã ghi nhận thời điểm kết thúc. Bạn không cần thao tác thêm cho chuyến này.
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
+            <div className="rounded-lg bg-white px-3 py-2">
+              <p className="text-xs font-bold uppercase text-slate-500">Thời gian kế hoạch</p>
+              <p className="mt-1 font-bold text-slate-900">
+                {formatTime(assignment.scheduledStart)} - {formatTime(assignment.scheduledEnd)}
+              </p>
+            </div>
+            <div className="rounded-lg bg-white px-3 py-2">
+              <p className="text-xs font-bold uppercase text-slate-500">Bắt đầu thực tế</p>
+              <p className="mt-1 font-bold text-slate-900">
+                {assignment.actualStartAt ? formatTime(assignment.actualStartAt) : 'Chưa có'}
+              </p>
+            </div>
+            <div className="rounded-lg bg-white px-3 py-2">
+              <p className="text-xs font-bold uppercase text-slate-500">Kết thúc thực tế</p>
+              <p className="mt-1 font-bold text-slate-900">
+                {assignment.actualEndAt ? formatTime(assignment.actualEndAt) : 'Chưa có'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </article>
+    );
+  }
+
+  if (isAccepted && !isRejected) {
+    return (
+      <article className="rounded-lg border border-emerald-100 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-black text-white">
+                {assignment.route.routeNumber}
+              </span>
+              <span className="text-sm font-semibold text-slate-500">{assignment.tripCode}</span>
+            </div>
+            <h3 className="mt-3 text-lg font-black text-slate-950">
+              {acceptedScreenTitle}
+            </h3>
+            <p className="mt-1 text-sm text-slate-600">
+              {assignment.route.origin} - {assignment.route.destination} | {formatTime(assignment.scheduledStart)} - {formatTime(assignment.scheduledEnd)}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <StatusBadge status={assignment.acceptanceStatus || 'ACCEPTED'} />
+            <StatusBadge status={assignment.tripStatus} />
+            <StatusBadge status={assignment.inspection?.status || 'NOT_STARTED'} />
+          </div>
+        </div>
+
+        {showVehiclePanel && (
+          <VehicleOperationsPanel
+            assignment={assignment}
+            canOperateVehicle={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+            isProcessing={isProcessing}
+            onStartInspection={onStartInspection}
+            onConfirmReady={onConfirmReady}
+            onReportIssue={onReportIssue}
+          />
+        )}
+        {showLifecycleStep && (
+          <TripLifecyclePanel
+            assignment={assignment}
+            canStartTrip={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+            isProcessing={isProcessing}
+            onStartTrip={onStartTrip}
+            onCompleteTrip={onCompleteTrip}
+            onSyncTripGps={onSyncTripGps}
+          />
+        )}
+        {showIncidentStep && (
+          <IncidentReportingPanel
+            assignment={assignment}
+            canReportIncident={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+            isProcessing={isProcessing}
+            onReportIncident={onReportIncident}
+          />
+        )}
+      </article>
+    );
+  }
+
+  return (
   <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
     <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
       <div className="min-w-0">
@@ -560,9 +1257,10 @@ const AssignmentCard = ({
         <p className="mt-1 text-sm text-slate-600">{assignment.route.name}</p>
       </div>
       <div className="flex flex-wrap gap-2">
+        <StatusBadge status={assignment.acceptanceStatus || 'PENDING'} />
         <StatusBadge status={assignment.shiftStatus} />
         <StatusBadge status={assignment.tripStatus} />
-        <StatusBadge status={assignment.inspection?.status || 'NOT_STARTED'} />
+        {showVehicleStep ? <StatusBadge status={assignment.inspection?.status || 'NOT_STARTED'} /> : null}
       </div>
     </div>
 
@@ -590,28 +1288,79 @@ const AssignmentCard = ({
       )}
     </div>
 
-    <VehicleOperationsPanel
-      assignment={assignment}
-      canOperateVehicle={canOperateVehicle && assignment.actorRole === 'DRIVER'}
-      isProcessing={isProcessing}
-      onStartInspection={onStartInspection}
-      onConfirmReady={onConfirmReady}
-      onReportIssue={onReportIssue}
-    />
-    <TripLifecyclePanel
-      assignment={assignment}
-      canStartTrip={canOperateVehicle && assignment.actorRole === 'DRIVER'}
-      isProcessing={isProcessing}
-      onStartTrip={onStartTrip}
-    />
-    <IncidentReportingPanel
-      assignment={assignment}
-      canReportIncident={canOperateVehicle && assignment.actorRole === 'DRIVER'}
-      isProcessing={isProcessing}
-      onReportIncident={onReportIncident}
-    />
+    <TripRouteMap assignment={assignment} />
+
+    {!isAccepted && !isRejected && (
+      <div className="mt-5 rounded-lg border border-amber-100 bg-amber-50/70 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h4 className="font-black text-slate-950">Tiếp nhận chuyến được phân công</h4>
+            <p className="mt-1 text-sm text-slate-600">
+              Kiểm tra tuyến, xe, thời gian và nhân sự đi cùng trước khi tiếp nhận chuyến.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => onAcceptTrip(assignment.id)}
+              disabled={!canRespond || isProcessing}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              Tiếp nhận chuyến
+            </button>
+            <button
+              type="button"
+              onClick={() => onRejectTrip(assignment.id)}
+              disabled={!canRespond || isProcessing}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-300 px-4 py-3 text-sm font-bold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <AlertTriangle className="h-4 w-4" />
+              Từ chối chuyến
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {isRejected && (
+      <div className="mt-5 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p className="font-bold">Bạn đã từ chối chuyến này.</p>
+        <p className="mt-1">{assignment.rejectionReason || 'Chưa có lý do từ chối.'}</p>
+      </div>
+    )}
+
+    {showVehicleStep && (
+      <VehicleOperationsPanel
+        assignment={assignment}
+        canOperateVehicle={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+        isProcessing={isProcessing}
+        onStartInspection={onStartInspection}
+        onConfirmReady={onConfirmReady}
+        onReportIssue={onReportIssue}
+      />
+    )}
+    {showLifecycleStep && (
+      <TripLifecyclePanel
+        assignment={assignment}
+        canStartTrip={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+        isProcessing={isProcessing}
+        onStartTrip={onStartTrip}
+        onCompleteTrip={onCompleteTrip}
+        onSyncTripGps={onSyncTripGps}
+      />
+    )}
+    {showIncidentStep && (
+      <IncidentReportingPanel
+        assignment={assignment}
+        canReportIncident={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+        isProcessing={isProcessing}
+        onReportIncident={onReportIncident}
+      />
+    )}
   </article>
-);
+  );
+};
 
 const ShiftScheduleCard = ({ shift }) => {
   const dutySteps = [
@@ -708,13 +1457,9 @@ const ScheduleOperationsPage = () => {
     setError('');
 
     try {
-      const [tripsPayload, schedulePayload] = await Promise.all([
-        scheduleOperationsService.getAssignedTrips(filters),
-        scheduleOperationsService.getShiftSchedule(filters),
-      ]);
-
+      const tripsPayload = await scheduleOperationsService.getAssignedTrips(filters);
       setAssignedTrips(tripsPayload.trips || []);
-      setShiftSchedule(schedulePayload.shifts || []);
+      setShiftSchedule([]);
     } catch (requestError) {
       setError(getErrorMessage(requestError));
     } finally {
@@ -760,10 +1505,45 @@ const ScheduleOperationsPage = () => {
     'Đã gửi báo cáo lỗi xe.'
   );
 
+  const handleAcceptTrip = (assignmentId) => runVehicleAction(
+    assignmentId,
+    () => scheduleOperationsService.acceptAssignedTrip(assignmentId),
+    'Đã tiếp nhận chuyến được phân công.'
+  );
+
+  const handleRejectTrip = (assignmentId) => {
+    const reason = window.prompt('Nhập lý do từ chối chuyến được phân công:');
+    if (!reason) return Promise.resolve();
+
+    return runVehicleAction(
+      assignmentId,
+      () => scheduleOperationsService.rejectAssignedTrip(assignmentId, { reason }),
+      'Đã gửi lý do từ chối chuyến cho điều hành.'
+    );
+  };
+
   const handleStartTrip = (assignmentId) => runVehicleAction(
     assignmentId,
-    () => scheduleOperationsService.startTrip(assignmentId),
+    async () => {
+      const gpsPayload = await captureStartGpsPayload();
+      return scheduleOperationsService.startTrip(assignmentId, gpsPayload);
+    },
     'Đã bắt đầu chuyến. Hệ thống chuyển sang theo dõi vận hành.'
+  );
+
+  const handleCompleteTrip = (assignmentId) => runVehicleAction(
+    assignmentId,
+    () => scheduleOperationsService.completeTrip(assignmentId),
+    'Đã hoàn thành chuyến và ghi nhận thời điểm kết thúc.'
+  );
+
+  const handleSyncTripGps = (assignmentId) => runVehicleAction(
+    assignmentId,
+    async () => {
+      const gpsPayload = await captureStartGpsPayload();
+      return scheduleOperationsService.syncTripGps(assignmentId, gpsPayload);
+    },
+    'Đã thử đồng bộ lại GPS cho chuyến đang vận hành.'
   );
 
   const handleReportIncident = (assignmentId, incidentPayload) => runVehicleAction(
@@ -857,15 +1637,12 @@ const ScheduleOperationsPage = () => {
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('schedule')}
-              className={`flex items-center justify-center gap-2 border-b-2 px-4 py-4 text-sm font-bold ${
-                activeTab === 'schedule'
-                  ? 'border-emerald-700 text-emerald-800'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
+              disabled
+              title="UC40 sẽ làm sau khi có màn admin phân công ca làm việc riêng."
+              className="flex cursor-not-allowed items-center justify-center gap-2 border-b-2 border-transparent px-4 py-4 text-sm font-bold text-slate-400"
             >
               <CalendarDays className="h-4 w-4" />
-              UC40 - Lịch ca làm việc ({shiftSchedule.length})
+              UC40 - Lịch ca làm việc (làm sau)
             </button>
           </div>
 
@@ -893,10 +1670,14 @@ const ScheduleOperationsPage = () => {
                   assignment={trip}
                   canOperateVehicle={canOperateVehicle}
                   isProcessing={processingAssignmentId === trip.id}
+                  onAcceptTrip={handleAcceptTrip}
+                  onRejectTrip={handleRejectTrip}
                   onStartInspection={handleStartInspection}
                   onConfirmReady={handleConfirmReady}
                   onReportIssue={handleReportIssue}
                   onStartTrip={handleStartTrip}
+                  onCompleteTrip={handleCompleteTrip}
+                  onSyncTripGps={handleSyncTripGps}
                   onReportIncident={handleReportIncident}
                 />
               )) : (

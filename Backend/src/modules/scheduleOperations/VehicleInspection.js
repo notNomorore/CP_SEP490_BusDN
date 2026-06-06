@@ -10,20 +10,19 @@ const VehicleInspectionSchema = new mongoose.Schema(
     },
     trip: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Trip',
+      ref: 'TripSchedule',
       required: true,
       index: true,
     },
     assignment: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'ShiftAssignment',
-      required: true,
       unique: true,
       index: true,
     },
     vehicle: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Vehicle',
+      ref: 'FleetBus',
       required: true,
       index: true,
     },

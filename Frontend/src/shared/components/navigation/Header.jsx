@@ -99,6 +99,20 @@ const Header = () => {
                 <>
                   <button
                     type="button"
+                    onClick={() => navigate('/admin/routes')}
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                  >
+                    Route Management
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/admin/users')}
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                  >
+                    User Accounts
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => navigate('/admin/priority-verification')}
                     className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
                   >

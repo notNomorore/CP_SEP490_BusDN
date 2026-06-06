@@ -110,12 +110,54 @@ export class ScheduleOperationsController {
     }
   }
 
+  static async acceptAssignedTrip(req, res, next) {
+    try {
+      const assignment = await ScheduleOperationsService.acceptAssignedTrip(
+        req.user.userId,
+        req.user.role,
+        req.params.assignmentId
+      );
+
+      await ScheduleOperationsService.attachInspectionRecords([assignment]);
+
+      return res.success(
+        ShiftAssignmentResponseDTO.format(assignment, req.user.userId, req.user.role),
+        'Assigned trip accepted successfully'
+      );
+    } catch (error) {
+      logger.error('Accept assigned trip error:', error);
+      next(error);
+    }
+  }
+
+  static async rejectAssignedTrip(req, res, next) {
+    try {
+      const assignment = await ScheduleOperationsService.rejectAssignedTrip(
+        req.user.userId,
+        req.user.role,
+        req.params.assignmentId,
+        req.body
+      );
+
+      await ScheduleOperationsService.attachInspectionRecords([assignment]);
+
+      return res.success(
+        ShiftAssignmentResponseDTO.format(assignment, req.user.userId, req.user.role),
+        'Assigned trip rejected successfully'
+      );
+    } catch (error) {
+      logger.error('Reject assigned trip error:', error);
+      next(error);
+    }
+  }
+
   static async startTrip(req, res, next) {
     try {
       const assignment = await ScheduleOperationsService.startTrip(
         req.user.userId,
         req.user.role,
-        req.params.assignmentId
+        req.params.assignmentId,
+        req.body
       );
 
       await ScheduleOperationsService.attachInspectionRecords([assignment]);
@@ -126,6 +168,47 @@ export class ScheduleOperationsController {
       );
     } catch (error) {
       logger.error('Start trip error:', error);
+      next(error);
+    }
+  }
+
+  static async completeTrip(req, res, next) {
+    try {
+      const assignment = await ScheduleOperationsService.completeTrip(
+        req.user.userId,
+        req.user.role,
+        req.params.assignmentId
+      );
+
+      await ScheduleOperationsService.attachInspectionRecords([assignment]);
+
+      return res.success(
+        ShiftAssignmentResponseDTO.format(assignment, req.user.userId, req.user.role),
+        'Trip completed successfully'
+      );
+    } catch (error) {
+      logger.error('Complete trip error:', error);
+      next(error);
+    }
+  }
+
+  static async syncTripGps(req, res, next) {
+    try {
+      const assignment = await ScheduleOperationsService.syncTripGps(
+        req.user.userId,
+        req.user.role,
+        req.params.assignmentId,
+        req.body
+      );
+
+      await ScheduleOperationsService.attachInspectionRecords([assignment]);
+
+      return res.success(
+        ShiftAssignmentResponseDTO.format(assignment, req.user.userId, req.user.role),
+        'Trip GPS synced successfully'
+      );
+    } catch (error) {
+      logger.error('Sync trip GPS error:', error);
       next(error);
     }
   }

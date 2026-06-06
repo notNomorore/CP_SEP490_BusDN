@@ -35,9 +35,40 @@ export const scheduleOperationsService = {
     return response.data;
   },
 
-  startTrip: async (assignmentId) => {
+  acceptAssignedTrip: async (assignmentId) => {
     const response = await apiClient.patch(
-      `/schedule-operations/assigned-trips/${assignmentId}/start`
+      `/schedule-operations/assigned-trips/${assignmentId}/accept`
+    );
+    return response.data;
+  },
+
+  rejectAssignedTrip: async (assignmentId, payload = {}) => {
+    const response = await apiClient.patch(
+      `/schedule-operations/assigned-trips/${assignmentId}/reject`,
+      payload
+    );
+    return response.data;
+  },
+
+  startTrip: async (assignmentId, payload = {}) => {
+    const response = await apiClient.patch(
+      `/schedule-operations/assigned-trips/${assignmentId}/start`,
+      payload
+    );
+    return response.data;
+  },
+
+  completeTrip: async (assignmentId) => {
+    const response = await apiClient.patch(
+      `/schedule-operations/assigned-trips/${assignmentId}/complete`
+    );
+    return response.data;
+  },
+
+  syncTripGps: async (assignmentId, payload = {}) => {
+    const response = await apiClient.patch(
+      `/schedule-operations/assigned-trips/${assignmentId}/gps-sync`,
+      payload
     );
     return response.data;
   },

@@ -16,7 +16,7 @@ const ShiftAssignmentSchema = new mongoose.Schema(
     },
     trip: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Trip',
+      ref: 'TripSchedule',
       required: true,
       index: true,
     },
