@@ -63,7 +63,6 @@ export class AuthController {
         message: 'Registration successful. OTP sent to your email/phone.',
         userId: result.userId,
         expiresAt: result.expiresAt,
-        ...(config.nodeEnv !== 'production' ? { devOtp: result.otp } : {}),
       });
     } catch (error) {
       logger.error('Registration error:', error);
@@ -105,21 +104,10 @@ export class AuthController {
       // Verify OTP
       const user = await AuthService.verifyOTP(email, phoneNumber || phone, otp);
 
-      // Generate JWT token on successful verification (auto-login)
-      const token = jwt.sign(
-        {
-          userId: user._id,
-          email: user.email,
-          role: user.role,
-        },
-        config.jwt.secret,
-        { expiresIn: config.jwt.expire || '7d' }
-      );
-
       return res.json({
         success: true,
         message: 'Email verified successfully',
-        ...AuthResponseDTO.format(user, token),
+        user: UserResponseDTO.format(user),
       });
     } catch (error) {
       logger.error('OTP verification error:', error);
@@ -177,7 +165,6 @@ export class AuthController {
         message: 'Verification OTP resent successfully',
         userId: result.userId,
         expiresAt: result.expiresAt,
-        ...(config.nodeEnv !== 'production' ? { devOtp: result.otp } : {}),
       });
     } catch (error) {
       logger.error('Resend OTP error:', error);
