@@ -16,6 +16,7 @@ import authRoutes from './modules/auth/authRoutes.js';
 import profileRoutes from './modules/profile/profileRoutes.js';
 import promotionRoutes from './modules/promotions/promotionRoutes.js';
 import revenueReportRoutes from './modules/revenue/revenueReport.routes.js';
+import routeEfficiencyRoutes from './modules/analytics/routeEfficiency.routes.js';
 
 export const createApp = () => {
   const app = express();
@@ -88,6 +89,7 @@ export const createApp = () => {
   app.use('/api/profile', profileRoutes);
   app.use('/api/admin/promotions', promotionRoutes);
   app.use('/api/admin/revenue', revenueReportRoutes);
+  app.use('/api/admin/analytics', routeEfficiencyRoutes);
   // app.use('/api/routes', routeRoutes);
   // etc...
 

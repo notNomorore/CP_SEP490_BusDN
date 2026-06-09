@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3, ReceiptText, TicketPercent } from 'lucide-react';
+import { BarChart3, Gauge, ReceiptText, TicketPercent } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import Header from '../../../../shared/components/navigation/Header.jsx';
 import Footer from '../../../../shared/components/common/Footer.jsx';
@@ -19,6 +19,11 @@ const navItems = [
     label: 'Revenue',
     path: '/admin/revenue',
     icon: ReceiptText,
+  },
+  {
+    label: 'Route Analytics',
+    path: '/admin/analytics/route-efficiency',
+    icon: Gauge,
   },
 ];
 
