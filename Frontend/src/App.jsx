@@ -17,6 +17,7 @@ import {
 } from './features/admin/promotions';
 import { RevenueReportsPage } from './features/admin/revenue';
 import { RouteEfficiencyPage } from './features/admin/analytics';
+import { IncidentReportsPage } from './features/admin/incidents';
 
 function App() {
   return (
@@ -119,6 +120,14 @@ function App() {
             element={(
               <AdminRoute>
                 <RouteEfficiencyPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/incidents"
+            element={(
+              <AdminRoute>
+                <IncidentReportsPage />
               </AdminRoute>
             )}
           />

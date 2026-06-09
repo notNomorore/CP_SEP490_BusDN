@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3, Gauge, ReceiptText, TicketPercent } from 'lucide-react';
+import { BarChart3, Gauge, ReceiptText, ShieldAlert, TicketPercent } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import Header from '../../../../shared/components/navigation/Header.jsx';
 import Footer from '../../../../shared/components/common/Footer.jsx';
@@ -24,6 +24,11 @@ const navItems = [
     label: 'Route Analytics',
     path: '/admin/analytics/route-efficiency',
     icon: Gauge,
+  },
+  {
+    label: 'Incidents',
+    path: '/admin/incidents',
+    icon: ShieldAlert,
   },
 ];
 

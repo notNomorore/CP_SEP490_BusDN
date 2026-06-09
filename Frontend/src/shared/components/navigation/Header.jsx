@@ -23,10 +23,11 @@ const Header = () => {
     { label: 'Promotions', path: '/admin/promotions', requiresAuth: true, adminOnly: true },
     { label: 'Revenue', path: '/admin/revenue', requiresAuth: true, adminOnly: true },
     { label: 'Analytics', path: '/admin/analytics/route-efficiency', requiresAuth: true, adminOnly: true },
-    { label: 'Become a Partner', href: '#' },
-    { label: 'Routes', href: '#' },
-    { label: 'Help', href: '#' }
-  ].filter((link) => !link.adminOnly || isAdmin);
+    { label: 'Incidents', path: '/admin/incidents', requiresAuth: true, adminOnly: true },
+    { label: 'Become a Partner', href: '#', hideForAdmin: true },
+    { label: 'Routes', href: '#', hideForAdmin: true },
+    { label: 'Help', href: '#', hideForAdmin: true }
+  ].filter((link) => (!link.adminOnly || isAdmin) && (!link.hideForAdmin || !isAdmin));
 
   const authCta =
     location.pathname === '/auth/register'
@@ -81,7 +82,7 @@ const Header = () => {
           </button>
 
           {/* Navigation - Hidden on mobile */}
-          <nav className="hidden lg:flex items-center gap-6">
+          <nav className="hidden lg:flex items-center gap-4">
             {navLinks.map((link) => {
               const isActive = link.path && location.pathname.startsWith(link.path);
 
