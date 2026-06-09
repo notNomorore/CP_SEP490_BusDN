@@ -18,6 +18,7 @@ import {
 import { RevenueReportsPage } from './features/admin/revenue';
 import { RouteEfficiencyPage } from './features/admin/analytics';
 import { IncidentReportsPage } from './features/admin/incidents';
+import { SystemMonitoringPage } from './features/admin/systemMonitoring';
 
 function App() {
   return (
@@ -130,6 +131,14 @@ function App() {
                 <IncidentReportsPage />
               </AdminRoute>
             )}
+          />
+          <Route
+            path="/admin/system-monitoring"
+            element={<AdminRoute><SystemMonitoringPage /></AdminRoute>}
+          />
+          <Route
+            path="/admin/system-monitoring/suspicious"
+            element={<AdminRoute><SystemMonitoringPage /></AdminRoute>}
           />
         </Routes>
       </AppInitializer>

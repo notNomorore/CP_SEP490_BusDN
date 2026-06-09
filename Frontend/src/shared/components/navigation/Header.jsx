@@ -24,6 +24,7 @@ const Header = () => {
     { label: 'Revenue', path: '/admin/revenue', requiresAuth: true, adminOnly: true },
     { label: 'Analytics', path: '/admin/analytics/route-efficiency', requiresAuth: true, adminOnly: true },
     { label: 'Incidents', path: '/admin/incidents', requiresAuth: true, adminOnly: true },
+    { label: 'Monitoring', path: '/admin/system-monitoring', requiresAuth: true, adminOnly: true },
     { label: 'Become a Partner', href: '#', hideForAdmin: true },
     { label: 'Routes', href: '#', hideForAdmin: true },
     { label: 'Help', href: '#', hideForAdmin: true }
