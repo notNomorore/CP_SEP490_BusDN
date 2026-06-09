@@ -149,6 +149,7 @@ export const OperationIncidentResponseDTO = {
     policeNotified: incident.policeNotified,
     canContinue: incident.canContinue,
     requiresReplacementVehicle: incident.requiresReplacementVehicle,
+    evidenceFiles: incident.evidenceFiles || [],
     reportedAt: incident.reportedAt,
     acknowledgedAt: incident.acknowledgedAt,
     resolvedAt: incident.resolvedAt,

@@ -1,6 +1,7 @@
 import express from 'express';
 import { authMiddleware, authorizeCurrentUserRole } from '../../middleware/authMiddleware.js';
 import ScheduleOperationsController from './ScheduleOperationsController.js';
+import { uploadIncidentEvidence } from './scheduleOperationsUpload.js';
 
 const router = express.Router();
 
@@ -35,6 +36,7 @@ router.get(
 );
 router.post(
   '/assigned-trips/:assignmentId/incidents',
+  uploadIncidentEvidence,
   ScheduleOperationsController.reportOperationIncident
 );
 router.post(

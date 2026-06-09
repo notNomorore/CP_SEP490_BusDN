@@ -912,20 +912,57 @@ const IncidentReportingPanel = ({
     canContinue: true,
     requiresReplacementVehicle: false,
   });
+  const [showIncidentChoices, setShowIncidentChoices] = useState(false);
+  const [selectedIncidentType, setSelectedIncidentType] = useState(null);
+  const [evidenceFiles, setEvidenceFiles] = useState([]);
 
   const isTripRunning = assignment.tripStatus === 'IN_PROGRESS';
+  const activeIncidentType = selectedIncidentType || form.type;
+  const incidentTitle = {
+    TRAFFIC_CONGESTION: 'UC46 - Báo kẹt xe',
+    ACCIDENT: 'UC47 - Báo tai nạn',
+    VEHICLE_BREAKDOWN: 'UC48 - Báo xe hỏng',
+  }[activeIncidentType] || 'Báo sự cố trong chuyến';
   const canSubmit = canReportIncident
     && isTripRunning
+    && selectedIncidentType
     && form.locationText.trim().length >= 3
     && form.description.trim().length >= 10
-    && form.trafficCategory
-    && form.affectedDirection
-    && (form.type !== 'TRAFFIC_CONGESTION' || Number(form.estimatedDelayMinutes) >= 1);
+    && (form.type !== 'ACCIDENT' || form.severity !== 'LOW')
+    && (
+      form.type !== 'TRAFFIC_CONGESTION'
+      || (
+        form.trafficCategory
+        && form.affectedDirection
+        && Number(form.estimatedDelayMinutes) >= 1
+      )
+    );
 
   const updateForm = (field, value) => {
     setForm((current) => ({
       ...current,
       [field]: value,
+    }));
+  };
+
+  const updateEvidenceFiles = (event) => {
+    setEvidenceFiles(Array.from(event.target.files || []).slice(0, 5));
+  };
+
+  const submitIncidentReport = () => {
+    onReportIncident(assignment.id, {
+      ...form,
+      evidenceFiles,
+    });
+  };
+
+  const selectIncidentType = (type) => {
+    setSelectedIncidentType(type);
+    setShowIncidentChoices(false);
+    setForm((current) => ({
+      ...current,
+      type,
+      severity: type === 'ACCIDENT' && current.severity === 'LOW' ? 'MEDIUM' : current.severity,
     }));
   };
 
@@ -935,10 +972,10 @@ const IncidentReportingPanel = ({
         <div>
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-red-700" />
-            <h4 className="font-black text-slate-950">UC46 - Báo kẹt xe</h4>
+            <h4 className="font-black text-slate-950">Báo cáo sự cố</h4>
           </div>
           <p className="mt-1 text-sm text-slate-600">
-            Chỉ báo kẹt xe khi chuyến đang vận hành. Báo cáo sẽ gửi về điều hành để xử lý.
+            Chỉ báo sự cố khi chuyến đang vận hành. Báo cáo sẽ gửi về điều hành để xử lý.
           </p>
         </div>
         <StatusBadge status={assignment.tripStatus} />
@@ -946,34 +983,86 @@ const IncidentReportingPanel = ({
 
       {!isTripRunning && (
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Cần bắt đầu chuyến trước khi báo kẹt xe.
+          Cần bắt đầu chuyến trước khi báo sự cố.
         </div>
       )}
 
+      {!selectedIncidentType && (
+        <div className="mt-4 rounded-lg border border-red-100 bg-white p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="font-black text-slate-950">Báo cáo sự cố</p>
+              <p className="mt-1 text-sm text-slate-600">
+                Chọn loại sự cố đang xảy ra để hệ thống mở đúng form báo cáo.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowIncidentChoices((current) => !current)}
+              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-700 px-4 py-3 text-sm font-bold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <AlertTriangle className="h-4 w-4" />
+              Báo cáo sự cố
+            </button>
+          </div>
+
+          {showIncidentChoices && (
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              {INCIDENT_TYPES.map((type) => (
+                <button
+                  key={type.value}
+                  type="button"
+                  onClick={() => selectIncidentType(type.value)}
+                  disabled={!canReportIncident || !isTripRunning || isProcessing}
+                  className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-left hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <p className="font-black text-slate-950">{type.label}</p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    {type.value === 'TRAFFIC_CONGESTION'
+                      ? 'Báo ùn tắc, chậm tuyến hoặc đường bị chặn.'
+                      : type.value === 'ACCIDENT'
+                        ? 'Báo tai nạn, va chạm hoặc tình huống cần hỗ trợ khẩn.'
+                        : 'Báo xe hỏng trong chuyến, cần hỗ trợ kỹ thuật hoặc xe thay thế.'}
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {selectedIncidentType && (
+        <>
+          <div className="mt-4 flex flex-col gap-3 rounded-lg border border-red-100 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="font-black text-slate-950">{incidentTitle}</p>
+              <p className="mt-1 text-sm text-slate-600">Nhập thông tin chi tiết để gửi về điều hành.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedIncidentType(null);
+                setShowIncidentChoices(true);
+              }}
+              disabled={isProcessing}
+              className="inline-flex items-center justify-center rounded-lg border border-red-200 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Đổi loại sự cố
+            </button>
+          </div>
+
       <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <label className="space-y-1">
-          <span className="text-xs font-bold uppercase text-slate-500">Loại kẹt xe</span>
+        <label className="hidden">
+          <span className="text-xs font-bold uppercase text-slate-500">Loại sự cố</span>
           <select
-            value={form.trafficCategory}
-            onChange={(event) => updateForm('trafficCategory', event.target.value)}
+            value={form.type}
+            onChange={(event) => updateForm('type', event.target.value)}
             disabled={!canReportIncident || !isTripRunning || isProcessing}
             className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
           >
-            {TRAFFIC_CATEGORIES.map((category) => (
-              <option key={category.value} value={category.value}>{category.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="space-y-1">
-          <span className="text-xs font-bold uppercase text-slate-500">Chiều ảnh hưởng</span>
-          <select
-            value={form.affectedDirection}
-            onChange={(event) => updateForm('affectedDirection', event.target.value)}
-            disabled={!canReportIncident || !isTripRunning || isProcessing}
-            className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
-          >
-            {AFFECTED_DIRECTIONS.map((direction) => (
-              <option key={direction.value} value={direction.value}>{direction.label}</option>
+            {INCIDENT_TYPES.map((type) => (
+              <option key={type.value} value={type.value}>{type.label}</option>
             ))}
           </select>
         </label>
@@ -1003,17 +1092,45 @@ const IncidentReportingPanel = ({
       </div>
 
       {form.type === 'TRAFFIC_CONGESTION' && (
-        <label className="mt-3 block space-y-1">
-          <span className="text-xs font-bold uppercase text-slate-500">Ước tính trễ phút</span>
-          <input
-            type="number"
-            min="1"
-            value={form.estimatedDelayMinutes}
-            onChange={(event) => updateForm('estimatedDelayMinutes', event.target.value)}
-            disabled={!canReportIncident || !isTripRunning || isProcessing}
-            className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500 md:w-56"
-          />
-        </label>
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Loại kẹt xe</span>
+            <select
+              value={form.trafficCategory}
+              onChange={(event) => updateForm('trafficCategory', event.target.value)}
+              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            >
+              {TRAFFIC_CATEGORIES.map((category) => (
+                <option key={category.value} value={category.value}>{category.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Chiều ảnh hưởng</span>
+            <select
+              value={form.affectedDirection}
+              onChange={(event) => updateForm('affectedDirection', event.target.value)}
+              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            >
+              {AFFECTED_DIRECTIONS.map((direction) => (
+                <option key={direction.value} value={direction.value}>{direction.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Ước tính trễ phút</span>
+            <input
+              type="number"
+              min="1"
+              value={form.estimatedDelayMinutes}
+              onChange={(event) => updateForm('estimatedDelayMinutes', event.target.value)}
+              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+        </div>
       )}
 
       {form.type === 'ACCIDENT' && (
@@ -1078,15 +1195,41 @@ const IncidentReportingPanel = ({
         />
       </label>
 
+      <label className="mt-3 block space-y-1">
+        <span className="text-xs font-bold uppercase text-slate-500">Ảnh hiện trường</span>
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          capture="environment"
+          multiple
+          onChange={updateEvidenceFiles}
+          disabled={!canReportIncident || !isTripRunning || isProcessing}
+          className="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-red-100 file:px-3 file:py-2 file:text-sm file:font-bold file:text-red-700 hover:file:bg-red-200"
+        />
+        <p className="text-xs text-slate-500">Có thể chụp hoặc chọn tối đa 5 ảnh JPG, PNG, WEBP để admin xem tình hình rõ hơn.</p>
+        {evidenceFiles.length > 0 && (
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {evidenceFiles.map((file) => (
+              <div key={`${file.name}-${file.size}`} className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600">
+                <p className="truncate font-bold text-slate-900">{file.name}</p>
+                <p>{Math.max(1, Math.round(file.size / 1024))} KB</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </label>
+
       <button
         type="button"
-        onClick={() => onReportIncident(assignment.id, form)}
+        onClick={submitIncidentReport}
         disabled={!canSubmit || isProcessing}
         className="mt-3 inline-flex items-center justify-center gap-2 rounded-lg bg-red-700 px-4 py-3 text-sm font-bold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Send className="h-4 w-4" />
         Gửi báo cáo sự cố
       </button>
+        </>
+      )}
     </div>
   );
 };

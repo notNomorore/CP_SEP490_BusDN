@@ -22,6 +22,13 @@ const AFFECTED_DIRECTIONS = [
   'UNKNOWN',
 ];
 
+const parseBoolean = (value) => {
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return null;
+};
+
 const startOfDay = (date = new Date()) => {
   const value = new Date(date);
   value.setHours(0, 0, 0, 0);
@@ -889,7 +896,7 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    if (type === 'VEHICLE_BREAKDOWN' && typeof payload.canContinue !== 'boolean') {
+    if (type === 'VEHICLE_BREAKDOWN' && parseBoolean(payload.canContinue) === null) {
       const error = new Error('Vehicle breakdown report must specify whether the vehicle can continue');
       error.statusCode = 400;
       throw error;
@@ -905,7 +912,18 @@ export class ScheduleOperationsService {
     };
   }
 
-  static async reportOperationIncident(userId, role, assignmentId, payload = {}) {
+  static buildIncidentEvidence(files = []) {
+    return files.map((file) => ({
+      originalName: file.originalname || '',
+      filename: file.filename || '',
+      url: `/uploads/operation-incidents/${file.filename}`,
+      mimeType: file.mimetype || '',
+      size: file.size || 0,
+      uploadedAt: new Date(),
+    }));
+  }
+
+  static async reportOperationIncident(userId, role, assignmentId, payload = {}, files = []) {
     if (role !== 'DRIVER') {
       const error = new Error('Only drivers can report operation incidents');
       error.statusCode = 403;
@@ -958,11 +976,12 @@ export class ScheduleOperationsService {
         ? Boolean(payload.policeNotified)
         : false,
       canContinue: type === 'VEHICLE_BREAKDOWN'
-        ? Boolean(payload.canContinue)
+        ? parseBoolean(payload.canContinue)
         : null,
       requiresReplacementVehicle: type === 'VEHICLE_BREAKDOWN'
-        ? Boolean(payload.requiresReplacementVehicle)
+        ? Boolean(parseBoolean(payload.requiresReplacementVehicle))
         : false,
+      evidenceFiles: this.buildIncidentEvidence(files),
       reportedAt: new Date(),
     });
 

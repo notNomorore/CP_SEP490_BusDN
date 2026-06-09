@@ -74,6 +74,24 @@ export const scheduleOperationsService = {
   },
 
   reportOperationIncident: async (assignmentId, payload = {}) => {
+    if (payload.evidenceFiles?.length) {
+      const formData = new FormData();
+      Object.entries(payload).forEach(([key, value]) => {
+        if (key === 'evidenceFiles') return;
+        formData.append(key, value);
+      });
+      payload.evidenceFiles.forEach((file) => {
+        formData.append('evidenceFiles', file);
+      });
+
+      const response = await apiClient.post(
+        `/schedule-operations/assigned-trips/${assignmentId}/incidents`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
+      return response.data;
+    }
+
     const response = await apiClient.post(
       `/schedule-operations/assigned-trips/${assignmentId}/incidents`,
       payload

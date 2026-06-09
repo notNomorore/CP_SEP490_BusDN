@@ -219,7 +219,8 @@ export class ScheduleOperationsController {
         req.user.userId,
         req.user.role,
         req.params.assignmentId,
-        req.body
+        req.body,
+        req.files || []
       );
 
       return res.success(

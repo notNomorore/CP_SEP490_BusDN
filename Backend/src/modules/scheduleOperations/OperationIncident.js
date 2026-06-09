@@ -114,6 +114,41 @@ const OperationIncidentSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    evidenceFiles: {
+      type: [
+        {
+          originalName: {
+            type: String,
+            trim: true,
+            default: '',
+          },
+          filename: {
+            type: String,
+            trim: true,
+            default: '',
+          },
+          url: {
+            type: String,
+            trim: true,
+            default: '',
+          },
+          mimeType: {
+            type: String,
+            trim: true,
+            default: '',
+          },
+          size: {
+            type: Number,
+            default: 0,
+          },
+          uploadedAt: {
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
+      default: [],
+    },
     reportedAt: {
       type: Date,
       default: Date.now,
