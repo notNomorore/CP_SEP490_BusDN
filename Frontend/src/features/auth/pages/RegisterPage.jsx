@@ -107,7 +107,6 @@ const RegisterPage = () => {
         email,
         phone,
         identifier: identifier.trim(),
-        devOtp: result.devOtp || '',
         expiresAt: result.expiresAt || '',
       });
       navigate('/auth/verify-otp');

@@ -21,7 +21,6 @@ const RegisterVerifyOtpPage = () => {
   const { verifyOTP, resendOtp, isLoading, error, clearError } = useAuthStore();
   const [pendingOtp, setPendingOtp] = useState(() => loadPendingRegistrationOtp());
   const [otp, setOtp] = useState('');
-  const [devOtp, setDevOtp] = useState('');
   const [countdown, setCountdown] = useState(0);
   const [isVerified, setIsVerified] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -35,8 +34,7 @@ const RegisterVerifyOtpPage = () => {
     }
 
     setPendingOtp(pending);
-    setDevOtp(pending.devOtp || '');
-    setOtp(pending.devOtp || '');
+    setOtp('');
     setCountdown(60);
   }, [navigate]);
 
@@ -89,13 +87,11 @@ const RegisterVerifyOtpPage = () => {
 
       const nextPending = updatePendingRegistrationOtp({
         ...pendingOtp,
-        devOtp: result.devOtp || '',
         expiresAt: result.expiresAt || pendingOtp.expiresAt,
       });
 
       setPendingOtp(nextPending);
-      setDevOtp(nextPending.devOtp || '');
-      setOtp(nextPending.devOtp || '');
+      setOtp('');
       setCountdown(60);
     } catch {
       // Error state is handled by the store.
@@ -142,7 +138,7 @@ const RegisterVerifyOtpPage = () => {
     <AuthShell
       eyebrow="Verify Account"
       heroTitle="Confirm the OTP to activate your account."
-      heroDescription="Enter the 6-digit code from your inbox or SMS. In local development, the OTP is shown below so you can complete the flow end-to-end."
+      heroDescription="Enter the 6-digit code from your inbox or SMS to complete the account verification step."
       heroImage="https://lh3.googleusercontent.com/aida-public/AB6AXuAJ0-46nGESJSMPeGRP-CE-D8JvDly9UpS2IuR4ExR-2mfpkgtDbYsnKM8c6LRR3L0WHKPYPHRsorX-jwR_51bHyNx-pdQsiHNm6Nkqs_S01BqkMSvKRfrmqNUp_PUuJay4TeFoy98DeSVH_z0FyUg-RHC7A5UPz00GKKvb9HPAXnE2hIMheiaEk8uTVlk9941sRBm6mVXM16HzsUqeVyVnouuY-DqgDGG6BXU-cr-ZHMX0a_yizZecfMAbRZNJLtA30wee7a6jJfA"
       heroChips={[
         { icon: 'mail', label: 'Check inbox' },
@@ -164,12 +160,6 @@ const RegisterVerifyOtpPage = () => {
             </p>
           </div>
         </div>
-
-        {devOtp && (
-          <div className="rounded-2xl border border-on-tertiary-container/20 bg-on-tertiary-container/10 px-4 py-3 text-sm text-on-tertiary-fixed-variant">
-            Development OTP: <span className="font-bold tracking-[0.25em]">{devOtp}</span>
-          </div>
-        )}
 
         {error && (
           <div className="rounded-2xl border border-error/20 bg-error-container px-4 py-3 text-sm text-on-error-container">

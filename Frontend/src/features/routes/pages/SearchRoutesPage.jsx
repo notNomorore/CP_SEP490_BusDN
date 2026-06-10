@@ -13,6 +13,7 @@ import {
 import { useSearchParams } from 'react-router-dom';
 import routeService from '../services/routeService';
 import useAuthStore from '../../auth/stores/authStore';
+import Header from '../../../shared/components/navigation/Header';
 
 const INITIAL_MAP_ZOOM = 13;
 const MIN_MAP_ZOOM = 11;
@@ -182,10 +183,6 @@ const MapCanvas = ({
   selectedRoute,
   currentLocation,
   onUseCurrentLocation,
-  query,
-  setQuery,
-  onSearch,
-  clearError,
 }) => {
   const routePath = selectedRoute?.pathPoints?.length
     ? selectedRoute.pathPoints
@@ -282,25 +279,6 @@ const MapCanvas = ({
         )}
       </MapContainer>
 
-      <div className="absolute left-6 top-5 z-[1000] flex w-[440px] max-w-[calc(100%-48px)] items-center gap-3 rounded-lg bg-white px-4 py-3 shadow-lg">
-        <span className="material-symbols-outlined text-slate-500">search</span>
-        <input
-          type="text"
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            clearError();
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              onSearch(event);
-            }
-          }}
-          placeholder="Search places or routes..."
-          className="w-full border-0 p-0 text-sm focus:ring-0"
-        />
-      </div>
-
       <button
         type="button"
         onClick={onUseCurrentLocation}
@@ -339,82 +317,82 @@ const RouteCard = ({
   onToggleFavorite,
 }) => (
   <article
-    className={`block w-full rounded-xl border bg-white p-4 text-left shadow-sm transition hover:border-emerald-500 hover:shadow-md ${
+    role="button"
+    tabIndex={0}
+    onClick={onSelect}
+    onKeyDown={(event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onSelect?.();
+      }
+    }}
+    className={`relative block w-full rounded-xl border bg-white p-4 pr-14 text-left shadow-sm transition hover:border-emerald-500 hover:shadow-md ${
       isHighlighted ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-slate-200'
     }`}
   >
-    <button type="button" onClick={onSelect} className="w-full text-left">
-      <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-slate-600">
-          <span className="material-symbols-outlined text-[22px]">directions_bus</span>
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-bold text-white">
-              {route.routeNumber}
-            </span>
-            <h3 className="truncate text-base font-bold text-slate-950">{route.name}</h3>
-          </div>
-          <p className="mt-1 text-sm text-slate-700">
-            {route.origin} - {route.destination}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
-        <div className="rounded-lg bg-slate-50 px-2 py-2">
-          <div className="text-[11px] font-semibold uppercase text-slate-500">Time</div>
-          <div className="font-semibold text-slate-950">{formatDuration(route.estimatedDurationMinutes)}</div>
-        </div>
-        <div className="rounded-lg bg-slate-50 px-2 py-2">
-          <div className="text-[11px] font-semibold uppercase text-slate-500">Fare</div>
-          <div className="font-semibold text-slate-950">{formatFare(route.fare)}</div>
-        </div>
-        <div className="rounded-lg bg-slate-50 px-2 py-2">
-          <div className="text-[11px] font-semibold uppercase text-slate-500">Distance</div>
-          <div className="font-semibold text-slate-950">{route.distanceKm} km</div>
-        </div>
-      </div>
-
-      {!compact && (
-        <div className="mt-3">
-          <div className="mb-2 text-xs font-bold uppercase text-slate-500">Stops</div>
-          <div className="flex flex-wrap gap-1.5">
-            {route.stops.map((stop) => (
-              <span
-                key={`${route.id}-${stop.order}`}
-                className="rounded-full border border-slate-200 px-2 py-1 text-xs text-slate-700"
-              >
-                {stop.name}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggleFavorite?.(route);
+      }}
+      className={`absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-lg border ${
+        isFavorite
+          ? 'border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100'
+          : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
+      }`}
+      aria-label={isFavorite ? 'Remove favorite route' : 'Save to favorites'}
+    >
+      <span className="material-symbols-outlined text-[20px] leading-none">{isFavorite ? 'star' : 'star_border'}</span>
     </button>
 
-    <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-3 text-xs font-bold">
-      <button
-        type="button"
-        onClick={onSelect}
-        className="inline-flex items-center gap-1 text-emerald-700 hover:text-emerald-800"
-      >
-        <span>View Details</span>
-        <span className="material-symbols-outlined text-[17px]">chevron_right</span>
-      </button>
-      <button
-        type="button"
-        onClick={() => onToggleFavorite?.(route)}
-        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1.5 ${
-          isFavorite
-            ? 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-            : 'bg-slate-50 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
-        }`}
-      >
-        <span className="material-symbols-outlined text-[16px]">{isFavorite ? 'star' : 'star_add'}</span>
-        {isFavorite ? 'Remove Favorite' : 'Save Favorite'}
-      </button>
+    <div className="flex items-start gap-3">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-slate-600">
+        <span className="material-symbols-outlined text-[22px]">directions_bus</span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-bold text-white">
+            {route.routeNumber}
+          </span>
+          <h3 className="min-w-0 truncate text-base font-bold text-slate-950">{route.name}</h3>
+        </div>
+        <p className="mt-1 text-sm text-slate-700">
+          {route.origin} - {route.destination}
+        </p>
+      </div>
     </div>
+
+    <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
+      <div className="rounded-lg bg-slate-50 px-2 py-2">
+        <div className="text-[11px] font-semibold uppercase text-slate-500">Trip duration</div>
+        <div className="font-semibold text-slate-950">{formatDuration(route.estimatedDurationMinutes)}</div>
+      </div>
+      <div className="rounded-lg bg-slate-50 px-2 py-2">
+        <div className="text-[11px] font-semibold uppercase text-slate-500">Fare</div>
+        <div className="font-semibold text-slate-950">{formatFare(route.fare)}</div>
+      </div>
+      <div className="rounded-lg bg-slate-50 px-2 py-2">
+        <div className="text-[11px] font-semibold uppercase text-slate-500">Distance</div>
+        <div className="font-semibold text-slate-950">{route.distanceKm} km</div>
+      </div>
+    </div>
+
+    {!compact && (
+      <div className="mt-3">
+        <div className="mb-2 text-xs font-bold uppercase text-slate-500">Stops</div>
+        <div className="flex flex-wrap gap-1.5">
+          {route.stops.map((stop) => (
+            <span
+              key={`${route.id}-${stop.order}`}
+              className="rounded-full border border-slate-200 px-2 py-1 text-xs text-slate-700"
+            >
+              {stop.name}
+            </span>
+          ))}
+        </div>
+      </div>
+    )}
   </article>
 );
 
@@ -425,6 +403,8 @@ const RouteDetailsPanel = ({
   onToggleFavorite,
   onClose,
 }) => {
+  const [directionTab, setDirectionTab] = useState('outbound');
+  const [detailTab, setDetailTab] = useState('info');
   const validStops = (route.stops || []).map(normalizeStopLocation).filter(isValidLocation);
   const nearestStop = currentLocation && validStops.length
     ? validStops
@@ -438,144 +418,219 @@ const RouteDetailsPanel = ({
   const firstDeparture = route.operatingHours?.firstDeparture || '05:30';
   const lastDeparture = route.operatingHours?.lastDeparture || '21:00';
   const frequencyMinutes = route.operatingHours?.frequencyMinutes || 30;
+  const maxOffsetMinutes = Math.max(
+    ...route.stops.map((stop) => stop.estimatedOffsetMinutes || 0),
+    route.estimatedDurationMinutes || 0
+  );
+  const directionStops = directionTab === 'outbound'
+    ? route.stops
+    : route.stops
+      .slice()
+      .reverse()
+      .map((stop, index) => ({
+        ...stop,
+        order: index + 1,
+        estimatedOffsetMinutes: Math.max(maxOffsetMinutes - (stop.estimatedOffsetMinutes || 0), 0),
+      }));
+  const directionOrigin = directionTab === 'outbound' ? route.origin : route.destination;
+  const directionDestination = directionTab === 'outbound' ? route.destination : route.origin;
+  const detailTabs = [
+    { id: 'info', label: 'Thông tin' },
+    { id: 'stops', label: 'Trạm' },
+    { id: 'arrival', label: 'Lịch chạy' },
+    { id: 'feedback', label: 'Feedback' },
+  ];
 
   return (
-    <section className="mb-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-xs font-black uppercase tracking-wide text-slate-500">Route Details</div>
-          <div className="mt-1 flex items-center gap-2">
-            <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-black text-white">
-              {route.routeNumber}
-            </span>
-            <h2 className="text-base font-black text-slate-950">{route.name}</h2>
+    <aside className="fixed bottom-0 right-0 top-[80px] z-[1200] flex w-[360px] max-w-[calc(100vw-24px)] flex-col border-l border-slate-200 bg-white shadow-2xl">
+      <div className="border-b border-slate-200 px-5 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-black text-white">
+                {route.routeNumber}
+              </span>
+              <span className="rounded bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase text-emerald-700">
+                {route.status || 'ACTIVE'}
+              </span>
+            </div>
+            <h2 className="mt-2 truncate text-xl font-black text-slate-950">{route.name}</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {directionOrigin} - {directionDestination}
+            </p>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="rounded bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase text-emerald-700">
-            {route.status || 'ACTIVE'}
-          </span>
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
             aria-label="Close route details"
           >
-            <span className="material-symbols-outlined text-[18px]">close</span>
+            <span className="material-symbols-outlined text-[22px]">close</span>
           </button>
         </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1">
+          {[
+            { id: 'outbound', label: 'Lượt đi' },
+            { id: 'inbound', label: 'Lượt về' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setDirectionTab(tab.id)}
+              className={`rounded-md px-3 py-2 text-sm font-black ${
+                directionTab === tab.id
+                  ? 'bg-white text-emerald-700 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-3 grid grid-cols-4 gap-1">
+          {detailTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setDetailTab(tab.id)}
+              title={tab.label}
+              className={`min-w-0 truncate rounded-lg border px-1.5 py-2 text-[11px] font-black ${
+                detailTab === tab.id
+                  ? 'border-emerald-600 bg-emerald-50 text-emerald-700'
+                  : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="mt-4 space-y-3 text-sm">
-        <div>
-          <div className="text-[11px] font-black uppercase text-slate-400">Route ID</div>
-          <div className="truncate font-semibold text-slate-700">{route.id}</div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <div className="text-[11px] font-black uppercase text-slate-400">Departure</div>
-            <div className="font-semibold text-slate-950">{route.origin}</div>
-          </div>
-          <div>
-            <div className="text-[11px] font-black uppercase text-slate-400">Destination</div>
-            <div className="font-semibold text-slate-950">{route.destination}</div>
-          </div>
-        </div>
-      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4">
+        {detailTab === 'info' && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-lg bg-slate-50 px-3 py-3">
+                <div className="text-[11px] font-black uppercase text-slate-400">Fare</div>
+                <div className="mt-1 font-black text-slate-950">{formatFare(route.fare)}</div>
+              </div>
+              <div className="rounded-lg bg-slate-50 px-3 py-3">
+                <div className="text-[11px] font-black uppercase text-slate-400">Trip duration</div>
+                <div className="mt-1 font-black text-slate-950">{formatDuration(route.estimatedDurationMinutes)}</div>
+              </div>
+              <div className="rounded-lg bg-slate-50 px-3 py-3">
+                <div className="text-[11px] font-black uppercase text-slate-400">Distance</div>
+                <div className="mt-1 font-black text-slate-950">{route.distanceKm} km</div>
+              </div>
+            </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-2">
-        <div className="rounded-lg bg-slate-50 px-3 py-3">
-          <div className="text-[11px] font-black uppercase text-slate-400">Fare</div>
-          <div className="mt-1 font-black text-slate-950">{formatFare(route.fare)}</div>
-        </div>
-        <div className="rounded-lg bg-slate-50 px-3 py-3">
-          <div className="text-[11px] font-black uppercase text-slate-400">Time</div>
-          <div className="mt-1 font-black text-slate-950">{formatDuration(route.estimatedDurationMinutes)}</div>
-        </div>
-        <div className="rounded-lg bg-slate-50 px-3 py-3">
-          <div className="text-[11px] font-black uppercase text-slate-400">Distance</div>
-          <div className="mt-1 font-black text-slate-950">{route.distanceKm} km</div>
-        </div>
-      </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-[11px] font-black uppercase text-slate-400">Operating hours</div>
+                  <div className="font-semibold text-slate-700">{firstDeparture} - {lastDeparture}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-black uppercase text-slate-400">Departure</div>
+                  <div className="font-semibold text-slate-950">{directionOrigin}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-black uppercase text-slate-400">Destination</div>
+                  <div className="font-semibold text-slate-950">{directionDestination}</div>
+                </div>
+              </div>
+            </div>
 
-      <div className="mt-4 rounded-lg bg-emerald-50 px-3 py-3 text-sm text-slate-700">
-        <div className="mb-1 text-[11px] font-black uppercase text-emerald-700">Route Description</div>
-        Optimized route from {route.origin} to {route.destination}, including key stops,
-        operating hours, estimated travel duration, fare, and nearby stop support.
-      </div>
+            <div className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-slate-700">
+              <div className="mb-1 text-[11px] font-black uppercase text-emerald-700">Route Description</div>
+              Optimized route from {directionOrigin} to {directionDestination}, including key stops,
+              operating hours, estimated minimum trip duration, fare, and nearby stop support.
+            </div>
 
-      <button
-        type="button"
-        onClick={() => onToggleFavorite?.(route)}
-        className={`mt-4 flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-black ${
-          isFavorite
-            ? 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-            : 'bg-slate-950 text-white hover:bg-emerald-700'
-        }`}
-      >
-        <span className="material-symbols-outlined text-[19px]">{isFavorite ? 'star' : 'star_add'}</span>
-        {isFavorite ? 'Remove from Favorites' : 'Save to Favorites'}
-      </button>
-
-      <div className="mt-4">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Nearby Stop</div>
-          <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-700">
-            Live
-          </span>
-        </div>
-        {nearestStop ? (
-          <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
-            <div className="font-black text-slate-950">{nearestStop.name}</div>
-            <div className="mt-1 text-xs font-semibold text-slate-500">
-              {nearestStop.distanceKm.toFixed(2)} km from your current location
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Nearby Stop</div>
+                <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-700">
+                  Live
+                </span>
+              </div>
+              {nearestStop ? (
+                <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+                  <div className="font-black text-slate-950">{nearestStop.name}</div>
+                  <div className="mt-1 text-xs font-semibold text-slate-500">
+                    {nearestStop.distanceKm.toFixed(2)} km from your current location
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
+                  Use current location to show the nearest stop for this route.
+                </div>
+              )}
             </div>
           </div>
-        ) : (
-          <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
-            Use current location to show the nearest stop for this route.
+        )}
+
+        {detailTab === 'stops' && (
+          <div className="space-y-3">
+            {directionStops.map((stop) => (
+              <div key={`${route.id}-${directionTab}-stop-${stop.order}`} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-black text-emerald-700">
+                  {stop.order}
+                </span>
+                <div className="min-w-0">
+                  <div className="font-black text-slate-900">{stop.name}</div>
+                  <div className="text-xs text-slate-500">
+                    Minimum arrival: {addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {detailTab === 'arrival' && (
+          <div>
+            <div className="rounded-lg border border-slate-200 bg-white">
+              <div className="grid grid-cols-3 border-b border-slate-100 px-3 py-2 text-xs font-black uppercase text-slate-400">
+                <span>Stop</span>
+                <span>Minimum arrival</span>
+                <span>Frequency</span>
+              </div>
+              {directionStops.map((stop) => (
+                <div
+                  key={`${route.id}-${directionTab}-arrival-${stop.order}`}
+                  className="grid grid-cols-3 gap-2 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0"
+                >
+                  <span className="font-semibold text-slate-800">{stop.name}</span>
+                  <span className="text-slate-600">{addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}</span>
+                  <span className="text-slate-600">Every {frequencyMinutes} min</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 text-xs font-semibold text-slate-500">
+              Minimum arrival time is calculated from the first departure at {firstDeparture}.
+            </div>
+          </div>
+        )}
+
+        {detailTab === 'feedback' && (
+          <div className="rounded-lg border border-slate-200 bg-white p-4">
+            <div className="text-sm font-black text-slate-950">Passenger Feedback</div>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              Feedback for this route will appear here after passengers submit reviews for schedule,
+              stop quality, and travel experience.
+            </p>
+            <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs font-black text-slate-500">
+              <div className="rounded-lg bg-slate-50 px-2 py-3">Schedule</div>
+              <div className="rounded-lg bg-slate-50 px-2 py-3">Stops</div>
+              <div className="rounded-lg bg-slate-50 px-2 py-3">Service</div>
+            </div>
           </div>
         )}
       </div>
-
-      <div className="mt-4">
-        <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Schedule</div>
-        <div className="rounded-lg border border-slate-200 bg-white">
-          <div className="grid grid-cols-3 border-b border-slate-100 px-3 py-2 text-xs font-black uppercase text-slate-400">
-            <span>Stop</span>
-            <span>First Trip</span>
-            <span>Frequency</span>
-          </div>
-          {route.stops.map((stop) => (
-            <div
-              key={`${route.id}-detail-${stop.order}`}
-              className="grid grid-cols-3 gap-2 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0"
-            >
-              <span className="font-semibold text-slate-800">{stop.name}</span>
-              <span className="text-slate-600">{addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}</span>
-              <span className="text-slate-600">Every {frequencyMinutes} min</span>
-            </div>
-          ))}
-        </div>
-        <div className="mt-2 text-xs font-semibold text-slate-500">
-          Operating hours: {firstDeparture} - {lastDeparture}
-        </div>
-      </div>
-
-      <div className="mt-4">
-        <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Stops</div>
-        <div className="space-y-2">
-          {route.stops.map((stop) => (
-            <div key={`${route.id}-stop-${stop.order}`} className="flex items-center gap-3 text-sm">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-xs font-black text-emerald-700">
-                {stop.order}
-              </span>
-              <span className="font-semibold text-slate-800">{stop.name}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
+    </aside>
   );
 };
 
@@ -726,7 +781,7 @@ const NearbyStopCard = ({ stop, onSelect }) => {
 
 const SearchRoutesPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, logout } = useAuthStore();
+  const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('lookup');
   const [query, setQuery] = useState(searchParams.get('q') || '');
   const [from, setFrom] = useState(searchParams.get('from') || '');
@@ -1064,46 +1119,11 @@ const SearchRoutesPage = () => {
     }
   };
 
-  const handleLogout = async () => {
-    await logout();
-    window.location.href = '/auth/login';
-  };
-
-  const displayName = user?.fullName?.trim() || 'User';
-
   return (
     <div className="h-screen overflow-hidden bg-slate-100 text-slate-950">
-      <header className="flex h-[54px] items-center justify-between bg-emerald-600 px-4 text-white shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/70">
-            <span className="material-symbols-outlined">directions_bus</span>
-          </div>
-          <span className="text-2xl font-black">BusDN Map</span>
-        </div>
+      <Header />
 
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleUseCurrentLocation}
-            className="hidden items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-emerald-700 shadow-sm hover:bg-emerald-50 md:inline-flex"
-          >
-            <span className="material-symbols-outlined text-[20px]">my_location</span>
-            Current location
-          </button>
-          <div className="hidden h-6 w-px bg-white/30 md:block" />
-          <span className="rounded-full bg-emerald-800 px-3 py-1 text-sm font-bold">VI</span>
-          <span className="hidden text-sm font-semibold md:inline">{displayName}</span>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="rounded-lg border border-white/50 px-3 py-1.5 text-sm font-semibold hover:bg-white/10"
-          >
-            Logout
-          </button>
-        </div>
-      </header>
-
-      <main className="flex h-[calc(100vh-54px)]">
+      <main className="mt-[80px] flex h-[calc(100vh-80px)]">
         <aside className="z-10 flex w-[420px] shrink-0 flex-col border-r border-slate-200 bg-white shadow-xl">
           <div className="grid grid-cols-2 border-b border-slate-200">
             <button
@@ -1288,7 +1308,9 @@ const SearchRoutesPage = () => {
                           route={bestRouteResult.bestRoute.route}
                           compact
                           isHighlighted
+                          isFavorite={isRouteFavorite(bestRouteResult.bestRoute.route)}
                           onSelect={() => setSelectedRoute(bestRouteResult.bestRoute.route)}
+                          onToggleFavorite={handleToggleFavoriteRoute}
                         />
                         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                           <div className="rounded-lg bg-white p-3">
@@ -1356,15 +1378,6 @@ const SearchRoutesPage = () => {
                       onSelect={() => setSelectedRoute(route)}
                       onToggleFavorite={handleToggleFavoriteRoute}
                     />
-                    {isSelected && (
-                      <RouteDetailsPanel
-                        route={route}
-                        currentLocation={currentLocation}
-                        isFavorite={isRouteFavorite(route)}
-                        onToggleFavorite={handleToggleFavoriteRoute}
-                        onClose={() => setSelectedRoute(null)}
-                      />
-                    )}
                   </div>
                 );
               })}
@@ -1377,11 +1390,16 @@ const SearchRoutesPage = () => {
           selectedRoute={selectedRoute}
           currentLocation={currentLocation}
           onUseCurrentLocation={handleUseCurrentLocation}
-          query={query}
-          setQuery={setQuery}
-          onSearch={handleSearch}
-          clearError={clearError}
         />
+        {selectedRoute && (
+          <RouteDetailsPanel
+            route={selectedRoute}
+            currentLocation={currentLocation}
+            isFavorite={isRouteFavorite(selectedRoute)}
+            onToggleFavorite={handleToggleFavoriteRoute}
+            onClose={() => setSelectedRoute(null)}
+          />
+        )}
       </main>
     </div>
   );
