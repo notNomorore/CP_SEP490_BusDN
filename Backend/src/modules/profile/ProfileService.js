@@ -1,5 +1,7 @@
 import { CustomError } from '../../middleware/errorHandler.js';
 import { HTTP_STATUS } from '../../constants/index.js';
+import Route from '../routes/Route.js';
+import RouteService from '../routes/RouteService.js';
 import ProfileRepository from './ProfileRepository.js';
 import { ProfileResponseDTO } from './profile.dto.js';
 
@@ -78,7 +80,7 @@ export class ProfileService {
       throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
     }
 
-    return user.favoriteRoutes || [];
+    return (user.favoriteRoutes || []).filter((route) => route.favoriteStatus !== 'REMOVED');
   }
 
   static async getFavoriteStops(userId) {
@@ -89,6 +91,81 @@ export class ProfileService {
     }
 
     return user.favoriteStops || [];
+  }
+
+  static async saveFavoriteRoute(userId, routeId) {
+    await RouteService.ensureSampleRoutes();
+
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const route = await Route.findById(routeId).lean();
+
+    if (!route) {
+      throw new CustomError('Route not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const favoriteRoutes = user.favoriteRoutes || [];
+    const existingIndex = favoriteRoutes.findIndex((favoriteRoute) => (
+      String(favoriteRoute.routeId) === String(route._id)
+      || favoriteRoute.routeNumber === route.routeNumber
+    ));
+
+    if (existingIndex >= 0 && favoriteRoutes[existingIndex].favoriteStatus !== 'REMOVED') {
+      throw new CustomError('Route already exists in favorites', HTTP_STATUS.CONFLICT);
+    }
+
+    const favoriteRoute = {
+      routeId: String(route._id),
+      routeNumber: route.routeNumber,
+      destination: route.destination,
+      quickAccessPath: `/search?q=${encodeURIComponent(route.routeNumber)}`,
+      color: '#059669',
+      savedAt: new Date(),
+      favoriteStatus: 'SAVED',
+    };
+
+    if (existingIndex >= 0) {
+      user.favoriteRoutes.set(existingIndex, favoriteRoute);
+    } else {
+      user.favoriteRoutes.push(favoriteRoute);
+    }
+
+    await ProfileRepository.save(user);
+
+    return favoriteRoute;
+  }
+
+  static async removeFavoriteRoute(userId, routeId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const favoriteRoutes = user.favoriteRoutes || [];
+    const existingIndex = favoriteRoutes.findIndex((favoriteRoute) => (
+      String(favoriteRoute.routeId) === String(routeId)
+    ));
+
+    if (existingIndex < 0 || favoriteRoutes[existingIndex].favoriteStatus === 'REMOVED') {
+      throw new CustomError('Favorite route not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const removedRoute = favoriteRoutes[existingIndex].toObject
+      ? favoriteRoutes[existingIndex].toObject()
+      : favoriteRoutes[existingIndex];
+
+    user.favoriteRoutes.splice(existingIndex, 1);
+    await ProfileRepository.save(user);
+
+    return {
+      ...removedRoute,
+      favoriteStatus: 'REMOVED',
+    };
   }
 }
 

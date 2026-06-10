@@ -28,6 +28,15 @@ const FavoriteRouteSchema = new mongoose.Schema(
       default: '#2ba471',
     },
     lastBoardedAt: Date,
+    savedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    favoriteStatus: {
+      type: String,
+      enum: ['SAVED', 'REMOVED'],
+      default: 'SAVED',
+    },
   },
   { _id: false }
 );

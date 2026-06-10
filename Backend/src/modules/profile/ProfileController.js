@@ -36,6 +36,16 @@ export class ProfileController {
     return res.success(routes, 'Favorite routes retrieved successfully');
   }
 
+  static async saveFavoriteRoute(req, res) {
+    const route = await ProfileService.saveFavoriteRoute(req.user.userId, req.params.routeId);
+    return res.success(route, 'Route saved to favorites successfully', 201);
+  }
+
+  static async removeFavoriteRoute(req, res) {
+    const route = await ProfileService.removeFavoriteRoute(req.user.userId, req.params.routeId);
+    return res.success(route, 'Route removed from favorites successfully');
+  }
+
   static async getFavoriteStops(req, res) {
     const stops = await ProfileService.getFavoriteStops(req.user.userId);
     return res.success(stops, 'Favorite stops retrieved successfully');

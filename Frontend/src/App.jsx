@@ -119,6 +119,8 @@ function App() {
                 <AdminCustomerSupportPage />
               </AdminRoute>
             }
+          />
+          <Route
             path="/admin/users"
             element={(
               <AdminRoute>

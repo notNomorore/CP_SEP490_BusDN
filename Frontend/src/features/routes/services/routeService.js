@@ -47,11 +47,26 @@ export const routeService = {
     return response.data;
   },
 
-  findBestRoute: async ({ from, to }) => {
+  findBestRoute: async ({ from, to, preference = 'fastest' }) => {
     const response = await apiClient.get('/routes/best', {
-      params: { from, to },
+      params: { from, to, preference },
     });
 
+    return response.data;
+  },
+
+  getFavoriteRoutes: async () => {
+    const response = await apiClient.get('/profile/favorites/routes');
+    return response.data;
+  },
+
+  saveFavoriteRoute: async (routeId) => {
+    const response = await apiClient.post(`/profile/favorites/routes/${routeId}`);
+    return response.data;
+  },
+
+  removeFavoriteRoute: async (routeId) => {
+    const response = await apiClient.delete(`/profile/favorites/routes/${routeId}`);
     return response.data;
   },
 };

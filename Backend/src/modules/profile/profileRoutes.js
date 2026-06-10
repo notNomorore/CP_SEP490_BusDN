@@ -30,6 +30,8 @@ router.post(
   asyncHandler(ProfileController.uploadAvatar)
 );
 router.get('/favorites/routes', asyncHandler(ProfileController.getFavoriteRoutes));
+router.post('/favorites/routes/:routeId', asyncHandler(ProfileController.saveFavoriteRoute));
+router.delete('/favorites/routes/:routeId', asyncHandler(ProfileController.removeFavoriteRoute));
 router.get('/favorites/stops', asyncHandler(ProfileController.getFavoriteStops));
 
 export default router;

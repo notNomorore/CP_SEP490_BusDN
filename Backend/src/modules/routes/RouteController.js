@@ -49,8 +49,8 @@ export class RouteController {
 
   static async best(req, res, next) {
     try {
-      const { from = '', to = '' } = req.query;
-      const result = await RouteService.findBestRoute({ from, to });
+      const { from = '', to = '', preference = 'fastest' } = req.query;
+      const result = await RouteService.findBestRoute({ from, to, preference });
 
       return res.success(result, 'Best route calculated successfully');
     } catch (error) {
