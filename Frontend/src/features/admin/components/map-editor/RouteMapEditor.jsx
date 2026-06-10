@@ -1,8 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
+import L from 'leaflet';
+import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import { DA_NANG_BOUNDS } from '../../pages/routes/routeWorkflowUtils.js';
 
-const DEFAULT_WIDTH = 1000;
-const DEFAULT_HEIGHT = 520;
+const DA_NANG_CENTER = [16.0544, 108.2022];
 
 const getStopLabel = (stop, index) => stop?.stopName || stop?.stationName || `Diem dung ${index + 1}`;
 
@@ -15,6 +17,81 @@ const isValidPoint = (point) => (
   Number.isFinite(point.latitude)
   && Number.isFinite(point.longitude)
 );
+
+const toLatLng = (item) => {
+  const point = toPoint(item);
+  return isValidPoint(point) ? [point.latitude, point.longitude] : null;
+};
+
+const createStopIcon = (index, selected = false) => L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      width:${selected ? 32 : 28}px;
+      height:${selected ? 32 : 28}px;
+      border-radius:999px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:${selected ? '#f59e0b' : '#022c22'};
+      color:#ffffff;
+      border:3px solid #ffffff;
+      box-shadow:0 10px 22px rgba(2,44,34,.26);
+      font-size:13px;
+      font-weight:900;
+    ">${index + 1}</div>
+  `,
+  iconSize: [selected ? 32 : 28, selected ? 32 : 28],
+  iconAnchor: [selected ? 16 : 14, selected ? 16 : 14],
+});
+
+const stationIcon = L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      width:18px;
+      height:18px;
+      border-radius:999px;
+      background:#0ea5e9;
+      border:3px solid #ffffff;
+      box-shadow:0 8px 18px rgba(14,165,233,.25);
+    "></div>
+  `,
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+});
+
+const FitRouteBounds = ({ positions }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      map.invalidateSize();
+      if (positions.length === 1) {
+        map.setView(positions[0], 15);
+        return;
+      }
+      if (positions.length > 1) {
+        map.fitBounds(L.latLngBounds(positions), { padding: [36, 36], maxZoom: 15 });
+      }
+    }, 80);
+
+    return () => window.clearTimeout(timer);
+  }, [map, positions]);
+
+  return null;
+};
+
+const MapClickHandler = ({ activeDirection, onAddMapStop }) => {
+  useMapEvents({
+    click(event) {
+      if (!onAddMapStop || !activeDirection) return;
+      onAddMapStop(activeDirection, event.latlng);
+    },
+  });
+
+  return null;
+};
 
 const RouteMapEditor = ({
   activeDirection,
@@ -35,63 +112,14 @@ const RouteMapEditor = ({
     ? direction.polylinePath
     : stops;
 
-  const bounds = useMemo(() => {
-    const points = [...stops, ...path, ...stations].map(toPoint).filter(isValidPoint);
-    if (!points.length) {
-      return {
-        minLat: DA_NANG_BOUNDS[0][0],
-        maxLat: DA_NANG_BOUNDS[1][0],
-        minLng: DA_NANG_BOUNDS[0][1],
-        maxLng: DA_NANG_BOUNDS[1][1],
-      };
-    }
+  const stopPositions = useMemo(() => stops.map(toLatLng).filter(Boolean), [stops]);
+  const routePositions = useMemo(() => path.map(toLatLng).filter(Boolean), [path]);
+  const stationPositions = useMemo(() => stations.map(toLatLng).filter(Boolean), [stations]);
+  const fitPositions = routePositions.length ? routePositions : stopPositions;
 
-    const latitudes = points.map((point) => point.latitude);
-    const longitudes = points.map((point) => point.longitude);
-    const minLat = Math.min(...latitudes);
-    const maxLat = Math.max(...latitudes);
-    const minLng = Math.min(...longitudes);
-    const maxLng = Math.max(...longitudes);
-    const latPadding = Math.max((maxLat - minLat) * 0.22, 0.01);
-    const lngPadding = Math.max((maxLng - minLng) * 0.22, 0.01);
-
-    return {
-      minLat: minLat - latPadding,
-      maxLat: maxLat + latPadding,
-      minLng: minLng - lngPadding,
-      maxLng: maxLng + lngPadding,
-    };
-  }, [path, stations, stops]);
-
-  const project = (point) => {
-    const latitude = Number(point?.latitude);
-    const longitude = Number(point?.longitude);
-    const lngRange = Math.max(bounds.maxLng - bounds.minLng, 0.00001);
-    const latRange = Math.max(bounds.maxLat - bounds.minLat, 0.00001);
-
-    return {
-      x: ((longitude - bounds.minLng) / lngRange) * DEFAULT_WIDTH,
-      y: DEFAULT_HEIGHT - (((latitude - bounds.minLat) / latRange) * DEFAULT_HEIGHT),
-    };
-  };
-
-  const routePoints = path.map(toPoint).filter(isValidPoint).map(project);
-  const routePolyline = routePoints.map((point) => `${point.x},${point.y}`).join(' ');
   const mapClassName = isDarkMode
     ? 'border-white/10 bg-slate-950 text-slate-100'
     : 'border-slate-200 bg-slate-50 text-slate-900';
-
-  const handleMapClick = (event) => {
-    if (!onAddMapStop || !activeDirection) return;
-
-    const rect = event.currentTarget.getBoundingClientRect();
-    const xRatio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-    const yRatio = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
-    const longitude = bounds.minLng + ((bounds.maxLng - bounds.minLng) * xRatio);
-    const latitude = bounds.maxLat - ((bounds.maxLat - bounds.minLat) * yRatio);
-
-    onAddMapStop(activeDirection, { lat: latitude, lng: longitude });
-  };
 
   const moveStop = (index, patch) => {
     if (!onUpdateStop || !activeDirection) return;
@@ -104,7 +132,7 @@ const RouteMapEditor = ({
         <div>
           <p className="text-sm font-black">Ban do lo trinh</p>
           <p className="mt-1 text-xs text-slate-500">
-            Bam vao ban do de them diem dung thu cong, chon diem dung de xem va dieu chinh toa do.
+            Bam vao ban do de them diem dung thu cong, keo marker de chinh toa do.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-bold">
@@ -115,69 +143,79 @@ const RouteMapEditor = ({
       </div>
 
       <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <button
-          type="button"
-          onClick={handleMapClick}
-          className="relative block min-h-[360px] cursor-crosshair overflow-hidden bg-[linear-gradient(135deg,#ecfeff_0%,#f8fafc_55%,#dcfce7_100%)] text-left"
-          aria-label="Them diem dung tren ban do"
-        >
-          <svg viewBox={`0 0 ${DEFAULT_WIDTH} ${DEFAULT_HEIGHT}`} className="absolute inset-0 h-full w-full">
-            <defs>
-              <pattern id="route-grid" width="50" height="50" patternUnits="userSpaceOnUse">
-                <path d="M 50 0 L 0 0 0 50" fill="none" stroke="rgba(15,23,42,0.08)" strokeWidth="1" />
-              </pattern>
-            </defs>
-            <rect width={DEFAULT_WIDTH} height={DEFAULT_HEIGHT} fill="url(#route-grid)" />
-            {routePolyline ? (
-              <polyline
-                points={routePolyline}
-                fill="none"
-                stroke={routeColor}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="8"
+        <div className="relative min-h-[460px] overflow-hidden bg-slate-100">
+          <MapContainer
+            center={fitPositions[0] || DA_NANG_CENTER}
+            zoom={13}
+            minZoom={11}
+            maxBounds={DA_NANG_BOUNDS}
+            scrollWheelZoom
+            className="h-[460px] w-full"
+          >
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            <MapClickHandler activeDirection={activeDirection} onAddMapStop={onAddMapStop} />
+            <FitRouteBounds positions={fitPositions} />
+
+            {routePositions.length > 1 ? (
+              <Polyline
+                positions={routePositions}
+                pathOptions={{ color: routeColor, weight: 7, opacity: 0.9 }}
               />
             ) : null}
+
             {showStationLayer ? stations.map((station) => {
-              const point = toPoint(station);
-              if (!isValidPoint(point)) return null;
-              const projected = project(point);
+              const position = toLatLng(station);
+              if (!position) return null;
               return (
-                <g key={station._id || `${station.latitude}-${station.longitude}`}>
-                  <circle cx={projected.x} cy={projected.y} r="8" fill="#0ea5e9" opacity="0.42" />
-                </g>
+                <Marker
+                  key={station._id || `${station.latitude}-${station.longitude}`}
+                  position={position}
+                  icon={stationIcon}
+                  eventHandlers={{
+                    click: () => onAddStationStop?.(activeDirection, station),
+                  }}
+                >
+                  <Popup>
+                    <strong>{station.stationName || station.stopName}</strong>
+                    <br />
+                    {station.address}
+                  </Popup>
+                </Marker>
               );
             }) : null}
+
             {stops.map((stop, index) => {
-              const point = toPoint(stop);
-              if (!isValidPoint(point)) return null;
-              const projected = project(point);
+              const position = toLatLng(stop);
+              if (!position) return null;
               const selected = selectedStopIndex === index;
+
               return (
-                <g key={`${getStopLabel(stop, index)}-${index}`}>
-                  <circle
-                    cx={projected.x}
-                    cy={projected.y}
-                    r={selected ? 18 : 15}
-                    fill={selected ? '#f59e0b' : '#022c22'}
-                    stroke="#ffffff"
-                    strokeWidth="5"
-                  />
-                  <text
-                    x={projected.x}
-                    y={projected.y + 5}
-                    textAnchor="middle"
-                    fill="#ffffff"
-                    fontSize="13"
-                    fontWeight="800"
-                  >
-                    {index + 1}
-                  </text>
-                </g>
+                <Marker
+                  key={`${getStopLabel(stop, index)}-${index}`}
+                  position={position}
+                  icon={createStopIcon(index, selected)}
+                  draggable={Boolean(onUpdateStop && activeDirection)}
+                  eventHandlers={{
+                    click: () => onSelectStop?.(index),
+                    dragend: (event) => {
+                      const next = event.target.getLatLng();
+                      moveStop(index, { latitude: next.lat, longitude: next.lng });
+                    },
+                  }}
+                >
+                  <Popup>
+                    <strong>#{index + 1} {getStopLabel(stop, index)}</strong>
+                    <br />
+                    {Number(stop.latitude).toFixed(6)}, {Number(stop.longitude).toFixed(6)}
+                  </Popup>
+                </Marker>
               );
             })}
-          </svg>
-        </button>
+          </MapContainer>
+        </div>
 
         <aside className="border-t border-slate-200 bg-white p-4 lg:border-l lg:border-t-0">
           <div className="flex items-center justify-between">

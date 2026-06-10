@@ -5,7 +5,14 @@ import useAuthStore from '../../../features/auth/stores/authStore.js';
 const Header = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isAuthenticated, isAdmin, isDriver, isBusAssistant, logout } = useAuthStore();
+  const {
+    user,
+    isAuthenticated,
+    isAdmin,
+    isDriver,
+    isBusAssistant,
+    logout,
+  } = useAuthStore();
   const [isScrolled, setIsScrolled] = useState(false);
 
   useEffect(() => {
@@ -17,12 +24,18 @@ const Header = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  const adminUser = isAdmin();
   const navLinks = [
-    { label: 'Manage Booking', href: '#' },
-    { label: 'Become a Partner', href: '#' },
-    { label: 'Routes', href: '/search' },
-    { label: 'Help', href: '#' }
-  ];
+    { label: 'Manage Booking', path: '/profile', requiresAuth: true },
+    { label: 'Promotions', path: '/admin/promotions', requiresAuth: true, adminOnly: true },
+    { label: 'Revenue', path: '/admin/revenue', requiresAuth: true, adminOnly: true },
+    { label: 'Analytics', path: '/admin/analytics/route-efficiency', requiresAuth: true, adminOnly: true },
+    { label: 'Incidents', path: '/admin/incidents', requiresAuth: true, adminOnly: true },
+    { label: 'Monitoring', path: '/admin/system-monitoring', requiresAuth: true, adminOnly: true },
+    { label: 'Become a Partner', href: '#', hideForAdmin: true },
+    { label: 'Routes', path: '/search', requiresAuth: true, hideForAdmin: true },
+    { label: 'Help', href: '#', hideForAdmin: true },
+  ].filter((link) => (!link.adminOnly || adminUser) && (!link.hideForAdmin || !adminUser));
 
   const authCta =
     location.pathname === '/auth/register'
@@ -39,6 +52,25 @@ const Header = () => {
     navigate('/');
   };
 
+  const handleNavClick = (event, link) => {
+    if (!link.path) {
+      return;
+    }
+
+    event.preventDefault();
+    if (link.requiresAuth && !isAuthenticated) {
+      navigate('/auth/login');
+      return;
+    }
+
+    if (link.adminOnly && !adminUser) {
+      navigate('/');
+      return;
+    }
+
+    navigate(link.path);
+  };
+
   return (
     <header
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
@@ -48,41 +80,38 @@ const Header = () => {
       }`}
     >
       <div className="flex justify-between items-center w-full px-6 py-4 max-w-screen-2xl mx-auto">
-        {/* Logo */}
         <div className="flex items-center gap-8">
           <button
             onClick={() => navigate('/')}
             className="text-2xl font-display font-black tracking-tight text-surface-bright hover:opacity-90 transition-opacity"
+            type="button"
           >
             Veridian Transit
           </button>
 
-          {/* Navigation - Hidden on mobile */}
-          <nav className="hidden lg:flex items-center gap-6">
-            {navLinks.map((link, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => {
-                  if (link.href !== '#') {
-                    navigate(link.href);
-                  }
-                }}
-                className={`text-label-md font-body transition-all ${
-                  location.pathname === link.href
-                    ? 'text-tertiary-fixed font-bold border-b-2 border-tertiary-fixed pb-1'
-                    : 'text-surface-variant/80 hover:text-surface-bright hover:bg-primary-container/50 px-2 py-1 rounded'
-                }`}
-              >
-                {link.label}
-              </button>
-            ))}
+          <nav className="hidden lg:flex items-center gap-4">
+            {navLinks.map((link) => {
+              const isActive = link.path && location.pathname.startsWith(link.path);
+
+              return (
+                <a
+                  key={link.label}
+                  href={link.path || link.href}
+                  onClick={(event) => handleNavClick(event, link)}
+                  className={`text-label-md font-body transition-all ${
+                    isActive
+                      ? 'text-tertiary-fixed font-bold border-b-2 border-tertiary-fixed pb-1'
+                      : 'text-surface-variant/80 hover:text-surface-bright hover:bg-primary-container/50 px-2 py-1 rounded'
+                  }`}
+                >
+                  {link.label}
+                </a>
+              );
+            })}
           </nav>
         </div>
 
-        {/* Right Section */}
         <div className="flex items-center gap-4 text-on-primary">
-          {/* Support Info - Hidden on mobile */}
           <div className="hidden md:flex items-center gap-4 mr-4">
             <span className="text-label-md font-body opacity-80">Hotline 24/7</span>
             <span className="material-symbols-outlined text-surface-bright">
@@ -95,33 +124,33 @@ const Header = () => {
 
           {isAuthenticated ? (
             <div className="flex items-center gap-3">
-              {isAdmin() ? (
+              {adminUser ? (
                 <>
                   <button
                     type="button"
                     onClick={() => navigate('/admin/routes')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
                   >
                     Route Management
                   </button>
                   <button
                     type="button"
                     onClick={() => navigate('/admin/users')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
                   >
                     User Accounts
                   </button>
                   <button
                     type="button"
                     onClick={() => navigate('/admin/priority-verification')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
                   >
                     Verify Profiles
                   </button>
                   <button
                     type="button"
                     onClick={() => navigate('/admin/customer-support')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
                   >
                     Customer Support
                   </button>
@@ -183,6 +212,7 @@ const Header = () => {
             <button
               onClick={() => navigate(authCta.path)}
               className="bg-on-tertiary-container text-primary font-bold px-6 py-2 rounded-full active:scale-95 transition-transform hover:shadow-lg"
+              type="button"
             >
               {authCta.label}
             </button>

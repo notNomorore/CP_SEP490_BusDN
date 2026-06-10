@@ -10,6 +10,7 @@ router.use(authorizeCurrentUserRole('DRIVER', 'BUS_ASSISTANT'));
 
 router.get('/assigned-trips', ScheduleOperationsController.listAssignedTrips);
 router.get('/shift-schedule', ScheduleOperationsController.listShiftSchedule);
+router.get('/operation-notifications', ScheduleOperationsController.listOperationNotifications);
 router.patch(
   '/assigned-trips/:assignmentId/accept',
   ScheduleOperationsController.acceptAssignedTrip

@@ -18,6 +18,14 @@ import {
   AdminRoute,
 } from './features/auth';
 import { ProfilePage } from './features/profile';
+import {
+  PromotionManagementPage,
+  PromotionStatisticsPage,
+} from './features/admin/promotions';
+import { RevenueReportsPage } from './features/admin/revenue';
+import { RouteEfficiencyPage } from './features/admin/analytics';
+import { IncidentReportsPage } from './features/admin/incidents';
+import { SystemMonitoringPage } from './features/admin/systemMonitoring';
 
 function App() {
   return (
@@ -28,113 +36,168 @@ function App() {
 
           <Route
             path="/auth/login"
-            element={
+            element={(
               <PublicRoute>
                 <LoginPage />
               </PublicRoute>
-            }
+            )}
           />
           <Route
             path="/auth/register"
-            element={
+            element={(
               <PublicRoute>
                 <RegisterPage />
               </PublicRoute>
-            }
+            )}
           />
           <Route
             path="/auth/verify-otp"
-            element={
+            element={(
               <PublicRoute>
                 <RegisterVerifyOtpPage />
               </PublicRoute>
-            }
+            )}
           />
           <Route
             path="/auth/force-change-password"
-            element={
+            element={(
               <ProtectedRoute allowFirstLogin>
                 <ForcePasswordChangePage />
               </ProtectedRoute>
-            }
+            )}
           />
 
           <Route
             path="/login"
-            element={
+            element={(
               <PublicRoute>
                 <LoginPage />
               </PublicRoute>
-            }
+            )}
           />
           <Route
             path="/register"
-            element={
+            element={(
               <PublicRoute>
                 <RegisterPage />
               </PublicRoute>
-            }
+            )}
           />
 
           <Route
             path="/search"
-            element={
+            element={(
               <ProtectedRoute>
                 <SearchRoutesPage />
               </ProtectedRoute>
-            }
+            )}
           />
           <Route
             path="/priority-profile"
-            element={
+            element={(
               <ProtectedRoute>
                 <PriorityProfilePage />
               </ProtectedRoute>
-            }
+            )}
           />
           <Route
             path="/profile"
-            element={
+            element={(
               <ProtectedRoute>
                 <ProfilePage />
               </ProtectedRoute>
-            }
+            )}
           />
 
           <Route
             path="/admin/priority-verification"
-            element={
+            element={(
               <AdminRoute>
                 <AdminPriorityVerificationPage />
               </AdminRoute>
-            }
+            )}
           />
           <Route
             path="/admin/customer-support"
-            element={
+            element={(
               <AdminRoute>
                 <AdminCustomerSupportPage />
               </AdminRoute>
-            }
+            )}
           />
           <Route
             path="/admin/routes"
-            element={
+            element={(
               <AdminRoute>
                 <RouteControlPage />
               </AdminRoute>
-            }
+            )}
           />
           <Route
             path="/admin/users"
-            element={
+            element={(
               <AdminRoute>
                 <UserAccountsPage />
               </AdminRoute>
-            }
+            )}
+          />
+          <Route
+            path="/admin/promotions"
+            element={(
+              <AdminRoute>
+                <PromotionManagementPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/promotions/statistics"
+            element={(
+              <AdminRoute>
+                <PromotionStatisticsPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/revenue"
+            element={(
+              <AdminRoute>
+                <RevenueReportsPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/analytics/route-efficiency"
+            element={(
+              <AdminRoute>
+                <RouteEfficiencyPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/incidents"
+            element={(
+              <AdminRoute>
+                <IncidentReportsPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/system-monitoring"
+            element={(
+              <AdminRoute>
+                <SystemMonitoringPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/system-monitoring/suspicious"
+            element={(
+              <AdminRoute>
+                <SystemMonitoringPage />
+              </AdminRoute>
+            )}
           />
 
-          {/* Driver and Bus Assistant Feature */}
           <Route
             path="/operations/schedule"
             element={(

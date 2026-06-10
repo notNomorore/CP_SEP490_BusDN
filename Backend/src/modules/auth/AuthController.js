@@ -13,6 +13,7 @@ import {
   UserResponseDTO,
 } from './dto/auth.dto.js';
 import logger from '../../utils/logger.js';
+import { createAuditLog } from '../systemMonitoring/auditLogger.js';
 
 /**
  * Auth Controller
@@ -115,6 +116,16 @@ export class AuthController {
         config.jwt.secret,
         { expiresIn: config.jwt.expire || '7d' }
       );
+
+      await createAuditLog({
+        req,
+        user,
+        action: 'LOGIN',
+        module: 'AUTH',
+        description: 'User logged in successfully.',
+        status: 'SUCCESS',
+        riskLevel: 'LOW',
+      });
 
       return res.json({
         success: true,
@@ -236,6 +247,17 @@ export class AuthController {
       });
     } catch (error) {
       logger.error('Login error:', error);
+
+      await createAuditLog({
+        req,
+        user: { email: req.body?.identifier || '' },
+        action: 'LOGIN',
+        module: 'AUTH',
+        description: 'Login attempt failed.',
+        status: 'FAILED',
+        riskLevel: 'MEDIUM',
+        metadata: { reason: error.message },
+      });
 
       if (
         error.code === 'ACCOUNT_LOCKED'
@@ -452,6 +474,16 @@ export class AuthController {
       }
 
       await AuthService.logoutUser(userId);
+
+      await createAuditLog({
+        req,
+        user: req.user,
+        action: 'LOGOUT',
+        module: 'AUTH',
+        description: 'User logged out.',
+        status: 'SUCCESS',
+        riskLevel: 'LOW',
+      });
 
       return res.json({
         success: true,

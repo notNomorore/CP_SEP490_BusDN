@@ -151,7 +151,7 @@ const UserSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['PASSENGER', 'DRIVER', 'BUS_ASSISTANT', 'ADMIN'],
+      enum: ['PASSENGER', 'DRIVER', 'BUS_ASSISTANT', 'BUS ASSISTANT', 'ADMIN'],
       default: 'PASSENGER',
     },
     status: {

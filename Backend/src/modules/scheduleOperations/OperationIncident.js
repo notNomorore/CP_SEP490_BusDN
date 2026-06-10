@@ -10,7 +10,7 @@ const OperationIncidentSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN'],
+      enum: ['TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN', 'PASSENGER_CONFLICT', 'FOUND_ITEM'],
       required: true,
       index: true,
     },
@@ -53,6 +53,12 @@ const OperationIncidentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
+      index: true,
+    },
+    reporterRole: {
+      type: String,
+      enum: ['DRIVER', 'BUS_ASSISTANT'],
+      default: 'DRIVER',
       index: true,
     },
     locationText: {
@@ -113,6 +119,50 @@ const OperationIncidentSchema = new mongoose.Schema(
     requiresReplacementVehicle: {
       type: Boolean,
       default: false,
+    },
+    passengerConflict: {
+      conflictCategory: {
+        type: String,
+        enum: ['ARGUMENT', 'FARE_DISPUTE', 'SEAT_DISPUTE', 'HARASSMENT', 'SAFETY_RISK', 'OTHER', null],
+        default: null,
+      },
+      partiesInvolved: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      actionTaken: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+    },
+    foundItem: {
+      itemName: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      itemDescription: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      foundLocation: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      handedTo: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      recoveryStatus: {
+        type: String,
+        enum: ['REPORTED', 'STORED', 'RETURNED'],
+        default: 'REPORTED',
+      },
     },
     evidenceFiles: {
       type: [

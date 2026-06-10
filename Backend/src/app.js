@@ -19,6 +19,12 @@ import routeRoutes from './modules/routes/routeRoutes.js';
 import adminRoutes from './modules/admin/adminRoutes.js';
 import profileRoutes from './modules/profile/profileRoutes.js';
 import scheduleOperationsRoutes from './modules/scheduleOperations/scheduleOperationsRoutes.js';
+import busStopRoutes from './modules/busStops/busStopRoutes.js';
+import promotionRoutes from './modules/promotions/promotionRoutes.js';
+import revenueReportRoutes from './modules/revenue/revenueReport.routes.js';
+import routeEfficiencyRoutes from './modules/analytics/routeEfficiency.routes.js';
+import incidentReportRoutes from './modules/incidents/incidentReport.routes.js';
+import systemMonitoringRoutes from './modules/systemMonitoring/systemMonitoring.routes.js';
 
 export const createApp = () => {
   const app = express();
@@ -45,7 +51,7 @@ export const createApp = () => {
   // Body parsing middleware
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
-  app.use('/uploads', express.static(path.join(config.paths.root, 'uploads')));
+  app.use('/uploads', express.static(path.resolve(config.paths.uploads)));
 
   // Rate limiting
   const limiter = rateLimit({
@@ -94,8 +100,14 @@ export const createApp = () => {
   app.use('/api/customer-support', customerSupportRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/profile', profileRoutes);
+  app.use('/api/admin/promotions', promotionRoutes);
+  app.use('/api/admin/revenue', revenueReportRoutes);
+  app.use('/api/admin/analytics', routeEfficiencyRoutes);
+  app.use('/api/admin/incidents', incidentReportRoutes);
+  app.use('/api/admin', systemMonitoringRoutes);
   // app.use('/api/routes', routeRoutes);
   app.use('/api/routes', routeRoutes);
+  app.use('/api/bus-stops', busStopRoutes);
   app.use('/api/schedule-operations', scheduleOperationsRoutes);
   // etc...
 
