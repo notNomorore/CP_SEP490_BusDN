@@ -18,11 +18,16 @@ const Header = () => {
   }, []);
 
   const navLinks = [
-    { label: 'Manage Booking', href: '#' },
-    { label: 'Become a Partner', href: '#' },
-    { label: 'Routes', href: '/search' },
-    { label: 'Help', href: '#' }
-  ];
+    { label: 'Manage Booking', path: '/profile', requiresAuth: true },
+    { label: 'Promotions', path: '/admin/promotions', requiresAuth: true, adminOnly: true },
+    { label: 'Revenue', path: '/admin/revenue', requiresAuth: true, adminOnly: true },
+    { label: 'Analytics', path: '/admin/analytics/route-efficiency', requiresAuth: true, adminOnly: true },
+    { label: 'Incidents', path: '/admin/incidents', requiresAuth: true, adminOnly: true },
+    { label: 'Monitoring', path: '/admin/system-monitoring', requiresAuth: true, adminOnly: true },
+    { label: 'Become a Partner', href: '#', hideForAdmin: true },
+    { label: 'Routes', href: '#', hideForAdmin: true },
+    { label: 'Help', href: '#', hideForAdmin: true }
+  ].filter((link) => (!link.adminOnly || isAdmin) && (!link.hideForAdmin || !isAdmin));
 
   const authCta =
     location.pathname === '/auth/register'
@@ -37,6 +42,25 @@ const Header = () => {
   const handleLogout = async () => {
     await logout();
     navigate('/');
+  };
+
+  const handleNavClick = (event, link) => {
+    if (!link.path) {
+      return;
+    }
+
+    event.preventDefault();
+    if (link.requiresAuth && !isAuthenticated) {
+      navigate('/auth/login');
+      return;
+    }
+
+    if (link.adminOnly && !isAdmin) {
+      navigate('/');
+      return;
+    }
+
+    navigate(link.path);
   };
 
   return (
@@ -58,25 +82,25 @@ const Header = () => {
           </button>
 
           {/* Navigation - Hidden on mobile */}
-          <nav className="hidden lg:flex items-center gap-6">
-            {navLinks.map((link, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => {
-                  if (link.href !== '#') {
-                    navigate(link.href);
-                  }
-                }}
-                className={`text-label-md font-body transition-all ${
-                  location.pathname === link.href
-                    ? 'text-tertiary-fixed font-bold border-b-2 border-tertiary-fixed pb-1'
-                    : 'text-surface-variant/80 hover:text-surface-bright hover:bg-primary-container/50 px-2 py-1 rounded'
-                }`}
-              >
-                {link.label}
-              </button>
-            ))}
+          <nav className="hidden lg:flex items-center gap-4">
+            {navLinks.map((link) => {
+              const isActive = link.path && location.pathname.startsWith(link.path);
+
+              return (
+                <a
+                  key={link.label}
+                  href={link.path || link.href}
+                  onClick={(event) => handleNavClick(event, link)}
+                  className={`text-label-md font-body transition-all ${
+                    isActive
+                      ? 'text-tertiary-fixed font-bold border-b-2 border-tertiary-fixed pb-1'
+                      : 'text-surface-variant/80 hover:text-surface-bright hover:bg-primary-container/50 px-2 py-1 rounded'
+                  }`}
+                >
+                  {link.label}
+                </a>
+              );
+            })}
           </nav>
         </div>
 

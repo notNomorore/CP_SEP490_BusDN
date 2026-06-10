@@ -21,6 +21,7 @@ const RegisterVerifyOtpPage = () => {
   const { verifyOTP, resendOtp, isLoading, error, clearError } = useAuthStore();
   const [pendingOtp, setPendingOtp] = useState(() => loadPendingRegistrationOtp());
   const [otp, setOtp] = useState('');
+  const [devOtp, setDevOtp] = useState('');
   const [countdown, setCountdown] = useState(0);
   const [isVerified, setIsVerified] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -34,7 +35,8 @@ const RegisterVerifyOtpPage = () => {
     }
 
     setPendingOtp(pending);
-    setOtp('');
+    setDevOtp(pending.devOtp || '');
+    setOtp(pending.devOtp || '');
     setCountdown(60);
   }, [navigate]);
 
@@ -87,11 +89,13 @@ const RegisterVerifyOtpPage = () => {
 
       const nextPending = updatePendingRegistrationOtp({
         ...pendingOtp,
+        devOtp: result.devOtp || '',
         expiresAt: result.expiresAt || pendingOtp.expiresAt,
       });
 
       setPendingOtp(nextPending);
-      setOtp('');
+      setDevOtp(nextPending.devOtp || '');
+      setOtp(nextPending.devOtp || '');
       setCountdown(60);
     } catch {
       // Error state is handled by the store.
@@ -160,6 +164,12 @@ const RegisterVerifyOtpPage = () => {
             </p>
           </div>
         </div>
+
+        {devOtp && (
+          <div className="rounded-2xl border border-on-tertiary-container/20 bg-on-tertiary-container/10 px-4 py-3 text-sm text-on-tertiary-fixed-variant">
+            Development OTP: <span className="font-bold tracking-[0.25em]">{devOtp}</span>
+          </div>
+        )}
 
         {error && (
           <div className="rounded-2xl border border-error/20 bg-error-container px-4 py-3 text-sm text-on-error-container">

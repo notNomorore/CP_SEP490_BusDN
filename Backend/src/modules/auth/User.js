@@ -251,13 +251,6 @@ const UserSchema = new mongoose.Schema(
         },
       ],
     },
-
-    // Wallet
-    walletBalance: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
     accountLock: {
       isLocked: {
         type: Boolean,

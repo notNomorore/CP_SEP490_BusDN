@@ -9,6 +9,7 @@ export const savePendingRegistrationOtp = (payload) => {
       email: payload.email || '',
       phone: payload.phone || '',
       identifier: payload.identifier || payload.email || payload.phone || '',
+      devOtp: payload.devOtp || '',
       expiresAt: payload.expiresAt || '',
     })
   );
