@@ -355,6 +355,7 @@ export class AuthService {
 
     // Update password
     user.password = newPassword;
+    user.isFirstLogin = false;
     await user.save();
 
     logger.info(`Password changed for user: ${userId}`);

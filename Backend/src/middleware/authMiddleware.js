@@ -97,6 +97,46 @@ export const authorizeRole = (...allowedRoles) => {
 };
 
 /**
+ * Role authorization backed by the latest database state.
+ * Use this for staff workflows where an administrator can change roles.
+ */
+export const authorizeCurrentUserRole = (...allowedRoles) => {
+  return async (req, res, next) => {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+      }
+
+      const user = await User.findById(req.user.userId).select('email role status');
+
+      if (!user || user.status !== 'ACTIVE') {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden - Account is unavailable',
+        });
+      }
+
+      if (!allowedRoles.includes(user.role)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden - Insufficient permissions',
+        });
+      }
+
+      req.user.email = user.email;
+      req.user.role = user.role;
+      return next();
+    } catch (error) {
+      logger.error('Current user role authorization error:', error);
+      return next(error);
+    }
+  };
+};
+
+/**
  * Optional Auth Middleware (doesn't fail if no token)
  */
 export const optionalAuthMiddleware = (req, res, next) => {

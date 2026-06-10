@@ -5,18 +5,16 @@ import { HOME_BUS_HERO_IMAGE } from '../../../shared/constants/images.js';
 import useTheme from '../../../shared/hooks/useTheme.js';
 import adminService from '../services/adminService.js';
 
-const roleOptions = ['ALL', 'ADMIN', 'PASSENGER', 'DRIVER', 'CONDUCTOR', 'STAFF', 'BUS ASSISTANT'];
+const roleOptions = ['ALL', 'ADMIN', 'PASSENGER', 'DRIVER', 'BUS_ASSISTANT'];
 const statusOptions = ['ALL', 'ACTIVE', 'INACTIVE', 'LOCKED', 'PENDING_ACTIVATION'];
-const managedRoleOptions = ['DRIVER', 'CONDUCTOR', 'STAFF'];
+const managedRoleOptions = ['DRIVER', 'BUS_ASSISTANT'];
 
 const roleLabels = {
   ALL: 'Tất cả vai trò',
   ADMIN: 'Quản trị viên',
   PASSENGER: 'Hành khách',
   DRIVER: 'Tài xế',
-  CONDUCTOR: 'Phụ xe',
-  STAFF: 'Nhân viên',
-  'BUS ASSISTANT': 'Trợ lý xe buýt',
+  BUS_ASSISTANT: 'Phụ xe',
 };
 
 const statusLabels = {

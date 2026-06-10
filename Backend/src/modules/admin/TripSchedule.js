@@ -21,6 +21,44 @@ const AssignedVehicleSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const TripLocationSchema = new mongoose.Schema(
+  {
+    latitude: { type: Number, default: null },
+    longitude: { type: Number, default: null },
+    accuracyMeters: { type: Number, min: 0, default: null },
+    capturedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+const GpsSyncSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: ['NOT_REQUESTED', 'SYNCED', 'FAILED'],
+      default: 'NOT_REQUESTED',
+    },
+    retryCount: { type: Number, min: 0, default: 0 },
+    message: { type: String, trim: true, default: '' },
+    syncedAt: { type: Date, default: null },
+    lastAttemptAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+const DriverAcceptanceSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: ['PENDING', 'ACCEPTED', 'REJECTED'],
+      default: 'PENDING',
+    },
+    respondedAt: { type: Date, default: null },
+    rejectionReason: { type: String, trim: true, default: '' },
+  },
+  { _id: false }
+);
+
 const TripScheduleSchema = new mongoose.Schema(
   {
     scheduleCode: { type: String, required: true, unique: true, trim: true, uppercase: true },
@@ -41,6 +79,11 @@ const TripScheduleSchema = new mongoose.Schema(
     driver: { type: AssignedPersonSchema, default: () => ({}) },
     assistant: { type: AssignedPersonSchema, default: () => ({}) },
     notes: { type: String, trim: true, default: '' },
+    actualStartAt: { type: Date, default: null },
+    actualEndAt: { type: Date, default: null },
+    startLocation: { type: TripLocationSchema, default: () => ({}) },
+    gpsSync: { type: GpsSyncSchema, default: () => ({}) },
+    driverAcceptance: { type: DriverAcceptanceSchema, default: () => ({}) },
     emergencyHistory: {
       type: [{
         reason: { type: String, trim: true, default: '' },

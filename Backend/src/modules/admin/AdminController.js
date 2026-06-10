@@ -5,8 +5,7 @@ import AdminModel from './AdminModel.js';
 import { config } from '../../config/environment.js';
 import logger from '../../utils/logger.js';
 
-const ALLOWED_MANAGED_ROLES = new Set(['DRIVER', 'CONDUCTOR', 'STAFF']);
-const ALLOWED_ACCOUNT_ROLES = new Set(['DRIVER', 'CONDUCTOR']);
+const ALLOWED_MANAGED_ROLES = new Set(['DRIVER', 'BUS_ASSISTANT']);
 const ALLOWED_ROUTE_STATUS = new Set(['DRAFT', 'PENDING_APPROVAL', 'PUBLISHED', 'SUSPENDED']);
 const ALLOWED_BUS_STATUS = new Set(['ACTIVE', 'RESERVE', 'MAINTENANCE']);
 const ALLOWED_SCHEDULE_STATUS = new Set(['PLANNED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']);
@@ -22,7 +21,7 @@ const validateManagedUserPayload = (payload) => {
   if (!email) errors.email = 'Email is required to send account credentials';
   if (email && !EMAIL_REGEX.test(email)) errors.email = 'Invalid email format';
   if (phone && !/^(\+84|0)[0-9]{9,10}$/.test(phone)) errors.phone = 'Invalid phone format';
-  if (!ALLOWED_ACCOUNT_ROLES.has(role)) errors.role = 'Role must be DRIVER or CONDUCTOR';
+  if (!ALLOWED_MANAGED_ROLES.has(role)) errors.role = 'Role must be DRIVER or BUS_ASSISTANT';
 
   return Object.keys(errors).length ? errors : null;
 };
@@ -35,7 +34,7 @@ const validateImportedUserPayload = (payload) => {
   if (!email) errors.email = 'Email is required to send the temporary password';
   if (email && !EMAIL_REGEX.test(email)) errors.email = 'Invalid email format';
   if (phone && !/^(\+84|0)[0-9]{9,10}$/.test(phone)) errors.phone = 'Invalid phone format';
-  if (!ALLOWED_MANAGED_ROLES.has(role)) errors.role = 'Role must be DRIVER, CONDUCTOR, or STAFF';
+  if (!ALLOWED_MANAGED_ROLES.has(role)) errors.role = 'Role must be DRIVER or BUS_ASSISTANT';
 
   return Object.keys(errors).length ? errors : null;
 };

@@ -23,6 +23,7 @@ import revenueReportRoutes from './modules/revenue/revenueReport.routes.js';
 import routeEfficiencyRoutes from './modules/analytics/routeEfficiency.routes.js';
 import incidentReportRoutes from './modules/incidents/incidentReport.routes.js';
 import systemMonitoringRoutes from './modules/systemMonitoring/systemMonitoring.routes.js';
+import scheduleOperationsRoutes from './modules/scheduleOperations/scheduleOperationsRoutes.js';
 
 export const createApp = () => {
   const app = express();
@@ -105,6 +106,7 @@ export const createApp = () => {
   app.use('/api/admin', systemMonitoringRoutes);
   // app.use('/api/routes', routeRoutes);
   app.use('/api/routes', routeRoutes);
+  app.use('/api/schedule-operations', scheduleOperationsRoutes);
   // etc...
 
   // 404 handler (must be after all routes)
