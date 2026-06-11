@@ -174,6 +174,7 @@ const operationIncidentTitle = (incident) => {
   const label = {
     TRAFFIC_CONGESTION: 'Báo kẹt xe',
     ACCIDENT: 'Báo tai nạn',
+    PASSENGER_VIOLATION: 'Báo hành khách vi phạm',
     PASSENGER_CONFLICT: 'Báo xung đột hành khách',
     FOUND_ITEM: 'Báo đồ tìm thấy',
   }[incident.type] || 'Báo cáo vận hành';
@@ -205,6 +206,15 @@ const operationIncidentDescription = (incident) => [
     : '',
   incident.type === 'ACCIDENT'
     ? `Đã báo cơ quan chức năng: ${incident.policeNotified ? 'Có' : 'Không'}.`
+    : '',
+  incident.type === 'PASSENGER_VIOLATION'
+    ? `Loại vi phạm: ${incident.passengerViolation?.violationCategory || 'OTHER'}.`
+    : '',
+  incident.type === 'PASSENGER_VIOLATION'
+    ? `Mô tả hành khách: ${incident.passengerViolation?.passengerDescription || 'Chưa ghi nhận'}.`
+    : '',
+  incident.type === 'PASSENGER_VIOLATION'
+    ? `Hành động đã xử lý: ${incident.passengerViolation?.actionTaken || 'Chưa ghi nhận'}.`
     : '',
   incident.type === 'PASSENGER_CONFLICT'
     ? `Nhóm xung đột: ${incident.passengerConflict?.conflictCategory || 'OTHER'}.`
@@ -239,7 +249,7 @@ export class IncidentReportService {
         driver: { $ne: null },
       }).sort({ reportedAt: -1, updatedAt: -1 }).limit(200).lean(),
       OperationIncident.find({
-        type: { $in: ['TRAFFIC_CONGESTION', 'ACCIDENT', 'PASSENGER_CONFLICT', 'FOUND_ITEM'] },
+        type: { $in: ['TRAFFIC_CONGESTION', 'ACCIDENT', 'PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'] },
         driver: { $ne: null },
       }).sort({ reportedAt: -1, updatedAt: -1 }).limit(300).lean(),
     ]);

@@ -33,6 +33,16 @@ const PASSENGER_CONFLICT_CATEGORIES = [
   'OTHER',
 ];
 
+const PASSENGER_VIOLATION_CATEGORIES = [
+  'NO_TICKET',
+  'WRONG_TICKET',
+  'SMOKING',
+  'LITTERING',
+  'UNSAFE_BEHAVIOR',
+  'DISTURBANCE',
+  'OTHER',
+];
+
 const parseBoolean = (value) => {
   if (typeof value === 'boolean') return value;
   if (value === 'true') return true;
@@ -123,6 +133,7 @@ const INCIDENT_TYPES = [
   'TRAFFIC_CONGESTION',
   'ACCIDENT',
   'VEHICLE_BREAKDOWN',
+  'PASSENGER_VIOLATION',
   'PASSENGER_CONFLICT',
   'FOUND_ITEM',
 ];
@@ -1045,6 +1056,20 @@ export class ScheduleOperationsService {
       throw error;
     }
 
+    if (type === 'PASSENGER_VIOLATION') {
+      if (!PASSENGER_VIOLATION_CATEGORIES.includes(payload.violationCategory)) {
+        const error = new Error('Passenger violation category is invalid');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      if (String(payload.actionTaken || '').trim().length < 3) {
+        const error = new Error('Action taken is required for passenger violation reports');
+        error.statusCode = 400;
+        throw error;
+      }
+    }
+
     if (type === 'PASSENGER_CONFLICT') {
       if (!PASSENGER_CONFLICT_CATEGORIES.includes(payload.conflictCategory)) {
         const error = new Error('Passenger conflict category is invalid');
@@ -1225,6 +1250,13 @@ export class ScheduleOperationsService {
       requiresReplacementVehicle: type === 'VEHICLE_BREAKDOWN'
         ? Boolean(parseBoolean(payload.requiresReplacementVehicle))
         : false,
+      passengerViolation: type === 'PASSENGER_VIOLATION'
+        ? {
+          violationCategory: payload.violationCategory,
+          passengerDescription: String(payload.passengerDescription || '').trim(),
+          actionTaken: String(payload.actionTaken || '').trim(),
+        }
+        : undefined,
       passengerConflict: type === 'PASSENGER_CONFLICT'
         ? {
           conflictCategory: payload.conflictCategory,
@@ -1252,10 +1284,11 @@ export class ScheduleOperationsService {
       );
     }
 
-    if (['TRAFFIC_CONGESTION', 'ACCIDENT', 'PASSENGER_CONFLICT', 'FOUND_ITEM'].includes(type)) {
+    if (['TRAFFIC_CONGESTION', 'ACCIDENT', 'PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'].includes(type)) {
       const titleLabel = {
         TRAFFIC_CONGESTION: 'Báo kẹt xe',
         ACCIDENT: 'Báo tai nạn',
+        PASSENGER_VIOLATION: 'Báo hành khách vi phạm',
         PASSENGER_CONFLICT: 'Báo xung đột hành khách',
         FOUND_ITEM: 'Báo đồ tìm thấy',
       }[type];
@@ -1286,6 +1319,15 @@ export class ScheduleOperationsService {
             : '',
           type === 'ACCIDENT'
             ? `Đã báo cơ quan chức năng: ${Boolean(payload.policeNotified) ? 'Có' : 'Không'}.`
+            : '',
+          type === 'PASSENGER_VIOLATION'
+            ? `Loại vi phạm: ${payload.violationCategory}.`
+            : '',
+          type === 'PASSENGER_VIOLATION'
+            ? `Mô tả hành khách: ${String(payload.passengerDescription || 'Chưa ghi nhận').trim()}.`
+            : '',
+          type === 'PASSENGER_VIOLATION'
+            ? `Hành động đã xử lý: ${String(payload.actionTaken || '').trim()}.`
             : '',
           type === 'PASSENGER_CONFLICT'
             ? `Nhóm xung đột: ${payload.conflictCategory}.`

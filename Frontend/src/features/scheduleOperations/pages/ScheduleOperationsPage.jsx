@@ -68,6 +68,7 @@ const INCIDENT_TYPES = [
   { value: 'TRAFFIC_CONGESTION', label: 'UC46 - Báo kẹt xe' },
   { value: 'ACCIDENT', label: 'UC47 - Báo tai nạn' },
   { value: 'VEHICLE_BREAKDOWN', label: 'UC48 - Báo xe hỏng' },
+  { value: 'PASSENGER_VIOLATION', label: 'UC50 - Báo hành khách vi phạm' },
   { value: 'PASSENGER_CONFLICT', label: 'UC51 - Báo xung đột hành khách' },
   { value: 'FOUND_ITEM', label: 'UC52 - Báo đồ tìm thấy' },
 ];
@@ -76,6 +77,7 @@ const INCIDENT_TYPE_DESCRIPTIONS = {
   TRAFFIC_CONGESTION: 'Báo ùn tắc, chậm tuyến hoặc đường bị chặn.',
   ACCIDENT: 'Báo tai nạn, va chạm hoặc tình huống cần hỗ trợ khẩn.',
   VEHICLE_BREAKDOWN: 'Báo xe hỏng trong chuyến, cần hỗ trợ kỹ thuật hoặc xe thay thế.',
+  PASSENGER_VIOLATION: 'Báo hành khách vi phạm nội quy xe buýt để điều hành xử lý.',
   PASSENGER_CONFLICT: 'Báo xung đột giữa hành khách để điều hành nắm tình hình.',
   FOUND_ITEM: 'Báo đồ vật tìm thấy trên xe để xử lý thất lạc.',
 };
@@ -110,6 +112,16 @@ const PASSENGER_CONFLICT_CATEGORIES = [
   { value: 'OTHER', label: 'Khác' },
 ];
 
+
+const PASSENGER_VIOLATION_CATEGORIES = [
+  { value: 'NO_TICKET', label: 'Không có vé / không quét vé' },
+  { value: 'WRONG_TICKET', label: 'Dùng sai loại vé' },
+  { value: 'SMOKING', label: 'Hút thuốc trên xe' },
+  { value: 'LITTERING', label: 'Xả rác trên xe' },
+  { value: 'UNSAFE_BEHAVIOR', label: 'Hành vi mất an toàn' },
+  { value: 'DISTURBANCE', label: 'Gây ồn / làm phiền hành khách' },
+  { value: 'OTHER', label: 'Khác' },
+];
 const INCIDENT_SEVERITIES = [
   { value: 'LOW', label: 'Thấp' },
   { value: 'MEDIUM', label: 'Trung bình' },
@@ -945,6 +957,8 @@ const IncidentReportingPanel = ({
     policeNotified: false,
     canContinue: true,
     requiresReplacementVehicle: false,
+    violationCategory: 'NO_TICKET',
+    passengerDescription: '',
     conflictCategory: 'ARGUMENT',
     partiesInvolved: '',
     actionTaken: '',
@@ -963,6 +977,7 @@ const IncidentReportingPanel = ({
     TRAFFIC_CONGESTION: 'UC46 - Báo kẹt xe',
     ACCIDENT: 'UC47 - Báo tai nạn',
     VEHICLE_BREAKDOWN: 'UC48 - Báo xe hỏng',
+    PASSENGER_VIOLATION: 'UC50 - Báo hành khách vi phạm',
     PASSENGER_CONFLICT: 'UC51 - Báo xung đột hành khách',
     FOUND_ITEM: 'UC52 - Báo đồ tìm thấy',
   }[activeIncidentType] || 'Báo sự cố trong chuyến';
@@ -980,11 +995,13 @@ const IncidentReportingPanel = ({
         && Number(form.estimatedDelayMinutes) >= 1
       )
     );
+  const hasPassengerViolationDetail = form.type !== 'PASSENGER_VIOLATION'
+    || (form.violationCategory && form.actionTaken.trim().length >= 3);
   const hasPassengerConflictDetail = form.type !== 'PASSENGER_CONFLICT'
     || (form.conflictCategory && form.actionTaken.trim().length >= 3);
   const hasFoundItemDetail = form.type !== 'FOUND_ITEM'
     || (form.itemName.trim().length >= 2 && form.foundLocation.trim().length >= 3);
-  const canSubmitReport = canSubmit && hasPassengerConflictDetail && hasFoundItemDetail;
+  const canSubmitReport = canSubmit && hasPassengerViolationDetail && hasPassengerConflictDetail && hasFoundItemDetail;
 
   const updateForm = (field, value) => {
     setForm((current) => ({
@@ -1224,6 +1241,44 @@ const IncidentReportingPanel = ({
               className="rounded border-slate-300 text-red-600 focus:ring-red-500"
             />
             Cần xe thay thế
+          </label>
+        </div>
+      )}
+
+      {form.type === 'PASSENGER_VIOLATION' && (
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Loại vi phạm</span>
+            <select
+              value={form.violationCategory}
+              onChange={(event) => updateForm('violationCategory', event.target.value)}
+              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            >
+              {PASSENGER_VIOLATION_CATEGORIES.map((category) => (
+                <option key={category.value} value={category.value}>{category.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Mô tả hành khách</span>
+            <input
+              value={form.passengerDescription}
+              onChange={(event) => updateForm('passengerDescription', event.target.value)}
+              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              placeholder="Ví dụ: hành khách áo xanh tại cửa sau"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Hành động đã xử lý</span>
+            <input
+              value={form.actionTaken}
+              onChange={(event) => updateForm('actionTaken', event.target.value)}
+              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              placeholder="Ví dụ: nhắc nội quy, yêu cầu mua vé"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
           </label>
         </div>
       )}

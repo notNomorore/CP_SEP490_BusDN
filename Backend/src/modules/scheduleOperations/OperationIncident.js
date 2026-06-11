@@ -10,7 +10,14 @@ const OperationIncidentSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN', 'PASSENGER_CONFLICT', 'FOUND_ITEM'],
+      enum: [
+        'TRAFFIC_CONGESTION',
+        'ACCIDENT',
+        'VEHICLE_BREAKDOWN',
+        'PASSENGER_VIOLATION',
+        'PASSENGER_CONFLICT',
+        'FOUND_ITEM',
+      ],
       required: true,
       index: true,
     },
@@ -127,6 +134,23 @@ const OperationIncidentSchema = new mongoose.Schema(
         default: null,
       },
       partiesInvolved: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      actionTaken: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+    },
+    passengerViolation: {
+      violationCategory: {
+        type: String,
+        enum: ['NO_TICKET', 'WRONG_TICKET', 'SMOKING', 'LITTERING', 'UNSAFE_BEHAVIOR', 'DISTURBANCE', 'OTHER', null],
+        default: null,
+      },
+      passengerDescription: {
         type: String,
         trim: true,
         default: '',
