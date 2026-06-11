@@ -90,7 +90,119 @@ export class ProfileService {
       throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
     }
 
-    return user.favoriteStops || [];
+    return (user.favoriteStops || []).filter((stop) => stop.favoriteStatus !== 'REMOVED');
+  }
+
+  static buildStopId(route, stop) {
+    const normalizedName = stop.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    return `${route.routeNumber}-${stop.order}-${normalizedName}`;
+  }
+
+  static async findStopInRoutes({ routeId, stopId, stopName, order }) {
+    await RouteService.ensureSampleRoutes();
+
+    const routeQuery = routeId ? { _id: routeId, status: 'ACTIVE' } : { status: 'ACTIVE' };
+    const routes = await Route.find(routeQuery).lean();
+
+    for (const route of routes) {
+      const stop = (route.stops || []).find((candidate) => {
+        const candidateStopId = this.buildStopId(route, candidate);
+        const sameStopId = stopId && candidateStopId === stopId;
+        const sameOrder = order && Number(candidate.order) === Number(order);
+        const sameName = stopName && candidate.name.toLowerCase() === stopName.trim().toLowerCase();
+
+        return sameStopId || (sameOrder && sameName) || sameName;
+      });
+
+      if (stop) {
+        return {
+          route,
+          stop,
+          stopId: this.buildStopId(route, stop),
+        };
+      }
+    }
+
+    return null;
+  }
+
+  static async saveFavoriteStop(userId, payload) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const matchedStop = await this.findStopInRoutes(payload);
+
+    if (!matchedStop) {
+      throw new CustomError('Stop not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const { route, stop, stopId } = matchedStop;
+    const favoriteStops = user.favoriteStops || [];
+    const existingIndex = favoriteStops.findIndex((favoriteStop) => (
+      favoriteStop.stopId === stopId
+      || (
+        favoriteStop.stopName?.toLowerCase() === stop.name.toLowerCase()
+        && favoriteStop.routeNumber === route.routeNumber
+      )
+    ));
+
+    if (existingIndex >= 0 && favoriteStops[existingIndex].favoriteStatus !== 'REMOVED') {
+      throw new CustomError('Stop already exists in favorites', HTTP_STATUS.CONFLICT);
+    }
+
+    const favoriteStop = {
+      stopId,
+      routeId: String(route._id),
+      routeNumber: route.routeNumber,
+      stopName: stop.name,
+      address: payload.address?.trim() || `${route.name} stop`,
+      nearbyArrivalText: payload.nearbyArrivalText?.trim() || `Every ${route.operatingHours?.frequencyMinutes || 30} min`,
+      distanceMeters: Number(payload.distanceMeters) || 0,
+      latitude: stop.latitude,
+      longitude: stop.longitude,
+      savedAt: new Date(),
+      favoriteStatus: 'SAVED',
+    };
+
+    if (existingIndex >= 0) {
+      user.favoriteStops.set(existingIndex, favoriteStop);
+    } else {
+      user.favoriteStops.push(favoriteStop);
+    }
+
+    await ProfileRepository.save(user);
+
+    return favoriteStop;
+  }
+
+  static async removeFavoriteStop(userId, stopId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const favoriteStops = user.favoriteStops || [];
+    const existingIndex = favoriteStops.findIndex((favoriteStop) => favoriteStop.stopId === stopId);
+
+    if (existingIndex < 0 || favoriteStops[existingIndex].favoriteStatus === 'REMOVED') {
+      throw new CustomError('Favorite stop not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const removedStop = favoriteStops[existingIndex].toObject
+      ? favoriteStops[existingIndex].toObject()
+      : favoriteStops[existingIndex];
+
+    user.favoriteStops.splice(existingIndex, 1);
+    await ProfileRepository.save(user);
+
+    return {
+      ...removedStop,
+      favoriteStatus: 'REMOVED',
+    };
   }
 
   static async saveFavoriteRoute(userId, routeId) {

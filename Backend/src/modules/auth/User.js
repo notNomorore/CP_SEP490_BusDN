@@ -47,6 +47,16 @@ const FavoriteStopSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    routeId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    routeNumber: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     stopName: {
       type: String,
       trim: true,
@@ -66,6 +76,25 @@ const FavoriteStopSchema = new mongoose.Schema(
       type: Number,
       min: 0,
       default: 0,
+    },
+    latitude: {
+      type: Number,
+      min: -90,
+      max: 90,
+    },
+    longitude: {
+      type: Number,
+      min: -180,
+      max: 180,
+    },
+    savedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    favoriteStatus: {
+      type: String,
+      enum: ['SAVED', 'REMOVED'],
+      default: 'SAVED',
     },
   },
   { _id: false }

@@ -308,6 +308,11 @@ const MapCanvas = ({
 };
 const isSameRouteId = (left, right) => String(left || '') === String(right || '');
 
+const buildStopId = (route, stop) => {
+  const normalizedName = stop.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return `${route.routeNumber}-${stop.originalOrder || stop.order}-${normalizedName}`;
+};
+
 const RouteCard = ({
   route,
   compact = false,
@@ -400,7 +405,9 @@ const RouteDetailsPanel = ({
   route,
   currentLocation,
   isFavorite = false,
+  isStopFavorite,
   onToggleFavorite,
+  onToggleFavoriteStop,
   onClose,
 }) => {
   const [directionTab, setDirectionTab] = useState('outbound');
@@ -429,6 +436,7 @@ const RouteDetailsPanel = ({
       .reverse()
       .map((stop, index) => ({
         ...stop,
+        originalOrder: stop.order,
         order: index + 1,
         estimatedOffsetMinutes: Math.max(maxOffsetMinutes - (stop.estimatedOffsetMinutes || 0), 0),
       }));
@@ -579,12 +587,26 @@ const RouteDetailsPanel = ({
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-black text-emerald-700">
                   {stop.order}
                 </span>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="font-black text-slate-900">{stop.name}</div>
                   <div className="text-xs text-slate-500">
                     Minimum arrival: {addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => onToggleFavoriteStop?.(route, stop)}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${
+                    isStopFavorite?.(route, stop)
+                      ? 'border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100'
+                      : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
+                  }`}
+                  aria-label={isStopFavorite?.(route, stop) ? 'Remove favorite stop' : 'Save stop to favorites'}
+                >
+                  <span className="material-symbols-outlined text-[18px] leading-none">
+                    {isStopFavorite?.(route, stop) ? 'star' : 'star_border'}
+                  </span>
+                </button>
               </div>
             ))}
           </div>
@@ -703,6 +725,66 @@ const FavoriteRoutesPanel = ({ favoriteRoutes, routes, onSelect, onRemove }) => 
   </section>
 );
 
+const FavoriteStopsPanel = ({ favoriteStops, onRemove }) => (
+  <section className="mt-5 border-t border-slate-200 pt-4">
+    <div className="mb-3 flex items-center justify-between">
+      <div>
+        <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Favorite Stops</div>
+        <p className="mt-1 text-xs text-slate-500">Quick access to frequently used bus stops.</p>
+      </div>
+      <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-700">
+        Passenger
+      </span>
+    </div>
+
+    {favoriteStops.length === 0 ? (
+      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
+        No favorite stops saved yet.
+      </div>
+    ) : (
+      <div className="space-y-3">
+        {favoriteStops.map((favoriteStop) => {
+          const savedDate = favoriteStop.savedAt
+            ? new Date(favoriteStop.savedAt).toLocaleDateString('en-GB')
+            : 'Recently saved';
+
+          return (
+            <article
+              key={favoriteStop.stopId || `${favoriteStop.routeNumber}-${favoriteStop.stopName}`}
+              className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-emerald-50 text-emerald-700">
+                      <span className="material-symbols-outlined text-[17px]">directions_bus</span>
+                    </span>
+                    <span className="truncate text-sm font-black text-slate-950">{favoriteStop.stopName}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {favoriteStop.routeNumber || 'Route'} • Saved: {savedDate}
+                  </p>
+                  {favoriteStop.nearbyArrivalText ? (
+                    <p className="mt-1 text-xs font-semibold text-slate-500">{favoriteStop.nearbyArrivalText}</p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onRemove(favoriteStop)}
+                  className="rounded p-1 text-amber-600 hover:bg-amber-50"
+                  aria-label="Remove favorite stop"
+                >
+                  <span className="material-symbols-outlined text-[18px]">star</span>
+                </button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    )}
+  </section>
+);
+
 const PlannerResultCard = ({ result, isRecommended = false, isSelected = false, onSelect }) => (
   <button
     type="button"
@@ -799,6 +881,7 @@ const SearchRoutesPage = () => {
   const [isFindingBest, setIsFindingBest] = useState(false);
   const [error, setError] = useState('');
   const [favoriteRoutes, setFavoriteRoutes] = useState([]);
+  const [favoriteStops, setFavoriteStops] = useState([]);
   const [favoriteMessage, setFavoriteMessage] = useState('');
 
   const activeFilters = useMemo(() => ({
@@ -811,9 +894,15 @@ const SearchRoutesPage = () => {
     favoriteRoutes.map((favoriteRoute) => String(favoriteRoute.routeId || favoriteRoute.routeNumber))
   ), [favoriteRoutes]);
 
+  const favoriteStopIds = useMemo(() => new Set(
+    favoriteStops.map((favoriteStop) => String(favoriteStop.stopId))
+  ), [favoriteStops]);
+
   const isRouteFavorite = (route) => (
     favoriteRouteIds.has(String(route.id)) || favoriteRouteIds.has(String(route.routeNumber))
   );
+
+  const isStopFavorite = (route, stop) => favoriteStopIds.has(buildStopId(route, stop));
 
   const mapStops = useMemo(() => {
     const seen = new Set();
@@ -883,18 +972,23 @@ const SearchRoutesPage = () => {
     const fetchFavoriteRoutes = async () => {
       if (!user) {
         setFavoriteRoutes([]);
+        setFavoriteStops([]);
         return;
       }
 
       try {
-        const result = await routeService.getFavoriteRoutes();
+        const [favoriteRouteResult, favoriteStopResult] = await Promise.all([
+          routeService.getFavoriteRoutes(),
+          routeService.getFavoriteStops(),
+        ]);
 
         if (isMounted) {
-          setFavoriteRoutes(result || []);
+          setFavoriteRoutes(favoriteRouteResult || []);
+          setFavoriteStops(favoriteStopResult || []);
         }
       } catch (err) {
         if (isMounted && err.statusCode !== 403) {
-          setError(err.message || 'Unable to load favorite routes.');
+          setError(err.message || 'Unable to load favorites.');
         }
       }
     };
@@ -1086,6 +1180,67 @@ const SearchRoutesPage = () => {
     }
   };
 
+  const handleToggleFavoriteStop = async (route, stop) => {
+    setError('');
+    setFavoriteMessage('');
+
+    if (!user) {
+      setError('Please log in before saving a favorite stop.');
+      return;
+    }
+
+    const stopId = buildStopId(route, stop);
+
+    try {
+      if (favoriteStopIds.has(stopId)) {
+        await routeService.removeFavoriteStop(stopId);
+        setFavoriteStops((current) => current.filter((favoriteStop) => favoriteStop.stopId !== stopId));
+        setFavoriteMessage('Stop removed from favorites.');
+        return;
+      }
+
+      const favoriteStop = await routeService.saveFavoriteStop({
+        routeId: route.id,
+        routeNumber: route.routeNumber,
+        stopId,
+        stopName: stop.name,
+        order: stop.originalOrder || stop.order,
+        address: `${route.name} stop`,
+        nearbyArrivalText: `Every ${route.operatingHours?.frequencyMinutes || 30} min`,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+      });
+
+      setFavoriteStops((current) => [
+        favoriteStop,
+        ...current.filter((item) => item.stopId !== favoriteStop.stopId),
+      ]);
+      setFavoriteMessage('Stop saved to favorites.');
+    } catch (err) {
+      if (err.message === 'Stop already exists in favorites') {
+        setFavoriteMessage('Stop already exists in favorites.');
+        return;
+      }
+
+      setError(err.message || 'Unable to update favorite stop.');
+    }
+  };
+
+  const handleRemoveFavoriteStop = async (favoriteStop) => {
+    if (!favoriteStop.stopId) {
+      setError('Stop not found.');
+      return;
+    }
+
+    try {
+      await routeService.removeFavoriteStop(favoriteStop.stopId);
+      setFavoriteStops((current) => current.filter((item) => item.stopId !== favoriteStop.stopId));
+      setFavoriteMessage('Stop removed from favorites.');
+    } catch (err) {
+      setError(err.message || 'Unable to remove favorite stop.');
+    }
+  };
+
   const handleFindBestRoute = async (event) => {
     event.preventDefault();
     setError('');
@@ -1265,6 +1420,10 @@ const SearchRoutesPage = () => {
                   onSelect={handleSelectFavoriteRoute}
                   onRemove={handleRemoveFavoriteRoute}
                 />
+                <FavoriteStopsPanel
+                  favoriteStops={favoriteStops}
+                  onRemove={handleRemoveFavoriteStop}
+                />
               </>
             ) : (
               <form onSubmit={handleFindBestRoute} className="space-y-3">
@@ -1396,7 +1555,9 @@ const SearchRoutesPage = () => {
             route={selectedRoute}
             currentLocation={currentLocation}
             isFavorite={isRouteFavorite(selectedRoute)}
+            isStopFavorite={isStopFavorite}
             onToggleFavorite={handleToggleFavoriteRoute}
+            onToggleFavoriteStop={handleToggleFavoriteStop}
             onClose={() => setSelectedRoute(null)}
           />
         )}

@@ -50,6 +50,16 @@ export class ProfileController {
     const stops = await ProfileService.getFavoriteStops(req.user.userId);
     return res.success(stops, 'Favorite stops retrieved successfully');
   }
+
+  static async saveFavoriteStop(req, res) {
+    const stop = await ProfileService.saveFavoriteStop(req.user.userId, req.body);
+    return res.success(stop, 'Stop saved to favorites successfully', 201);
+  }
+
+  static async removeFavoriteStop(req, res) {
+    const stop = await ProfileService.removeFavoriteStop(req.user.userId, req.params.stopId);
+    return res.success(stop, 'Stop removed from favorites successfully');
+  }
 }
 
 export default ProfileController;

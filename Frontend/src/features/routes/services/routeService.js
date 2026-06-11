@@ -69,6 +69,21 @@ export const routeService = {
     const response = await apiClient.delete(`/profile/favorites/routes/${routeId}`);
     return response.data;
   },
+
+  getFavoriteStops: async () => {
+    const response = await apiClient.get('/profile/favorites/stops');
+    return response.data;
+  },
+
+  saveFavoriteStop: async (payload) => {
+    const response = await apiClient.post('/profile/favorites/stops', payload);
+    return response.data;
+  },
+
+  removeFavoriteStop: async (stopId) => {
+    const response = await apiClient.delete(`/profile/favorites/stops/${encodeURIComponent(stopId)}`);
+    return response.data;
+  },
 };
 
 export default routeService;

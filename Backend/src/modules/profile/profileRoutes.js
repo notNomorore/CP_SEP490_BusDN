@@ -33,5 +33,7 @@ router.get('/favorites/routes', asyncHandler(ProfileController.getFavoriteRoutes
 router.post('/favorites/routes/:routeId', asyncHandler(ProfileController.saveFavoriteRoute));
 router.delete('/favorites/routes/:routeId', asyncHandler(ProfileController.removeFavoriteRoute));
 router.get('/favorites/stops', asyncHandler(ProfileController.getFavoriteStops));
+router.post('/favorites/stops', asyncHandler(ProfileController.saveFavoriteStop));
+router.delete('/favorites/stops/:stopId', asyncHandler(ProfileController.removeFavoriteStop));
 
 export default router;
