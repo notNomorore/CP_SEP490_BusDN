@@ -217,17 +217,17 @@ const Login = () => {
             </label>
 
             {/* Password Input */}
-            <label className="block space-y-2">
-              <span className="flex items-center justify-between text-sm font-semibold text-on-surface">
+            <div className="block space-y-2">
+              <div className="flex items-center justify-between gap-4 text-sm font-semibold text-on-surface">
                 <span>Password</span>
                 <button
                   type="button"
                   onClick={() => setView('forgot-email')}
-                  className="text-xs font-bold uppercase tracking-[0.18em] text-on-tertiary-fixed-variant hover:text-primary"
+                  className="inline-flex w-fit shrink-0 items-center justify-center text-xs font-bold uppercase tracking-[0.18em] text-on-tertiary-fixed-variant hover:text-primary"
                 >
                   Forgot password?
                 </button>
-              </span>
+              </div>
               <input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
@@ -235,7 +235,7 @@ const Login = () => {
                 placeholder="••••••••"
                 className="w-full rounded-2xl border border-outline-variant/60 bg-white px-4 py-3 text-base text-on-surface placeholder:text-outline/70 focus:border-on-tertiary-container focus:outline-none focus:ring-2 focus:ring-on-tertiary-container/20 shadow-sm"
               />
-            </label>
+            </div>
 
             {/* Remember Device */}
             <div className="flex items-center justify-between gap-4 text-sm text-on-surface-variant">

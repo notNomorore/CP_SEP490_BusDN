@@ -5,7 +5,7 @@ import { HomePage } from './features/home';
 import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/priorityProfile';
 import { AdminCustomerSupportPage } from './features/customerSupport';
 import { SearchRoutesPage } from './features/routes';
-import { RouteControlPage, UserAccountsPage } from './features/admin';
+import { DashboardAdminPage, RouteControlPage, UserAccountsPage } from './features/admin';
 import { ScheduleOperationsPage } from './features/scheduleOperations';
 import {
   LoginPage,
@@ -25,6 +25,7 @@ import { RevenueReportsPage } from './features/admin/revenue';
 import { RouteEfficiencyPage } from './features/admin/analytics';
 import { IncidentReportsPage } from './features/admin/incidents';
 import { SystemMonitoringPage } from './features/admin/systemMonitoring';
+import { FareOperationsPage } from './features/admin/fareOperations';
 
 function App() {
   return (
@@ -130,13 +131,14 @@ function App() {
               <AdminRoute>
                 <UserAccountsPage />
               </AdminRoute>
-            }/>
-          // {/* Ticket Feature */}
-          // {/* <Route path="/booking" element={<ProtectedRoute><BookingPage /></ProtectedRoute>} />
-          // <Route path="/tickets" element={<ProtectedRoute><MyTicketsPage /></ProtectedRoute>} /> */}
+            }
+          />
+          {/* Ticket Feature */}
+          {/* <Route path="/booking" element={<ProtectedRoute><BookingPage /></ProtectedRoute>} />
+          <Route path="/tickets" element={<ProtectedRoute><MyTicketsPage /></ProtectedRoute>} /> */}
 
-          // {/* Tracking Feature */}
-          // {/* <Route path="/track" element={<ProtectedRoute><TrackingPage /></ProtectedRoute>} /> */}
+          {/* Tracking Feature */}
+          {/* <Route path="/track" element={<ProtectedRoute><TrackingPage /></ProtectedRoute>} /> */}
 
           <Route
             path="/profile"
@@ -148,6 +150,14 @@ function App() {
           />
 
           {/* Admin Feature */}
+          <Route
+            path="/admin/dashboard"
+            element={(
+              <AdminRoute>
+                <DashboardAdminPage />
+              </AdminRoute>
+            )}
+          />
           <Route
             path="/admin/promotions"
             element={(
@@ -169,6 +179,14 @@ function App() {
             element={(
               <AdminRoute>
                 <RevenueReportsPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/fare-operations"
+            element={(
+              <AdminRoute>
+                <FareOperationsPage />
               </AdminRoute>
             )}
           />

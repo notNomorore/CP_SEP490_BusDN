@@ -114,7 +114,7 @@ export const OperationsRoute = ({ children }) => {
  * Public Route - only for non-authenticated users
  */
 export const PublicRoute = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, isAdmin } = useAuthStore();
 
   if (isLoading) {
     return (
@@ -128,7 +128,7 @@ export const PublicRoute = ({ children }) => {
   }
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={isAdmin() ? '/admin/dashboard' : '/'} replace />;
   }
 
   return children;

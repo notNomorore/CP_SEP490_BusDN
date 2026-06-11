@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../../../features/auth/stores/authStore.js';
+import useLanguage from '../../hooks/useLanguage.js';
 
 const Header = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isAuthenticated, isAdmin, isDriver, isBusAssistant, logout } = useAuthStore();
+  const { language, toggleLanguage } = useLanguage();
   const [isScrolled, setIsScrolled] = useState(false);
 
   useEffect(() => {
@@ -27,7 +29,7 @@ const Header = () => {
     { label: 'Become a Partner', href: '#', hideForAdmin: true },
     { label: 'Routes', href: '#', hideForAdmin: true },
     { label: 'Help', href: '#', hideForAdmin: true }
-  ].filter((link) => (!link.adminOnly || isAdmin) && (!link.hideForAdmin || !isAdmin));
+  ].filter((link) => (!link.adminOnly || isAdmin()) && (!link.hideForAdmin || !isAdmin()));
 
   const authCta =
     location.pathname === '/auth/register'
@@ -38,10 +40,15 @@ const Header = () => {
 
   const displayName = user?.fullName?.trim() || 'Passenger';
   const profileInitial = displayName.charAt(0).toUpperCase();
+  const nextLanguageLabel = language === 'en' ? 'Chuyển sang tiếng Việt' : 'Switch to English';
 
   const handleLogout = async () => {
     await logout();
     navigate('/');
+  };
+
+  const handleBrandClick = () => {
+    navigate(isAdmin() ? '/admin/dashboard' : '/');
   };
 
   const handleNavClick = (event, link) => {
@@ -55,7 +62,7 @@ const Header = () => {
       return;
     }
 
-    if (link.adminOnly && !isAdmin) {
+    if (link.adminOnly && !isAdmin()) {
       navigate('/');
       return;
     }
@@ -75,7 +82,7 @@ const Header = () => {
         {/* Logo */}
         <div className="flex items-center gap-8">
           <button
-            onClick={() => navigate('/')}
+            onClick={handleBrandClick}
             className="text-2xl font-display font-black tracking-tight text-surface-bright hover:opacity-90 transition-opacity"
           >
             Veridian Transit
@@ -109,9 +116,15 @@ const Header = () => {
           {/* Support Info - Hidden on mobile */}
           <div className="hidden md:flex items-center gap-4 mr-4">
             <span className="text-label-md font-body opacity-80">Hotline 24/7</span>
-            <span className="material-symbols-outlined text-surface-bright">
-              language
-            </span>
+            <button
+              type="button"
+              onClick={toggleLanguage}
+              title={nextLanguageLabel}
+              aria-label={nextLanguageLabel}
+              className="inline-flex h-10 min-w-14 items-center justify-center rounded-full border border-white/10 bg-white/10 px-3 text-sm font-black text-surface-bright hover:bg-white/15"
+            >
+              {language === 'en' ? 'VI' : 'EN'}
+            </button>
             <span className="material-symbols-outlined text-surface-bright">
               help_outline
             </span>

@@ -24,6 +24,7 @@ import routeEfficiencyRoutes from './modules/analytics/routeEfficiency.routes.js
 import incidentReportRoutes from './modules/incidents/incidentReport.routes.js';
 import systemMonitoringRoutes from './modules/systemMonitoring/systemMonitoring.routes.js';
 import scheduleOperationsRoutes from './modules/scheduleOperations/scheduleOperationsRoutes.js';
+import fareOperationsRoutes from './modules/fareOperations/fareOperations.routes.js';
 
 export const createApp = () => {
   const app = express();
@@ -104,6 +105,7 @@ export const createApp = () => {
   app.use('/api/admin/analytics', routeEfficiencyRoutes);
   app.use('/api/admin/incidents', incidentReportRoutes);
   app.use('/api/admin', systemMonitoringRoutes);
+  app.use('/api/admin/fares', fareOperationsRoutes);
   // app.use('/api/routes', routeRoutes);
   app.use('/api/routes', routeRoutes);
   app.use('/api/schedule-operations', scheduleOperationsRoutes);

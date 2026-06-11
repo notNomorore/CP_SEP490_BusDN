@@ -196,18 +196,18 @@ const LoginPage = () => {
                 </span>
               </label>
 
-              <label className="block space-y-2">
-                <span className="flex items-center justify-between text-sm font-semibold text-on-surface">
+              <div className="block space-y-2">
+                <div className="flex items-center justify-between gap-4 text-sm font-semibold text-on-surface">
                   <span>Password</span>
                   <button
                     type="button"
                     onClick={openForgotPassword}
-                    className="text-xs font-bold uppercase tracking-[0.18em] text-on-tertiary-fixed-variant hover:text-primary"
+                    className="inline-flex w-fit shrink-0 items-center justify-center text-xs font-bold uppercase tracking-[0.18em] text-on-tertiary-fixed-variant hover:text-primary"
                   >
                     Forgot password?
                   </button>
-                </span>
-                <span className="flex items-center gap-3 rounded-2xl border border-outline-variant/60 bg-white px-4 py-3 shadow-sm focus-within:border-on-tertiary-container focus-within:ring-2 focus-within:ring-on-tertiary-container/20">
+                </div>
+                <label className="flex items-center gap-3 rounded-2xl border border-outline-variant/60 bg-white px-4 py-3 shadow-sm focus-within:border-on-tertiary-container focus-within:ring-2 focus-within:ring-on-tertiary-container/20">
                   <span className="material-symbols-outlined text-outline">lock</span>
                   <input
                     type={showPassword ? 'text' : 'password'}
@@ -228,8 +228,8 @@ const LoginPage = () => {
                       {showPassword ? 'visibility_off' : 'visibility'}
                     </span>
                   </button>
-                </span>
-              </label>
+                </label>
+              </div>
 
               <div className="flex items-center justify-between gap-4 text-sm text-on-surface-variant">
                 <label className="flex items-center gap-3">
