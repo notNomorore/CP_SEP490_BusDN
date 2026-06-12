@@ -1,8 +1,10 @@
 import CustomerSupportService from './CustomerSupportService.js';
 import {
   CreateSupportCaseDTO,
+  FoundItemCaseResponseDTO,
   RespondSupportCaseDTO,
   SupportCaseResponseDTO,
+  UpdateFoundItemCaseDTO,
 } from './customerSupport.dto.js';
 import logger from '../../utils/logger.js';
 
@@ -97,6 +99,80 @@ export class CustomerSupportController {
 
       if (error.message.includes('Only complaint')) {
         return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async listFoundItemCases(req, res, next) {
+    try {
+      const result = await CustomerSupportService.listFoundItemCases(req.query);
+
+      return res.json({
+        success: true,
+        data: result.items.map((incident) => FoundItemCaseResponseDTO.format(incident)),
+        meta: result.meta,
+      });
+    } catch (error) {
+      logger.error('List found item cases error:', error);
+      next(error);
+    }
+  }
+
+  static async getFoundItemCaseDetail(req, res, next) {
+    try {
+      const incident = await CustomerSupportService.getFoundItemCaseById(req.params.caseId);
+
+      return res.json({
+        success: true,
+        data: FoundItemCaseResponseDTO.format(incident),
+      });
+    } catch (error) {
+      logger.error('Get found item case detail error:', error);
+
+      if (error.message.includes('not found')) {
+        return res.status(404).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async updateFoundItemCase(req, res, next) {
+    try {
+      const validationErrors = UpdateFoundItemCaseDTO.validate(req.body);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const incident = await CustomerSupportService.updateFoundItemCase(
+        req.params.caseId,
+        req.user.userId,
+        req.body
+      );
+
+      return res.json({
+        success: true,
+        message: 'Lost item case updated successfully',
+        data: FoundItemCaseResponseDTO.format(incident),
+      });
+    } catch (error) {
+      logger.error('Update found item case error:', error);
+
+      if (error.message.includes('not found')) {
+        return res.status(404).json({
           success: false,
           message: error.message,
         });

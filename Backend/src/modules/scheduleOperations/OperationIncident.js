@@ -186,7 +186,7 @@ const OperationIncidentSchema = new mongoose.Schema(
       },
       recoveryStatus: {
         type: String,
-        enum: ['REPORTED', 'STORED', 'RETURNED'],
+        enum: ['REPORTED', 'STORED', 'RETURNED', 'CANCELLED'],
         default: 'REPORTED',
       },
     },

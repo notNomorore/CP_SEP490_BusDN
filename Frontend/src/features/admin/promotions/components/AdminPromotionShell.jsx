@@ -2,6 +2,7 @@ import React from 'react';
 import {
   BarChart3,
   Gauge,
+  PackageSearch,
   MessageSquareReply,
   ReceiptText,
   ShieldAlert,
@@ -42,6 +43,11 @@ const navItems = [
     label: 'Respond to Complaints',
     path: '/admin/customer-support',
     icon: MessageSquareReply,
+  },
+  {
+    label: 'Handle Lost Items',
+    path: '/admin/lost-items',
+    icon: PackageSearch,
   },
   {
     label: 'Monitoring',

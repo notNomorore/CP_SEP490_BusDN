@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import AppInitializer from './shared/components/AppInitializer';
 import { HomePage } from './features/home';
 import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/priorityProfile';
-import { AdminCustomerSupportPage } from './features/customerSupport';
+import { AdminCustomerSupportPage, AdminLostItemCasesPage } from './features/customerSupport';
 import { SearchRoutesPage } from './features/routes';
 import { RouteControlPage, UserAccountsPage } from './features/admin';
 import { ScheduleOperationsPage } from './features/scheduleOperations';
@@ -122,6 +122,14 @@ function App() {
             element={(
               <AdminRoute>
                 <AdminCustomerSupportPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/lost-items"
+            element={(
+              <AdminRoute>
+                <AdminLostItemCasesPage />
               </AdminRoute>
             )}
           />
