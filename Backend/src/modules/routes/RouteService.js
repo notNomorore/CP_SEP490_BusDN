@@ -777,6 +777,29 @@ export class RouteService {
       },
     };
   }
+
+  static async suggestRouteOptions({ from, to, preference = 'fastest' }) {
+    const result = await this.findBestRoute({ from, to, preference });
+    const suggestions = [
+      ...(result.bestRoute ? [{ ...result.bestRoute, isRecommended: true }] : []),
+      ...result.alternatives.map((alternative) => ({
+        ...alternative,
+        isRecommended: false,
+      })),
+    ];
+
+    return {
+      departureLocation: from,
+      destinationLocation: to,
+      transportationType: 'bus',
+      suggestions,
+      count: suggestions.length,
+      totalMatches: result.count,
+      criteria: result.criteria,
+      bestRoute: result.bestRoute,
+      alternatives: result.alternatives,
+    };
+  }
 }
 
 export default RouteService;

@@ -790,7 +790,7 @@ const PlannerResultCard = ({ result, isRecommended = false, isSelected = false, 
     type="button"
     onClick={onSelect}
     className={`w-full rounded-lg border bg-white p-3 text-left shadow-sm transition hover:border-emerald-500 ${
-      isSelected || isRecommended ? 'border-slate-950 ring-1 ring-slate-950' : 'border-slate-200'
+      isSelected || isRecommended ? 'border-emerald-600 ring-1 ring-emerald-600' : 'border-slate-200'
     }`}
   >
     {isRecommended && (
@@ -810,8 +810,14 @@ const PlannerResultCard = ({ result, isRecommended = false, isSelected = false, 
           {formatDuration(result.estimatedDurationMinutes)} · {result.estimatedDistanceKm} km
         </p>
       </div>
-      <div className="text-right text-sm font-black text-slate-950">
-        {formatFare(result.estimatedFare || result.route.fare)}
+      <div className="shrink-0 text-right">
+        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-black uppercase text-emerald-700">
+          <span className="material-symbols-outlined text-[14px]">directions_bus</span>
+          Bus
+        </span>
+        <div className="mt-1 text-sm font-black text-slate-950">
+          {formatFare(result.estimatedFare || result.route.fare)}
+        </div>
       </div>
     </div>
     <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
@@ -822,6 +828,16 @@ const PlannerResultCard = ({ result, isRecommended = false, isSelected = false, 
       <div className="rounded bg-slate-50 px-2 py-1.5">
         <div className="font-bold uppercase text-slate-400">Get off</div>
         <div className="truncate font-semibold text-slate-700">{result.endStop.name}</div>
+      </div>
+    </div>
+    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+      <div className="rounded bg-slate-50 px-2 py-1.5">
+        <div className="font-bold uppercase text-slate-400">Trip duration</div>
+        <div className="font-semibold text-slate-700">{formatDuration(result.estimatedDurationMinutes)}</div>
+      </div>
+      <div className="rounded bg-slate-50 px-2 py-1.5">
+        <div className="font-bold uppercase text-slate-400">Distance</div>
+        <div className="font-semibold text-slate-700">{result.estimatedDistanceKm} km</div>
       </div>
     </div>
   </button>
@@ -897,6 +913,24 @@ const SearchRoutesPage = () => {
   const favoriteStopIds = useMemo(() => new Set(
     favoriteStops.map((favoriteStop) => String(favoriteStop.stopId))
   ), [favoriteStops]);
+
+  const suggestedRouteOptions = useMemo(() => {
+    if (!bestRouteResult) {
+      return [];
+    }
+
+    if (Array.isArray(bestRouteResult.suggestions)) {
+      return bestRouteResult.suggestions;
+    }
+
+    return [
+      ...(bestRouteResult.bestRoute ? [{ ...bestRouteResult.bestRoute, isRecommended: true }] : []),
+      ...(bestRouteResult.alternatives || []).map((alternative) => ({
+        ...alternative,
+        isRecommended: false,
+      })),
+    ];
+  }, [bestRouteResult]);
 
   const isRouteFavorite = (route) => (
     favoriteRouteIds.has(String(route.id)) || favoriteRouteIds.has(String(route.routeNumber))
@@ -1254,7 +1288,7 @@ const SearchRoutesPage = () => {
     setIsFindingBest(true);
 
     try {
-      const result = await routeService.findBestRoute({
+      const result = await routeService.suggestRouteOptions({
         from: bestFrom.trim(),
         to: bestTo.trim(),
         preference: routePreference,
@@ -1262,13 +1296,22 @@ const SearchRoutesPage = () => {
 
       setBestRouteResult(result);
 
-      if (result.bestRoute?.route) {
-        const nextRoutes = [result.bestRoute.route, ...(result.alternatives || []).map((item) => item.route)];
+      const nextSuggestions = Array.isArray(result.suggestions)
+        ? result.suggestions
+        : [
+          ...(result.bestRoute ? [{ ...result.bestRoute, isRecommended: true }] : []),
+          ...(result.alternatives || []),
+        ];
+
+      if (nextSuggestions.length) {
+        const nextRoutes = nextSuggestions.map((item) => item.route);
         setRoutes(nextRoutes);
-        setSelectedRoute(result.bestRoute.route);
+        setSelectedRoute(nextSuggestions[0].route);
+      } else {
+        setSelectedRoute(null);
       }
     } catch (err) {
-      setError(err.message || 'Unable to calculate the best route.');
+      setError(err.message || 'Unable to suggest route options.');
     } finally {
       setIsFindingBest(false);
     }
@@ -1447,6 +1490,33 @@ const SearchRoutesPage = () => {
                   placeholder="Enter destination"
                   className="w-full rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
                 />
+                <div className="space-y-2">
+                  <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Route preference</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {ROUTE_PREFERENCES.map((preference) => {
+                      const isActive = routePreference === preference.id;
+
+                      return (
+                        <button
+                          key={preference.id}
+                          type="button"
+                          onClick={() => {
+                            setRoutePreference(preference.id);
+                            clearError();
+                          }}
+                          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs font-bold transition ${
+                            isActive
+                              ? 'border-slate-950 bg-slate-950 text-white'
+                              : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-500'
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[17px]">{preference.icon}</span>
+                          <span>{preference.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
                 <button
                   type="submit"
                   disabled={isFindingBest}
@@ -1459,42 +1529,34 @@ const SearchRoutesPage = () => {
                 </button>
 
                 {bestRouteResult && (
-                  <div className="rounded-xl bg-emerald-50 p-3">
-                    {bestRouteResult.bestRoute ? (
-                      <>
-                        <div className="text-sm font-bold text-emerald-800">Recommended route</div>
-                        <RouteCard
-                          route={bestRouteResult.bestRoute.route}
-                          compact
-                          isHighlighted
-                          isFavorite={isRouteFavorite(bestRouteResult.bestRoute.route)}
-                          onSelect={() => setSelectedRoute(bestRouteResult.bestRoute.route)}
-                          onToggleFavorite={handleToggleFavoriteRoute}
-                        />
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                          <div className="rounded-lg bg-white p-3">
-                            <div className="text-xs font-semibold uppercase text-slate-500">Board at</div>
-                            <div className="font-semibold">{bestRouteResult.bestRoute.startStop.name}</div>
-                          </div>
-                          <div className="rounded-lg bg-white p-3">
-                            <div className="text-xs font-semibold uppercase text-slate-500">Get off at</div>
-                            <div className="font-semibold">{bestRouteResult.bestRoute.endStop.name}</div>
-                          </div>
-                          <div className="rounded-lg bg-white p-3">
-                            <div className="text-xs font-semibold uppercase text-slate-500">Time</div>
-                            <div className="font-semibold">
-                              {formatDuration(bestRouteResult.bestRoute.estimatedDurationMinutes)}
-                            </div>
-                          </div>
-                          <div className="rounded-lg bg-white p-3">
-                            <div className="text-xs font-semibold uppercase text-slate-500">Distance</div>
-                            <div className="font-semibold">{bestRouteResult.bestRoute.estimatedDistanceKm} km</div>
-                          </div>
-                        </div>
-                      </>
+                  <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-black text-emerald-900">Suggested route options</div>
+                        <p className="mt-1 text-xs text-emerald-800">
+                          Compare bus routes by trip duration, distance, fare, and selected preference.
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[11px] font-black text-emerald-700">
+                        {suggestedRouteOptions.length} found
+                      </span>
+                    </div>
+
+                    {suggestedRouteOptions.length ? (
+                      <div className="mt-3 space-y-3">
+                        {suggestedRouteOptions.map((suggestion, index) => (
+                          <PlannerResultCard
+                            key={`${suggestion.route.id}-${suggestion.startStop.name}-${suggestion.endStop.name}`}
+                            result={suggestion}
+                            isRecommended={suggestion.isRecommended || index === 0}
+                            isSelected={selectedRoute?.routeNumber === suggestion.route.routeNumber}
+                            onSelect={() => setSelectedRoute(suggestion.route)}
+                          />
+                        ))}
+                      </div>
                     ) : (
-                      <div className="text-sm text-slate-700">
-                        No direct suitable route found for this departure and destination.
+                      <div className="mt-3 rounded-lg bg-white p-3 text-sm text-slate-700">
+                        No route options found. Try another departure, destination, or route preference.
                       </div>
                     )}
                   </div>
@@ -1520,27 +1582,29 @@ const SearchRoutesPage = () => {
               </div>
             )}
 
-            <div className="mt-5 space-y-3">
-              <div className="text-sm font-bold text-slate-700">
-                {routes.length} route{routes.length === 1 ? '' : 's'} found
-              </div>
-              {routes.map((route) => {
-                const isSelected = selectedRoute?.routeNumber === route.routeNumber;
+            {(activeTab === 'lookup' || !bestRouteResult) && (
+              <div className="mt-5 space-y-3">
+                <div className="text-sm font-bold text-slate-700">
+                  {routes.length} route{routes.length === 1 ? '' : 's'} found
+                </div>
+                {routes.map((route) => {
+                  const isSelected = selectedRoute?.routeNumber === route.routeNumber;
 
-                return (
-                  <div key={route.id} className="space-y-3">
-                    <RouteCard
-                      route={route}
-                      compact={activeTab === 'directions'}
-                      isHighlighted={isSelected}
-                      isFavorite={isRouteFavorite(route)}
-                      onSelect={() => setSelectedRoute(route)}
-                      onToggleFavorite={handleToggleFavoriteRoute}
-                    />
-                  </div>
-                );
-              })}
-            </div>
+                  return (
+                    <div key={route.id} className="space-y-3">
+                      <RouteCard
+                        route={route}
+                        compact={activeTab === 'directions'}
+                        isHighlighted={isSelected}
+                        isFavorite={isRouteFavorite(route)}
+                        onSelect={() => setSelectedRoute(route)}
+                        onToggleFavorite={handleToggleFavoriteRoute}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </aside>
 

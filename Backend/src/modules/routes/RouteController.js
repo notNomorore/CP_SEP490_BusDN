@@ -66,6 +66,26 @@ export class RouteController {
       next(error);
     }
   }
+
+  static async suggestions(req, res, next) {
+    try {
+      const { from = '', to = '', preference = 'fastest' } = req.query;
+      const result = await RouteService.suggestRouteOptions({ from, to, preference });
+
+      return res.success(result, 'Route options suggested successfully');
+    } catch (error) {
+      logger.error('Route suggestion error:', error);
+
+      if (error.message === 'Departure and destination are required') {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
 }
 
 export default RouteController;

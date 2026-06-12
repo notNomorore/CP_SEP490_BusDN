@@ -5,6 +5,7 @@ const router = express.Router();
 
 router.get('/nearby', RouteController.nearby);
 router.get('/best', RouteController.best);
+router.get('/suggestions', RouteController.suggestions);
 router.get('/search', RouteController.search);
 router.get('/', RouteController.search);
 

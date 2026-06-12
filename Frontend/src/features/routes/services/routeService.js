@@ -55,6 +55,14 @@ export const routeService = {
     return response.data;
   },
 
+  suggestRouteOptions: async ({ from, to, preference = 'fastest' }) => {
+    const response = await apiClient.get('/routes/suggestions', {
+      params: { from, to, preference },
+    });
+
+    return response.data;
+  },
+
   getFavoriteRoutes: async () => {
     const response = await apiClient.get('/profile/favorites/routes');
     return response.data;
