@@ -138,6 +138,31 @@ const currentLocationIcon = L.divIcon({
   `,
 });
 
+const liveBusIcon = (status) => {
+  const isDelayed = status === 'Delayed';
+
+  return L.divIcon({
+    className: '',
+    iconAnchor: [22, 45],
+    popupAnchor: [0, -44],
+    html: `
+      <div class="relative flex flex-col items-center">
+        <span class="absolute h-12 w-12 rounded-full ${
+          isDelayed ? 'bg-amber-300/35' : 'bg-emerald-300/35'
+        } animate-ping"></span>
+        <div class="relative flex h-11 w-11 items-center justify-center rounded-full border-[3px] border-white ${
+          isDelayed ? 'bg-amber-500' : 'bg-emerald-600'
+        } text-white shadow-xl">
+          <span class="material-symbols-outlined text-[23px]">directions_bus</span>
+        </div>
+        <div class="h-0 w-0 border-x-[7px] border-x-transparent ${
+          isDelayed ? 'border-t-amber-500' : 'border-t-emerald-600'
+        } border-t-[10px]"></div>
+      </div>
+    `,
+  });
+};
+
 const RouteLabelIcon = (routeNumber) => L.divIcon({
   className: '',
   iconAnchor: [18, -2],
@@ -182,6 +207,8 @@ const MapCanvas = ({
   stops,
   selectedRoute,
   currentLocation,
+  liveBusData,
+  liveError,
   onUseCurrentLocation,
 }) => {
   const routePath = selectedRoute?.pathPoints?.length
@@ -277,6 +304,16 @@ const MapCanvas = ({
             interactive={false}
           />
         )}
+
+        {(liveBusData?.buses || []).filter((bus) => isValidLocation(bus.currentLocation)).map((bus) => (
+          <Marker
+            key={bus.busId}
+            position={toLatLng(bus.currentLocation)}
+            icon={liveBusIcon(bus.status)}
+            title={`${bus.busId} - ${bus.status}`}
+            interactive={false}
+          />
+        ))}
       </MapContainer>
 
       <button
@@ -303,6 +340,38 @@ const MapCanvas = ({
       <div className="pointer-events-none absolute bottom-5 right-5 z-[1000] rounded-lg bg-white px-3 py-2 text-xs text-slate-500 shadow">
         Leaflet map © OpenStreetMap
       </div>
+
+      {(liveBusData || liveError) && (
+        <div className="absolute right-5 top-24 z-[1000] w-72 rounded-xl bg-white p-4 shadow-xl">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs font-black uppercase tracking-wide text-slate-500">Live Bus Location</div>
+            <span className={`rounded px-2 py-0.5 text-[10px] font-black uppercase ${
+              liveError ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-700'
+            }`}>
+              {liveError ? 'Unavailable' : 'Live'}
+            </span>
+          </div>
+          {liveError ? (
+            <p className="mt-2 text-sm text-slate-600">{liveError}</p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {(liveBusData.buses || []).map((bus) => (
+                <div key={bus.busId} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-black text-slate-950">{bus.busId}</span>
+                    <span className={bus.status === 'Delayed' ? 'font-bold text-amber-600' : 'font-bold text-emerald-700'}>
+                      {bus.status}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    Next stop: {bus.nextStop} • ETA {bus.estimatedArrivalTime}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 };
@@ -404,10 +473,15 @@ const RouteCard = ({
 const RouteDetailsPanel = ({
   route,
   currentLocation,
+  liveBusData,
+  isLiveTracking = false,
+  isLiveLoading = false,
+  liveError = '',
   isFavorite = false,
   isStopFavorite,
   onToggleFavorite,
   onToggleFavoriteStop,
+  onToggleLiveLocation,
   onClose,
 }) => {
   const [directionTab, setDirectionTab] = useState('outbound');
@@ -555,6 +629,61 @@ const RouteDetailsPanel = ({
               <div className="mb-1 text-[11px] font-black uppercase text-emerald-700">Route Description</div>
               Optimized route from {directionOrigin} to {directionDestination}, including key stops,
               operating hours, estimated minimum trip duration, fare, and nearby stop support.
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">
+                    Live Bus Location
+                  </div>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Track active buses on this route with GPS position, status, and next-stop ETA.
+                  </p>
+                </div>
+                <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-black uppercase ${
+                  isLiveTracking ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                }`}>
+                  {isLiveTracking ? 'Live' : 'Off'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onToggleLiveLocation?.(route)}
+                disabled={isLiveLoading}
+                className={`mt-3 flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-black transition disabled:opacity-60 ${
+                  isLiveTracking
+                    ? 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    : 'bg-slate-950 text-white hover:bg-slate-800'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  {isLiveLoading ? 'progress_activity' : 'gps_fixed'}
+                </span>
+                {isLiveTracking ? 'Stop live location' : 'View live location'}
+              </button>
+              {liveError && (
+                <div className="mt-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {liveError}
+                </div>
+              )}
+              {isLiveTracking && liveBusData?.buses?.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {liveBusData.buses.map((bus) => (
+                    <div key={bus.busId} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-black text-slate-950">{bus.busId}</span>
+                        <span className={bus.status === 'Delayed' ? 'font-bold text-amber-600' : 'font-bold text-emerald-700'}>
+                          {bus.status}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Next stop: {bus.nextStop} - ETA {bus.estimatedArrivalTime}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div>
@@ -899,6 +1028,10 @@ const SearchRoutesPage = () => {
   const [favoriteRoutes, setFavoriteRoutes] = useState([]);
   const [favoriteStops, setFavoriteStops] = useState([]);
   const [favoriteMessage, setFavoriteMessage] = useState('');
+  const [liveRouteId, setLiveRouteId] = useState(null);
+  const [liveBusData, setLiveBusData] = useState(null);
+  const [isLiveLoading, setIsLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState('');
 
   const activeFilters = useMemo(() => ({
     q: searchParams.get('q') || '',
@@ -937,6 +1070,9 @@ const SearchRoutesPage = () => {
   );
 
   const isStopFavorite = (route, stop) => favoriteStopIds.has(buildStopId(route, stop));
+  const isLiveTrackingSelectedRoute = Boolean(
+    selectedRoute?.id && isSameRouteId(liveRouteId, selectedRoute.id)
+  );
 
   const mapStops = useMemo(() => {
     const seen = new Set();
@@ -1033,6 +1169,46 @@ const SearchRoutesPage = () => {
       isMounted = false;
     };
   }, [user]);
+
+  useEffect(() => {
+    if (!liveRouteId) {
+      setLiveBusData(null);
+      setLiveError('');
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    const fetchLiveBusLocations = async () => {
+      setIsLiveLoading(true);
+
+      try {
+        const result = await routeService.getLiveBusLocations(liveRouteId);
+
+        if (isMounted) {
+          setLiveBusData(result);
+          setLiveError(result.buses?.length ? '' : (result.message || 'Live location unavailable.'));
+        }
+      } catch (err) {
+        if (isMounted) {
+          setLiveBusData(null);
+          setLiveError(err.message || 'Live location unavailable.');
+        }
+      } finally {
+        if (isMounted) {
+          setIsLiveLoading(false);
+        }
+      }
+    };
+
+    fetchLiveBusLocations();
+    const intervalId = window.setInterval(fetchLiveBusLocations, 5000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [liveRouteId]);
 
   const clearError = () => {
     if (error) {
@@ -1273,6 +1449,27 @@ const SearchRoutesPage = () => {
     } catch (err) {
       setError(err.message || 'Unable to remove favorite stop.');
     }
+  };
+
+  const handleToggleLiveLocation = (route) => {
+    clearError();
+
+    if (!route?.id) {
+      setLiveError('Bus not found.');
+      return;
+    }
+
+    if (isSameRouteId(liveRouteId, route.id)) {
+      setLiveRouteId(null);
+      setLiveBusData(null);
+      setLiveError('');
+      return;
+    }
+
+    setSelectedRoute(route);
+    setLiveRouteId(route.id);
+    setLiveBusData(null);
+    setLiveError('');
   };
 
   const handleFindBestRoute = async (event) => {
@@ -1612,16 +1809,23 @@ const SearchRoutesPage = () => {
           stops={mapStops}
           selectedRoute={selectedRoute}
           currentLocation={currentLocation}
+          liveBusData={liveBusData}
+          liveError={liveError}
           onUseCurrentLocation={handleUseCurrentLocation}
         />
         {selectedRoute && (
           <RouteDetailsPanel
             route={selectedRoute}
             currentLocation={currentLocation}
+            liveBusData={isLiveTrackingSelectedRoute ? liveBusData : null}
+            isLiveTracking={isLiveTrackingSelectedRoute}
+            isLiveLoading={isLiveTrackingSelectedRoute && isLiveLoading}
+            liveError={isLiveTrackingSelectedRoute ? liveError : ''}
             isFavorite={isRouteFavorite(selectedRoute)}
             isStopFavorite={isStopFavorite}
             onToggleFavorite={handleToggleFavoriteRoute}
             onToggleFavoriteStop={handleToggleFavoriteStop}
+            onToggleLiveLocation={handleToggleLiveLocation}
             onClose={() => setSelectedRoute(null)}
           />
         )}

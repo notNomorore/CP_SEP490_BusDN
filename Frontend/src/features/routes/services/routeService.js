@@ -63,6 +63,11 @@ export const routeService = {
     return response.data;
   },
 
+  getLiveBusLocations: async (routeId) => {
+    const response = await apiClient.get(`/routes/${routeId}/live`);
+    return response.data;
+  },
+
   getFavoriteRoutes: async () => {
     const response = await apiClient.get('/profile/favorites/routes');
     return response.data;

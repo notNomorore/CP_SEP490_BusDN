@@ -800,6 +800,93 @@ export class RouteService {
       alternatives: result.alternatives,
     };
   }
+
+  static interpolatePathPosition(pathPoints, progress) {
+    const normalizedProgress = Math.max(0, Math.min(progress, 0.999));
+    const segmentCount = Math.max(pathPoints.length - 1, 1);
+    const rawIndex = normalizedProgress * segmentCount;
+    const startIndex = Math.floor(rawIndex);
+    const endIndex = Math.min(startIndex + 1, pathPoints.length - 1);
+    const segmentProgress = rawIndex - startIndex;
+    const start = pathPoints[startIndex];
+    const end = pathPoints[endIndex];
+
+    return {
+      latitude: Number((start.latitude + (end.latitude - start.latitude) * segmentProgress).toFixed(6)),
+      longitude: Number((start.longitude + (end.longitude - start.longitude) * segmentProgress).toFixed(6)),
+    };
+  }
+
+  static findNextStop(route, progress) {
+    const stops = route.stops || [];
+    const stopCount = Math.max(stops.length - 1, 1);
+    const nextStopIndex = Math.min(Math.ceil(progress * stopCount), stops.length - 1);
+
+    return stops[nextStopIndex] || stops[stops.length - 1] || null;
+  }
+
+  static async getLiveBusLocations(routeId) {
+    await this.ensureSampleRoutes();
+
+    let route = await Route.findOne({ routeNumber: routeId, status: 'ACTIVE' }).lean();
+
+    if (!route) {
+      try {
+        route = await Route.findOne({ _id: routeId, status: 'ACTIVE' }).lean();
+      } catch {
+        route = null;
+      }
+    }
+
+    if (!route) {
+      throw new Error('Bus not found');
+    }
+
+    const pathPoints = route.pathPoints?.length ? route.pathPoints : route.stops;
+
+    if (!pathPoints?.length || pathPoints.length < 2) {
+      return {
+        route: this.formatRoute(route),
+        buses: [],
+        message: 'Live location unavailable',
+        refreshedAt: new Date().toISOString(),
+      };
+    }
+
+    const now = Date.now();
+    const cycleMs = Math.max(route.estimatedDurationMinutes || 30, 10) * 60 * 1000;
+    const busOffsets = [0, 0.48];
+    const buses = busOffsets.map((offset, index) => {
+      const progress = ((now % cycleMs) / cycleMs + offset) % 1;
+      const currentLocation = this.interpolatePathPosition(pathPoints, progress);
+      const nextStop = this.findNextStop(route, progress);
+      const remainingMinutes = Math.max(
+        Math.round((1 - progress) * (route.estimatedDurationMinutes || 30)),
+        1
+      );
+      const arrivalToNextStopMinutes = nextStop
+        ? Math.max(Math.round(((nextStop.estimatedOffsetMinutes || 0) / (route.estimatedDurationMinutes || 30) - progress) * (route.estimatedDurationMinutes || 30)), 1)
+        : remainingMinutes;
+
+      return {
+        busId: `${route.routeNumber}-BUS-${index + 1}`,
+        routeId: String(route._id),
+        routeNumber: route.routeNumber,
+        currentLocation,
+        estimatedArrivalTime: `${Math.max(arrivalToNextStopMinutes, 1)} min`,
+        nextStop: nextStop?.name || route.destination,
+        status: index === 1 && progress > 0.82 ? 'Delayed' : 'Running',
+        lastUpdated: new Date(now).toISOString(),
+      };
+    });
+
+    return {
+      route: this.formatRoute(route),
+      buses,
+      count: buses.length,
+      refreshedAt: new Date(now).toISOString(),
+    };
+  }
 }
 
 export default RouteService;
