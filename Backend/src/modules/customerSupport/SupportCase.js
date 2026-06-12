@@ -4,7 +4,7 @@ const SupportCaseSchema = new mongoose.Schema(
   {
     type: {
       type: String,
-      enum: ['COMPLAINT', 'LOST_ITEM'],
+      enum: ['COMPLAINT'],
       required: true,
       index: true,
     },
@@ -26,7 +26,7 @@ const SupportCaseSchema = new mongoose.Schema(
     },
     category: {
       type: String,
-      enum: ['SERVICE_QUALITY', 'DELAY', 'DRIVER_BEHAVIOR', 'SAFETY', 'PAYMENT', 'LOST_ITEM', 'OTHER'],
+      enum: ['SERVICE_QUALITY', 'DELAY', 'DRIVER_BEHAVIOR', 'SAFETY', 'PAYMENT', 'OTHER'],
       default: 'OTHER',
     },
     priority: {
@@ -47,19 +47,6 @@ const SupportCaseSchema = new mongoose.Schema(
     incidentAt: Date,
     contactPhone: String,
     contactEmail: String,
-    lostItem: {
-      itemName: String,
-      itemDescription: String,
-      lastSeenLocation: String,
-      lostAt: Date,
-      recoveryStatus: {
-        type: String,
-        enum: ['REPORTED', 'SEARCHING', 'FOUND', 'RETURNED', 'UNRECOVERED'],
-        default: 'REPORTED',
-      },
-      foundAt: Date,
-      returnedAt: Date,
-    },
     responses: [
       {
         message: {
@@ -71,6 +58,25 @@ const SupportCaseSchema = new mongoose.Schema(
           type: mongoose.Schema.Types.ObjectId,
           ref: 'User',
           required: true,
+        },
+        statusBefore: {
+          type: String,
+          enum: ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'REJECTED', 'CLOSED'],
+          default: 'OPEN',
+        },
+        statusAfter: {
+          type: String,
+          enum: ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'REJECTED', 'CLOSED'],
+          default: 'IN_PROGRESS',
+        },
+        responseType: {
+          type: String,
+          enum: ['COMPLAINT_RESPONSE', 'INTERNAL_NOTE'],
+          default: 'COMPLAINT_RESPONSE',
+        },
+        visibleToPassenger: {
+          type: Boolean,
+          default: true,
         },
         createdAt: {
           type: Date,

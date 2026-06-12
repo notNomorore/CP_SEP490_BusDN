@@ -3,5 +3,4 @@ export { default as customerSupportService } from './services/customerSupportSer
 export {
   CASE_STATUSES,
   CASE_TYPES,
-  RECOVERY_STATUSES,
 } from './services/customerSupportService.js';

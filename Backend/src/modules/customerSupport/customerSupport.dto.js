@@ -1,7 +1,7 @@
-const CASE_TYPES = ['COMPLAINT', 'LOST_ITEM'];
+const CASE_TYPES = ['COMPLAINT'];
 const CASE_STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'REJECTED', 'CLOSED'];
+const COMPLAINT_RESPONSE_STATUSES = ['IN_PROGRESS', 'RESOLVED', 'REJECTED', 'CLOSED'];
 const CASE_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
-const RECOVERY_STATUSES = ['REPORTED', 'SEARCHING', 'FOUND', 'RETURNED', 'UNRECOVERED'];
 
 export const CreateSupportCaseDTO = {
   validate: (body) => {
@@ -23,10 +23,6 @@ export const CreateSupportCaseDTO = {
       errors.priority = 'Priority is invalid';
     }
 
-    if (body.type === 'LOST_ITEM' && !body.lostItem?.itemName?.trim()) {
-      errors.itemName = 'Lost item name is required';
-    }
-
     return Object.keys(errors).length === 0 ? null : errors;
   },
 };
@@ -39,28 +35,12 @@ export const RespondSupportCaseDTO = {
       errors.message = 'Response message is required';
     }
 
-    if (body.status && !CASE_STATUSES.includes(body.status)) {
+    if (body.message?.trim() && body.message.trim().length < 10) {
+      errors.message = 'Response message must be at least 10 characters';
+    }
+
+    if (body.status && !COMPLAINT_RESPONSE_STATUSES.includes(body.status)) {
       errors.status = 'Status is invalid';
-    }
-
-    return Object.keys(errors).length === 0 ? null : errors;
-  },
-};
-
-export const UpdateLostItemCaseDTO = {
-  validate: (body) => {
-    const errors = {};
-
-    if (body.status && !CASE_STATUSES.includes(body.status)) {
-      errors.status = 'Status is invalid';
-    }
-
-    if (body.recoveryStatus && !RECOVERY_STATUSES.includes(body.recoveryStatus)) {
-      errors.recoveryStatus = 'Recovery status is invalid';
-    }
-
-    if (body.note !== undefined && !body.note?.trim()) {
-      errors.note = 'Case note cannot be empty';
     }
 
     return Object.keys(errors).length === 0 ? null : errors;
@@ -90,7 +70,6 @@ export const SupportCaseResponseDTO = {
     incidentAt: supportCase.incidentAt,
     contactPhone: supportCase.contactPhone,
     contactEmail: supportCase.contactEmail,
-    lostItem: supportCase.lostItem,
     responses: supportCase.responses || [],
     assignedTo: supportCase.assignedTo,
     resolvedAt: supportCase.resolvedAt,
@@ -104,5 +83,4 @@ export {
   CASE_TYPES,
   CASE_STATUSES,
   CASE_PRIORITIES,
-  RECOVERY_STATUSES,
 };

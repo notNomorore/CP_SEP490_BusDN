@@ -1,5 +1,13 @@
 import React from 'react';
-import { BarChart3, Gauge, ReceiptText, ShieldAlert, ShieldCheck, TicketPercent } from 'lucide-react';
+import {
+  BarChart3,
+  Gauge,
+  MessageSquareReply,
+  ReceiptText,
+  ShieldAlert,
+  ShieldCheck,
+  TicketPercent,
+} from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import Header from '../../../../shared/components/navigation/Header.jsx';
 import Footer from '../../../../shared/components/common/Footer.jsx';
@@ -29,6 +37,11 @@ const navItems = [
     label: 'Incidents',
     path: '/admin/incidents',
     icon: ShieldAlert,
+  },
+  {
+    label: 'Respond to Complaints',
+    path: '/admin/customer-support',
+    icon: MessageSquareReply,
   },
   {
     label: 'Monitoring',

@@ -2,9 +2,9 @@ import SupportCase from './SupportCase.js';
 
 export class CustomerSupportService {
   static buildCaseQuery({ type, status, priority }) {
-    const query = {};
+    const query = { type: 'COMPLAINT' };
 
-    if (type && type !== 'ALL') {
+    if (type === 'COMPLAINT') {
       query.type = type;
     }
 
@@ -21,11 +21,11 @@ export class CustomerSupportService {
 
   static async createCase(userId, data) {
     const supportCase = new SupportCase({
-      type: data.type,
+      type: 'COMPLAINT',
       passenger: userId,
       title: data.title.trim(),
       description: data.description.trim(),
-      category: data.category || (data.type === 'LOST_ITEM' ? 'LOST_ITEM' : 'OTHER'),
+      category: data.category || 'OTHER',
       priority: data.priority || 'NORMAL',
       routeName: data.routeName?.trim(),
       tripCode: data.tripCode?.trim(),
@@ -33,15 +33,6 @@ export class CustomerSupportService {
       incidentAt: data.incidentAt ? new Date(data.incidentAt) : undefined,
       contactPhone: data.contactPhone?.trim(),
       contactEmail: data.contactEmail?.trim(),
-      lostItem: data.type === 'LOST_ITEM'
-        ? {
-          itemName: data.lostItem.itemName.trim(),
-          itemDescription: data.lostItem.itemDescription?.trim(),
-          lastSeenLocation: data.lostItem.lastSeenLocation?.trim(),
-          lostAt: data.lostItem.lostAt ? new Date(data.lostItem.lostAt) : undefined,
-          recoveryStatus: 'REPORTED',
-        }
-        : undefined,
     });
 
     await supportCase.save();
@@ -92,12 +83,23 @@ export class CustomerSupportService {
       throw new Error('Only complaint cases can be responded through this action');
     }
 
+    if (supportCase.status === 'CLOSED') {
+      throw new Error('Closed complaint cases cannot be responded again');
+    }
+
+    const statusBefore = supportCase.status;
+    const statusAfter = data.status || 'IN_PROGRESS';
+
     supportCase.responses.push({
       message: data.message.trim(),
       responder: adminId,
+      statusBefore,
+      statusAfter,
+      responseType: 'COMPLAINT_RESPONSE',
+      visibleToPassenger: true,
       createdAt: new Date(),
     });
-    supportCase.status = data.status || 'IN_PROGRESS';
+    supportCase.status = statusAfter;
     supportCase.assignedTo = supportCase.assignedTo || adminId;
 
     if (supportCase.status === 'RESOLVED') {
@@ -107,50 +109,6 @@ export class CustomerSupportService {
     if (supportCase.status === 'CLOSED') {
       supportCase.closedAt = new Date();
     }
-
-    await supportCase.save();
-    return this.getCaseById(caseId);
-  }
-
-  static async updateLostItemCase(caseId, adminId, data) {
-    const supportCase = await this.getCaseById(caseId);
-
-    if (supportCase.type !== 'LOST_ITEM') {
-      throw new Error('Only lost item cases can be handled through this action');
-    }
-
-    if (data.note?.trim()) {
-      supportCase.responses.push({
-        message: data.note.trim(),
-        responder: adminId,
-        createdAt: new Date(),
-      });
-    }
-
-    if (data.status) {
-      supportCase.status = data.status;
-    }
-
-    if (data.recoveryStatus) {
-      supportCase.lostItem.recoveryStatus = data.recoveryStatus;
-    }
-
-    if (data.recoveryStatus === 'FOUND') {
-      supportCase.lostItem.foundAt = new Date();
-      supportCase.status = data.status || 'IN_PROGRESS';
-    }
-
-    if (data.recoveryStatus === 'RETURNED') {
-      supportCase.lostItem.returnedAt = new Date();
-      supportCase.status = 'RESOLVED';
-      supportCase.resolvedAt = new Date();
-    }
-
-    if (supportCase.status === 'CLOSED') {
-      supportCase.closedAt = new Date();
-    }
-
-    supportCase.assignedTo = supportCase.assignedTo || adminId;
 
     await supportCase.save();
     return this.getCaseById(caseId);

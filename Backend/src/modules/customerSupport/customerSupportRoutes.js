@@ -11,6 +11,5 @@ router.post('/cases', authorizeRole('PASSENGER'), CustomerSupportController.crea
 router.get('/admin/cases', authorizeRole('ADMIN'), CustomerSupportController.listCases);
 router.get('/admin/cases/:caseId', authorizeRole('ADMIN'), CustomerSupportController.getCaseDetail);
 router.post('/admin/cases/:caseId/respond', authorizeRole('ADMIN'), CustomerSupportController.respondToComplaint);
-router.patch('/admin/cases/:caseId/lost-item', authorizeRole('ADMIN'), CustomerSupportController.updateLostItemCase);
 
 export default router;

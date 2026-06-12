@@ -3,7 +3,6 @@ import {
   CreateSupportCaseDTO,
   RespondSupportCaseDTO,
   SupportCaseResponseDTO,
-  UpdateLostItemCaseDTO,
 } from './customerSupport.dto.js';
 import logger from '../../utils/logger.js';
 
@@ -97,43 +96,6 @@ export class CustomerSupportController {
       logger.error('Respond to complaint error:', error);
 
       if (error.message.includes('Only complaint')) {
-        return res.status(400).json({
-          success: false,
-          message: error.message,
-        });
-      }
-
-      next(error);
-    }
-  }
-
-  static async updateLostItemCase(req, res, next) {
-    try {
-      const validationErrors = UpdateLostItemCaseDTO.validate(req.body);
-
-      if (validationErrors) {
-        return res.status(400).json({
-          success: false,
-          message: 'Validation failed',
-          errors: validationErrors,
-        });
-      }
-
-      const supportCase = await CustomerSupportService.updateLostItemCase(
-        req.params.caseId,
-        req.user.userId,
-        req.body
-      );
-
-      return res.json({
-        success: true,
-        message: 'Lost item case updated successfully',
-        data: SupportCaseResponseDTO.format(supportCase),
-      });
-    } catch (error) {
-      logger.error('Update lost item case error:', error);
-
-      if (error.message.includes('Only lost item')) {
         return res.status(400).json({
           success: false,
           message: error.message,
