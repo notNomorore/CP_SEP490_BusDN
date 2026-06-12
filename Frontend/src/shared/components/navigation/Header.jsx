@@ -23,6 +23,8 @@ const Header = () => {
     { label: 'Manage Booking', path: '/profile', requiresAuth: true },
     { label: 'Promotions', path: '/admin/promotions', requiresAuth: true, adminOnly: true },
     { label: 'Revenue', path: '/admin/revenue', requiresAuth: true, adminOnly: true },
+    { label: 'Walk-in', path: '/admin/walkin-tickets', requiresAuth: true, adminOnly: true },
+    { label: 'Compliance', path: '/admin/passenger-compliance', requiresAuth: true, adminOnly: true },
     { label: 'Analytics', path: '/admin/analytics/route-efficiency', requiresAuth: true, adminOnly: true },
     { label: 'Incidents', path: '/admin/incidents', requiresAuth: true, adminOnly: true },
     { label: 'Monitoring', path: '/admin/system-monitoring', requiresAuth: true, adminOnly: true },

@@ -16,6 +16,21 @@ const apiClient = axios.create({
   },
 });
 
+const pendingGetRequests = new Map();
+
+const stableParams = (params = {}) => Object.keys(params)
+  .sort()
+  .reduce((result, key) => {
+    result[key] = params[key];
+    return result;
+  }, {});
+
+const getRequestKey = (url, config = {}) => JSON.stringify({
+  url,
+  params: stableParams(config.params),
+  responseType: config.responseType || 'json',
+});
+
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('authToken');
@@ -48,8 +63,31 @@ apiClient.interceptors.response.use(
       window.location.href = '/auth/login';
     }
 
-    throw error.response?.data || error;
+    const responseError = error.response?.data || error;
+    if (error.response?.status === 429) {
+      responseError.isRateLimited = true;
+      responseError.retryAfter = error.response.headers?.['retry-after'] || responseError.retryAfter;
+    }
+
+    throw responseError;
   }
 );
+
+const axiosGet = apiClient.get.bind(apiClient);
+apiClient.get = (url, config = {}) => {
+  const key = getRequestKey(url, config);
+  const pending = pendingGetRequests.get(key);
+  if (pending) {
+    return pending;
+  }
+
+  const request = axiosGet(url, config).finally(() => {
+    if (pendingGetRequests.get(key) === request) {
+      pendingGetRequests.delete(key);
+    }
+  });
+  pendingGetRequests.set(key, request);
+  return request;
+};
 
 export default apiClient;

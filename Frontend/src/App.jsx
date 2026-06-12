@@ -5,7 +5,13 @@ import { HomePage } from './features/home';
 import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/priorityProfile';
 import { AdminCustomerSupportPage } from './features/customerSupport';
 import { SearchRoutesPage } from './features/routes';
-import { DashboardAdminPage, RouteControlPage, UserAccountsPage } from './features/admin';
+import {
+  AdminCommandLayout,
+  DashboardAdminPage,
+  RouteControlPage,
+  StaffPerformancePage,
+  UserAccountsPage,
+} from './features/admin';
 import { ScheduleOperationsPage } from './features/scheduleOperations';
 import {
   LoginPage,
@@ -26,6 +32,8 @@ import { RouteEfficiencyPage } from './features/admin/analytics';
 import { IncidentReportsPage } from './features/admin/incidents';
 import { SystemMonitoringPage } from './features/admin/systemMonitoring';
 import { FareOperationsPage } from './features/admin/fareOperations';
+import { WalkInTicketMonitoringPage } from './features/admin/walkInTickets';
+import { PassengerCompliancePage } from './features/admin/passengerCompliance';
 
 function App() {
   return (
@@ -101,38 +109,6 @@ function App() {
             }
           />
 
-          <Route
-            path="/admin/priority-verification"
-            element={
-              <AdminRoute>
-                <AdminPriorityVerificationPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/admin/customer-support"
-            element={
-              <AdminRoute>
-                <AdminCustomerSupportPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/admin/routes"
-            element={
-              <AdminRoute>
-                <RouteControlPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/admin/users"
-            element={
-              <AdminRoute>
-                <UserAccountsPage />
-              </AdminRoute>
-            }
-          />
           {/* Ticket Feature */}
           {/* <Route path="/booking" element={<ProtectedRoute><BookingPage /></ProtectedRoute>} />
           <Route path="/tickets" element={<ProtectedRoute><MyTicketsPage /></ProtectedRoute>} /> */}
@@ -149,71 +125,31 @@ function App() {
             )}
           />
 
-          {/* Admin Feature */}
+          {/* Unified Admin Command Center */}
           <Route
-            path="/admin/dashboard"
             element={(
               <AdminRoute>
-                <DashboardAdminPage />
+                <AdminCommandLayout />
               </AdminRoute>
             )}
-          />
-          <Route
-            path="/admin/promotions"
-            element={(
-              <AdminRoute>
-                <PromotionManagementPage />
-              </AdminRoute>
-            )}
-          />
-          <Route
-            path="/admin/promotions/statistics"
-            element={(
-              <AdminRoute>
-                <PromotionStatisticsPage />
-              </AdminRoute>
-            )}
-          />
-          <Route
-            path="/admin/revenue"
-            element={(
-              <AdminRoute>
-                <RevenueReportsPage />
-              </AdminRoute>
-            )}
-          />
-          <Route
-            path="/admin/fare-operations"
-            element={(
-              <AdminRoute>
-                <FareOperationsPage />
-              </AdminRoute>
-            )}
-          />
-          <Route
-            path="/admin/analytics/route-efficiency"
-            element={(
-              <AdminRoute>
-                <RouteEfficiencyPage />
-              </AdminRoute>
-            )}
-          />
-          <Route
-            path="/admin/incidents"
-            element={(
-              <AdminRoute>
-                <IncidentReportsPage />
-              </AdminRoute>
-            )}
-          />
-          <Route
-            path="/admin/system-monitoring"
-            element={<AdminRoute><SystemMonitoringPage /></AdminRoute>}
-          />
-          <Route
-            path="/admin/system-monitoring/suspicious"
-            element={<AdminRoute><SystemMonitoringPage /></AdminRoute>}
-          />
+          >
+            <Route path="/admin/dashboard" element={<DashboardAdminPage embedded />} />
+            <Route path="/admin/routes" element={<RouteControlPage />} />
+            <Route path="/admin/users" element={<UserAccountsPage />} />
+            <Route path="/admin/staff-performance" element={<StaffPerformancePage />} />
+            <Route path="/admin/priority-verification" element={<AdminPriorityVerificationPage />} />
+            <Route path="/admin/customer-support" element={<AdminCustomerSupportPage />} />
+            <Route path="/admin/promotions" element={<PromotionManagementPage />} />
+            <Route path="/admin/promotions/statistics" element={<PromotionStatisticsPage />} />
+            <Route path="/admin/revenue" element={<RevenueReportsPage />} />
+            <Route path="/admin/fare-operations" element={<FareOperationsPage />} />
+            <Route path="/admin/walkin-tickets" element={<WalkInTicketMonitoringPage />} />
+            <Route path="/admin/passenger-compliance" element={<PassengerCompliancePage />} />
+            <Route path="/admin/analytics/route-efficiency" element={<RouteEfficiencyPage />} />
+            <Route path="/admin/incidents" element={<IncidentReportsPage />} />
+            <Route path="/admin/system-monitoring" element={<SystemMonitoringPage />} />
+            <Route path="/admin/system-monitoring/suspicious" element={<SystemMonitoringPage />} />
+          </Route>
 
           {/* Driver and Bus Assistant Feature */}
           <Route

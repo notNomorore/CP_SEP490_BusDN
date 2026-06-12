@@ -1068,7 +1068,7 @@ const AdminSidebar = ({ activeModule, setActiveModule, t }) => {
   );
 };
 
-const DashboardAdminPage = () => {
+const DashboardAdminPage = ({ embedded = false }) => {
   const [activeModule, setActiveModule] = useState('fleet');
   const { language, toggleLanguage } = useLanguage();
   const { user } = useAuthStore();
@@ -1077,6 +1077,10 @@ const DashboardAdminPage = () => {
   const ActivePanel = panels[activeModule] || FleetOperationsPanel;
   const t = (key) => translations[language]?.[key] || translations.en[key] || key;
   const activeLabelKey = adminModules.find((item) => item.id === activeModule)?.labelKey || 'fleet';
+
+  if (embedded) {
+    return <FleetOperationsPanel language={language} t={t} />;
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-surface text-on-surface">
