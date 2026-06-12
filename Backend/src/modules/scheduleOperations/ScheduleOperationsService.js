@@ -561,12 +561,26 @@ export class ScheduleOperationsService {
       }
     );
 
+    const incident = await OperationIncident.create({
+      incidentCode: this.buildIncidentCode(assignment, 'TRIP_REJECTION'),
+      type: 'TRIP_REJECTION',
+      severity: 'MEDIUM',
+      trip: trip._id,
+      route: getScheduleRouteId(trip),
+      vehicle: getScheduleVehicleId(trip),
+      driver: userId,
+      reporterRole: role,
+      locationText: this.buildRouteLabel(trip),
+      description: reason,
+      reportedAt: new Date(),
+    });
+
     await this.syncToAdminIncidentReport({
-      sourceType: 'TRIP_REJECTION',
-      sourceId: trip._id,
+      sourceType: 'OPERATION_TRIP_REJECTION',
+      sourceId: incident._id,
       reporterId: userId,
       reporterRole: role,
-      incidentType: 'OTHER',
+      incidentType: 'TRIP_REJECTION',
       title: `Tài xế từ chối chuyến ${trip.scheduleCode}`,
       description: [
         'Tài xế đã từ chối chuyến được phân công.',
@@ -780,12 +794,29 @@ export class ScheduleOperationsService {
       ),
     ]);
 
+    const incident = await OperationIncident.create({
+      incidentCode: this.buildIncidentCode(assignment, 'VEHICLE_ISSUE'),
+      type: 'VEHICLE_ISSUE',
+      severity: issueCategory === 'BRAKE' || issueCategory === 'ENGINE' ? 'HIGH' : 'MEDIUM',
+      trip: assignment.trip._id,
+      route: getScheduleRouteId(assignment.trip),
+      vehicle: getScheduleVehicleId(assignment.trip),
+      driver: userId,
+      reporterRole: role,
+      locationText: this.buildRouteLabel(assignment.trip),
+      description: [
+        `Nhóm lỗi: ${issueCategory}.`,
+        description,
+      ].join('\n'),
+      reportedAt: new Date(),
+    });
+
     await this.syncToAdminIncidentReport({
-      sourceType: 'VEHICLE_INSPECTION_ISSUE',
-      sourceId: inspection._id,
+      sourceType: 'OPERATION_VEHICLE_ISSUE',
+      sourceId: incident._id,
       reporterId: userId,
       reporterRole: role,
-      incidentType: 'VEHICLE_BREAKDOWN',
+      incidentType: 'VEHICLE_ISSUE',
       title: `Báo lỗi xe trước chuyến ${assignment.trip.scheduleCode}`,
       description: [
         'Tài xế báo lỗi xe trong bước kiểm tra trước khi xuất bến.',
@@ -804,16 +835,29 @@ export class ScheduleOperationsService {
     return inspection;
   }
 
-  static async assertDriverHasNoActiveTrip(userId, currentTripId) {
+  static async assertDriverHasNoActiveTrip(userId, currentTrip) {
+    const currentTripId = currentTrip?._id || currentTrip;
+    const serviceDate = currentTrip?.serviceDate ? new Date(currentTrip.serviceDate) : new Date();
+
     const activeAssignment = await TripSchedule.findOne({
       _id: { $ne: currentTripId },
       'driver.userId': userId,
       status: 'IN_PROGRESS',
-    });
+      serviceDate: {
+        $gte: startOfDay(serviceDate),
+        $lte: endOfDay(serviceDate),
+      },
+    }).select('scheduleCode serviceDate departureTime expectedArrivalTime');
 
     if (activeAssignment) {
       const error = new Error('Driver already has another trip in progress');
       error.statusCode = 409;
+      error.details = {
+        scheduleCode: activeAssignment.scheduleCode,
+        serviceDate: activeAssignment.serviceDate,
+        departureTime: activeAssignment.departureTime,
+        expectedArrivalTime: activeAssignment.expectedArrivalTime,
+      };
       throw error;
     }
   }
@@ -849,7 +893,7 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    await this.assertDriverHasNoActiveTrip(userId, trip._id);
+    await this.assertDriverHasNoActiveTrip(userId, trip);
 
     const startedAt = new Date();
     const gpsPayload = normalizeStartGpsPayload(payload.gps || payload, startedAt);
@@ -1208,14 +1252,27 @@ export class ScheduleOperationsService {
       trafficCategory,
       affectedDirection,
     } = this.validateIncidentPayload(payload);
+
+    if (
+      role === 'BUS_ASSISTANT'
+      && !['PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'].includes(type)
+    ) {
+      const error = new Error('Bus assistants can only report passenger violations, passenger conflicts, or found items');
+      error.statusCode = 403;
+      throw error;
+    }
+
     if (!getScheduleRouteId(assignment.trip) || !getScheduleVehicleId(assignment.trip)) {
       const error = new Error('Assigned schedule must have route and vehicle before reporting incidents');
       error.statusCode = 400;
       throw error;
     }
 
-    if (assignment.trip.status !== 'IN_PROGRESS' && !(type === 'FOUND_ITEM' && assignment.trip.status === 'COMPLETED')) {
-      const error = new Error('Operation incidents can only be reported while the trip is in progress');
+    if (
+      assignment.trip.status !== 'IN_PROGRESS'
+      && !(role === 'BUS_ASSISTANT' && type === 'FOUND_ITEM' && assignment.trip.status === 'COMPLETED')
+    ) {
+      const error = new Error('Operation incidents can only be reported while the trip is in progress, except found item reports after completion');
       error.statusCode = 409;
       throw error;
     }

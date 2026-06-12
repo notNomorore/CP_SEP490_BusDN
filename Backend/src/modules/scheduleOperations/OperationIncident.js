@@ -11,6 +11,8 @@ const OperationIncidentSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: [
+        'TRIP_REJECTION',
+        'VEHICLE_ISSUE',
         'TRAFFIC_CONGESTION',
         'ACCIDENT',
         'VEHICLE_BREAKDOWN',

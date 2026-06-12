@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 export const INCIDENT_TYPES = [
   'ACCIDENT',
   'TRAFFIC_CONGESTION',
+  'TRIP_REJECTION',
+  'VEHICLE_ISSUE',
   'VEHICLE_BREAKDOWN',
   'PASSENGER_VIOLATION',
   'PASSENGER_CONFLICT',

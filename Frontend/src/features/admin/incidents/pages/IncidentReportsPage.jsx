@@ -22,6 +22,8 @@ const fieldClassName =
 const incidentTypes = [
   'ACCIDENT',
   'TRAFFIC_CONGESTION',
+  'TRIP_REJECTION',
+  'VEHICLE_ISSUE',
   'VEHICLE_BREAKDOWN',
   'PASSENGER_VIOLATION',
   'PASSENGER_CONFLICT',

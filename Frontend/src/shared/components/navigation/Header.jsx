@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../../../features/auth/stores/authStore.js';
+import apiClient from '../../services/apiClient.js';
 
 const Header = () => {
   const navigate = useNavigate();
@@ -14,6 +15,9 @@ const Header = () => {
     logout,
   } = useAuthStore();
   const [isScrolled, setIsScrolled] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [selectedNotification, setSelectedNotification] = useState(null);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -46,6 +50,55 @@ const Header = () => {
 
   const displayName = user?.fullName?.trim() || 'Passenger';
   const profileInitial = displayName.charAt(0).toUpperCase();
+  const isOperationsUser = isAuthenticated && (isDriver() || isBusAssistant());
+  const unreadNotificationCount = notifications.filter((notification) => !notification.isRead).length;
+
+  useEffect(() => {
+    if (!isOperationsUser) {
+      setNotifications([]);
+      setIsNotificationsOpen(false);
+      setSelectedNotification(null);
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    const loadNotifications = async () => {
+      try {
+        const response = await apiClient.get('/schedule-operations/operation-notifications');
+        if (isMounted) {
+          setNotifications(response.data?.notifications || []);
+        }
+      } catch {
+        if (isMounted) {
+          setNotifications([]);
+        }
+      }
+    };
+
+    loadNotifications();
+    const intervalId = window.setInterval(loadNotifications, 60000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [isOperationsUser]);
+
+  const formatNotificationTime = (value) => {
+    if (!value) return '';
+
+    try {
+      return new Intl.DateTimeFormat('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(new Date(value));
+    } catch {
+      return '';
+    }
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -156,13 +209,99 @@ const Header = () => {
                   </button>
                 </>
               ) : isDriver() || isBusAssistant() ? (
-                <button
-                  type="button"
-                  onClick={() => navigate('/operations/schedule')}
-                  className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
-                >
-                  Operations Schedule
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/operations/schedule')}
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                  >
+                    Operations Schedule
+                  </button>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsNotificationsOpen((current) => !current);
+                        setSelectedNotification(null);
+                      }}
+                      className="relative inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/10 text-surface-bright hover:bg-white/10"
+                      aria-label="Operation notifications"
+                    >
+                      <span className="material-symbols-outlined text-[22px]">notifications</span>
+                      {unreadNotificationCount > 0 ? (
+                        <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-black text-white">
+                          {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
+                        </span>
+                      ) : null}
+                    </button>
+
+                    {isNotificationsOpen ? (
+                      <div className="absolute right-0 top-14 z-[60] w-[360px] overflow-hidden rounded-2xl border border-white/15 bg-white text-slate-950 shadow-2xl">
+                        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                          <div>
+                            <p className="text-sm font-black">Thông báo vận hành</p>
+                            <p className="text-xs text-slate-500">
+                              {notifications.length} thông báo từ điều hành
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => navigate('/operations/schedule')}
+                            className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
+                          >
+                            Lịch chạy
+                          </button>
+                        </div>
+
+                        <div className="max-h-[360px] overflow-y-auto">
+                          {!notifications.length ? (
+                            <div className="px-4 py-8 text-center text-sm text-slate-500">
+                              Chưa có thông báo vận hành.
+                            </div>
+                          ) : notifications.map((notification) => (
+                            <button
+                              key={notification.id}
+                              type="button"
+                              onClick={() => setSelectedNotification(notification)}
+                              className={`block w-full border-b border-slate-100 px-4 py-3 text-left hover:bg-emerald-50 ${
+                                selectedNotification?.id === notification.id ? 'bg-emerald-50' : 'bg-white'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="line-clamp-1 text-sm font-black text-slate-950">
+                                  {notification.title}
+                                </span>
+                                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                                  {notification.priority || 'NORMAL'}
+                                </span>
+                              </div>
+                              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">
+                                {notification.message}
+                              </p>
+                              <p className="mt-2 text-[11px] font-semibold text-slate-400">
+                                {formatNotificationTime(notification.createdAt || notification.activeFrom)}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+
+                        {selectedNotification ? (
+                          <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
+                            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">
+                              Chi tiết
+                            </p>
+                            <h4 className="mt-1 text-sm font-black text-slate-950">
+                              {selectedNotification.title}
+                            </h4>
+                            <p className="mt-2 text-sm leading-6 text-slate-700">
+                              {selectedNotification.message}
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </>
               ) : (
                 <button
                   type="button"

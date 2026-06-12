@@ -2,8 +2,6 @@
 import { HTTP_STATUS, PAGINATION } from '../../constants/index.js';
 import { CustomError } from '../../middleware/errorHandler.js';
 import IncidentReport from './IncidentReport.js';
-import TripSchedule from '../admin/TripSchedule.js';
-import VehicleInspection from '../scheduleOperations/VehicleInspection.js';
 import OperationIncident from '../scheduleOperations/OperationIncident.js';
 
 const toPositiveInteger = (value, fallback, max = Number.MAX_SAFE_INTEGER) => {
@@ -149,12 +147,6 @@ const logAudit = async ({ action, actorId, incidentId, metadata = {} }) => {
   }
 };
 
-const routeLabel = (trip = {}) => trip.routeName || trip.routeCode || 'Unknown route';
-const vehicleLabel = (trip = {}) => {
-  const vehicle = trip.vehicle || {};
-  return [vehicle.plateNumber, vehicle.busCode].filter(Boolean).join(' - ') || 'Unknown vehicle';
-};
-
 const buildSourceUpsert = (report) => ({
   updateOne: {
     filter: {
@@ -172,6 +164,8 @@ const operationIncidentSourceType = (type) => `OPERATION_${type}`;
 
 const operationIncidentTitle = (incident) => {
   const label = {
+    TRIP_REJECTION: 'Tài xế từ chối chuyến',
+    VEHICLE_ISSUE: 'Báo lỗi xe trước chuyến',
     TRAFFIC_CONGESTION: 'Báo kẹt xe',
     ACCIDENT: 'Báo tai nạn',
     PASSENGER_VIOLATION: 'Báo hành khách vi phạm',
@@ -239,67 +233,14 @@ const operationIncidentDescription = (incident) => [
 
 export class IncidentReportService {
   static async syncOperationalSources() {
-    const [rejectedTrips, vehicleIssues, operationIncidents] = await Promise.all([
-      TripSchedule.find({
-        'driverAcceptance.status': 'REJECTED',
-        'driver.userId': { $ne: null },
-      }).sort({ updatedAt: -1 }).limit(200).lean(),
-      VehicleInspection.find({
-        status: 'ISSUE_REPORTED',
-        driver: { $ne: null },
-      }).sort({ reportedAt: -1, updatedAt: -1 }).limit(200).lean(),
+    const [operationIncidents] = await Promise.all([
       OperationIncident.find({
-        type: { $in: ['TRAFFIC_CONGESTION', 'ACCIDENT', 'PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'] },
+        type: { $in: ['TRIP_REJECTION', 'VEHICLE_ISSUE', 'TRAFFIC_CONGESTION', 'ACCIDENT', 'PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'] },
         driver: { $ne: null },
       }).sort({ reportedAt: -1, updatedAt: -1 }).limit(300).lean(),
     ]);
 
     const operations = [
-      ...rejectedTrips.map((trip) => buildSourceUpsert({
-        reporterId: trip.driver.userId,
-        reporterRole: 'DRIVER',
-        incidentType: 'OTHER',
-        title: `Tài xế từ chối chuyến ${trip.scheduleCode}`,
-        description: [
-          'Tài xế đã từ chối chuyến được phân công.',
-          `Tuyến: ${routeLabel(trip)}.`,
-          `Xe: ${vehicleLabel(trip)}.`,
-          `Lý do: ${trip.driverAcceptance?.rejectionReason || 'Không có lý do.'}`,
-        ].join('\n'),
-        routeId: trip.routeId || null,
-        tripId: trip._id,
-        vehicleId: trip.vehicle?.busId || null,
-        location: routeLabel(trip),
-        severity: 'MEDIUM',
-        status: 'PENDING',
-        attachments: [],
-        sourceModule: 'SCHEDULE_OPERATIONS',
-        sourceType: 'TRIP_REJECTION',
-        sourceId: trip._id,
-        createdAt: trip.driverAcceptance?.respondedAt || trip.updatedAt || new Date(),
-      })),
-      ...vehicleIssues.map((inspection) => buildSourceUpsert({
-        reporterId: inspection.driver,
-        reporterRole: 'DRIVER',
-        incidentType: 'VEHICLE_BREAKDOWN',
-        title: `Báo lỗi xe trước chuyến ${inspection.inspectionCode}`,
-        description: [
-          'Tài xế báo lỗi xe trong bước kiểm tra trước khi xuất bến.',
-          `Nhóm lỗi: ${inspection.issueCategory || 'OTHER'}.`,
-          `Mô tả: ${inspection.issueDescription || 'Không có mô tả.'}`,
-        ].join('\n'),
-        routeId: null,
-        tripId: inspection.trip || null,
-        vehicleId: inspection.vehicle || null,
-        location: 'Kiểm tra xe trước chuyến',
-        severity: ['BRAKE', 'ENGINE'].includes(inspection.issueCategory) ? 'HIGH' : 'MEDIUM',
-        status: 'PENDING',
-        attachments: [],
-        sourceModule: 'SCHEDULE_OPERATIONS',
-        sourceType: 'VEHICLE_INSPECTION_ISSUE',
-        sourceId: inspection._id,
-        createdAt: inspection.reportedAt || inspection.updatedAt || new Date(),
-      })),
       ...operationIncidents.map((incident) => buildSourceUpsert({
         reporterId: incident.driver,
         reporterRole: incident.reporterRole || 'DRIVER',
