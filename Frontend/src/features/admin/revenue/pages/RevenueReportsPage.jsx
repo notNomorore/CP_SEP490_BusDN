@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { format, subDays } from 'date-fns';
-import toast from 'react-hot-toast';
+import toast from '../../../../shared/utils/toast.js';
 import {
   BarChart3,
   CalendarDays,

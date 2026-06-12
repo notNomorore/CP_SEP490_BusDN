@@ -5,6 +5,7 @@ import User from '../auth/User.js';
 import FareMatrix from './FareMatrix.js';
 import MonthlyPassPricing from './MonthlyPassPricing.js';
 import PriorityDiscount from './PriorityDiscount.js';
+import { assertPassengerCanPurchase } from '../passengerCompliance/passengerCompliance.service.js';
 
 const getActorId = (actor) => actor?.userId || actor?._id || null;
 const normalizeNullableNumber = (value) => (value === '' || value === undefined ? null : value);
@@ -341,6 +342,7 @@ export class FareOperationsService {
 
   static async calculateOneWayFare({ routeId, distanceKm, passengerId, purchaseDate = new Date() }) {
     const date = new Date(purchaseDate);
+    await assertPassengerCanPurchase({ passengerId, routeId, at: date });
     const routeObjectId = routeId && mongoose.isValidObjectId(routeId) ? new mongoose.Types.ObjectId(routeId) : null;
     const active = activeAtQuery(date);
 
@@ -385,6 +387,7 @@ export class FareOperationsService {
 
   static async calculateMonthlyPassPrice({ routeId, passType, passengerId, purchaseDate = new Date() }) {
     const date = new Date(purchaseDate);
+    await assertPassengerCanPurchase({ passengerId, routeId, at: date });
     const active = activeAtQuery(date);
     const normalizedPassType = passType || 'ROUTE_PASS';
     const routeObjectId = routeId && mongoose.isValidObjectId(routeId) ? new mongoose.Types.ObjectId(routeId) : null;

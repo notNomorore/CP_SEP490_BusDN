@@ -43,12 +43,9 @@ const navItems = [
 ];
 
 const AdminPromotionShell = ({ children, title, subtitle, action }) => {
-  const location = useLocation();
-
   return (
-    <div className="min-h-screen">
-      <Header />
-      <main className="mx-auto w-full max-w-7xl px-4 pb-10 pt-28 lg:px-6">
+    <div className="w-full">
+      <main className="mx-auto w-full max-w-7xl pb-10">
         <div className="mb-6 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.22em] text-outline">
@@ -86,7 +83,6 @@ const AdminPromotionShell = ({ children, title, subtitle, action }) => {
 
         {children}
       </main>
-      <Footer />
     </div>
   );
 };

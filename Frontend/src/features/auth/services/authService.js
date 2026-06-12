@@ -1,5 +1,41 @@
 import apiClient from '../../../shared/services/apiClient.js';
 
+const FRONTEND_RUN_ID_KEY = 'frontendRunId';
+const AUTH_STORAGE_KEYS = ['authToken', 'authUser'];
+
+const clearCookie = (name, path = '/') => {
+  document.cookie = `${name}=; Max-Age=0; path=${path}; SameSite=Lax`;
+};
+
+const clearSessionCookies = () => {
+  document.cookie
+    .split(';')
+    .map((cookie) => cookie.split('=')[0].trim())
+    .filter(Boolean)
+    .forEach((name) => {
+      clearCookie(name);
+      clearCookie(name, window.location.pathname || '/');
+    });
+};
+
+const clearStoredAuthSession = () => {
+  AUTH_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+  sessionStorage.removeItem('registrationOtpSession');
+  clearSessionCookies();
+};
+
+const clearAuthSessionAfterFrontendRestart = () => {
+  const currentRunId = import.meta.env.VITE_FRONTEND_RUN_ID;
+  const previousRunId = localStorage.getItem(FRONTEND_RUN_ID_KEY);
+
+  if (previousRunId !== currentRunId) {
+    clearStoredAuthSession();
+    localStorage.setItem(FRONTEND_RUN_ID_KEY, currentRunId);
+  }
+};
+
+clearAuthSessionAfterFrontendRestart();
+
 const persistSession = (token, user) => {
   if (token) {
     localStorage.setItem('authToken', token);
@@ -83,8 +119,7 @@ export const authService = {
     try {
       await apiClient.post('/auth/logout');
     } finally {
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('authUser');
+      clearStoredAuthSession();
     }
   },
 

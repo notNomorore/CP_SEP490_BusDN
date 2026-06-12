@@ -105,6 +105,18 @@ export const config = {
     level: getEnv('LOG_LEVEL', 'info'),
   },
 
+  rateLimit: {
+    windowMs: toNumber(getEnv('RATE_LIMIT_WINDOW_MS', '900000'), 900000),
+    apiMax: toNumber(
+      getEnv('RATE_LIMIT_API_MAX', getEnv('NODE_ENV', 'development') === 'development' ? '5000' : '1000'),
+      getEnv('NODE_ENV', 'development') === 'development' ? 5000 : 1000
+    ),
+    authMax: toNumber(
+      getEnv('RATE_LIMIT_AUTH_MAX', getEnv('NODE_ENV', 'development') === 'development' ? '100' : '10'),
+      getEnv('NODE_ENV', 'development') === 'development' ? 100 : 10
+    ),
+  },
+
   // Paths
   paths: {
     root: rootDir,

@@ -1,3 +1,5 @@
 export { default as UserAccountsPage } from './pages/UserAccountsPage.jsx';
 export { default as RouteControlPage } from './pages/routes/RouteWorkflowPage.jsx';
 export { default as DashboardAdminPage } from './pages/DashboardAdminPage.jsx';
+export { default as AdminCommandLayout } from './components/AdminCommandLayout.jsx';
+export { default as StaffPerformancePage } from './pages/StaffPerformancePage.jsx';
