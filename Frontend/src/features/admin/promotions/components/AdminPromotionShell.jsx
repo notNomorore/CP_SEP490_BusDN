@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3, Gauge, ReceiptText, ShieldAlert, ShieldCheck, TicketPercent } from 'lucide-react';
+import { BarChart3, Gauge, ReceiptText, ShieldAlert, ShieldCheck, TicketPercent, WalletCards } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import Header from '../../../../shared/components/navigation/Header.jsx';
 import Footer from '../../../../shared/components/common/Footer.jsx';
@@ -9,6 +9,11 @@ const navItems = [
     label: 'Promotions',
     path: '/admin/promotions',
     icon: TicketPercent,
+  },
+  {
+    label: 'Fare Operations',
+    path: '/admin/fare-operations',
+    icon: WalletCards,
   },
   {
     label: 'Statistics',
@@ -57,7 +62,7 @@ const AdminPromotionShell = ({ children, title, subtitle, action }) => {
           {action}
         </div>
 
-        <div className="mb-6 flex flex-wrap gap-2 rounded-[24px] border border-outline-variant/40 bg-white/75 p-2">
+        <div className="admin-global-module-tabs mb-6 flex flex-wrap gap-2 rounded-[24px] border border-outline-variant/40 bg-white/75 p-2">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;

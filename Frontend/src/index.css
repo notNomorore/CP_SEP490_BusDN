@@ -34,6 +34,13 @@ body {
     linear-gradient(180deg, #f4faf7 0%, #eef6f2 45%, #f7fbf9 100%);
 }
 
+.dark body {
+  background:
+    radial-gradient(circle at top left, rgba(34, 197, 94, 0.12), transparent 22%),
+    linear-gradient(180deg, #071516 0%, #102225 100%);
+  color: #e2e8f0;
+}
+
 h1, h2, h3, h4, h5, h6,
 .font-headline,
 .font-display {
@@ -43,6 +50,11 @@ h1, h2, h3, h4, h5, h6,
 /* Selection Color */
 ::selection {
   @apply bg-primary-fixed text-primary;
+}
+
+.dark ::selection {
+  background: rgba(110, 231, 183, 0.35);
+  color: #ecfdf5;
 }
 
 /* Smooth Transitions */
@@ -74,8 +86,16 @@ button {
   @apply bg-surface-container;
 }
 
+.dark ::-webkit-scrollbar-track {
+  background: #0f1f22;
+}
+
 ::-webkit-scrollbar-thumb {
   @apply bg-outline rounded-full;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #35585b;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -85,6 +105,10 @@ button {
 /* Focus Ring */
 :focus-visible {
   @apply outline-2 outline-offset-2 outline-primary;
+}
+
+.dark :focus-visible {
+  outline-color: #6ee7b7;
 }
 
 /* Placeholder Styling */

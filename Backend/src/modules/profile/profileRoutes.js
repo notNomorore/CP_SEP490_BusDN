@@ -1,6 +1,6 @@
 import express from 'express';
 import { asyncHandler } from '../../middleware/errorHandler.js';
-import { authMiddleware, authorizeRole } from '../../middleware/authMiddleware.js';
+import { authMiddleware } from '../../middleware/authMiddleware.js';
 import validateRequest from '../../middleware/validateRequest.js';
 import { avatarUpload } from '../../middleware/uploadMiddleware.js';
 import ProfileController from './ProfileController.js';
@@ -11,7 +11,7 @@ import {
 
 const router = express.Router();
 
-router.use(authMiddleware, authorizeRole('PASSENGER'));
+router.use(authMiddleware);
 
 router.get('/me', asyncHandler(ProfileController.getMe));
 router.put(

@@ -3,12 +3,13 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// Load environment variables
-dotenv.config({ path: '.env.local' });
-dotenv.config({ path: '.env' });
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, '../..');
+
+// Load environment variables from the backend root, independent of the shell cwd.
+dotenv.config({ path: path.join(rootDir, '.env.local') });
+dotenv.config({ path: path.join(rootDir, '.env') });
 
 const getEnv = (key, fallback = undefined) => {
   const value = process.env[key];
@@ -106,9 +107,9 @@ export const config = {
 
   // Paths
   paths: {
-    root: path.dirname(__dirname),
+    root: rootDir,
     src: __dirname,
-    uploads: path.join(path.dirname(__dirname), 'uploads'),
+    uploads: path.join(rootDir, 'uploads'),
   },
 
   // Feature Flags

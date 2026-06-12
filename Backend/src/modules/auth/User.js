@@ -151,7 +151,7 @@ const UserSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['PASSENGER', 'DRIVER', 'BUS_ASSISTANT', 'BUS ASSISTANT', 'ADMIN'],
+      enum: ['PASSENGER', 'DRIVER', 'BUS_ASSISTANT', 'ADMIN'],
       default: 'PASSENGER',
     },
     status: {
@@ -197,10 +197,59 @@ const UserSchema = new mongoose.Schema(
       token: String,
       expiresAt: Date,
     },
-    walletBalance: {
-      type: Number,
-      default: 0,
-      min: 0,
+
+    // Priority Group (special passenger status)
+    isPriorityGroup: {
+      type: Boolean,
+      default: false,
+    },
+    priorityStatus: {
+      type: String,
+      enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'],
+      default: 'NONE',
+    },
+    priorityProfile: {
+      profileType: {
+        type: String,
+        enum: ['STUDENT', 'SENIOR', 'DISABLED', 'PREGNANT', 'CHILD_UNDER_6', 'OTHER'],
+      },
+      fullName: String,
+      dateOfBirth: Date,
+      identityNumber: String,
+      cardNumber: String,
+      issuingAuthority: String,
+      reason: String,
+      status: {
+        type: String,
+        enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'],
+        default: 'NONE',
+      },
+      rejectionReason: String,
+      expiryDate: Date,
+      submittedAt: Date,
+      reviewedAt: Date,
+      reviewedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+      documents: [
+        {
+          type: {
+            type: String,
+            enum: ['IDENTITY_FRONT', 'IDENTITY_BACK', 'PRIORITY_PROOF', 'PORTRAIT', 'OTHER'],
+            required: true,
+          },
+          originalName: String,
+          fileName: String,
+          mimeType: String,
+          size: Number,
+          url: String,
+          uploadedAt: {
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
     },
     accountLock: {
       isLocked: {
@@ -212,6 +261,66 @@ const UserSchema = new mongoose.Schema(
     },
     lastLoginAt: Date,
     lastLoginIp: String,
+
+    // Staff performance metrics
+    staffMetrics: {
+      completedTrips: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      incidents: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      onTimeRate: {
+        type: Number,
+        default: 100,
+        min: 0,
+        max: 100,
+      },
+      performanceScore: {
+        type: Number,
+        default: 100,
+        min: 0,
+        max: 100,
+      },
+      lastActivityAt: Date,
+    },
+    activityReports: [
+      {
+        type: {
+          type: String,
+          enum: ['ACCOUNT_CREATED', 'TRIP_COMPLETED', 'INCIDENT_REPORTED', 'STATUS_UPDATED'],
+          default: 'ACCOUNT_CREATED',
+        },
+        message: {
+          type: String,
+          trim: true,
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+
+    // Metadata
+    preferences: {
+      language: {
+        type: String,
+        default: 'vi',
+      },
+      notifications: {
+        type: Boolean,
+        default: true,
+      },
+      emailNotifications: {
+        type: Boolean,
+        default: true,
+      },
+    },
   },
   {
     timestamps: true,

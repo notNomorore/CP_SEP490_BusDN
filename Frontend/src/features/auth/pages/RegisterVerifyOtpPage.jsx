@@ -142,7 +142,7 @@ const RegisterVerifyOtpPage = () => {
     <AuthShell
       eyebrow="Verify Account"
       heroTitle="Confirm the OTP to activate your account."
-      heroDescription="Enter the 6-digit code from your inbox or SMS. In local development, the OTP is shown below so you can complete the flow end-to-end."
+      heroDescription="Enter the 6-digit code from your inbox or SMS to complete the account verification step."
       heroImage="https://lh3.googleusercontent.com/aida-public/AB6AXuAJ0-46nGESJSMPeGRP-CE-D8JvDly9UpS2IuR4ExR-2mfpkgtDbYsnKM8c6LRR3L0WHKPYPHRsorX-jwR_51bHyNx-pdQsiHNm6Nkqs_S01BqkMSvKRfrmqNUp_PUuJay4TeFoy98DeSVH_z0FyUg-RHC7A5UPz00GKKvb9HPAXnE2hIMheiaEk8uTVlk9941sRBm6mVXM16HzsUqeVyVnouuY-DqgDGG6BXU-cr-ZHMX0a_yizZecfMAbRZNJLtA30wee7a6jJfA"
       heroChips={[
         { icon: 'mail', label: 'Check inbox' },

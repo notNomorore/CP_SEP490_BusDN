@@ -57,7 +57,7 @@ export const handleMongooseError = (error) => {
 };
 
 // Global error handler middleware
-export const globalErrorHandler = (err, req, res, next) => {
+export const globalErrorHandler = (err, req, res, _next) => {
   let error = err;
 
   // Log error details
