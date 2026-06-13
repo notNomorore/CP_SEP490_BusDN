@@ -182,6 +182,13 @@ const operationIncidentStatus = (status) => {
   return 'PENDING';
 };
 
+const incidentReportStatusToOperationStatus = (status) => {
+  if (status === 'IN_PROGRESS') return 'ACKNOWLEDGED';
+  if (status === 'RESOLVED') return 'RESOLVED';
+  if (status === 'REJECTED') return 'CANCELLED';
+  return 'OPEN';
+};
+
 const operationIncidentDescription = (incident) => [
   `${incident.reporterRole === 'BUS_ASSISTANT' ? 'Phụ xe' : 'Tài xế'} gửi báo cáo trong lúc vận hành chuyến.`,
   `Loại sự cố: ${incident.type}.`,
@@ -307,11 +314,14 @@ export class IncidentReportService {
       ]),
     ]);
 
+    const relatedInfo = await Promise.all(incidents.map((incident) => enrichRelatedInfo(incident)));
+
     return {
-      incidents: incidents.map((incident) => ({
+      incidents: incidents.map((incident, index) => ({
         ...incident,
         reporter: safeUser(incident.reporterId),
         reporterId: incident.reporterId?._id || incident.reporterId,
+        ...relatedInfo[index],
       })),
       pagination: {
         page,
@@ -372,12 +382,22 @@ export class IncidentReportService {
 
     const previousStatus = incident.status;
     const adminNote = String(payload.adminNote || '').trim();
+    const resolutionSummary = String(payload.resolutionSummary || '').trim();
+    const handlingAction = payload.handlingAction || incident.handlingAction || 'TRIAGE_ONLY';
+    const responsibleUnit = payload.responsibleUnit || incident.responsibleUnit || 'OPERATION_CENTER';
+
     incident.status = payload.status;
     incident.adminNote = adminNote || incident.adminNote;
+    incident.resolutionSummary = resolutionSummary || incident.resolutionSummary;
+    incident.handlingAction = handlingAction;
+    incident.responsibleUnit = responsibleUnit;
     incident.statusHistory.push({
       fromStatus: previousStatus,
       toStatus: payload.status,
       adminNote,
+      resolutionSummary,
+      handlingAction,
+      responsibleUnit,
       changedBy: actor.userId,
       changedAt: new Date(),
     });
@@ -392,6 +412,20 @@ export class IncidentReportService {
 
     await incident.save();
 
+    if (incident.sourceModule === 'SCHEDULE_OPERATIONS' && incident.sourceId) {
+      const operationStatus = incidentReportStatusToOperationStatus(payload.status);
+      await OperationIncident.findByIdAndUpdate(incident.sourceId, {
+        status: operationStatus,
+        adminNote: incident.resolutionSummary || incident.adminNote,
+        acknowledgedAt: ['ACKNOWLEDGED', 'RESOLVED', 'CANCELLED'].includes(operationStatus)
+          ? new Date()
+          : null,
+        resolvedAt: ['RESOLVED', 'CANCELLED'].includes(operationStatus)
+          ? new Date()
+          : null,
+      });
+    }
+
     await logAudit({
       action: 'INCIDENT_STATUS_UPDATED',
       actorId: actor?.userId,
@@ -399,6 +433,8 @@ export class IncidentReportService {
       metadata: {
         fromStatus: previousStatus,
         toStatus: payload.status,
+        handlingAction,
+        responsibleUnit,
       },
     });
 

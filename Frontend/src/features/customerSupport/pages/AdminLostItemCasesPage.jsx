@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import AdminPromotionShell from '../../admin/promotions/components/AdminPromotionShell.jsx';
+import FileViewerModal, {
+  getFileDisplayName,
+  resolveFileUrl,
+} from '../../../shared/components/common/FileViewerModal.jsx';
 import customerSupportService, {
   LOST_ITEM_RECOVERY_STATUSES,
   OPERATION_INCIDENT_STATUSES,
@@ -58,6 +62,7 @@ const AdminLostItemCasesPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewerFile, setViewerFile] = useState(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -140,6 +145,7 @@ const AdminLostItemCasesPage = () => {
   };
 
   return (
+    <>
     <AdminPromotionShell
       title="Handle Lost Item Cases"
       subtitle="Quản lý báo cáo đồ thất lạc từ tài xế/phụ xe, theo dõi quá trình lưu giữ và hoàn trả cho hành khách."
@@ -311,17 +317,33 @@ const AdminLostItemCasesPage = () => {
               {selectedCase.evidenceFiles?.length > 0 && (
                 <div className="rounded-2xl border border-outline-variant/30 bg-white p-4">
                   <p className="text-sm font-bold text-on-surface">Ảnh minh chứng</p>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="mt-3 grid gap-3">
                     {selectedCase.evidenceFiles.map((file) => (
-                      <a
+                      <div
                         key={file.url || file.filename}
-                        href={file.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rounded-2xl border border-outline-variant/30 px-4 py-3 text-sm font-bold text-primary hover:bg-surface-container-low"
+                        className="flex flex-col gap-3 rounded-2xl border border-outline-variant/30 px-4 py-3 md:flex-row md:items-center md:justify-between"
                       >
-                        {file.originalName || file.filename || 'Xem file'}
-                      </a>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold text-on-surface">
+                            {getFileDisplayName(file)}
+                          </p>
+                          <p className="mt-1 text-xs text-on-surface-variant">
+                            Minh chứng đồ thất lạc
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setViewerFile({
+                            ...file,
+                            name: getFileDisplayName(file),
+                            url: resolveFileUrl(file.url),
+                          })}
+                          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-on-primary hover:bg-primary-container hover:text-on-primary-container"
+                        >
+                          <span className="material-symbols-outlined text-base">visibility</span>
+                          Xem file
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -381,6 +403,14 @@ const AdminLostItemCasesPage = () => {
         </section>
       </section>
     </AdminPromotionShell>
+    {viewerFile && (
+      <FileViewerModal
+        file={viewerFile}
+        title="Xem trước ảnh minh chứng"
+        onClose={() => setViewerFile(null)}
+      />
+    )}
+    </>
   );
 };
 

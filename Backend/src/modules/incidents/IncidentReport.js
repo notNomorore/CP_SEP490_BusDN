@@ -16,6 +16,25 @@ export const INCIDENT_TYPES = [
 export const INCIDENT_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 export const INCIDENT_STATUSES = ['PENDING', 'IN_PROGRESS', 'RESOLVED', 'REJECTED'];
 export const INCIDENT_REPORTER_ROLES = ['DRIVER', 'BUS_ASSISTANT', 'PASSENGER', 'ADMIN'];
+export const INCIDENT_HANDLING_ACTIONS = [
+  'TRIAGE_ONLY',
+  'DISPATCH_SUPPORT',
+  'REASSIGN_TRIP',
+  'SEND_MAINTENANCE',
+  'CONTACT_REPORTER',
+  'NOTIFY_PASSENGERS',
+  'CALL_EMERGENCY_SERVICE',
+  'MARK_INVALID',
+];
+export const INCIDENT_RESPONSIBLE_UNITS = [
+  'OPERATION_CENTER',
+  'DRIVER_TEAM',
+  'BUS_ASSISTANT_TEAM',
+  'MAINTENANCE_TEAM',
+  'CUSTOMER_SUPPORT',
+  'SECURITY_TEAM',
+  'EMERGENCY_SERVICE',
+];
 
 const StatusHistorySchema = new mongoose.Schema(
   {
@@ -30,6 +49,21 @@ const StatusHistorySchema = new mongoose.Schema(
       required: true,
     },
     adminNote: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    handlingAction: {
+      type: String,
+      enum: INCIDENT_HANDLING_ACTIONS,
+      default: 'TRIAGE_ONLY',
+    },
+    responsibleUnit: {
+      type: String,
+      enum: INCIDENT_RESPONSIBLE_UNITS,
+      default: 'OPERATION_CENTER',
+    },
+    resolutionSummary: {
       type: String,
       trim: true,
       default: '',
@@ -144,6 +178,21 @@ const IncidentReportSchema = new mongoose.Schema(
       index: true,
     },
     adminNote: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    handlingAction: {
+      type: String,
+      enum: INCIDENT_HANDLING_ACTIONS,
+      default: 'TRIAGE_ONLY',
+    },
+    responsibleUnit: {
+      type: String,
+      enum: INCIDENT_RESPONSIBLE_UNITS,
+      default: 'OPERATION_CENTER',
+    },
+    resolutionSummary: {
       type: String,
       trim: true,
       default: '',
