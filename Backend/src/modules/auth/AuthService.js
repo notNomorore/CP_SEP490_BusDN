@@ -7,13 +7,13 @@ import emailService from '../../utils/emailService.js';
  * Auth Service - Handles authentication business logic
  */
 export class AuthService {
-  static createAccountLockedError(user) {
-    const reason = user.accountLock?.reason?.trim() || 'Không có lý do cụ thể';
+  static createLockedLoginError(user) {
+    const reason = user.accountLock?.reason?.trim() || 'Kh\u00f4ng c\u00f3 l\u00fd do c\u1ee5 th\u1ec3';
     const lockedUntil = user.accountLock?.lockedUntil;
     const untilText = lockedUntil
-      ? ` Thời hạn khóa đến: ${new Date(lockedUntil).toLocaleString('vi-VN')}.`
+      ? ` Th\u1eddi h\u1ea1n kh\u00f3a \u0111\u1ebfn: ${new Date(lockedUntil).toLocaleString('vi-VN')}.`
       : '';
-    const error = new Error(`Tài khoản đã bị khóa. Lý do: ${reason}.${untilText} Vui lòng liên hệ quản trị viên để được hỗ trợ.`);
+    const error = new Error(`T\u00e0i kho\u1ea3n \u0111\u00e3 b\u1ecb kh\u00f3a. L\u00fd do: ${reason}.${untilText} Vui l\u00f2ng li\u00ean h\u1ec7 qu\u1ea3n tr\u1ecb vi\u00ean \u0111\u1ec3 \u0111\u01b0\u1ee3c h\u1ed7 tr\u1ee3.`);
     error.code = 'ACCOUNT_LOCKED';
     error.reason = reason;
     error.lockedUntil = lockedUntil || null;
@@ -222,16 +222,21 @@ export class AuthService {
       throw new Error('User account not verified');
     }
 
-    // Check if user is locked
+    // Locked accounts must receive a clear lock message with the lock reason.
     if (user.accountLock?.isLocked || user.status === 'LOCKED') {
       const hasExpiry = Boolean(user.accountLock?.lockedUntil);
       const lockExpired = hasExpiry && new Date() >= user.accountLock.lockedUntil;
 
-      if (lockExpired && user.status !== 'LOCKED') {
-        user.accountLock = undefined;
+      if (lockExpired) {
+        user.status = 'ACTIVE';
+        user.accountLock = {
+          isLocked: false,
+          reason: '',
+          lockedUntil: null,
+        };
         await user.save();
       } else {
-        throw this.createAccountLockedError(user);
+        throw this.createLockedLoginError(user);
       }
     }
 
@@ -353,8 +358,14 @@ export class AuthService {
       throw new Error('Current password is incorrect');
     }
 
+    const isSamePassword = await user.comparePassword(newPassword);
+    if (isSamePassword) {
+      throw new Error('New password must be different from the temporary password');
+    }
+
     // Update password
     user.password = newPassword;
+    user.isFirstLogin = false;
     await user.save();
 
     logger.info(`Password changed for user: ${userId}`);

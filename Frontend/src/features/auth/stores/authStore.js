@@ -15,7 +15,7 @@ export const useAuthStore = create((set, get) => ({
   // Selectors
   isAdmin: () => get().user?.role === 'ADMIN',
   isDriver: () => get().user?.role === 'DRIVER',
-  isConductor: () => get().user?.role === 'CONDUCTOR' || get().user?.role === 'BUS ASSISTANT',
+  isConductor: () => get().user?.role === 'CONDUCTOR' || get().user?.role === 'BUS_ASSISTANT',
   isPassenger: () => get().user?.role === 'PASSENGER',
 
   // Actions
@@ -89,14 +89,14 @@ export const useAuthStore = create((set, get) => ({
 
       return result;
     } catch (error) {
-      const errorMsg = error.message || 'Login failed';
+      const errorMsg = error.message || 'Đăng nhập thất bại. Vui lòng kiểm tra tài khoản, mật khẩu hoặc trạng thái tài khoản.';
       set({
         user: null,
         token: null,
         isAuthenticated: false,
         error: errorMsg,
       });
-      throw error;
+      throw new Error(errorMsg);
     } finally {
       set({ isLoading: false });
     }

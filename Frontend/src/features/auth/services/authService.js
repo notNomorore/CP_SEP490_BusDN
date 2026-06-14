@@ -34,10 +34,23 @@ export const authService = {
     }),
 
   login: async (identifier, password) => {
-    const response = await apiClient.post('/auth/login', {
-      identifier,
-      password,
-    });
+    let response;
+    try {
+      response = await apiClient.post('/auth/login', {
+        identifier,
+        password,
+      });
+    } catch (error) {
+      const isLocked = error?.code === 'ACCOUNT_LOCKED' || error?.statusCode === 423 || error?.response?.status === 423;
+      const message = isLocked
+        ? error?.message || 'Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên để được hỗ trợ.'
+        : error?.message || 'Đăng nhập thất bại. Vui lòng kiểm tra tài khoản, mật khẩu hoặc trạng thái tài khoản.';
+      const normalizedError = new Error(message);
+      normalizedError.code = isLocked ? 'ACCOUNT_LOCKED' : error?.code;
+      normalizedError.reason = error?.reason;
+      normalizedError.lockedUntil = error?.lockedUntil;
+      throw normalizedError;
+    }
 
     persistSession(response.token, response.user);
     return response;

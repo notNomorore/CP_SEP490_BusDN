@@ -5,7 +5,7 @@ import { HomePage } from './features/home';
 import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/priorityProfile';
 import { AdminCustomerSupportPage } from './features/customerSupport';
 import { SearchRoutesPage } from './features/routes';
-import { RouteControlPage, UserAccountsPage } from './features/admin';
+import { RouteControlPage, StaffPerformancePage, UserAccountsPage } from './features/admin';
 import {
   LoginPage,
   RegisterPage,
@@ -128,6 +128,14 @@ function App() {
             element={
               <AdminRoute>
                 <UserAccountsPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/staff-performance"
+            element={
+              <AdminRoute>
+                <StaffPerformancePage />
               </AdminRoute>
             }
           />

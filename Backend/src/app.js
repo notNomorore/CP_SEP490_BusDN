@@ -18,6 +18,9 @@ import customerSupportRoutes from './modules/customerSupport/customerSupportRout
 import routeRoutes from './modules/routes/routeRoutes.js';
 import adminRoutes from './modules/admin/adminRoutes.js';
 import profileRoutes from './modules/profile/profileRoutes.js';
+import busStopRoutes from './modules/busStops/busStopRoutes.js';
+import shiftRoutes from './modules/shifts/shiftRoutes.js';
+import { authMiddleware, authorizeRole } from './middleware/authMiddleware.js';
 
 export const createApp = () => {
   const app = express();
@@ -49,7 +52,7 @@ export const createApp = () => {
   // Rate limiting
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // 100 requests per windowMs
+    max: config.nodeEnv === 'development' ? 5000 : 100,
     message: 'Too many requests from this IP, please try again later.',
     standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
     legacyHeaders: false, // Disable the `X-RateLimit-*` headers
@@ -57,7 +60,7 @@ export const createApp = () => {
 
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: config.nodeEnv === 'development' ? 100 : 5,
+    max: config.nodeEnv === 'development' ? 500 : 5,
     message: 'Too many authentication attempts, please try again later.',
   });
 
@@ -92,7 +95,9 @@ export const createApp = () => {
   app.use('/api/priority-profile', priorityProfileRoutes);
   app.use('/api/customer-support', customerSupportRoutes);
   app.use('/api/admin', adminRoutes);
+  app.use('/api', authMiddleware, authorizeRole('ADMIN'), shiftRoutes);
   app.use('/api/profile', profileRoutes);
+  app.use('/api/bus-stops', busStopRoutes);
   // app.use('/api/routes', routeRoutes);
   app.use('/api/routes', routeRoutes);
   // etc...

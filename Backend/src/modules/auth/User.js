@@ -151,8 +151,33 @@ const UserSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['PASSENGER', 'DRIVER', 'BUS_ASSISTANT', 'ADMIN'],
+      enum: ['PASSENGER', 'DRIVER', 'CONDUCTOR', 'BUS_ASSISTANT', 'ADMIN'],
       default: 'PASSENGER',
+    },
+    driverLicense: {
+      licenseNumber: { type: String, trim: true, default: '' },
+      permittedVehicleTypes: { type: [String], default: [] },
+      expiresAt: Date,
+      status: {
+        type: String,
+        enum: ['VALID', 'EXPIRED', 'SUSPENDED', 'UNVERIFIED'],
+        default: 'UNVERIFIED',
+      },
+    },
+    staffAvailability: {
+      leaveRequests: {
+        type: [{
+          startDate: Date,
+          endDate: Date,
+          status: {
+            type: String,
+            enum: ['PENDING', 'APPROVED', 'REJECTED', 'ACTIVE', 'CANCELLED'],
+            default: 'PENDING',
+          },
+          reason: { type: String, trim: true, default: '' },
+        }],
+        default: [],
+      },
     },
     status: {
       type: String,
@@ -281,6 +306,11 @@ const UserSchema = new mongoose.Schema(
         default: 0,
         min: 0,
       },
+      delayedTrips: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
       onTimeRate: {
         type: Number,
         default: 100,
@@ -305,6 +335,10 @@ const UserSchema = new mongoose.Schema(
         message: {
           type: String,
           trim: true,
+        },
+        actorId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
         },
         createdAt: {
           type: Date,

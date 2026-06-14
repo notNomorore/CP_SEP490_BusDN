@@ -243,7 +243,7 @@ export class AuthController {
         || error.message.includes('not verified')
         || error.message.includes('locked')
       ) {
-        return res.status(401).json({
+        return res.status(error.code === 'ACCOUNT_LOCKED' ? 423 : 401).json({
           success: false,
           message: error.message,
           ...(error.code === 'ACCOUNT_LOCKED'
@@ -398,7 +398,11 @@ export class AuthController {
     } catch (error) {
       logger.error('Change password error:', error);
 
-      if (error.message.includes('incorrect') || error.message.includes('not found')) {
+      if (
+        error.message.includes('incorrect')
+        || error.message.includes('not found')
+        || error.message.includes('different')
+      ) {
         return res.status(400).json({
           success: false,
           message: error.message,

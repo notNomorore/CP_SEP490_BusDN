@@ -2,48 +2,6 @@ import React from 'react';
 import { operatingDayLabels, operatingDayOptions, validateRouteDraft } from './routeWorkflowUtils.js';
 import { useRouteWorkflowStore } from './routeWorkflowStore.js';
 
-const holidayModeOptions = [
-  { value: 'NORMAL', label: 'Chạy như ngày thường' },
-  { value: 'SUNDAY', label: 'Dùng lịch Chủ nhật' },
-  { value: 'REDUCED', label: 'Giãn cách chuyến' },
-  { value: 'SPECIAL', label: 'Khung giờ riêng' },
-  { value: 'SUSPENDED', label: 'Tạm dừng tuyến' },
-  { value: 'CUSTOM', label: 'Quy định riêng' },
-];
-
-const parseHolidaySchedule = (value = '') => {
-  const text = String(value || '').trim();
-  const frequency = text.match(/tần suất\s+(\d+)/i)?.[1] || text.match(/giãn cách\s+(\d+)/i)?.[1] || '20';
-  const startTime = text.match(/từ\s+(\d{2}:\d{2})/i)?.[1] || '06:00';
-  const endTime = text.match(/đến\s+(\d{2}:\d{2})/i)?.[1] || '20:00';
-  const note = text.match(/Ghi chú:\s*(.+)$/i)?.[1] || '';
-
-  if (!text) return { mode: 'NORMAL', frequency, startTime, endTime, note: '' };
-  if (/tạm dừng|không chạy/i.test(text)) return { mode: 'SUSPENDED', frequency, startTime, endTime, note };
-  if (/chủ nhật/i.test(text)) return { mode: 'SUNDAY', frequency, startTime, endTime, note };
-  if (/khung giờ|từ\s+\d{2}:\d{2}/i.test(text)) return { mode: 'SPECIAL', frequency, startTime, endTime, note };
-  if (/giãn cách|tần suất/i.test(text)) return { mode: 'REDUCED', frequency, startTime, endTime, note };
-  if (/ngày thường/i.test(text)) return { mode: 'NORMAL', frequency, startTime, endTime, note };
-  return { mode: 'CUSTOM', frequency, startTime, endTime, note: text };
-};
-
-const buildHolidaySchedule = ({ mode, frequency, startTime, endTime, note }) => {
-  const cleanFrequency = Math.max(1, Number(frequency || 20));
-  const cleanStartTime = startTime || '06:00';
-  const cleanEndTime = endTime || '20:00';
-  const cleanNote = String(note || '').trim();
-  const baseText = {
-    NORMAL: 'Ngày lễ chạy như lịch ngày thường.',
-    SUNDAY: 'Ngày lễ dùng lịch Chủ nhật.',
-    REDUCED: `Ngày lễ chạy giãn cách ${cleanFrequency} phút/chuyến.`,
-    SPECIAL: `Ngày lễ chạy từ ${cleanStartTime} đến ${cleanEndTime}, tần suất ${cleanFrequency} phút/chuyến.`,
-    SUSPENDED: 'Tạm dừng tuyến vào ngày lễ/Tết.',
-    CUSTOM: cleanNote || 'Quy định riêng cho ngày lễ/ngày đặc biệt.',
-  }[mode] || 'Ngày lễ chạy như lịch ngày thường.';
-
-  return cleanNote && mode !== 'CUSTOM' ? `${baseText} Ghi chú: ${cleanNote}` : baseText;
-};
-
 const ConfigureScheduleStep = ({ inputClassName, panelClassName }) => {
   const draft = useRouteWorkflowStore((state) => state.draft);
   const updateSchedule = useRouteWorkflowStore((state) => state.updateSchedule);
@@ -67,17 +25,6 @@ const ConfigureScheduleStep = ({ inputClassName, panelClassName }) => {
   ];
 
   const scheduleErrors = validation.errors.filter((error) => error.includes('Chuyến') || error.includes('Tần suất') || error.includes('ngày'));
-
-  const holidayConfig = parseHolidaySchedule(draft.scheduleConfig.holidaySchedule);
-  const holidayInputClassName = 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-amber-300';
-  const updateHolidayConfig = (patch) => {
-    updateSchedule({
-      holidaySchedule: buildHolidaySchedule({
-        ...holidayConfig,
-        ...patch,
-      }),
-    });
-  };
 
   return (
     <section className={`rounded-2xl border p-6 ${panelClassName}`}>
@@ -128,43 +75,6 @@ const ConfigureScheduleStep = ({ inputClassName, panelClassName }) => {
             <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Số xe dự kiến</span>
             <input type="number" min="1" className={inputClassName} value={draft.vehicleAssignment.estimatedFleetSize} onChange={(event) => updateVehicle({ estimatedFleetSize: event.target.value, capacity: Number(event.target.value || 0) * 60 })} />
           </label>
-          <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-white/90 p-4 text-slate-900">
-            <div className="grid gap-3 md:grid-cols-3">
-              <label>
-                <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Ngày lễ / đặc biệt</span>
-                <select className={holidayInputClassName} value={holidayConfig.mode} onChange={(event) => updateHolidayConfig({ mode: event.target.value })}>
-                  {holidayModeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
-              {['REDUCED', 'SPECIAL'].includes(holidayConfig.mode) ? (
-                <label>
-                  <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Tần suất lễ</span>
-                  <input type="number" min="1" className={holidayInputClassName} value={holidayConfig.frequency} onChange={(event) => updateHolidayConfig({ frequency: event.target.value })} />
-                </label>
-              ) : null}
-              {holidayConfig.mode === 'SPECIAL' ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <label>
-                    <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Từ</span>
-                    <input type="time" className={holidayInputClassName} value={holidayConfig.startTime} onChange={(event) => updateHolidayConfig({ startTime: event.target.value })} />
-                  </label>
-                  <label>
-                    <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Đến</span>
-                    <input type="time" className={holidayInputClassName} value={holidayConfig.endTime} onChange={(event) => updateHolidayConfig({ endTime: event.target.value })} />
-                  </label>
-                </div>
-              ) : null}
-            </div>
-            <label className="mt-3 block">
-              <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Ghi chú áp dụng</span>
-              <textarea rows={3} className={holidayInputClassName} value={holidayConfig.note} onChange={(event) => updateHolidayConfig({ note: event.target.value })} placeholder="VD: Áp dụng cho 30/4, 1/5, Tết Dương lịch hoặc theo thông báo điều hành." />
-            </label>
-            <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900">
-              {draft.scheduleConfig.holidaySchedule || 'Ngày lễ chạy như lịch ngày thường.'}
-            </div>
-          </div>
         </div>
 
         <aside className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-slate-900">

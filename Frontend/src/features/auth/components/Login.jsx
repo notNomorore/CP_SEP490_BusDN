@@ -18,6 +18,7 @@ const Login = () => {
 
   // Forgot password state
   const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotResetToken, setForgotResetToken] = useState('');
   const [forgotOtp, setForgotOtp] = useState('');
   const [forgotPassword, setForgotPassword] = useState('');
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
@@ -137,6 +138,7 @@ const Login = () => {
   const returnToLogin = () => {
     setView('login');
     setForgotEmail('');
+    setForgotResetToken('');
     setForgotOtp('');
     setForgotPassword('');
     setForgotConfirmPassword('');

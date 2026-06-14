@@ -2,13 +2,14 @@ import crypto from 'crypto';
 import mongoose from 'mongoose';
 import nodemailer from 'nodemailer';
 import AdminModel from './AdminModel.js';
+import ScheduleGenerationService from './ScheduleGenerationService.js';
 import { config } from '../../config/environment.js';
 import logger from '../../utils/logger.js';
 
-const ALLOWED_MANAGED_ROLES = new Set(['DRIVER', 'CONDUCTOR', 'STAFF']);
+const ALLOWED_MANAGED_ROLES = new Set(['DRIVER', 'CONDUCTOR']);
 const ALLOWED_ACCOUNT_ROLES = new Set(['DRIVER', 'CONDUCTOR']);
 const ALLOWED_ROUTE_STATUS = new Set(['DRAFT', 'PENDING_APPROVAL', 'PUBLISHED', 'SUSPENDED']);
-const ALLOWED_BUS_STATUS = new Set(['ACTIVE', 'RESERVE', 'MAINTENANCE']);
+const ALLOWED_BUS_STATUS = new Set(['ACTIVE', 'INACTIVE', 'RESERVE', 'ASSIGNED', 'MAINTENANCE']);
 const ALLOWED_SCHEDULE_STATUS = new Set(['PLANNED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']);
 const REQUIRED_IMPORT_COLUMNS = ['fullName', 'role'];
 const EMAIL_REGEX = /^[^\s@.]+(?:\.[^\s@.]+)*@[^\s@.]+(?:\.[^\s@.]+)+$/;
@@ -35,7 +36,7 @@ const validateImportedUserPayload = (payload) => {
   if (!email) errors.email = 'Email is required to send the temporary password';
   if (email && !EMAIL_REGEX.test(email)) errors.email = 'Invalid email format';
   if (phone && !/^(\+84|0)[0-9]{9,10}$/.test(phone)) errors.phone = 'Invalid phone format';
-  if (!ALLOWED_MANAGED_ROLES.has(role)) errors.role = 'Role must be DRIVER, CONDUCTOR, or STAFF';
+  if (!ALLOWED_MANAGED_ROLES.has(role)) errors.role = 'Role must be DRIVER or CONDUCTOR';
 
   return Object.keys(errors).length ? errors : null;
 };
@@ -44,9 +45,13 @@ const normalizeBusPayload = (body = {}) => ({
   busCode: String(body.busCode || '').trim().toUpperCase(),
   plateNumber: String(body.plateNumber || '').trim().toUpperCase(),
   busType: String(body.busType || 'Standard City Bus').trim(),
+  manufacturer: String(body.manufacturer || '').trim(),
+  model: String(body.model || '').trim(),
+  year: body.year === '' || body.year === undefined ? undefined : asNumber(body.year),
   capacity: asNumber(body.capacity),
   operator: String(body.operator || 'Veridian Transit').trim(),
   status: ALLOWED_BUS_STATUS.has(body.status) ? body.status : 'ACTIVE',
+  notes: String(body.notes || '').trim(),
   currentLatitude: body.currentLatitude === '' || body.currentLatitude === undefined ? undefined : asNumber(body.currentLatitude),
   currentLongitude: body.currentLongitude === '' || body.currentLongitude === undefined ? undefined : asNumber(body.currentLongitude),
   heading: body.heading === '' || body.heading === undefined ? undefined : asNumber(body.heading),
@@ -55,9 +60,12 @@ const normalizeBusPayload = (body = {}) => ({
 const validateBusPayload = (payload) => {
   const errors = [];
   if (!payload.busCode) errors.push('Bus code is required');
-  if (!payload.plateNumber) errors.push('Plate number is required');
+  if (!payload.plateNumber) errors.push('License plate is required');
   if (!payload.busType) errors.push('Bus type is required');
   if (!Number.isFinite(payload.capacity) || payload.capacity < 1) errors.push('Capacity must be greater than 0');
+  if (payload.year !== undefined && (!Number.isFinite(payload.year) || payload.year < 1980 || payload.year > 2100)) {
+    errors.push('Vehicle year is invalid');
+  }
   if (payload.currentLatitude !== undefined && (payload.currentLatitude < -90 || payload.currentLatitude > 90)) {
     errors.push('Current latitude is invalid');
   }
@@ -122,6 +130,26 @@ const validateTripSchedulePayload = (payload) => {
 };
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
+
+const buildAssignmentConflictMessage = (conflicts, payload) => {
+  const conflictTypes = new Set();
+  conflicts.forEach((schedule) => {
+    if (payload.vehicle?.busId && String(schedule.vehicle?.busId || '') === String(payload.vehicle.busId)) conflictTypes.add('xe');
+    if (payload.driver?.userId && String(schedule.driver?.userId || '') === String(payload.driver.userId)) conflictTypes.add('tài xế');
+    if (payload.assistant?.userId && String(schedule.assistant?.userId || '') === String(payload.assistant.userId)) conflictTypes.add('phụ xe');
+  });
+  const codes = conflicts.map((schedule) => schedule.scheduleCode).filter(Boolean).join(', ');
+  return `${[...conflictTypes].join(', ') || 'Nhân sự hoặc xe'} đã có lịch trùng thời gian${codes ? ` với ca ${codes}` : ''}.`;
+};
+
+const normalizeDirectionKey = (value) => {
+  const direction = String(value || '').trim().toUpperCase();
+  return direction === 'INBOUND' ? 'inboundRoute' : 'outboundRoute';
+};
+
+const normalizeDirectionLabel = (value) => (
+  normalizeDirectionKey(value) === 'inboundRoute' ? 'INBOUND' : 'OUTBOUND'
+);
 
 const asNumber = (value, fallback = 0) => {
   const number = Number(value);
@@ -199,6 +227,16 @@ const normalizeRoutePayload = (body = {}, userId) => {
   };
 };
 
+const buildStopIdentity = (stop) => {
+  if (stop.stationId) return `station:${stop.stationId}`;
+  const latitude = Number(stop.latitude);
+  const longitude = Number(stop.longitude);
+  if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+    return `geo:${latitude.toFixed(6)}:${longitude.toFixed(6)}`;
+  }
+  return `name:${String(stop.stopName || '').trim().toLowerCase()}`;
+};
+
 const validateRoutePayload = (payload) => {
   const errors = [];
   if (!payload.routeCode) errors.push('Route code is required');
@@ -218,6 +256,9 @@ const validateRoutePayload = (payload) => {
       if (!stop.address) errors.push(`${directionKey} stop ${index + 1} address is required`);
       if (!Number.isFinite(stop.latitude) || !Number.isFinite(stop.longitude)) {
         errors.push(`${directionKey} stop ${index + 1} coordinates are invalid`);
+      }
+      if (index > 0 && buildStopIdentity(stop) === buildStopIdentity(direction.orderedStops[index - 1])) {
+        errors.push(`${directionKey} has duplicated consecutive stops at positions ${index} and ${index + 1}`);
       }
     });
   });
@@ -407,6 +448,7 @@ export class AdminController {
           ? {
             staffMetrics: {
               completedTrips: 0,
+              delayedTrips: 0,
               incidents: 0,
               onTimeRate: 100,
               performanceScore: 100,
@@ -417,6 +459,7 @@ export class AdminController {
         activityReports: [{
           type: 'ACCOUNT_CREATED',
           message: `Account created by administrator for ${payload.role.toLowerCase()} role.`,
+          actorId: req.user?.userId,
           createdAt: new Date(),
         }],
       });
@@ -496,6 +539,7 @@ export class AdminController {
             isFirstLogin: true,
             staffMetrics: {
               completedTrips: 0,
+              delayedTrips: 0,
               incidents: 0,
               onTimeRate: 100,
               performanceScore: 100,
@@ -587,8 +631,15 @@ export class AdminController {
     try {
       const { userId } = req.params;
       if (!isValidObjectId(userId)) return res.status(400).json({ success: false, message: 'Invalid user id' });
+      if (String(userId) === String(req.user?.userId)) {
+        return res.status(400).json({ success: false, message: 'Administrators cannot lock their own account' });
+      }
       const lockedUntil = req.body.lockedUntil ? new Date(req.body.lockedUntil) : null;
-      const user = await AdminModel.lockUserById(userId, { reason: req.body.reason, lockedUntil });
+      const user = await AdminModel.lockUserById(userId, {
+        reason: req.body.reason,
+        lockedUntil,
+        actorId: req.user?.userId,
+      });
       if (!user) return res.status(404).json({ success: false, message: 'User account not found' });
       return res.json({ success: true, message: 'User account locked successfully', user });
     } catch (error) {
@@ -599,7 +650,7 @@ export class AdminController {
 
   static async unlockUser(req, res, next) {
     try {
-      const user = await AdminModel.unlockUserById(req.params.userId);
+      const user = await AdminModel.unlockUserById(req.params.userId, { actorId: req.user?.userId });
       if (!user) return res.status(404).json({ success: false, message: 'User account not found' });
       return res.json({ success: true, message: 'User account unlocked successfully', user });
     } catch (error) {
@@ -679,12 +730,20 @@ export class AdminController {
     try {
       const { routeId } = req.params;
       if (!isValidObjectId(routeId)) return res.status(400).json({ success: false, message: 'Invalid route id' });
-      const route = await AdminModel.updateRouteById(routeId, {
-        status: 'SUSPENDED',
+      const blockingTrips = await AdminModel.findRouteDeactivationBlockers(routeId);
+      if (blockingTrips.length) {
+        return res.status(409).json({
+          success: false,
+          message: 'Route cannot be deactivated while active or future trips exist',
+          blockingTrips,
+        });
+      }
+      const route = await AdminModel.deactivateRouteById(routeId, {
+        reason: req.body.reason,
         updatedBy: req.user?.userId,
       });
       if (!route) return res.status(404).json({ success: false, message: 'Route not found' });
-      return res.json({ success: true, message: 'Route suspended successfully', route });
+      return res.json({ success: true, message: 'Route deactivated successfully', route });
     } catch (error) {
       logger.error('Suspend route error:', error);
       next(error);
@@ -695,9 +754,20 @@ export class AdminController {
     try {
       const { routeId } = req.params;
       if (!isValidObjectId(routeId)) return res.status(400).json({ success: false, message: 'Invalid route id' });
-      const route = await AdminModel.deleteRouteById(routeId);
+      const blockingTrips = await AdminModel.findRouteDeactivationBlockers(routeId);
+      if (blockingTrips.length) {
+        return res.status(409).json({
+          success: false,
+          message: 'Route cannot be deactivated while active or future trips exist',
+          blockingTrips,
+        });
+      }
+      const route = await AdminModel.deactivateRouteById(routeId, {
+        reason: req.body.reason,
+        updatedBy: req.user?.userId,
+      });
       if (!route) return res.status(404).json({ success: false, message: 'Route not found' });
-      return res.json({ success: true, message: 'Route deleted successfully', route });
+      return res.json({ success: true, message: 'Route deactivated successfully', route });
     } catch (error) {
       logger.error('Delete route error:', error);
       next(error);
@@ -806,6 +876,26 @@ export class AdminController {
     }
   }
 
+  static async generateTripSchedulePreview(req, res, _next) {
+    try {
+      const preview = await ScheduleGenerationService.generatePreview(req.body);
+      return res.json({ success: true, message: 'Đã tạo bản xem trước lịch chuyến.', ...preview });
+    } catch (error) {
+      logger.error('Generate trip schedule preview error:', error);
+      return res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Không thể sinh lịch chuyến.' });
+    }
+  }
+
+  static async confirmGeneratedTripSchedules(req, res, _next) {
+    try {
+      const schedules = await ScheduleGenerationService.confirm(req.body?.rows, req.user?.userId, Boolean(req.body?.replaceScheduled));
+      return res.status(201).json({ success: true, message: 'Đã lưu lịch chuyến.', schedules });
+    } catch (error) {
+      logger.error('Confirm generated trip schedules error:', error);
+      return res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Không thể lưu lịch chuyến.' });
+    }
+  }
+
   static async createTripSchedule(req, res, next) {
     try {
       const payload = await normalizeTripSchedulePayload(req.body, req.user?.userId);
@@ -822,9 +912,16 @@ export class AdminController {
         payload.vehicle = normalizeAssignedVehicle(bus);
       }
 
+      if (payload.driver?.userId) {
+        const assignment = await AdminModel.findEligibleDriverShiftAssignment(payload);
+        if (!assignment) {
+          return res.status(409).json({ success: false, message: 'Tai xe khong co ca lam phu hop voi thoi gian chuyen' });
+        }
+      }
+
       const conflicts = await AdminModel.findScheduleAssignmentConflicts(payload);
       if (conflicts.length) {
-        return res.status(409).json({ success: false, message: 'Vehicle or staff already assigned to another trip at this time', conflicts });
+        return res.status(409).json({ success: false, message: buildAssignmentConflictMessage(conflicts, payload), conflicts });
       }
 
       const schedule = await AdminModel.createTripSchedule(payload);
@@ -856,9 +953,16 @@ export class AdminController {
         payload.vehicle = normalizeAssignedVehicle(bus);
       }
 
+      if (payload.driver?.userId) {
+        const assignment = await AdminModel.findEligibleDriverShiftAssignment(payload);
+        if (!assignment) {
+          return res.status(409).json({ success: false, message: 'Tai xe khong co ca lam phu hop voi thoi gian chuyen' });
+        }
+      }
+
       const conflicts = await AdminModel.findScheduleAssignmentConflicts(payload, scheduleId);
       if (conflicts.length) {
-        return res.status(409).json({ success: false, message: 'Vehicle or staff already assigned to another trip at this time', conflicts });
+        return res.status(409).json({ success: false, message: buildAssignmentConflictMessage(conflicts, payload), conflicts });
       }
 
       const schedule = await AdminModel.updateTripScheduleById(scheduleId, payload, {
@@ -872,6 +976,25 @@ export class AdminController {
       if (error.code === 11000) {
         return res.status(409).json({ success: false, message: 'Schedule code already exists' });
       }
+      next(error);
+    }
+  }
+
+  static async deleteTripSchedule(req, res, next) {
+    try {
+      const { scheduleId } = req.params;
+      if (!isValidObjectId(scheduleId)) return res.status(400).json({ success: false, message: 'Mã ca làm không hợp lệ.' });
+
+      const schedule = await AdminModel.findTripScheduleById(scheduleId);
+      if (!schedule) return res.status(404).json({ success: false, message: 'Không tìm thấy ca làm.' });
+      if (schedule.status === 'IN_PROGRESS') {
+        return res.status(409).json({ success: false, message: 'Không thể xóa ca đang chạy.' });
+      }
+
+      await AdminModel.deleteTripScheduleById(scheduleId);
+      return res.json({ success: true, message: 'Đã xóa ca làm.' });
+    } catch (error) {
+      logger.error('Delete trip schedule error:', error);
       next(error);
     }
   }

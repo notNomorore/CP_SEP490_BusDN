@@ -1,0 +1,5 @@
+email,phone,fullName,role
+driver01.busdn.test@example.com,0901000001,Nguyen Van Driver,DRIVER
+driver02.busdn.test@example.com,0901000002,Tran Van Driver,DRIVER
+conductor01.busdn.test@example.com,0901000003,Le Thi Conductor,CONDUCTOR
+conductor02.busdn.test@example.com,0901000004,Pham Van Conductor,CONDUCTOR

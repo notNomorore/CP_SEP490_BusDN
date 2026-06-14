@@ -1,11 +1,28 @@
 import jwt from 'jsonwebtoken';
 import { config } from '../config/environment.js';
 import logger from '../utils/logger.js';
+import User from '../modules/auth/User.js';
+
+const buildLockedAccountResponse = (user) => {
+  const reason = user.accountLock?.reason?.trim() || 'Không có lý do cụ thể';
+  const lockedUntil = user.accountLock?.lockedUntil;
+  const untilText = lockedUntil
+    ? ` Thời hạn khóa đến: ${new Date(lockedUntil).toLocaleString('vi-VN')}.`
+    : '';
+
+  return {
+    success: false,
+    code: 'ACCOUNT_LOCKED',
+    message: `Tài khoản đã bị khóa. Lý do: ${reason}.${untilText} Vui lòng liên hệ quản trị viên để được hỗ trợ.`,
+    reason,
+    lockedUntil: lockedUntil || null,
+  };
+};
 
 /**
  * JWT Authentication Middleware
  */
-export const authMiddleware = (req, res, next) => {
+export const authMiddleware = async (req, res, next) => {
   try {
     // Get token from header
     const token = req.headers.authorization?.split(' ')[1];
@@ -19,12 +36,38 @@ export const authMiddleware = (req, res, next) => {
 
     // Verify token
     const decoded = jwt.verify(token, config.jwt.secret);
+    const user = await User.findById(decoded.userId).select('email role status accountLock').lean();
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    if (user.accountLock?.isLocked || user.status === 'LOCKED') {
+      const hasExpiry = Boolean(user.accountLock?.lockedUntil);
+      const lockExpired = hasExpiry && new Date() >= user.accountLock.lockedUntil;
+
+      if (lockExpired) {
+        await User.findByIdAndUpdate(user._id, {
+          status: 'ACTIVE',
+          accountLock: {
+            isLocked: false,
+            reason: '',
+            lockedUntil: null,
+          },
+        });
+      } else {
+        return res.status(423).json(buildLockedAccountResponse(user));
+      }
+    }
 
     // Attach user info to request
     req.user = {
-      userId: decoded.userId,
-      email: decoded.email,
-      role: decoded.role,
+      userId: user._id,
+      email: user.email || decoded.email,
+      role: user.role || decoded.role,
     };
 
     next();
