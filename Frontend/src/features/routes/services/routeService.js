@@ -47,11 +47,54 @@ export const routeService = {
     return response.data;
   },
 
-  findBestRoute: async ({ from, to }) => {
+  findBestRoute: async ({ from, to, preference = 'fastest' }) => {
     const response = await apiClient.get('/routes/best', {
-      params: { from, to },
+      params: { from, to, preference },
     });
 
+    return response.data;
+  },
+
+  suggestRouteOptions: async ({ from, to, preference = 'fastest' }) => {
+    const response = await apiClient.get('/routes/suggestions', {
+      params: { from, to, preference },
+    });
+
+    return response.data;
+  },
+
+  getLiveBusLocations: async (routeId) => {
+    const response = await apiClient.get(`/routes/${routeId}/live`);
+    return response.data;
+  },
+
+  getFavoriteRoutes: async () => {
+    const response = await apiClient.get('/profile/favorites/routes');
+    return response.data;
+  },
+
+  saveFavoriteRoute: async (routeId) => {
+    const response = await apiClient.post(`/profile/favorites/routes/${routeId}`);
+    return response.data;
+  },
+
+  removeFavoriteRoute: async (routeId) => {
+    const response = await apiClient.delete(`/profile/favorites/routes/${routeId}`);
+    return response.data;
+  },
+
+  getFavoriteStops: async () => {
+    const response = await apiClient.get('/profile/favorites/stops');
+    return response.data;
+  },
+
+  saveFavoriteStop: async (payload) => {
+    const response = await apiClient.post('/profile/favorites/stops', payload);
+    return response.data;
+  },
+
+  removeFavoriteStop: async (stopId) => {
+    const response = await apiClient.delete(`/profile/favorites/stops/${encodeURIComponent(stopId)}`);
     return response.data;
   },
 };
