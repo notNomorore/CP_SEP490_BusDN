@@ -337,7 +337,6 @@ export const buildSuggestedStops = ({
     .filter((station) => buildStationKeys(station).every((key) => !existingStationKeys.has(key)))
     .filter((station) => buildStationKeys(station).every((key) => !terminalKeys.has(key)))
     .filter((station) => station.isActive !== false)
-    .filter((station) => station.source !== 'MANUAL' || station.sourceId || station.googlePlaceId)
     .filter((station) => isInsideDaNang(station.latitude, station.longitude))
     .map((station) => {
       const projection = projectPointToPath(station, path);
