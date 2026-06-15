@@ -46,6 +46,23 @@ const persistSession = (token, user) => {
   }
 };
 
+const getStoredToken = () => {
+  const directToken = localStorage.getItem('authToken')
+    || localStorage.getItem('token')
+    || localStorage.getItem('accessToken');
+
+  if (directToken) {
+    return directToken;
+  }
+
+  try {
+    const storedUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+    return storedUser.token || storedUser.accessToken || '';
+  } catch {
+    return '';
+  }
+};
+
 export const authService = {
   register: async (data) =>
     apiClient.post('/auth/register', {
@@ -99,19 +116,19 @@ export const authService = {
       newPassword: data.newPassword,
       confirmPassword: data.confirmPassword,
     });
-    persistSession(localStorage.getItem('authToken'), response.user);
+    persistSession(getStoredToken(), response.user);
     return response;
   },
 
   getCurrentUser: async () => {
     const response = await apiClient.get('/auth/me');
-    persistSession(localStorage.getItem('authToken'), response.user);
+    persistSession(getStoredToken(), response.user);
     return response;
   },
 
   updateProfile: async (data) => {
     const response = await apiClient.put('/auth/profile', data);
-    persistSession(localStorage.getItem('authToken'), response.user);
+    persistSession(getStoredToken(), response.user);
     return response;
   },
 
@@ -120,19 +137,23 @@ export const authService = {
       await apiClient.post('/auth/logout');
     } finally {
       clearStoredAuthSession();
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('token');
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('authUser');
     }
   },
 
-  isAuthenticated: () => Boolean(localStorage.getItem('authToken')),
+  isAuthenticated: () => Boolean(getStoredToken()),
 
   getStoredUser: () => {
     const stored = localStorage.getItem('authUser');
     return stored ? JSON.parse(stored) : null;
   },
 
-  getToken: () => localStorage.getItem('authToken'),
+  getToken: () => getStoredToken(),
 
-  setStoredUser: (user) => persistSession(localStorage.getItem('authToken'), user),
+  setStoredUser: (user) => persistSession(getStoredToken(), user),
 };
 
 export { apiClient };

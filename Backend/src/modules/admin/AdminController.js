@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import mongoose from 'mongoose';
 import nodemailer from 'nodemailer';
 import AdminModel from './AdminModel.js';
+import OperationNotification from '../scheduleOperations/OperationNotification.js';
 import { config } from '../../config/environment.js';
 import logger from '../../utils/logger.js';
 
@@ -9,6 +10,9 @@ const ALLOWED_MANAGED_ROLES = new Set(['DRIVER', 'BUS_ASSISTANT']);
 const ALLOWED_ROUTE_STATUS = new Set(['DRAFT', 'PENDING_APPROVAL', 'PUBLISHED', 'SUSPENDED']);
 const ALLOWED_BUS_STATUS = new Set(['ACTIVE', 'RESERVE', 'MAINTENANCE']);
 const ALLOWED_SCHEDULE_STATUS = new Set(['PLANNED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']);
+const ALLOWED_OPERATION_NOTIFICATION_CATEGORIES = new Set(['ROUTE_UPDATE', 'SCHEDULE_CHANGE', 'EMERGENCY_INSTRUCTION', 'GENERAL']);
+const ALLOWED_OPERATION_NOTIFICATION_PRIORITIES = new Set(['LOW', 'NORMAL', 'HIGH', 'CRITICAL']);
+const ALLOWED_OPERATION_NOTIFICATION_ROLES = new Set(['DRIVER', 'BUS_ASSISTANT']);
 const REQUIRED_IMPORT_COLUMNS = ['fullName', 'role'];
 const EMAIL_REGEX = /^[^\s@.]+(?:\.[^\s@.]+)*@[^\s@.]+(?:\.[^\s@.]+)+$/;
 const normalizeEmail = (value) => value?.trim().toLowerCase().replace(/\.+$/, '');
@@ -125,6 +129,57 @@ const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 const asNumber = (value, fallback = 0) => {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+};
+
+const normalizeObjectId = (value) => (
+  value && isValidObjectId(value) ? new mongoose.Types.ObjectId(value) : null
+);
+
+const normalizeObjectIdList = (value) => {
+  const items = Array.isArray(value) ? value : [value].filter(Boolean);
+  return items
+    .map((item) => normalizeObjectId(item))
+    .filter(Boolean);
+};
+
+const normalizeOperationNotificationPayload = (body = {}, userId) => {
+  const targetRoles = Array.isArray(body.targetRoles) && body.targetRoles.length
+    ? body.targetRoles.map((role) => String(role || '').trim().toUpperCase())
+    : ['DRIVER', 'BUS_ASSISTANT'];
+
+  return {
+    title: String(body.title || '').trim(),
+    message: String(body.message || '').trim(),
+    category: ALLOWED_OPERATION_NOTIFICATION_CATEGORIES.has(body.category)
+      ? body.category
+      : 'GENERAL',
+    priority: ALLOWED_OPERATION_NOTIFICATION_PRIORITIES.has(body.priority)
+      ? body.priority
+      : 'NORMAL',
+    targetRoles: targetRoles.filter((role) => ALLOWED_OPERATION_NOTIFICATION_ROLES.has(role)),
+    targetUsers: normalizeObjectIdList(body.targetUsers),
+    route: normalizeObjectId(body.routeId || body.route),
+    trip: normalizeObjectId(body.tripId || body.trip),
+    vehicle: normalizeObjectId(body.vehicleId || body.vehicle),
+    activeFrom: body.activeFrom ? new Date(body.activeFrom) : new Date(),
+    expiresAt: body.expiresAt ? new Date(body.expiresAt) : null,
+    createdBy: userId,
+  };
+};
+
+const validateOperationNotificationPayload = (payload) => {
+  const errors = [];
+  if (!payload.title || payload.title.length < 3) errors.push('Notification title is required');
+  if (!payload.message || payload.message.length < 5) errors.push('Notification message is required');
+  if (!payload.targetRoles.length && !payload.targetUsers.length) {
+    errors.push('At least one target role or target user is required');
+  }
+  if (Number.isNaN(payload.activeFrom.getTime())) errors.push('Active from date is invalid');
+  if (payload.expiresAt && Number.isNaN(payload.expiresAt.getTime())) errors.push('Expiration date is invalid');
+  if (payload.expiresAt && payload.expiresAt <= payload.activeFrom) {
+    errors.push('Expiration date must be after active from date');
+  }
+  return errors;
 };
 
 const normalizeStationRef = (station) => {
@@ -865,6 +920,25 @@ export class AdminController {
         changedBy: req.user?.userId,
       });
       if (!schedule) return res.status(404).json({ success: false, message: 'Trip schedule not found' });
+
+      if (req.body.emergencyReason) {
+        await OperationNotification.create({
+          title: `Điều chỉnh khẩn cấp chuyến ${schedule.scheduleCode}`,
+          message: String(req.body.emergencyReason).trim(),
+          category: 'EMERGENCY_INSTRUCTION',
+          priority: 'HIGH',
+          targetRoles: ['DRIVER', 'BUS_ASSISTANT'],
+          targetUsers: [
+            schedule.driver?.userId,
+            schedule.assistant?.userId,
+          ].filter(Boolean),
+          route: schedule.routeId || null,
+          trip: schedule._id,
+          vehicle: schedule.vehicle?.busId || null,
+          createdBy: req.user?.userId,
+        });
+      }
+
       return res.json({ success: true, message: req.body.emergencyReason ? 'Emergency reassignment saved successfully' : 'Trip schedule updated successfully', schedule });
     } catch (error) {
       logger.error('Update trip schedule error:', error);
@@ -881,6 +955,50 @@ export class AdminController {
       return res.json({ success: true, message: 'Route staff retrieved successfully', ...result });
     } catch (error) {
       logger.error('List route staff error:', error);
+      next(error);
+    }
+  }
+
+  static async listOperationNotifications(req, res, next) {
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+      const notifications = await OperationNotification.find({})
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean();
+
+      return res.json({
+        success: true,
+        message: 'Operation notifications retrieved successfully',
+        notifications,
+        count: notifications.length,
+      });
+    } catch (error) {
+      logger.error('List operation notifications error:', error);
+      next(error);
+    }
+  }
+
+  static async createOperationNotification(req, res, next) {
+    try {
+      const payload = normalizeOperationNotificationPayload(req.body, req.user?.userId);
+      const validationErrors = validateOperationNotificationPayload(payload);
+      if (validationErrors.length) {
+        return res.status(400).json({
+          success: false,
+          message: 'Operation notification validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const notification = await OperationNotification.create(payload);
+      return res.status(201).json({
+        success: true,
+        message: 'Operation notification created successfully',
+        notification,
+      });
+    } catch (error) {
+      logger.error('Create operation notification error:', error);
       next(error);
     }
   }

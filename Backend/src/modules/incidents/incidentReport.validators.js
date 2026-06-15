@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import {
+  INCIDENT_HANDLING_ACTIONS,
+  INCIDENT_RESPONSIBLE_UNITS,
   INCIDENT_SEVERITIES,
   INCIDENT_STATUSES,
   INCIDENT_TYPES,
@@ -66,11 +68,23 @@ export const validateIncidentStatusUpdate = (body) => {
     errors.adminNote = 'Admin note must not exceed 2000 characters';
   }
 
+  if (body.resolutionSummary !== undefined && String(body.resolutionSummary).trim().length > 2000) {
+    errors.resolutionSummary = 'Resolution summary must not exceed 2000 characters';
+  }
+
+  if (body.handlingAction && !INCIDENT_HANDLING_ACTIONS.includes(body.handlingAction)) {
+    errors.handlingAction = 'Invalid handling action';
+  }
+
+  if (body.responsibleUnit && !INCIDENT_RESPONSIBLE_UNITS.includes(body.responsibleUnit)) {
+    errors.responsibleUnit = 'Invalid responsible unit';
+  }
+
   if (
     ['RESOLVED', 'REJECTED'].includes(body.status)
-    && !String(body.adminNote || '').trim()
+    && !String(body.resolutionSummary || body.adminNote || '').trim()
   ) {
-    errors.adminNote = 'Admin note is required when resolving or rejecting an incident';
+    errors.resolutionSummary = 'Resolution summary is required when resolving or rejecting an incident';
   }
 
   return errors;

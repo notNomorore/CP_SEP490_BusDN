@@ -27,6 +27,7 @@ import scheduleOperationsRoutes from './modules/scheduleOperations/scheduleOpera
 import fareOperationsRoutes from './modules/fareOperations/fareOperations.routes.js';
 import walkInTicketRoutes from './modules/walkInTickets/walkInTicket.routes.js';
 import passengerComplianceRoutes from './modules/passengerCompliance/passengerCompliance.routes.js';
+import busStopRoutes from './modules/busStops/busStopRoutes.js';
 
 export const createApp = () => {
   const app = express();
@@ -53,7 +54,7 @@ export const createApp = () => {
   // Body parsing middleware
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
-  app.use('/uploads', express.static(path.join(config.paths.root, 'uploads')));
+  app.use('/uploads', express.static(path.resolve(config.paths.uploads)));
 
   // Rate limiting
   const limiter = rateLimit({
@@ -127,6 +128,7 @@ export const createApp = () => {
   app.use('/api/admin', passengerComplianceRoutes);
   // app.use('/api/routes', routeRoutes);
   app.use('/api/routes', routeRoutes);
+  app.use('/api/bus-stops', busStopRoutes);
   app.use('/api/schedule-operations', scheduleOperationsRoutes);
   // etc...
 

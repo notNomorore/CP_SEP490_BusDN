@@ -1,28 +1,5 @@
 import { apiClient } from '../../auth/services/authService.js';
 
-const shouldRetrySameOrigin = (error) => (
-  error?.statusCode === 404
-  || error?.response?.status === 404
-  || /not found/i.test(error?.message || '')
-);
-
-const sameOriginAdminRequest = async (path, options = {}) => {
-  const token = localStorage.getItem('authToken');
-  const response = await fetch(`/api/admin${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw data?.message ? data : new Error(`Request failed with status ${response.status}`);
-  }
-  return data;
-};
-
 export const adminService = {
   createUser: async (data) => {
     return apiClient.post('/admin/users', data);
@@ -86,34 +63,13 @@ export const adminService = {
     return apiClient.post('/bus-stops/sync');
   },
   getBuses: async () => {
-    try {
-      return await apiClient.get('/admin/buses');
-    } catch (error) {
-      if (!shouldRetrySameOrigin(error)) throw error;
-      return sameOriginAdminRequest('/buses');
-    }
+    return apiClient.get('/admin/buses');
   },
   createBus: async (data) => {
-    try {
-      return await apiClient.post('/admin/buses', data);
-    } catch (error) {
-      if (!shouldRetrySameOrigin(error)) throw error;
-      return sameOriginAdminRequest('/buses', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    }
+    return apiClient.post('/admin/buses', data);
   },
   updateBus: async (busId, data) => {
-    try {
-      return await apiClient.put(`/admin/buses/${busId}`, data);
-    } catch (error) {
-      if (!shouldRetrySameOrigin(error)) throw error;
-      return sameOriginAdminRequest(`/buses/${busId}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      });
-    }
+    return apiClient.put(`/admin/buses/${busId}`, data);
   },
   getDrivers: async () => {
     return apiClient.get('/admin/drivers');

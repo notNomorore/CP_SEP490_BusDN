@@ -3,8 +3,7 @@ import Header from '../../../shared/components/navigation/Header.jsx';
 import Footer from '../../../shared/components/common/Footer.jsx';
 import customerSupportService, {
   CASE_STATUSES,
-  CASE_TYPES,
-  RECOVERY_STATUSES,
+  COMPLAINT_RESPONSE_STATUSES,
 } from '../services/customerSupportService.js';
 
 const PRIORITY_FILTERS = [
@@ -19,13 +18,12 @@ const STATUS_BADGE = {
   OPEN: 'bg-blue-100 text-blue-800',
   IN_PROGRESS: 'bg-amber-100 text-amber-900',
   RESOLVED: 'bg-green-100 text-green-800',
-  REJECTED: 'bg-error-container text-on-error-container',
-  CLOSED: 'bg-surface-container-high text-on-surface-variant',
+  REJECTED: 'bg-red-100 text-red-800',
+  CLOSED: 'bg-slate-100 text-slate-700',
 };
 
 const TYPE_BADGE = {
   COMPLAINT: 'bg-purple-100 text-purple-800',
-  LOST_ITEM: 'bg-orange-100 text-orange-900',
 };
 
 const formatDateTime = (value) => {
@@ -37,6 +35,8 @@ const formatDateTime = (value) => {
   }).format(new Date(value));
 };
 
+const getLabel = (items, value) => items.find((item) => item.value === value)?.label || value || 'Chưa có';
+
 const getErrorMessage = (error) => {
   if (!error) return '';
   if (typeof error === 'string') return error;
@@ -46,29 +46,30 @@ const getErrorMessage = (error) => {
   return error.message || 'Không thể xử lý yêu cầu.';
 };
 
-const getLabel = (items, value) => items.find((item) => item.value === value)?.label || value || 'Chưa có';
+const InfoRow = ({ label, value }) => (
+  <div className="rounded-2xl bg-surface-container-low px-4 py-3">
+    <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-on-surface-variant">
+      {label}
+    </dt>
+    <dd className="mt-1 font-bold text-on-surface">{value}</dd>
+  </div>
+);
 
 const AdminCustomerSupportPage = () => {
-  const [type, setType] = useState('ALL');
   const [status, setStatus] = useState('OPEN');
   const [priority, setPriority] = useState('ALL');
   const [cases, setCases] = useState([]);
   const [selectedCase, setSelectedCase] = useState(null);
   const [responseMessage, setResponseMessage] = useState('');
   const [nextStatus, setNextStatus] = useState('IN_PROGRESS');
-  const [lostItemNote, setLostItemNote] = useState('');
-  const [recoveryStatus, setRecoveryStatus] = useState('SEARCHING');
-  const [lostItemStatus, setLostItemStatus] = useState('IN_PROGRESS');
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
-  const selectedType = selectedCase?.type;
-  const selectedStatus = selectedCase?.status;
-  const isComplaint = selectedType === 'COMPLAINT';
-  const isLostItem = selectedType === 'LOST_ITEM';
+  const isComplaint = selectedCase?.type === 'COMPLAINT';
+  const isClosed = selectedCase?.status === 'CLOSED';
 
   const responseHistory = useMemo(() => (
     [...(selectedCase?.responses || [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
@@ -79,25 +80,19 @@ const AdminCustomerSupportPage = () => {
     setError('');
 
     try {
-      const response = await customerSupportService.listAdminCases({
-        type,
-        status,
-        priority,
+      const response = await customerSupportService.listAdminCases({ type: 'COMPLAINT', status, priority });
+      const items = response.data || [];
+      setCases(items);
+      setSelectedCase((current) => {
+        if (!items.length) return null;
+        return items.some((item) => item.id === current?.id) ? current : items[0];
       });
-
-      setCases(response.data || []);
-
-      if (response.data?.length) {
-        setSelectedCase((current) => current || response.data[0]);
-      } else {
-        setSelectedCase(null);
-      }
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
-  }, [priority, status, type]);
+  }, [priority, status]);
 
   useEffect(() => {
     loadCases();
@@ -110,12 +105,10 @@ const AdminCustomerSupportPage = () => {
 
     try {
       const response = await customerSupportService.getAdminCaseDetail(caseId);
-      setSelectedCase(response.data);
-      setNextStatus(response.data?.status === 'OPEN' ? 'IN_PROGRESS' : response.data?.status || 'IN_PROGRESS');
-      setRecoveryStatus(response.data?.lostItem?.recoveryStatus || 'SEARCHING');
-      setLostItemStatus(response.data?.status || 'IN_PROGRESS');
+      const supportCase = response.data;
+      setSelectedCase(supportCase);
+      setNextStatus(supportCase?.status === 'OPEN' ? 'IN_PROGRESS' : supportCase?.status || 'IN_PROGRESS');
       setResponseMessage('');
-      setLostItemNote('');
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -125,7 +118,7 @@ const AdminCustomerSupportPage = () => {
 
   const handleRespondToComplaint = async (event) => {
     event.preventDefault();
-    if (!selectedCase?.id) return;
+    if (!selectedCase?.id || isClosed) return;
 
     setIsSubmitting(true);
     setError('');
@@ -139,33 +132,7 @@ const AdminCustomerSupportPage = () => {
 
       setSelectedCase(response.data);
       setResponseMessage('');
-      setMessage('Phản hồi khiếu nại đã được lưu.');
-      await loadCases();
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleUpdateLostItem = async (event) => {
-    event.preventDefault();
-    if (!selectedCase?.id) return;
-
-    setIsSubmitting(true);
-    setError('');
-    setMessage('');
-
-    try {
-      const response = await customerSupportService.updateLostItemCase(selectedCase.id, {
-        recoveryStatus,
-        status: lostItemStatus,
-        note: lostItemNote,
-      });
-
-      setSelectedCase(response.data);
-      setLostItemNote('');
-      setMessage('Trạng thái đồ thất lạc đã được cập nhật.');
+      setMessage('Phản hồi khiếu nại đã được lưu và ghi vào lịch sử xử lý.');
       await loadCases();
     } catch (err) {
       setError(getErrorMessage(err));
@@ -175,20 +142,20 @@ const AdminCustomerSupportPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="flex min-h-screen flex-col bg-background">
       <Header />
 
       <main className="flex-1 pt-24">
         <section className="bg-primary text-surface-bright">
           <div className="mx-auto max-w-7xl px-6 py-12">
             <span className="inline-flex rounded-full bg-white/10 px-4 py-1 text-sm font-semibold uppercase tracking-[0.2em] text-tertiary-fixed">
-              Customer Support
+              Customer Support Management
             </span>
-            <h1 className="mt-4 text-4xl font-headline font-black md:text-5xl">
+            <h1 className="mt-4 font-headline text-4xl font-black md:text-5xl">
               Quản lý hỗ trợ khách hàng
             </h1>
             <p className="mt-3 max-w-3xl text-lg leading-8 text-surface-variant/85">
-              Xử lý khiếu nại hành khách và theo dõi các trường hợp đồ thất lạc trong vận hành xe buýt.
+              Admin xem khiếu nại, phản hồi hành khách và lưu lại lịch sử xử lý để quản lý chất lượng dịch vụ.
             </p>
           </div>
         </section>
@@ -197,11 +164,11 @@ const AdminCustomerSupportPage = () => {
           <aside className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-xl shadow-primary/5">
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-headline font-black text-primary">
+                <h2 className="font-headline text-2xl font-black text-primary">
                   Danh sách yêu cầu
                 </h2>
                 <p className="mt-2 text-sm text-on-surface-variant">
-                  Lọc và chọn một hồ sơ hỗ trợ để xử lý.
+                  Lọc hồ sơ theo loại, trạng thái và mức độ ưu tiên.
                 </p>
               </div>
               <button
@@ -214,22 +181,8 @@ const AdminCustomerSupportPage = () => {
               </button>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
-              <select
-                value={type}
-                onChange={(event) => {
-                  setType(event.target.value);
-                  setSelectedCase(null);
-                }}
-                className="rounded-2xl border-outline-variant/70 bg-white px-4 py-3 text-sm text-on-surface focus:border-on-tertiary-container focus:ring-on-tertiary-container"
-              >
-                <option value="ALL">Tất cả loại</option>
-                {CASE_TYPES.map((item) => (
-                  <option key={item.value} value={item.value}>{item.label}</option>
-                ))}
-              </select>
-
-              <select
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+<select
                 value={status}
                 onChange={(event) => {
                   setStatus(event.target.value);
@@ -257,7 +210,7 @@ const AdminCustomerSupportPage = () => {
             </div>
 
             {error && (
-              <div className="mt-4 rounded-2xl border border-error/20 bg-error-container px-4 py-3 text-sm text-on-error-container">
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {error}
               </div>
             )}
@@ -293,11 +246,11 @@ const AdminCustomerSupportPage = () => {
                               {supportCase.title}
                             </p>
                             <p className="mt-1 text-xs text-on-surface-variant">
-                              {supportCase.passenger?.fullName || 'Passenger'} • {formatDateTime(supportCase.createdAt)}
+                              {supportCase.passenger?.fullName || 'Hành khách'} - {formatDateTime(supportCase.createdAt)}
                             </p>
                           </div>
                           <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${TYPE_BADGE[supportCase.type]}`}>
-                            {getLabel(CASE_TYPES, supportCase.type)}
+                            Khi?u n?i
                           </span>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
@@ -318,16 +271,16 @@ const AdminCustomerSupportPage = () => {
 
           <section className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-xl shadow-primary/5">
             <div className="mb-6">
-              <h2 className="text-2xl font-headline font-black text-primary">
+              <h2 className="font-headline text-2xl font-black text-primary">
                 Chi tiết xử lý
               </h2>
               <p className="mt-2 text-sm leading-6 text-on-surface-variant">
-                Phản hồi khiếu nại hoặc cập nhật tiến độ đồ thất lạc theo từng hồ sơ.
+                UC101 tập trung vào khiếu nại: admin xem nội dung, phản hồi và cập nhật trạng thái hồ sơ.
               </p>
             </div>
 
             {message && (
-              <div className="mb-4 rounded-2xl border border-on-tertiary-container/20 bg-on-tertiary-container/10 px-4 py-3 text-sm text-on-tertiary-fixed-variant">
+              <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
                 {message}
               </div>
             )}
@@ -344,19 +297,19 @@ const AdminCustomerSupportPage = () => {
               <div className="space-y-6">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
-                    <h3 className="text-xl font-headline font-black text-primary">
+                    <h3 className="font-headline text-xl font-black text-primary">
                       {selectedCase.title}
                     </h3>
                     <p className="mt-1 text-sm text-on-surface-variant">
-                      {selectedCase.passenger?.fullName || 'Passenger'} • {selectedCase.passenger?.phone || selectedCase.passenger?.email || 'Chưa có liên hệ'}
+                      {selectedCase.passenger?.fullName || 'Hành khách'} - {selectedCase.passenger?.phone || selectedCase.passenger?.email || 'Chưa có liên hệ'}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <span className={`rounded-full px-4 py-2 text-sm font-bold ${TYPE_BADGE[selectedType]}`}>
-                      {getLabel(CASE_TYPES, selectedType)}
+                    <span className={`rounded-full px-4 py-2 text-sm font-bold ${TYPE_BADGE[selectedCase.type]}`}>
+                      Khi?u n?i
                     </span>
-                    <span className={`rounded-full px-4 py-2 text-sm font-bold ${STATUS_BADGE[selectedStatus]}`}>
-                      {getLabel(CASE_STATUSES, selectedStatus)}
+                    <span className={`rounded-full px-4 py-2 text-sm font-bold ${STATUS_BADGE[selectedCase.status]}`}>
+                      {getLabel(CASE_STATUSES, selectedCase.status)}
                     </span>
                   </div>
                 </div>
@@ -364,44 +317,30 @@ const AdminCustomerSupportPage = () => {
                 <dl className="grid gap-3 md:grid-cols-2">
                   <InfoRow label="Tuyến/chuyến" value={selectedCase.routeName || selectedCase.tripCode || 'Chưa có'} />
                   <InfoRow label="Biển số xe" value={selectedCase.busPlate || 'Chưa có'} />
-                  <InfoRow label="Thời điểm sự cố" value={formatDateTime(selectedCase.incidentAt)} />
+                  <InfoRow label="Thời điểm sự việc" value={formatDateTime(selectedCase.incidentAt)} />
                   <InfoRow label="Mức độ" value={selectedCase.priority} />
                 </dl>
 
                 <div className="rounded-2xl bg-surface-container-low p-4">
                   <p className="text-sm font-bold text-on-surface">Nội dung hành khách gửi</p>
-                  <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                  <p className="mt-2 whitespace-pre-line text-sm leading-6 text-on-surface-variant">
                     {selectedCase.description}
                   </p>
                 </div>
-
-                {isLostItem && (
-                  <div className="rounded-2xl border border-outline-variant/30 bg-white p-4">
-                    <h3 className="text-lg font-headline font-black text-primary">
-                      Thông tin đồ thất lạc
-                    </h3>
-                    <dl className="mt-3 grid gap-3 md:grid-cols-2">
-                      <InfoRow label="Tên đồ vật" value={selectedCase.lostItem?.itemName || 'Chưa có'} />
-                      <InfoRow label="Trạng thái tìm kiếm" value={getLabel(RECOVERY_STATUSES, selectedCase.lostItem?.recoveryStatus)} />
-                      <InfoRow label="Vị trí thấy lần cuối" value={selectedCase.lostItem?.lastSeenLocation || 'Chưa có'} />
-                      <InfoRow label="Thời điểm thất lạc" value={formatDateTime(selectedCase.lostItem?.lostAt)} />
-                    </dl>
-                    {selectedCase.lostItem?.itemDescription && (
-                      <p className="mt-3 text-sm leading-6 text-on-surface-variant">
-                        {selectedCase.lostItem.itemDescription}
-                      </p>
-                    )}
-                  </div>
-                )}
 
                 {isComplaint && (
                   <form
                     onSubmit={handleRespondToComplaint}
                     className="rounded-3xl border border-outline-variant/30 bg-surface-container-low p-5"
                   >
-                    <h3 className="text-lg font-headline font-black text-primary">
-                      Phản hồi khiếu nại
+                    <h3 className="font-headline text-lg font-black text-primary">
+                      UC101 - Phản hồi khiếu nại
                     </h3>
+                    {isClosed && (
+                      <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                        Hồ sơ đã đóng. Admin chỉ có thể xem lịch sử xử lý, không phản hồi thêm.
+                      </div>
+                    )}
                     <div className="mt-4 grid gap-4">
                       <label className="block space-y-2">
                         <span className="text-sm font-semibold text-on-surface">Nội dung phản hồi</span>
@@ -409,8 +348,9 @@ const AdminCustomerSupportPage = () => {
                           rows={4}
                           value={responseMessage}
                           onChange={(event) => setResponseMessage(event.target.value)}
-                          className="w-full rounded-2xl border-outline-variant/70 bg-white px-4 py-3 text-on-surface focus:border-on-tertiary-container focus:ring-on-tertiary-container"
-                          placeholder="Nhập phản hồi gửi cho hành khách và ghi nhận nội bộ."
+                          disabled={isClosed}
+                          className="w-full rounded-2xl border-outline-variant/70 bg-white px-4 py-3 text-on-surface focus:border-on-tertiary-container focus:ring-on-tertiary-container disabled:cursor-not-allowed disabled:opacity-60"
+                          placeholder="Nhập nội dung phản hồi cho hành khách và ghi nhận hướng xử lý."
                         />
                       </label>
                       <label className="block max-w-sm space-y-2">
@@ -418,9 +358,10 @@ const AdminCustomerSupportPage = () => {
                         <select
                           value={nextStatus}
                           onChange={(event) => setNextStatus(event.target.value)}
-                          className="w-full rounded-2xl border-outline-variant/70 bg-white px-4 py-3 text-on-surface focus:border-on-tertiary-container focus:ring-on-tertiary-container"
+                          disabled={isClosed}
+                          className="w-full rounded-2xl border-outline-variant/70 bg-white px-4 py-3 text-on-surface focus:border-on-tertiary-container focus:ring-on-tertiary-container disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          {CASE_STATUSES.filter((item) => item.value !== 'ALL').map((item) => (
+                          {COMPLAINT_RESPONSE_STATUSES.map((item) => (
                             <option key={item.value} value={item.value}>{item.label}</option>
                           ))}
                         </select>
@@ -428,7 +369,7 @@ const AdminCustomerSupportPage = () => {
                     </div>
                     <button
                       type="submit"
-                      disabled={isSubmitting || !responseMessage.trim()}
+                      disabled={isSubmitting || isClosed || responseMessage.trim().length < 10}
                       className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-4 font-bold text-on-primary hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60 md:w-auto"
                     >
                       <span className="material-symbols-outlined">reply</span>
@@ -437,63 +378,9 @@ const AdminCustomerSupportPage = () => {
                   </form>
                 )}
 
-                {isLostItem && (
-                  <form
-                    onSubmit={handleUpdateLostItem}
-                    className="rounded-3xl border border-outline-variant/30 bg-surface-container-low p-5"
-                  >
-                    <h3 className="text-lg font-headline font-black text-primary">
-                      Cập nhật lost-and-found
-                    </h3>
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <label className="block space-y-2">
-                        <span className="text-sm font-semibold text-on-surface">Trạng thái tìm kiếm</span>
-                        <select
-                          value={recoveryStatus}
-                          onChange={(event) => setRecoveryStatus(event.target.value)}
-                          className="w-full rounded-2xl border-outline-variant/70 bg-white px-4 py-3 text-on-surface focus:border-on-tertiary-container focus:ring-on-tertiary-container"
-                        >
-                          {RECOVERY_STATUSES.map((item) => (
-                            <option key={item.value} value={item.value}>{item.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="block space-y-2">
-                        <span className="text-sm font-semibold text-on-surface">Trạng thái hồ sơ</span>
-                        <select
-                          value={lostItemStatus}
-                          onChange={(event) => setLostItemStatus(event.target.value)}
-                          className="w-full rounded-2xl border-outline-variant/70 bg-white px-4 py-3 text-on-surface focus:border-on-tertiary-container focus:ring-on-tertiary-container"
-                        >
-                          {CASE_STATUSES.filter((item) => item.value !== 'ALL').map((item) => (
-                            <option key={item.value} value={item.value}>{item.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="block space-y-2 md:col-span-2">
-                        <span className="text-sm font-semibold text-on-surface">Ghi chú xử lý</span>
-                        <textarea
-                          rows={3}
-                          value={lostItemNote}
-                          onChange={(event) => setLostItemNote(event.target.value)}
-                          className="w-full rounded-2xl border-outline-variant/70 bg-white px-4 py-3 text-on-surface focus:border-on-tertiary-container focus:ring-on-tertiary-container"
-                          placeholder="Ví dụ: đã liên hệ tài xế, đã tìm tại trạm cuối, đã hẹn khách nhận lại..."
-                        />
-                      </label>
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-on-tertiary-fixed-variant px-6 py-4 font-bold text-on-tertiary-fixed hover:bg-primary disabled:cursor-not-allowed disabled:opacity-60 md:w-auto"
-                    >
-                      <span className="material-symbols-outlined">inventory_2</span>
-                      Cập nhật hồ sơ
-                    </button>
-                  </form>
-                )}
 
                 <section className="rounded-3xl border border-outline-variant/30 bg-white p-5">
-                  <h3 className="text-lg font-headline font-black text-primary">
+                  <h3 className="font-headline text-lg font-black text-primary">
                     Lịch sử phản hồi / xử lý
                   </h3>
                   {responseHistory.length === 0 ? (
@@ -508,14 +395,21 @@ const AdminCustomerSupportPage = () => {
                           className="rounded-2xl bg-surface-container-low p-4"
                         >
                           <div className="flex items-start justify-between gap-4">
-                            <p className="text-sm font-bold text-on-surface">
-                              {response.responder?.fullName || 'Admin'}
-                            </p>
+                            <div>
+                              <p className="text-sm font-bold text-on-surface">
+                                {response.responder?.fullName || 'Admin'}
+                              </p>
+                              {response.statusAfter && (
+                                <p className="mt-1 text-xs text-on-surface-variant">
+                                  {getLabel(CASE_STATUSES, response.statusBefore)} {'->'} {getLabel(CASE_STATUSES, response.statusAfter)}
+                                </p>
+                              )}
+                            </div>
                             <span className="shrink-0 text-xs text-on-surface-variant">
                               {formatDateTime(response.createdAt)}
                             </span>
                           </div>
-                          <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                          <p className="mt-2 whitespace-pre-line text-sm leading-6 text-on-surface-variant">
                             {response.message}
                           </p>
                         </li>
@@ -533,14 +427,5 @@ const AdminCustomerSupportPage = () => {
     </div>
   );
 };
-
-const InfoRow = ({ label, value }) => (
-  <div className="rounded-2xl bg-surface-container-low px-4 py-3">
-    <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-on-surface-variant">
-      {label}
-    </dt>
-    <dd className="mt-1 font-bold text-on-surface">{value}</dd>
-  </div>
-);
 
 export default AdminCustomerSupportPage;

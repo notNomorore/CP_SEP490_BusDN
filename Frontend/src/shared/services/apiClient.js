@@ -30,10 +30,26 @@ const getRequestKey = (url, config = {}) => JSON.stringify({
   params: stableParams(config.params),
   responseType: config.responseType || 'json',
 });
+const getStoredToken = () => {
+  const directToken = localStorage.getItem('authToken')
+    || localStorage.getItem('token')
+    || localStorage.getItem('accessToken');
+
+  if (directToken) {
+    return directToken;
+  }
+
+  try {
+    const storedUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+    return storedUser.token || storedUser.accessToken || '';
+  } catch {
+    return '';
+  }
+};
 
 apiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('authToken');
+    const token = getStoredToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -46,7 +62,7 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    const token = localStorage.getItem('authToken');
+    const token = getStoredToken();
     const requestUrl = error.config?.url || '';
     const isPublicAuthRequest = [
       '/auth/login',

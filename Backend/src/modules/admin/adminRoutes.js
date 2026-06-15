@@ -30,6 +30,8 @@ router.put('/buses/:busId', AdminController.updateBus);
 router.get('/trip-schedules', AdminController.listTripSchedules);
 router.post('/trip-schedules', AdminController.createTripSchedule);
 router.put('/trip-schedules/:scheduleId', AdminController.updateTripSchedule);
+router.get('/operation-notifications', AdminController.listOperationNotifications);
+router.post('/operation-notifications', AdminController.createOperationNotification);
 router.get('/drivers', AdminController.listRouteStaff);
 router.get('/users', AdminController.listUsers);
 router.get('/users/:userId', AdminController.getUserDetail);

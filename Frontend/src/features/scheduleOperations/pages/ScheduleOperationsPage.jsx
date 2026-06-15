@@ -11,6 +11,7 @@ import {
 } from 'react-leaflet';
 import {
   AlertTriangle,
+  BellRing,
   BusFront,
   CalendarDays,
   CheckCircle2,
@@ -67,7 +68,34 @@ const INCIDENT_TYPES = [
   { value: 'TRAFFIC_CONGESTION', label: 'UC46 - Báo kẹt xe' },
   { value: 'ACCIDENT', label: 'UC47 - Báo tai nạn' },
   { value: 'VEHICLE_BREAKDOWN', label: 'UC48 - Báo xe hỏng' },
+  { value: 'PASSENGER_VIOLATION', label: 'UC50 - Báo hành khách vi phạm' },
+  { value: 'PASSENGER_CONFLICT', label: 'UC51 - Báo xung đột hành khách' },
+  { value: 'FOUND_ITEM', label: 'UC52 - Báo đồ tìm thấy' },
 ];
+
+const DRIVER_INCIDENT_TYPES = INCIDENT_TYPES.filter((type) => [
+  'TRAFFIC_CONGESTION',
+  'ACCIDENT',
+  'VEHICLE_BREAKDOWN',
+  'PASSENGER_VIOLATION',
+  'PASSENGER_CONFLICT',
+  'FOUND_ITEM',
+].includes(type.value));
+
+const BUS_ASSISTANT_INCIDENT_TYPES = INCIDENT_TYPES.filter((type) => [
+  'PASSENGER_VIOLATION',
+  'PASSENGER_CONFLICT',
+  'FOUND_ITEM',
+].includes(type.value));
+
+const INCIDENT_TYPE_DESCRIPTIONS = {
+  TRAFFIC_CONGESTION: 'Báo ùn tắc, chậm tuyến hoặc đường bị chặn.',
+  ACCIDENT: 'Báo tai nạn, va chạm hoặc tình huống cần hỗ trợ khẩn.',
+  VEHICLE_BREAKDOWN: 'Báo xe hỏng trong chuyến, cần hỗ trợ kỹ thuật hoặc xe thay thế.',
+  PASSENGER_VIOLATION: 'Báo hành khách vi phạm nội quy xe buýt để điều hành xử lý.',
+  PASSENGER_CONFLICT: 'Báo xung đột giữa hành khách để điều hành nắm tình hình.',
+  FOUND_ITEM: 'Báo đồ vật tìm thấy trên xe để xử lý thất lạc.',
+};
 
 const IN_TRIP_INCIDENT_TYPES = INCIDENT_TYPES.filter(
   (type) => type.value === 'TRAFFIC_CONGESTION'
@@ -90,12 +118,45 @@ const AFFECTED_DIRECTIONS = [
   { value: 'UNKNOWN', label: 'Chưa xác định' },
 ];
 
+const PASSENGER_CONFLICT_CATEGORIES = [
+  { value: 'ARGUMENT', label: 'Cãi vã / gây rối' },
+  { value: 'FARE_DISPUTE', label: 'Tranh chấp vé / thanh toán' },
+  { value: 'SEAT_DISPUTE', label: 'Tranh chấp chỗ ngồi' },
+  { value: 'HARASSMENT', label: 'Quấy rối / đe dọa' },
+  { value: 'SAFETY_RISK', label: 'Nguy cơ mất an toàn' },
+  { value: 'OTHER', label: 'Khác' },
+];
+
+
+const PASSENGER_VIOLATION_CATEGORIES = [
+  { value: 'NO_TICKET', label: 'Không có vé / không quét vé' },
+  { value: 'WRONG_TICKET', label: 'Dùng sai loại vé' },
+  { value: 'SMOKING', label: 'Hút thuốc trên xe' },
+  { value: 'LITTERING', label: 'Xả rác trên xe' },
+  { value: 'UNSAFE_BEHAVIOR', label: 'Hành vi mất an toàn' },
+  { value: 'DISTURBANCE', label: 'Gây ồn / làm phiền hành khách' },
+  { value: 'OTHER', label: 'Khác' },
+];
 const INCIDENT_SEVERITIES = [
   { value: 'LOW', label: 'Thấp' },
   { value: 'MEDIUM', label: 'Trung bình' },
   { value: 'HIGH', label: 'Cao' },
   { value: 'CRITICAL', label: 'Khẩn cấp' },
 ];
+
+const NOTIFICATION_CATEGORY_LABELS = {
+  ROUTE_UPDATE: 'Cập nhật tuyến',
+  SCHEDULE_CHANGE: 'Đổi lịch vận hành',
+  EMERGENCY_INSTRUCTION: 'Chỉ đạo khẩn',
+  GENERAL: 'Thông báo chung',
+};
+
+const NOTIFICATION_PRIORITY_META = {
+  LOW: 'bg-slate-100 text-slate-700',
+  NORMAL: 'bg-blue-100 text-blue-800',
+  HIGH: 'bg-amber-100 text-amber-900',
+  CRITICAL: 'bg-red-100 text-red-800',
+};
 
 const formatDate = (value) => new Intl.DateTimeFormat('vi-VN', {
   weekday: 'long',
@@ -911,20 +972,49 @@ const IncidentReportingPanel = ({
     policeNotified: false,
     canContinue: true,
     requiresReplacementVehicle: false,
+    violationCategory: 'NO_TICKET',
+    passengerDescription: '',
+    conflictCategory: 'ARGUMENT',
+    partiesInvolved: '',
+    actionTaken: '',
+    itemName: '',
+    itemDescription: '',
+    foundLocation: '',
+    handedTo: '',
   });
   const [showIncidentChoices, setShowIncidentChoices] = useState(false);
   const [selectedIncidentType, setSelectedIncidentType] = useState(null);
   const [evidenceFiles, setEvidenceFiles] = useState([]);
 
   const isTripRunning = assignment.tripStatus === 'IN_PROGRESS';
+  const isTripCompleted = assignment.tripStatus === 'COMPLETED';
+  const canReportFoundItemAfterCompletion = assignment.actorRole === 'BUS_ASSISTANT' && isTripCompleted;
+  const canUseIncidentForm = isTripRunning || canReportFoundItemAfterCompletion;
+  const allowedIncidentTypes = assignment.actorRole === 'BUS_ASSISTANT'
+    ? BUS_ASSISTANT_INCIDENT_TYPES.filter((type) => (
+      canReportFoundItemAfterCompletion ? type.value === 'FOUND_ITEM' : true
+    ))
+    : DRIVER_INCIDENT_TYPES;
+  useEffect(() => {
+    if (
+      selectedIncidentType
+      && !allowedIncidentTypes.some((type) => type.value === selectedIncidentType)
+    ) {
+      setSelectedIncidentType(null);
+      setShowIncidentChoices(false);
+    }
+  }, [allowedIncidentTypes, selectedIncidentType]);
   const activeIncidentType = selectedIncidentType || form.type;
   const incidentTitle = {
     TRAFFIC_CONGESTION: 'UC46 - Báo kẹt xe',
     ACCIDENT: 'UC47 - Báo tai nạn',
     VEHICLE_BREAKDOWN: 'UC48 - Báo xe hỏng',
+    PASSENGER_VIOLATION: 'UC50 - Báo hành khách vi phạm',
+    PASSENGER_CONFLICT: 'UC51 - Báo xung đột hành khách',
+    FOUND_ITEM: 'UC52 - Báo đồ tìm thấy',
   }[activeIncidentType] || 'Báo sự cố trong chuyến';
   const canSubmit = canReportIncident
-    && isTripRunning
+    && canUseIncidentForm
     && selectedIncidentType
     && form.locationText.trim().length >= 3
     && form.description.trim().length >= 10
@@ -937,6 +1027,13 @@ const IncidentReportingPanel = ({
         && Number(form.estimatedDelayMinutes) >= 1
       )
     );
+  const hasPassengerViolationDetail = form.type !== 'PASSENGER_VIOLATION'
+    || (form.violationCategory && form.actionTaken.trim().length >= 3);
+  const hasPassengerConflictDetail = form.type !== 'PASSENGER_CONFLICT'
+    || (form.conflictCategory && form.actionTaken.trim().length >= 3);
+  const hasFoundItemDetail = form.type !== 'FOUND_ITEM'
+    || (form.itemName.trim().length >= 2 && form.foundLocation.trim().length >= 3);
+  const canSubmitReport = canSubmit && hasPassengerViolationDetail && hasPassengerConflictDetail && hasFoundItemDetail;
 
   const updateForm = (field, value) => {
     setForm((current) => ({
@@ -949,11 +1046,14 @@ const IncidentReportingPanel = ({
     setEvidenceFiles(Array.from(event.target.files || []).slice(0, 5));
   };
 
-  const submitIncidentReport = () => {
-    onReportIncident(assignment.id, {
+  const submitIncidentReport = async () => {
+    await onReportIncident(assignment.id, {
       ...form,
       evidenceFiles,
     });
+    setSelectedIncidentType(null);
+    setShowIncidentChoices(false);
+    setEvidenceFiles([]);
   };
 
   const selectIncidentType = (type) => {
@@ -963,6 +1063,7 @@ const IncidentReportingPanel = ({
       ...current,
       type,
       severity: type === 'ACCIDENT' && current.severity === 'LOW' ? 'MEDIUM' : current.severity,
+      foundLocation: type === 'FOUND_ITEM' ? current.locationText : current.foundLocation,
     }));
   };
 
@@ -981,7 +1082,7 @@ const IncidentReportingPanel = ({
         <StatusBadge status={assignment.tripStatus} />
       </div>
 
-      {!isTripRunning && (
+      {!canUseIncidentForm && (
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Cần bắt đầu chuyến trước khi báo sự cố.
         </div>
@@ -999,7 +1100,7 @@ const IncidentReportingPanel = ({
             <button
               type="button"
               onClick={() => setShowIncidentChoices((current) => !current)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-700 px-4 py-3 text-sm font-bold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <AlertTriangle className="h-4 w-4" />
@@ -1009,21 +1110,17 @@ const IncidentReportingPanel = ({
 
           {showIncidentChoices && (
             <div className="mt-4 grid gap-3 md:grid-cols-3">
-              {INCIDENT_TYPES.map((type) => (
+              {allowedIncidentTypes.map((type) => (
                 <button
                   key={type.value}
                   type="button"
                   onClick={() => selectIncidentType(type.value)}
-                  disabled={!canReportIncident || !isTripRunning || isProcessing}
+                  disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
                   className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-left hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <p className="font-black text-slate-950">{type.label}</p>
                   <p className="mt-1 text-xs text-slate-600">
-                    {type.value === 'TRAFFIC_CONGESTION'
-                      ? 'Báo ùn tắc, chậm tuyến hoặc đường bị chặn.'
-                      : type.value === 'ACCIDENT'
-                        ? 'Báo tai nạn, va chạm hoặc tình huống cần hỗ trợ khẩn.'
-                        : 'Báo xe hỏng trong chuyến, cần hỗ trợ kỹ thuật hoặc xe thay thế.'}
+                    {INCIDENT_TYPE_DESCRIPTIONS[type.value]}
                   </p>
                 </button>
               ))}
@@ -1058,10 +1155,10 @@ const IncidentReportingPanel = ({
           <select
             value={form.type}
             onChange={(event) => updateForm('type', event.target.value)}
-            disabled={!canReportIncident || !isTripRunning || isProcessing}
+            disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
             className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
           >
-            {INCIDENT_TYPES.map((type) => (
+            {allowedIncidentTypes.map((type) => (
               <option key={type.value} value={type.value}>{type.label}</option>
             ))}
           </select>
@@ -1071,7 +1168,7 @@ const IncidentReportingPanel = ({
           <select
             value={form.severity}
             onChange={(event) => updateForm('severity', event.target.value)}
-            disabled={!canReportIncident || !isTripRunning || isProcessing}
+            disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
             className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
           >
             {INCIDENT_SEVERITIES.map((severity) => (
@@ -1084,7 +1181,7 @@ const IncidentReportingPanel = ({
           <input
             value={form.locationText}
             onChange={(event) => updateForm('locationText', event.target.value)}
-            disabled={!canReportIncident || !isTripRunning || isProcessing}
+            disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
             placeholder="Ví dụ: gần cầu Rồng"
             className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
           />
@@ -1098,7 +1195,7 @@ const IncidentReportingPanel = ({
             <select
               value={form.trafficCategory}
               onChange={(event) => updateForm('trafficCategory', event.target.value)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
             >
               {TRAFFIC_CATEGORIES.map((category) => (
@@ -1111,7 +1208,7 @@ const IncidentReportingPanel = ({
             <select
               value={form.affectedDirection}
               onChange={(event) => updateForm('affectedDirection', event.target.value)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
             >
               {AFFECTED_DIRECTIONS.map((direction) => (
@@ -1126,7 +1223,7 @@ const IncidentReportingPanel = ({
               min="1"
               value={form.estimatedDelayMinutes}
               onChange={(event) => updateForm('estimatedDelayMinutes', event.target.value)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
             />
           </label>
@@ -1140,7 +1237,7 @@ const IncidentReportingPanel = ({
               type="checkbox"
               checked={form.injuriesReported}
               onChange={(event) => updateForm('injuriesReported', event.target.checked)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="rounded border-slate-300 text-red-600 focus:ring-red-500"
             />
             Có người bị thương
@@ -1150,7 +1247,7 @@ const IncidentReportingPanel = ({
               type="checkbox"
               checked={form.policeNotified}
               onChange={(event) => updateForm('policeNotified', event.target.checked)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="rounded border-slate-300 text-red-600 focus:ring-red-500"
             />
             Đã báo cơ quan chức năng
@@ -1165,7 +1262,7 @@ const IncidentReportingPanel = ({
               type="checkbox"
               checked={form.canContinue}
               onChange={(event) => updateForm('canContinue', event.target.checked)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="rounded border-slate-300 text-red-600 focus:ring-red-500"
             />
             Xe còn có thể tiếp tục chạy
@@ -1175,10 +1272,121 @@ const IncidentReportingPanel = ({
               type="checkbox"
               checked={form.requiresReplacementVehicle}
               onChange={(event) => updateForm('requiresReplacementVehicle', event.target.checked)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="rounded border-slate-300 text-red-600 focus:ring-red-500"
             />
             Cần xe thay thế
+          </label>
+        </div>
+      )}
+
+      {form.type === 'PASSENGER_VIOLATION' && (
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Loại vi phạm</span>
+            <select
+              value={form.violationCategory}
+              onChange={(event) => updateForm('violationCategory', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            >
+              {PASSENGER_VIOLATION_CATEGORIES.map((category) => (
+                <option key={category.value} value={category.value}>{category.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Mô tả hành khách</span>
+            <input
+              value={form.passengerDescription}
+              onChange={(event) => updateForm('passengerDescription', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: hành khách áo xanh tại cửa sau"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Hành động đã xử lý</span>
+            <input
+              value={form.actionTaken}
+              onChange={(event) => updateForm('actionTaken', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: nhắc nội quy, yêu cầu mua vé"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+        </div>
+      )}
+
+      {form.type === 'PASSENGER_CONFLICT' && (
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Nhóm xung đột</span>
+            <select
+              value={form.conflictCategory}
+              onChange={(event) => updateForm('conflictCategory', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            >
+              {PASSENGER_CONFLICT_CATEGORIES.map((category) => (
+                <option key={category.value} value={category.value}>{category.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Các bên liên quan</span>
+            <input
+              value={form.partiesInvolved}
+              onChange={(event) => updateForm('partiesInvolved', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: 2 hành khách tại cửa sau"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Hành động đã xử lý</span>
+            <input
+              value={form.actionTaken}
+              onChange={(event) => updateForm('actionTaken', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: tách hành khách, nhắc nội quy"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+        </div>
+      )}
+
+      {form.type === 'FOUND_ITEM' && (
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Tên đồ vật</span>
+            <input
+              value={form.itemName}
+              onChange={(event) => updateForm('itemName', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: ví da màu đen"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Vị trí tìm thấy</span>
+            <input
+              value={form.foundLocation}
+              onChange={(event) => updateForm('foundLocation', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: ghế số 12"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Bàn giao cho</span>
+            <input
+              value={form.handedTo}
+              onChange={(event) => updateForm('handedTo', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: quầy điều hành bến"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
           </label>
         </div>
       )}
@@ -1188,7 +1396,7 @@ const IncidentReportingPanel = ({
         <textarea
           value={form.description}
           onChange={(event) => updateForm('description', event.target.value)}
-          disabled={!canReportIncident || !isTripRunning || isProcessing}
+          disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
           placeholder="Mô tả rõ tình huống, mức ảnh hưởng và hành động đã thực hiện."
           rows={3}
           className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
@@ -1203,7 +1411,7 @@ const IncidentReportingPanel = ({
           capture="environment"
           multiple
           onChange={updateEvidenceFiles}
-          disabled={!canReportIncident || !isTripRunning || isProcessing}
+          disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
           className="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-red-100 file:px-3 file:py-2 file:text-sm file:font-bold file:text-red-700 hover:file:bg-red-200"
         />
         <p className="text-xs text-slate-500">Có thể chụp hoặc chọn tối đa 5 ảnh JPG, PNG, WEBP để admin xem tình hình rõ hơn.</p>
@@ -1222,7 +1430,7 @@ const IncidentReportingPanel = ({
       <button
         type="button"
         onClick={submitIncidentReport}
-        disabled={!canSubmit || isProcessing}
+        disabled={!canSubmitReport || isProcessing}
         className="mt-3 inline-flex items-center justify-center gap-2 rounded-lg bg-red-700 px-4 py-3 text-sm font-bold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Send className="h-4 w-4" />
@@ -1261,7 +1469,8 @@ const AssignmentCard = ({
     assignment.inspection?.status === 'READY'
     || ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(assignment.tripStatus)
   );
-  const showIncidentStep = assignment.tripStatus === 'IN_PROGRESS';
+  const showIncidentStep = assignment.tripStatus === 'IN_PROGRESS'
+    || (assignment.actorRole === 'BUS_ASSISTANT' && assignment.tripStatus === 'COMPLETED');
   const acceptedScreenTitle = assignment.tripStatus === 'IN_PROGRESS'
     ? 'Chuyến đang vận hành'
     : assignment.inspection?.status === 'READY'
@@ -1323,6 +1532,14 @@ const AssignmentCard = ({
             </div>
           </div>
         </div>
+        {showIncidentStep && (
+          <IncidentReportingPanel
+            assignment={assignment}
+            canReportIncident={assignment.actorRole === 'BUS_ASSISTANT'}
+            isProcessing={isProcessing}
+            onReportIncident={onReportIncident}
+          />
+        )}
       </article>
     );
   }
@@ -1375,7 +1592,7 @@ const AssignmentCard = ({
         {showIncidentStep && (
           <IncidentReportingPanel
             assignment={assignment}
-            canReportIncident={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+            canReportIncident={['DRIVER', 'BUS_ASSISTANT'].includes(assignment.actorRole)}
             isProcessing={isProcessing}
             onReportIncident={onReportIncident}
           />
@@ -1496,7 +1713,7 @@ const AssignmentCard = ({
     {showIncidentStep && (
       <IncidentReportingPanel
         assignment={assignment}
-        canReportIncident={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+        canReportIncident={['DRIVER', 'BUS_ASSISTANT'].includes(assignment.actorRole)}
         isProcessing={isProcessing}
         onReportIncident={onReportIncident}
       />
@@ -1575,6 +1792,51 @@ const ShiftScheduleCard = ({ shift }) => {
         </ul>
       </div>
     </article>
+  );
+};
+
+const OperationNotificationsPanel = ({ notifications = [] }) => {
+  if (!notifications.length) return null;
+
+  return (
+    <section className="mt-6 rounded-lg border border-cyan-200 bg-cyan-50/70 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-black uppercase text-cyan-900">
+            <BellRing className="h-4 w-4" />
+            UC49 - Thông báo vận hành
+          </div>
+          <p className="mt-1 text-sm text-slate-600">
+            Thông báo từ điều hành về tuyến, lịch chạy hoặc chỉ đạo khẩn.
+          </p>
+        </div>
+        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-cyan-800">
+          {notifications.length} thông báo
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {notifications.map((notification) => (
+          <article key={notification.id} className="rounded-lg border border-cyan-100 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${NOTIFICATION_PRIORITY_META[notification.priority] || NOTIFICATION_PRIORITY_META.NORMAL}`}>
+                {notification.priority || 'NORMAL'}
+              </span>
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">
+                {NOTIFICATION_CATEGORY_LABELS[notification.category] || notification.category}
+              </span>
+            </div>
+            <h3 className="mt-3 text-base font-black text-slate-950">{notification.title}</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-700">{notification.message}</p>
+            {notification.createdAt ? (
+              <p className="mt-3 text-xs font-semibold text-slate-500">
+                Gửi lúc {formatShortDate(notification.createdAt)} {formatTime(notification.createdAt)}
+              </p>
+            ) : null}
+          </article>
+        ))}
+      </div>
+    </section>
   );
 };
 

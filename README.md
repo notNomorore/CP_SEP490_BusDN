@@ -4,7 +4,7 @@ huhuhichic64@gmail.com | @Minh123 | khách
 skykidclone80@gmail.com / @Minh123
 Modern bus transportation booking system with real-time tracking, ticketing, and comprehensive fleet management.
 
-## 🎯 Project Overview
+## ðŸŽ¯ Project Overview
 
 This is a complete rewrite of the BusDN system with improved architecture, scalability, and maintainability. The system is built with:
 
@@ -14,59 +14,59 @@ This is a complete rewrite of the BusDN system with improved architecture, scala
 - **State Management:** Zustand for frontend state
 - **Authentication:** JWT-based with email/phone verification
 
-## 📁 Project Structure
+## ðŸ“ Project Structure
 
 ```
 CP_SEP490_BusDN/
-├── Backend/              # Express.js backend
-│   ├── src/
-│   │   ├── modules/      # Feature modules (auth, routes, bookings, etc.)
-│   │   ├── middleware/   # Express middlewares
-│   │   ├── config/       # Configuration
-│   │   ├── utils/        # Utility functions
-│   │   ├── constants/    # Constants
-│   │   ├── app.js        # Express app factory
-│   │   └── server.js     # Server entry point
-│   ├── package.json
-│   └── .env.local        # Environment variables
-│
-├── Frontend/             # React + Vite frontend
-│   ├── src/
-│   │   ├── features/     # Feature modules (auth, routes, bookings, etc.)
-│   │   ├── shared/       # Shared components and utilities
-│   │   ├── App.jsx       # Main app component
-│   │   └── main.jsx      # Entry point
-│   ├── package.json
-│   └── .env.local        # Environment variables
-│
-├── AUTH_DOCUMENTATION.md # Complete auth system docs
-├── AUTH_QUICK_REFERENCE.md # Quick reference guide
-└── README.md             # This file
+â”œâ”€â”€ Backend/              # Express.js backend
+â”‚   â”œâ”€â”€ src/
+â”‚   â”‚   â”œâ”€â”€ modules/      # Feature modules (auth, routes, bookings, etc.)
+â”‚   â”‚   â”œâ”€â”€ middleware/   # Express middlewares
+â”‚   â”‚   â”œâ”€â”€ config/       # Configuration
+â”‚   â”‚   â”œâ”€â”€ utils/        # Utility functions
+â”‚   â”‚   â”œâ”€â”€ constants/    # Constants
+â”‚   â”‚   â”œâ”€â”€ app.js        # Express app factory
+â”‚   â”‚   â””â”€â”€ server.js     # Server entry point
+â”‚   â”œâ”€â”€ package.json
+â”‚   â””â”€â”€ .env.local        # Environment variables
+â”‚
+â”œâ”€â”€ Frontend/             # React + Vite frontend
+â”‚   â”œâ”€â”€ src/
+â”‚   â”‚   â”œâ”€â”€ features/     # Feature modules (auth, routes, bookings, etc.)
+â”‚   â”‚   â”œâ”€â”€ shared/       # Shared components and utilities
+â”‚   â”‚   â”œâ”€â”€ App.jsx       # Main app component
+â”‚   â”‚   â””â”€â”€ main.jsx      # Entry point
+â”‚   â”œâ”€â”€ package.json
+â”‚   â””â”€â”€ .env.local        # Environment variables
+â”‚
+â”œâ”€â”€ AUTH_DOCUMENTATION.md # Complete auth system docs
+â”œâ”€â”€ AUTH_QUICK_REFERENCE.md # Quick reference guide
+â””â”€â”€ README.md             # This file
 ```
 
-## 🔐 Authentication System
+## ðŸ” Authentication System
 
 The system includes a complete authentication system with:
 
-✅ **User Registration**
+âœ… **User Registration**
 - Email or phone-based registration
 - OTP email verification
 - Strong password requirements
 - Multi-step registration flow
 
-✅ **User Login**
+âœ… **User Login**
 - Email or phone login
 - JWT token-based authentication
 - 7-day token expiration
 - Session persistence
 
-✅ **Password Management**
+âœ… **Password Management**
 - Secure password hashing (bcryptjs)
 - Password reset with OTP verification
 - Change password (authenticated users)
 - Password strength requirements
 
-✅ **User Management**
+âœ… **User Management**
 - Role-based access control (RBAC)
 - User profiles with avatars
 - Wallet/balance tracking
@@ -83,7 +83,7 @@ The system includes a complete authentication system with:
 
 See [AUTH_DOCUMENTATION.md](./AUTH_DOCUMENTATION.md) for complete details.
 
-## 🚀 Getting Started
+## ðŸš€ Getting Started
 
 ### Prerequisites
 
@@ -131,7 +131,7 @@ npm run dev
 
 Frontend runs on `http://localhost:5173`
 
-## 📝 Available Scripts
+## ðŸ“ Available Scripts
 
 ### Backend
 
@@ -154,7 +154,7 @@ npm run test         # Run tests
 npm run test:ui      # Run tests with UI
 ```
 
-## 🔑 Key API Endpoints
+## ðŸ”‘ Key API Endpoints
 
 ### Authentication
 
@@ -177,15 +177,15 @@ npm run test:ui      # Run tests with UI
 - `/api/tracking` - Real-time tracking
 - `/api/admin` - Admin operations
 
-## 🎨 Frontend Features
+## ðŸŽ¨ Frontend Features
 
 ### Components
 
-- ✅ **AuthShell** - Shared authentication layout
-- ✅ **Login** - Complete login flow with password reset
-- ✅ **Register** - Multi-step registration process
-- ✅ **ProtectedRoute** - Route protection based on auth status
-- ✅ **AdminRoute** - Admin-only route protection
+- âœ… **AuthShell** - Shared authentication layout
+- âœ… **Login** - Complete login flow with password reset
+- âœ… **Register** - Multi-step registration process
+- âœ… **ProtectedRoute** - Route protection based on auth status
+- âœ… **AdminRoute** - Admin-only route protection
 
 ### State Management
 
@@ -199,7 +199,7 @@ npm run test:ui      # Run tests with UI
 - `useAuth()` - Main authentication hook
 - `useAuthStore()` - Direct store access
 
-## 🛡️ Security Features
+## ðŸ›¡ï¸ Security Features
 
 1. **JWT Authentication** - Stateless token-based auth
 2. **Password Hashing** - bcryptjs with 10 rounds
@@ -210,7 +210,7 @@ npm run test:ui      # Run tests with UI
 7. **Input Validation** - Server-side validation
 8. **Error Handling** - Secure error messages
 
-## 📊 User Roles
+## ðŸ“Š User Roles
 
 - `PASSENGER` - Regular user for booking tickets
 - `DRIVER` - Bus driver
@@ -220,7 +220,7 @@ npm run test:ui      # Run tests with UI
 - `STAFF` - Staff member
 - `FINANCE` - Finance department
 
-## 🌐 Environment Variables
+## ðŸŒ Environment Variables
 
 ### Backend (.env.local)
 
@@ -273,37 +273,37 @@ LOG_LEVEL=debug
 VITE_API_BASE_URL=http://localhost:3000/api
 ```
 
-## 📚 Documentation
+## ðŸ“š Documentation
 
 - [AUTH_DOCUMENTATION.md](./AUTH_DOCUMENTATION.md) - Complete authentication system documentation
 - [AUTH_QUICK_REFERENCE.md](./AUTH_QUICK_REFERENCE.md) - Quick reference guide for developers
 
-## 🔄 Code Reuse from Old Project
+## ðŸ”„ Code Reuse from Old Project
 
 The new project reuses valuable patterns from BusDN_SE18C02:
 
-- ✅ User authentication logic
-- ✅ Password validation rules
-- ✅ Socket.IO connection patterns
-- ✅ UI component layouts
-- ✅ API response formatting
-- ✅ Error handling patterns
-- ✅ Database schema structures
+- âœ… User authentication logic
+- âœ… Password validation rules
+- âœ… Socket.IO connection patterns
+- âœ… UI component layouts
+- âœ… API response formatting
+- âœ… Error handling patterns
+- âœ… Database schema structures
 
 Improvements made:
 
-- 🎯 Better module organization
-- 🎯 Cleaner separation of concerns
-- 🎯 Enhanced code reusability
-- 🎯 Better type safety with DTOs
-- 🎯 Improved error handling
-- 🎯 Modern React patterns (hooks, Zustand)
-- 🎯 Better state management
-- 🎯 Scalable architecture
+- ðŸŽ¯ Better module organization
+- ðŸŽ¯ Cleaner separation of concerns
+- ðŸŽ¯ Enhanced code reusability
+- ðŸŽ¯ Better type safety with DTOs
+- ðŸŽ¯ Improved error handling
+- ðŸŽ¯ Modern React patterns (hooks, Zustand)
+- ðŸŽ¯ Better state management
+- ðŸŽ¯ Scalable architecture
 
-## 🚧 Implementation Roadmap
+## ðŸš§ Implementation Roadmap
 
-### Phase 1: Core Auth ✅
+### Phase 1: Core Auth âœ…
 - [x] User registration and verification
 - [x] Login and logout
 - [x] Password reset flow
@@ -340,7 +340,7 @@ Improvements made:
 - [ ] User statistics
 - [ ] Performance metrics
 
-## 🧪 Testing
+## ðŸ§ª Testing
 
 ### Backend Tests
 ```bash
@@ -356,7 +356,7 @@ npm run test
 npm run test:ui
 ```
 
-## 📦 Deployment
+## ðŸ“¦ Deployment
 
 ### Backend (Node.js)
 ```bash
@@ -376,7 +376,7 @@ npm run build
 # Deploy to any static hosting (Vercel, Firebase, etc.)
 ```
 
-## 🤝 Architecture Principles
+## ðŸ¤ Architecture Principles
 
 1. **Clean Architecture** - Separation of concerns
 2. **Modular Monolith** - Feature-based modules
@@ -387,7 +387,7 @@ npm run build
 7. **Repository Pattern** - Data access abstraction
 8. **DTO Pattern** - Data transformation
 
-## 🔗 Technologies
+## ðŸ”— Technologies
 
 ### Frontend
 - React 18
@@ -410,7 +410,7 @@ npm run build
 - Redis (optional)
 - Stripe (optional)
 
-## 📞 Support & Contributing
+## ðŸ“ž Support & Contributing
 
 For issues or questions:
 
@@ -420,11 +420,11 @@ For issues or questions:
 4. Ensure MongoDB is connected
 5. Check API base URL configuration
 
-## 📄 License
+## ðŸ“„ License
 
 MIT License - feel free to use this project for educational purposes
 
-## 👨‍💻 Development Team
+## ðŸ‘¨â€ðŸ’» Development Team
 
 - Backend Development
 - Frontend Development
