@@ -933,6 +933,9 @@ export class RouteService {
         : remainingMinutes;
       const stopEtas = this.calculateStopEtas(route, progress, status);
       const tripProgress = this.calculateTripProgress(route, progress, busId, status);
+      const delayDurationMinutes = status === 'Delayed'
+        ? Math.max(Math.round((progress - 0.82) * (route.estimatedDurationMinutes || 30)) + 5, 5)
+        : 0;
 
       return {
         busId,
@@ -944,6 +947,11 @@ export class RouteService {
         stopEtas,
         tripProgress,
         status,
+        delay: status === 'Delayed' ? {
+          delayDurationMinutes,
+          delayReason: 'Traffic congestion',
+          updatedEta: `${Math.max(arrivalToNextStopMinutes + delayDurationMinutes, 1)} min`,
+        } : null,
         lastUpdated: new Date(now).toISOString(),
       };
     });

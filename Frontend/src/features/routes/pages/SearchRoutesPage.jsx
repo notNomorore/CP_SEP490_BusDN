@@ -209,6 +209,8 @@ const MapCanvas = ({
   currentLocation,
   liveBusData,
   liveError,
+  arrivalAlerts,
+  onDismissArrivalAlert,
   onUseCurrentLocation,
 }) => {
   const routePath = selectedRoute?.pathPoints?.length
@@ -389,6 +391,32 @@ const MapCanvas = ({
           )}
         </div>
       )}
+
+      {arrivalAlerts.length > 0 && (
+        <div className="absolute left-5 top-5 z-[1000] w-80 space-y-2">
+          {arrivalAlerts.map((alert) => (
+            <div key={alert.id} className="rounded-xl border border-emerald-100 bg-white p-4 shadow-xl">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-black text-slate-950">
+                    <span className="material-symbols-outlined text-[19px] text-emerald-600">notifications_active</span>
+                    {alert.title}
+                  </div>
+                  <p className="mt-1 text-sm leading-5 text-slate-600">{alert.message}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onDismissArrivalAlert?.(alert.id)}
+                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  aria-label="Dismiss arrival notification"
+                >
+                  <span className="material-symbols-outlined text-[18px]">close</span>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 };
@@ -398,6 +426,12 @@ const buildStopId = (route, stop) => {
   const normalizedName = stop.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
   return `${route.routeNumber}-${stop.originalOrder || stop.order}-${normalizedName}`;
 };
+
+const buildArrivalNotificationId = (route, stop) => (
+  `${route.routeNumber}-${buildStopId(route, stop)}-arrival`
+);
+
+const buildDelayNotificationId = (route) => `${route.routeNumber}-delay`;
 
 const RouteCard = ({
   route,
@@ -496,8 +530,12 @@ const RouteDetailsPanel = ({
   liveError = '',
   isFavorite = false,
   isStopFavorite,
+  isArrivalNotificationEnabled,
+  isDelayNotificationEnabled,
   onToggleFavorite,
   onToggleFavoriteStop,
+  onToggleArrivalNotification,
+  onToggleDelayNotification,
   onToggleLiveLocation,
   onClose,
 }) => {
@@ -653,6 +691,50 @@ const RouteDetailsPanel = ({
               operating hours, estimated minimum trip duration, fare, and nearby stop support.
             </div>
 
+            <div className="rounded-lg border border-slate-200 bg-white">
+              <div className="border-b border-slate-100 px-4 py-3">
+                <div className="flex items-center gap-2 text-sm font-black text-slate-950">
+                  <span className="material-symbols-outlined text-[18px] text-emerald-600">notifications</span>
+                  Trip notification settings
+                </div>
+              </div>
+              <div className="divide-y divide-slate-100">
+                <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div>
+                    <div className="text-sm font-black text-slate-900">Bus arrival alerts</div>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Enable the bell beside a stop to receive approaching and arriving alerts.
+                    </p>
+                  </div>
+                  <span className="rounded bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase text-emerald-700">
+                    Stops
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div>
+                    <div className="text-sm font-black text-slate-900">Delay alerts</div>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Notify when a bus on this route is delayed beyond the expected schedule.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onToggleDelayNotification?.(route)}
+                    className={`relative h-7 w-12 shrink-0 rounded-full transition ${
+                      isDelayNotificationEnabled?.(route) ? 'bg-emerald-600' : 'bg-slate-200'
+                    }`}
+                    aria-label={isDelayNotificationEnabled?.(route) ? 'Disable delay alerts' : 'Enable delay alerts'}
+                  >
+                    <span
+                      className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${
+                        isDelayNotificationEnabled?.(route) ? 'left-6' : 'left-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <div className="rounded-lg border border-slate-200 bg-white p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -702,6 +784,11 @@ const RouteDetailsPanel = ({
                       <div className="mt-1 text-xs text-slate-500">
                         Next stop: {bus.nextStop} - ETA {bus.estimatedArrivalTime}
                       </div>
+                      {bus.delay && (
+                        <div className="mt-2 rounded border border-amber-100 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                          Delayed {bus.delay.delayDurationMinutes} min • {bus.delay.delayReason}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -784,20 +871,38 @@ const RouteDetailsPanel = ({
                       {stopEta?.nextBusId ? ` • ${stopEta.nextBusId}` : ''}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => onToggleFavoriteStop?.(route, stop)}
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${
-                      isStopFavorite?.(route, stop)
-                        ? 'border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100'
-                        : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
-                    }`}
-                    aria-label={isStopFavorite?.(route, stop) ? 'Remove favorite stop' : 'Save stop to favorites'}
-                  >
-                    <span className="material-symbols-outlined text-[18px] leading-none">
-                      {isStopFavorite?.(route, stop) ? 'star' : 'star_border'}
-                    </span>
-                  </button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onToggleArrivalNotification?.(route, stop)}
+                      className={`flex h-8 w-8 items-center justify-center rounded-lg border ${
+                        isArrivalNotificationEnabled?.(route, stop)
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                          : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
+                      }`}
+                      aria-label={isArrivalNotificationEnabled?.(route, stop) ? 'Disable arrival notification' : 'Enable arrival notification'}
+                      title={isArrivalNotificationEnabled?.(route, stop) ? 'Disable arrival notification' : 'Enable arrival notification'}
+                    >
+                      <span className="material-symbols-outlined text-[18px] leading-none">
+                        {isArrivalNotificationEnabled?.(route, stop) ? 'notifications_active' : 'notifications'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onToggleFavoriteStop?.(route, stop)}
+                      className={`flex h-8 w-8 items-center justify-center rounded-lg border ${
+                        isStopFavorite?.(route, stop)
+                          ? 'border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100'
+                          : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
+                      }`}
+                      aria-label={isStopFavorite?.(route, stop) ? 'Remove favorite stop' : 'Save stop to favorites'}
+                      title={isStopFavorite?.(route, stop) ? 'Remove favorite stop' : 'Save stop to favorites'}
+                    >
+                      <span className="material-symbols-outlined text-[18px] leading-none">
+                        {isStopFavorite?.(route, stop) ? 'star' : 'star_border'}
+                      </span>
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -1208,6 +1313,12 @@ const SearchRoutesPage = () => {
   const [favoriteRoutes, setFavoriteRoutes] = useState([]);
   const [favoriteStops, setFavoriteStops] = useState([]);
   const [favoriteMessage, setFavoriteMessage] = useState('');
+  const [arrivalNotifications, setArrivalNotifications] = useState([]);
+  const [delayNotifications, setDelayNotifications] = useState([]);
+  const [arrivalAlerts, setArrivalAlerts] = useState([]);
+  const [delayAlerts, setDelayAlerts] = useState([]);
+  const [notifiedArrivalKeys, setNotifiedArrivalKeys] = useState(new Set());
+  const [notifiedDelayKeys, setNotifiedDelayKeys] = useState(new Set());
   const [liveRouteId, setLiveRouteId] = useState(null);
   const [liveBusData, setLiveBusData] = useState(null);
   const [isLiveLoading, setIsLiveLoading] = useState(false);
@@ -1226,6 +1337,18 @@ const SearchRoutesPage = () => {
   const favoriteStopIds = useMemo(() => new Set(
     favoriteStops.map((favoriteStop) => String(favoriteStop.stopId))
   ), [favoriteStops]);
+
+  const arrivalNotificationIds = useMemo(() => new Set(
+    arrivalNotifications
+      .filter((subscription) => subscription.notificationStatus !== 'DISABLED')
+      .map((subscription) => String(subscription.subscriptionId))
+  ), [arrivalNotifications]);
+
+  const delayNotificationIds = useMemo(() => new Set(
+    delayNotifications
+      .filter((subscription) => subscription.notificationStatus !== 'DISABLED')
+      .map((subscription) => String(subscription.subscriptionId))
+  ), [delayNotifications]);
 
   const suggestedRouteOptions = useMemo(() => {
     if (!bestRouteResult) {
@@ -1250,6 +1373,12 @@ const SearchRoutesPage = () => {
   );
 
   const isStopFavorite = (route, stop) => favoriteStopIds.has(buildStopId(route, stop));
+  const isArrivalNotificationEnabled = (route, stop) => (
+    arrivalNotificationIds.has(buildArrivalNotificationId(route, stop))
+  );
+  const isDelayNotificationEnabled = (route) => (
+    delayNotificationIds.has(buildDelayNotificationId(route))
+  );
   const isLiveTrackingSelectedRoute = Boolean(
     selectedRoute?.id && isSameRouteId(liveRouteId, selectedRoute.id)
   );
@@ -1323,18 +1452,29 @@ const SearchRoutesPage = () => {
       if (!user) {
         setFavoriteRoutes([]);
         setFavoriteStops([]);
+        setArrivalNotifications([]);
+        setDelayNotifications([]);
         return;
       }
 
       try {
-        const [favoriteRouteResult, favoriteStopResult] = await Promise.all([
+        const [
+          favoriteRouteResult,
+          favoriteStopResult,
+          arrivalNotificationResult,
+          delayNotificationResult,
+        ] = await Promise.all([
           routeService.getFavoriteRoutes(),
           routeService.getFavoriteStops(),
+          routeService.getArrivalNotifications(),
+          routeService.getDelayNotifications(),
         ]);
 
         if (isMounted) {
           setFavoriteRoutes(favoriteRouteResult || []);
           setFavoriteStops(favoriteStopResult || []);
+          setArrivalNotifications(arrivalNotificationResult || []);
+          setDelayNotifications(delayNotificationResult || []);
         }
       } catch (err) {
         if (isMounted && err.statusCode !== 403) {
@@ -1389,6 +1529,120 @@ const SearchRoutesPage = () => {
       window.clearInterval(intervalId);
     };
   }, [liveRouteId]);
+
+  useEffect(() => {
+    if (!liveBusData?.stopEtaSummary?.length || !arrivalNotifications.length) {
+      return;
+    }
+
+    const activeSubscriptions = arrivalNotifications.filter((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+      && (
+        isSameRouteId(subscription.routeId, liveBusData.route?.id)
+        || subscription.routeNumber === liveBusData.route?.routeNumber
+      )
+    ));
+
+    const nextAlerts = [];
+    const nextNotifiedKeys = new Set(notifiedArrivalKeys);
+
+    activeSubscriptions.forEach((subscription) => {
+      const eta = liveBusData.stopEtaSummary.find((item) => item.stopId === subscription.stopId);
+      const threshold = Number(subscription.etaThresholdMinutes) || 5;
+
+      if (!eta || typeof eta.etaMinutes !== 'number' || eta.etaMinutes > threshold) {
+        return;
+      }
+
+      const notificationType = eta.etaMinutes <= 1 ? 'arriving' : 'approaching';
+      const notificationKey = `${subscription.subscriptionId}-${notificationType}`;
+
+      if (nextNotifiedKeys.has(notificationKey)) {
+        return;
+      }
+
+      nextNotifiedKeys.add(notificationKey);
+      nextAlerts.push({
+        id: `${notificationKey}-${Date.now()}`,
+        title: notificationType === 'arriving' ? 'Bus arriving now' : 'Bus approaching',
+        message: `${subscription.routeNumber} to ${subscription.stopName}: ${eta.estimatedArrivalTime}. ${eta.nextBusId || 'Tracked bus'} is ${eta.status.toLowerCase()}.`,
+        status: eta.status,
+      });
+    });
+
+    if (!nextAlerts.length) {
+      return;
+    }
+
+    setNotifiedArrivalKeys(nextNotifiedKeys);
+    setArrivalAlerts((current) => [...nextAlerts, ...current].slice(0, 4));
+
+    if ('Notification' in window && Notification.permission === 'granted') {
+      nextAlerts.forEach((alert) => {
+        new Notification(alert.title, {
+          body: alert.message,
+        });
+      });
+    }
+  }, [arrivalNotifications, liveBusData, notifiedArrivalKeys]);
+
+  useEffect(() => {
+    if (!liveBusData?.buses?.length || !delayNotifications.length) {
+      return;
+    }
+
+    const activeSubscriptions = delayNotifications.filter((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+      && (
+        isSameRouteId(subscription.routeId, liveBusData.route?.id)
+        || subscription.routeNumber === liveBusData.route?.routeNumber
+      )
+    ));
+
+    const delayedBuses = liveBusData.buses.filter((bus) => bus.status === 'Delayed' && bus.delay);
+    const nextAlerts = [];
+    const nextNotifiedKeys = new Set(notifiedDelayKeys);
+
+    activeSubscriptions.forEach((subscription) => {
+      delayedBuses.forEach((bus) => {
+        const delayMinutes = bus.delay?.delayDurationMinutes || 0;
+        const threshold = Number(subscription.delayThresholdMinutes) || 5;
+
+        if (delayMinutes < threshold) {
+          return;
+        }
+
+        const notificationKey = `${subscription.subscriptionId}-${bus.busId}-${delayMinutes}`;
+
+        if (nextNotifiedKeys.has(notificationKey)) {
+          return;
+        }
+
+        nextNotifiedKeys.add(notificationKey);
+        nextAlerts.push({
+          id: `${notificationKey}-${Date.now()}`,
+          title: 'Bus delayed',
+          message: `${subscription.routeNumber} ${bus.busId} is delayed ${delayMinutes} min. Reason: ${bus.delay.delayReason}. Updated ETA: ${bus.delay.updatedEta}.`,
+          status: 'Delayed',
+        });
+      });
+    });
+
+    if (!nextAlerts.length) {
+      return;
+    }
+
+    setNotifiedDelayKeys(nextNotifiedKeys);
+    setDelayAlerts((current) => [...nextAlerts, ...current].slice(0, 4));
+
+    if ('Notification' in window && Notification.permission === 'granted') {
+      nextAlerts.forEach((alert) => {
+        new Notification(alert.title, {
+          body: alert.message,
+        });
+      });
+    }
+  }, [delayNotifications, liveBusData, notifiedDelayKeys]);
 
   const clearError = () => {
     if (error) {
@@ -1631,6 +1885,110 @@ const SearchRoutesPage = () => {
     }
   };
 
+  const handleToggleArrivalNotification = async (route, stop) => {
+    setError('');
+    setFavoriteMessage('');
+
+    if (!user) {
+      setError('Please log in before enabling arrival notifications.');
+      return;
+    }
+
+    const subscriptionId = buildArrivalNotificationId(route, stop);
+
+    try {
+      if (arrivalNotificationIds.has(subscriptionId)) {
+        await routeService.removeArrivalNotification(subscriptionId);
+        setArrivalNotifications((current) => (
+          current.filter((subscription) => subscription.subscriptionId !== subscriptionId)
+        ));
+        setFavoriteMessage('Arrival notification disabled.');
+        return;
+      }
+
+      if ('Notification' in window && Notification.permission === 'default') {
+        await Notification.requestPermission();
+      }
+
+      const subscription = await routeService.subscribeArrivalNotification({
+        routeId: route.id,
+        stopId: buildStopId(route, stop),
+        stopName: stop.name,
+        order: stop.originalOrder || stop.order,
+        etaThresholdMinutes: 5,
+      });
+
+      setArrivalNotifications((current) => [
+        subscription,
+        ...current.filter((item) => item.subscriptionId !== subscription.subscriptionId),
+      ]);
+      setFavoriteMessage(
+        'Arrival notification enabled. You will be alerted when a bus is within 5 minutes of this stop.'
+      );
+
+      if ('Notification' in window && Notification.permission === 'denied') {
+        setError('Browser notification permission is disabled. In-app alerts will still appear.');
+      }
+    } catch (err) {
+      if (err.message === 'Arrival notification already enabled') {
+        setFavoriteMessage('Arrival notification already enabled.');
+        return;
+      }
+
+      setError(err.message || 'Unable to update arrival notification.');
+    }
+  };
+
+  const handleToggleDelayNotification = async (route) => {
+    setError('');
+    setFavoriteMessage('');
+
+    if (!user) {
+      setError('Please log in before enabling delay notifications.');
+      return;
+    }
+
+    const subscriptionId = buildDelayNotificationId(route);
+
+    try {
+      if (delayNotificationIds.has(subscriptionId)) {
+        await routeService.removeDelayNotification(subscriptionId);
+        setDelayNotifications((current) => (
+          current.filter((subscription) => subscription.subscriptionId !== subscriptionId)
+        ));
+        setFavoriteMessage('Delay notification disabled.');
+        return;
+      }
+
+      if ('Notification' in window && Notification.permission === 'default') {
+        await Notification.requestPermission();
+      }
+
+      const subscription = await routeService.subscribeDelayNotification({
+        routeId: route.id,
+        routeNumber: route.routeNumber,
+        delayThresholdMinutes: 5,
+      });
+
+      setDelayNotifications((current) => [
+        subscription,
+        ...current.filter((item) => item.subscriptionId !== subscription.subscriptionId),
+      ]);
+      setFavoriteMessage('Delay notification enabled for this route.');
+
+      if ('Notification' in window && Notification.permission === 'denied') {
+        setError('Browser notification permission is disabled. In-app delay alerts will still appear.');
+      }
+    } catch (err) {
+      if (err.message === 'Delay notification already enabled') {
+        setFavoriteMessage('Delay notification already enabled.');
+        return;
+      }
+
+      setError(err.message || 'Unable to update delay notification.');
+    }
+  };
+
   const handleToggleLiveLocation = (route) => {
     clearError();
 
@@ -1650,6 +2008,11 @@ const SearchRoutesPage = () => {
     setLiveRouteId(route.id);
     setLiveBusData(null);
     setLiveError('');
+  };
+
+  const handleDismissArrivalAlert = (alertId) => {
+    setArrivalAlerts((current) => current.filter((alert) => alert.id !== alertId));
+    setDelayAlerts((current) => current.filter((alert) => alert.id !== alertId));
   };
 
   const handleFindBestRoute = async (event) => {
@@ -1991,6 +2354,8 @@ const SearchRoutesPage = () => {
           currentLocation={currentLocation}
           liveBusData={liveBusData}
           liveError={liveError}
+          arrivalAlerts={[...delayAlerts, ...arrivalAlerts]}
+          onDismissArrivalAlert={handleDismissArrivalAlert}
           onUseCurrentLocation={handleUseCurrentLocation}
         />
         {selectedRoute && (
@@ -2003,8 +2368,12 @@ const SearchRoutesPage = () => {
             liveError={isLiveTrackingSelectedRoute ? liveError : ''}
             isFavorite={isRouteFavorite(selectedRoute)}
             isStopFavorite={isStopFavorite}
+            isArrivalNotificationEnabled={isArrivalNotificationEnabled}
+            isDelayNotificationEnabled={isDelayNotificationEnabled}
             onToggleFavorite={handleToggleFavoriteRoute}
             onToggleFavoriteStop={handleToggleFavoriteStop}
+            onToggleArrivalNotification={handleToggleArrivalNotification}
+            onToggleDelayNotification={handleToggleDelayNotification}
             onToggleLiveLocation={handleToggleLiveLocation}
             onClose={() => setSelectedRoute(null)}
           />

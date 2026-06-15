@@ -60,6 +60,42 @@ export class ProfileController {
     const stop = await ProfileService.removeFavoriteStop(req.user.userId, req.params.stopId);
     return res.success(stop, 'Stop removed from favorites successfully');
   }
+
+  static async getArrivalNotifications(req, res) {
+    const subscriptions = await ProfileService.getArrivalNotifications(req.user.userId);
+    return res.success(subscriptions, 'Arrival notifications retrieved successfully');
+  }
+
+  static async subscribeArrivalNotification(req, res) {
+    const subscription = await ProfileService.subscribeArrivalNotification(req.user.userId, req.body);
+    return res.success(subscription, 'Arrival notification enabled successfully', 201);
+  }
+
+  static async removeArrivalNotification(req, res) {
+    const subscription = await ProfileService.removeArrivalNotification(
+      req.user.userId,
+      req.params.subscriptionId
+    );
+    return res.success(subscription, 'Arrival notification disabled successfully');
+  }
+
+  static async getDelayNotifications(req, res) {
+    const subscriptions = await ProfileService.getDelayNotifications(req.user.userId);
+    return res.success(subscriptions, 'Delay notifications retrieved successfully');
+  }
+
+  static async subscribeDelayNotification(req, res) {
+    const subscription = await ProfileService.subscribeDelayNotification(req.user.userId, req.body);
+    return res.success(subscription, 'Delay notification enabled successfully', 201);
+  }
+
+  static async removeDelayNotification(req, res) {
+    const subscription = await ProfileService.removeDelayNotification(
+      req.user.userId,
+      req.params.subscriptionId
+    );
+    return res.success(subscription, 'Delay notification disabled successfully');
+  }
 }
 
 export default ProfileController;

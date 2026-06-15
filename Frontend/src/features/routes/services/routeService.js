@@ -102,6 +102,36 @@ export const routeService = {
     const response = await apiClient.delete(`/profile/favorites/stops/${encodeURIComponent(stopId)}`);
     return response.data;
   },
+
+  getArrivalNotifications: async () => {
+    const response = await apiClient.get('/profile/notifications/arrival');
+    return response.data;
+  },
+
+  subscribeArrivalNotification: async (payload) => {
+    const response = await apiClient.post('/profile/notifications/arrival', payload);
+    return response.data;
+  },
+
+  removeArrivalNotification: async (subscriptionId) => {
+    const response = await apiClient.delete(`/profile/notifications/arrival/${encodeURIComponent(subscriptionId)}`);
+    return response.data;
+  },
+
+  getDelayNotifications: async () => {
+    const response = await apiClient.get('/profile/notifications/delay');
+    return response.data;
+  },
+
+  subscribeDelayNotification: async (payload) => {
+    const response = await apiClient.post('/profile/notifications/delay', payload);
+    return response.data;
+  },
+
+  removeDelayNotification: async (subscriptionId) => {
+    const response = await apiClient.delete(`/profile/notifications/delay/${encodeURIComponent(subscriptionId)}`);
+    return response.data;
+  },
 };
 
 export default routeService;

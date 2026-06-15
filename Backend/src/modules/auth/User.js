@@ -100,6 +100,109 @@ const FavoriteStopSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const ArrivalNotificationSchema = new mongoose.Schema(
+  {
+    subscriptionId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeNumber: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    stopId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    stopName: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    busId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    etaThresholdMinutes: {
+      type: Number,
+      min: 1,
+      default: 5,
+    },
+    notificationStatus: {
+      type: String,
+      enum: ['ENABLED', 'DISABLED'],
+      default: 'ENABLED',
+    },
+    subscribedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
+const DelayNotificationSchema = new mongoose.Schema(
+  {
+    subscriptionId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeNumber: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    busId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    tripId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    delayThresholdMinutes: {
+      type: Number,
+      min: 1,
+      default: 5,
+    },
+    notificationStatus: {
+      type: String,
+      enum: ['ENABLED', 'DISABLED'],
+      default: 'ENABLED',
+    },
+    subscribedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const TravelHistorySchema = new mongoose.Schema(
   {
     routeNumber: {
@@ -203,6 +306,14 @@ const UserSchema = new mongoose.Schema(
     },
     favoriteStops: {
       type: [FavoriteStopSchema],
+      default: [],
+    },
+    arrivalNotifications: {
+      type: [ArrivalNotificationSchema],
+      default: [],
+    },
+    delayNotifications: {
+      type: [DelayNotificationSchema],
       default: [],
     },
     notificationEnabled: {

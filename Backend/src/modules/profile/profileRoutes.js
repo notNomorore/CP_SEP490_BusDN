@@ -35,5 +35,17 @@ router.delete('/favorites/routes/:routeId', asyncHandler(ProfileController.remov
 router.get('/favorites/stops', asyncHandler(ProfileController.getFavoriteStops));
 router.post('/favorites/stops', asyncHandler(ProfileController.saveFavoriteStop));
 router.delete('/favorites/stops/:stopId', asyncHandler(ProfileController.removeFavoriteStop));
+router.get('/notifications/arrival', asyncHandler(ProfileController.getArrivalNotifications));
+router.post('/notifications/arrival', asyncHandler(ProfileController.subscribeArrivalNotification));
+router.delete(
+  '/notifications/arrival/:subscriptionId',
+  asyncHandler(ProfileController.removeArrivalNotification)
+);
+router.get('/notifications/delay', asyncHandler(ProfileController.getDelayNotifications));
+router.post('/notifications/delay', asyncHandler(ProfileController.subscribeDelayNotification));
+router.delete(
+  '/notifications/delay/:subscriptionId',
+  asyncHandler(ProfileController.removeDelayNotification)
+);
 
 export default router;
