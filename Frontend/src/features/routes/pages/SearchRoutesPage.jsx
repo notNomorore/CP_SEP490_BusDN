@@ -366,6 +366,23 @@ const MapCanvas = ({
                   <div className="mt-1 text-xs text-slate-500">
                     Next stop: {bus.nextStop} • ETA {bus.estimatedArrivalTime}
                   </div>
+                  {bus.tripProgress && (
+                    <div className="mt-2">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
+                        <span>Trip progress</span>
+                        <span>{bus.tripProgress.progressPercent}%</span>
+                      </div>
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                        <div
+                          className="h-full rounded-full bg-emerald-600"
+                          style={{ width: `${bus.tripProgress.progressPercent}%` }}
+                        />
+                      </div>
+                      <div className="mt-1 text-[11px] text-slate-500">
+                        {bus.tripProgress.completedStops.length} completed • {bus.tripProgress.remainingStops.length} remaining • {bus.tripProgress.estimatedRemainingTime} left
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -520,6 +537,7 @@ const RouteDetailsPanel = ({
     { id: 'info', label: 'Thông tin' },
     { id: 'stops', label: 'Trạm' },
     { id: 'arrival', label: 'Lịch chạy' },
+    { id: 'progress', label: 'Tiến độ' },
     { id: 'feedback', label: 'Feedback' },
   ];
   const stopEtaSummary = liveBusData?.stopEtaSummary || [];
@@ -575,14 +593,14 @@ const RouteDetailsPanel = ({
           ))}
         </div>
 
-        <div className="mt-3 grid grid-cols-4 gap-1">
+        <div className="mt-3 grid grid-cols-5 gap-1">
           {detailTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setDetailTab(tab.id)}
               title={tab.label}
-              className={`min-w-0 truncate rounded-lg border px-1.5 py-2 text-[11px] font-black ${
+              className={`min-w-0 truncate rounded-lg border px-1 py-2 text-[10px] font-black ${
                 detailTab === tab.id
                   ? 'border-emerald-600 bg-emerald-50 text-emerald-700'
                   : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
@@ -817,6 +835,114 @@ const RouteDetailsPanel = ({
               Minimum arrival time is calculated from the first departure at {firstDeparture}.
               Live ETA updates automatically when live tracking is enabled.
             </div>
+          </div>
+        )}
+
+        {detailTab === 'progress' && (
+          <div className="space-y-3">
+            {!isLiveTracking && (
+              <div className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="text-sm font-black text-slate-950">Trip progress unavailable</div>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Start live location tracking to view completed stops, remaining stops, current bus position,
+                  trip status, and estimated remaining travel time.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onToggleLiveLocation?.(route)}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white hover:bg-slate-800"
+                >
+                  <span className="material-symbols-outlined text-[18px]">route</span>
+                  View trip progress
+                </button>
+              </div>
+            )}
+
+            {isLiveTracking && (liveBusData?.buses || []).map((bus) => {
+              const progress = bus.tripProgress;
+
+              if (!progress) {
+                return null;
+              }
+
+              return (
+                <div key={progress.tripId} className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-wide text-slate-400">{progress.tripId}</div>
+                      <div className="mt-1 font-black text-slate-950">{bus.busId}</div>
+                    </div>
+                    <span className={`rounded px-2 py-0.5 text-[10px] font-black uppercase ${
+                      progress.tripStatus === 'Delayed'
+                        ? 'bg-amber-50 text-amber-700'
+                        : 'bg-emerald-50 text-emerald-700'
+                    }`}>
+                      {progress.tripStatus}
+                    </span>
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between text-xs font-black text-slate-500">
+                      <span>Progress toward destination</span>
+                      <span>{progress.progressPercent}%</span>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="h-full rounded-full bg-emerald-600"
+                        style={{ width: `${progress.progressPercent}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="font-black uppercase text-slate-400">Current stop</div>
+                      <div className="mt-1 font-semibold text-slate-900">{progress.currentStop}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="font-black uppercase text-slate-400">Next stop</div>
+                      <div className="mt-1 font-semibold text-slate-900">{progress.nextStop}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="font-black uppercase text-slate-400">Completed</div>
+                      <div className="mt-1 font-semibold text-slate-900">{progress.completedStops.length} stops</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="font-black uppercase text-slate-400">Remaining time</div>
+                      <div className="mt-1 font-semibold text-slate-900">{progress.estimatedRemainingTime}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Completed stops</div>
+                    <div className="space-y-1">
+                      {progress.completedStops.length ? progress.completedStops.map((stop) => (
+                        <div key={stop.stopId} className="flex items-center gap-2 text-xs text-slate-600">
+                          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                          <span>{stop.stopName}</span>
+                        </div>
+                      )) : (
+                        <div className="text-xs text-slate-400">No stops completed yet.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Remaining stops</div>
+                    <div className="space-y-1">
+                      {progress.remainingStops.length ? progress.remainingStops.map((stop) => (
+                        <div key={stop.stopId} className="flex items-center gap-2 text-xs text-slate-600">
+                          <span className="h-2 w-2 rounded-full bg-slate-300" />
+                          <span>{stop.stopName}</span>
+                        </div>
+                      )) : (
+                        <div className="text-xs text-emerald-700">Trip is near completion.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 

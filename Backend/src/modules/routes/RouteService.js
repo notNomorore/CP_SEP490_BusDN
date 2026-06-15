@@ -851,6 +851,42 @@ export class RouteService {
     });
   }
 
+  static calculateTripProgress(route, progress, busId, status) {
+    const duration = route.estimatedDurationMinutes || 30;
+    const stops = route.stops || [];
+    const completedStops = stops.filter((stop) => (
+      Math.min((stop.estimatedOffsetMinutes || 0) / duration, 1) <= progress
+    ));
+    const remainingStops = stops.filter((stop) => (
+      Math.min((stop.estimatedOffsetMinutes || 0) / duration, 1) > progress
+    ));
+    const estimatedRemainingMinutes = Math.max(Math.round((1 - progress) * duration), 1);
+    const progressPercent = Math.min(Math.round(progress * 100), 99);
+    const tripStatus = progressPercent >= 97 ? 'Completed' : status;
+
+    return {
+      tripId: `${route.routeNumber}-TRIP-${busId.split('-').pop()}`,
+      busId,
+      routeId: String(route._id),
+      progressPercent,
+      completedStops: completedStops.map((stop) => ({
+        stopId: this.buildStopId(route, stop),
+        stopName: stop.name,
+        stopOrder: stop.order,
+      })),
+      remainingStops: remainingStops.map((stop) => ({
+        stopId: this.buildStopId(route, stop),
+        stopName: stop.name,
+        stopOrder: stop.order,
+      })),
+      tripStatus,
+      estimatedRemainingMinutes,
+      estimatedRemainingTime: `${estimatedRemainingMinutes} min`,
+      currentStop: completedStops[completedStops.length - 1]?.name || route.origin,
+      nextStop: remainingStops[0]?.name || route.destination,
+    };
+  }
+
   static async getLiveBusLocations(routeId) {
     await this.ensureSampleRoutes();
 
@@ -887,6 +923,7 @@ export class RouteService {
       const currentLocation = this.interpolatePathPosition(pathPoints, progress);
       const nextStop = this.findNextStop(route, progress);
       const status = index === 1 && progress > 0.82 ? 'Delayed' : 'Running';
+      const busId = `${route.routeNumber}-BUS-${index + 1}`;
       const remainingMinutes = Math.max(
         Math.round((1 - progress) * (route.estimatedDurationMinutes || 30)),
         1
@@ -895,15 +932,17 @@ export class RouteService {
         ? Math.max(Math.round(((nextStop.estimatedOffsetMinutes || 0) / (route.estimatedDurationMinutes || 30) - progress) * (route.estimatedDurationMinutes || 30)), 1)
         : remainingMinutes;
       const stopEtas = this.calculateStopEtas(route, progress, status);
+      const tripProgress = this.calculateTripProgress(route, progress, busId, status);
 
       return {
-        busId: `${route.routeNumber}-BUS-${index + 1}`,
+        busId,
         routeId: String(route._id),
         routeNumber: route.routeNumber,
         currentLocation,
         estimatedArrivalTime: `${Math.max(arrivalToNextStopMinutes, 1)} min`,
         nextStop: nextStop?.name || route.destination,
         stopEtas,
+        tripProgress,
         status,
         lastUpdated: new Date(now).toISOString(),
       };
@@ -943,6 +982,7 @@ export class RouteService {
       route: liveResult.route,
       stopEtaSummary: liveResult.stopEtaSummary || [],
       buses: liveResult.buses || [],
+      tripProgress: (liveResult.buses || []).map((bus) => bus.tripProgress),
       refreshedAt: liveResult.refreshedAt,
     };
   }
