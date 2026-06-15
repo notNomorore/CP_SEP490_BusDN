@@ -396,6 +396,10 @@ export const computeDirection = (direction) => {
   const estimatedDistanceKm = polylinePath.reduce((total, point, index) => (
     index === 0 ? total : total + distanceKm(polylinePath[index - 1], point)
   ), 0);
+  const effectiveDistanceKm = Number(direction?.estimatedDistanceKm) || estimatedDistanceKm;
+  const urbanBusDurationMinutes = effectiveDistanceKm > 0
+    ? Math.ceil((effectiveDistanceKm / 22) * 60 + Math.max(0, stops.length - 2) * 0.75)
+    : 0;
 
   return {
     ...direction,
@@ -403,11 +407,12 @@ export const computeDirection = (direction) => {
     startStation: stationToRefFromStop(stops[0]) || direction.startStation || null,
     endStation: stationToRefFromStop(stops[stops.length - 1]) || direction.endStation || null,
     polylinePath,
-    estimatedDistanceKm: Number((Number(direction?.estimatedDistanceKm) || estimatedDistanceKm).toFixed(1)),
-    estimatedDurationMinutes: Math.max(
-      0,
-      Math.round(Number(direction?.estimatedDurationMinutes) || (estimatedDistanceKm * 3.2 + stops.length * 1.5))
-    ),
+    estimatedDistanceKm: Number(effectiveDistanceKm.toFixed(1)),
+    estimatedDurationMinutes: Math.min(80, Math.max(
+      60,
+      Math.round(Number(direction?.estimatedDurationMinutes) || 0),
+      urbanBusDurationMinutes
+    )),
   };
 };
 
@@ -490,6 +495,7 @@ export const prepareRoutePayload = (draft, status = draft.status) => {
     inboundRoute,
     scheduleConfig: {
       ...draft.scheduleConfig,
+      holidaySchedule: '',
       frequencyMinutes: Number(draft.scheduleConfig.peakFrequencyMinutes || draft.scheduleConfig.frequencyMinutes || 0),
     },
     vehicleAssignment: {
@@ -545,9 +551,16 @@ export const validateRouteDraft = (draft) => {
 
   [outbound, inbound].forEach((direction, directionIndex) => {
     const seen = new Set();
-    direction.orderedStops.forEach((stop) => {
+    direction.orderedStops.forEach((stop, index) => {
       const key = stop.stationId || `${Number(stop.latitude).toFixed(5)}:${Number(stop.longitude).toFixed(5)}`;
       if (seen.has(key)) warnings.push(`${directionIndex === 0 ? 'Chi\u1ec1u \u0111i' : 'Chi\u1ec1u v\u1ec1'} c\u00f3 \u0111i\u1ec3m d\u1eebng tr\u00f9ng.`);
+      const previousStop = direction.orderedStops[index - 1];
+      const previousKey = previousStop
+        ? previousStop.stationId || `${Number(previousStop.latitude).toFixed(5)}:${Number(previousStop.longitude).toFixed(5)}`
+        : '';
+      if (index > 0 && key && key === previousKey) {
+        errors.push(`${directionIndex === 0 ? 'Chi\u1ec1u \u0111i' : 'Chi\u1ec1u v\u1ec1'} kh\u00f4ng \u0111\u01b0\u1ee3c c\u00f3 hai \u0111i\u1ec3m d\u1eebng li\u00ean ti\u1ebfp tr\u00f9ng nhau.`);
+      }
       seen.add(key);
     });
     direction.orderedStops.forEach((stop, index) => {

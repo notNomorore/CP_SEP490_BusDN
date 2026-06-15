@@ -27,6 +27,34 @@ const toNumber = (value, fallback) => {
   return Number.isNaN(parsed) ? fallback : parsed;
 };
 
+const toList = (value, fallback = []) => {
+  const source = typeof value === 'string' ? value : '';
+  const list = source
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return list.length ? list : fallback;
+};
+
+const createCorsOrigin = () => {
+  const allowedOrigins = toList(getEnv('CORS_ORIGIN'), ['http://localhost:5173']);
+  const isDevelopment = getEnv('NODE_ENV', 'development') === 'development';
+  const localDevOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
+
+  return (origin, callback) => {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (allowedOrigins.includes(origin) || (isDevelopment && localDevOriginPattern.test(origin))) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS origin not allowed: ${origin}`), false);
+  };
+};
+
 export const config = {
   // Server
   port: toNumber(getEnv('PORT'), 3000),
@@ -79,7 +107,7 @@ export const config = {
 
   // CORS
   cors: {
-    origin: getEnv('CORS_ORIGIN', 'http://localhost:5173'),
+    origin: createCorsOrigin(),
     credentials: true,
   },
 
@@ -98,6 +126,20 @@ export const config = {
   // Redis
   redis: {
     url: getEnv('REDIS_URL', 'redis://localhost:6379'),
+  },
+
+  // Google Maps Platform
+  googleMaps: {
+    apiKey: getEnv('GOOGLE_MAPS_API_KEY'),
+  },
+
+  // Da Nang public bus data
+  danabus: {
+    stopApiUrl: getEnv(
+      'DANABUS_STOP_API_URL',
+      'https://ecobus.danang.gov.vn/api/api/BusStop/GetListBusStop'
+    ),
+    requestTimeoutMs: toNumber(getEnv('DANABUS_REQUEST_TIMEOUT_MS', '20000'), 20000),
   },
 
   // Logging

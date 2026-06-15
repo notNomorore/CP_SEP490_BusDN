@@ -4,6 +4,21 @@ import logger from '../utils/logger.js';
 import User from '../modules/auth/User.js';
 
 const normalizeRole = (role) => String(role || '').trim().toUpperCase();
+const buildLockedAccountResponse = (user) => {
+  const reason = user.accountLock?.reason?.trim() || 'Không có lý do cụ thể';
+  const lockedUntil = user.accountLock?.lockedUntil;
+  const untilText = lockedUntil
+    ? ` Thời hạn khóa đến: ${new Date(lockedUntil).toLocaleString('vi-VN')}.`
+    : '';
+
+  return {
+    success: false,
+    code: 'ACCOUNT_LOCKED',
+    message: `Tài khoản đã bị khóa. Lý do: ${reason}.${untilText} Vui lòng liên hệ quản trị viên để được hỗ trợ.`,
+    reason,
+    lockedUntil: lockedUntil || null,
+  };
+};
 
 /**
  * JWT Authentication Middleware
@@ -22,7 +37,7 @@ export const authMiddleware = async (req, res, next) => {
 
     // Verify token
     const decoded = jwt.verify(token, config.jwt.secret);
-    const user = await User.findById(decoded.userId).select('email role status accountLock');
+    const user = await User.findById(decoded.userId).select('email role status accountLock').lean();
 
     if (!user) {
       return res.status(401).json({
@@ -31,11 +46,22 @@ export const authMiddleware = async (req, res, next) => {
       });
     }
 
-    if (user.status !== 'ACTIVE' || user.accountLock?.isLocked) {
-      return res.status(403).json({
-        success: false,
-        message: 'Account is not allowed to access this resource',
-      });
+    if (user.accountLock?.isLocked || user.status === 'LOCKED') {
+      const hasExpiry = Boolean(user.accountLock?.lockedUntil);
+      const lockExpired = hasExpiry && new Date() >= user.accountLock.lockedUntil;
+
+      if (lockExpired) {
+        await User.findByIdAndUpdate(user._id, {
+          status: 'ACTIVE',
+          accountLock: {
+            isLocked: false,
+            reason: '',
+            lockedUntil: null,
+          },
+        });
+      } else {
+        return res.status(423).json(buildLockedAccountResponse(user));
+      }
     }
 
     // Attach user info to request

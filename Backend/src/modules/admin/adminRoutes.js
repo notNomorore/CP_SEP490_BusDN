@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import AdminController from './AdminController.js';
 import { authMiddleware, authorizeRole } from '../../middleware/authMiddleware.js';
+import shiftRoutes from '../shifts/shiftRoutes.js';
 
 const router = express.Router();
 const upload = multer({
@@ -11,6 +12,7 @@ const upload = multer({
 
 router.use(authMiddleware);
 router.use(authorizeRole('ADMIN'));
+router.use(shiftRoutes);
 
 router.post('/users', AdminController.createManagedUser);
 router.post('/users/import', upload.single('file'), AdminController.importManagedUsers);
@@ -28,10 +30,13 @@ router.get('/buses', AdminController.listBuses);
 router.post('/buses', AdminController.createBus);
 router.put('/buses/:busId', AdminController.updateBus);
 router.get('/trip-schedules', AdminController.listTripSchedules);
+router.post('/trip-schedules/generate-preview', AdminController.generateTripSchedulePreview);
+router.post('/trip-schedules/confirm-generated', AdminController.confirmGeneratedTripSchedules);
 router.post('/trip-schedules', AdminController.createTripSchedule);
 router.put('/trip-schedules/:scheduleId', AdminController.updateTripSchedule);
 router.get('/operation-notifications', AdminController.listOperationNotifications);
 router.post('/operation-notifications', AdminController.createOperationNotification);
+router.delete('/trip-schedules/:scheduleId', AdminController.deleteTripSchedule);
 router.get('/drivers', AdminController.listRouteStaff);
 router.get('/users', AdminController.listUsers);
 router.get('/users/:userId', AdminController.getUserDetail);

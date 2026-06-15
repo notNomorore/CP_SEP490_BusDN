@@ -1,4 +1,5 @@
 import Route from './Route.js';
+import BusRoute from '../admin/BusRoute.js';
 
 const sampleRoutes = [
   {
@@ -560,16 +561,66 @@ export class RouteService {
     return { $and: andConditions };
   }
 
+  static buildManagedSearchQuery({ q, from, to }) {
+    const andConditions = [{ status: 'PUBLISHED' }];
+
+    if (q) {
+      const searchRegex = new RegExp(q.trim(), 'i');
+      andConditions.push({
+        $or: [
+          { routeCode: searchRegex },
+          { routeName: searchRegex },
+          { 'outboundRoute.orderedStops.stopName': searchRegex },
+          { 'inboundRoute.orderedStops.stopName': searchRegex },
+          { 'outboundRoute.startStation.stopName': searchRegex },
+          { 'outboundRoute.endStation.stopName': searchRegex },
+        ],
+      });
+    }
+
+    if (from) {
+      const fromRegex = new RegExp(from.trim(), 'i');
+      andConditions.push({
+        $or: [
+          { 'outboundRoute.startStation.stopName': fromRegex },
+          { 'outboundRoute.orderedStops.stopName': fromRegex },
+        ],
+      });
+    }
+
+    if (to) {
+      const toRegex = new RegExp(to.trim(), 'i');
+      andConditions.push({
+        $or: [
+          { 'outboundRoute.endStation.stopName': toRegex },
+          { 'outboundRoute.orderedStops.stopName': toRegex },
+        ],
+      });
+    }
+
+    return { $and: andConditions };
+  }
+
   static async searchRoutes(params) {
     await this.ensureSampleRoutes();
 
     const query = this.buildSearchQuery(params);
-    const routes = await Route.find(query)
-      .sort({ routeNumber: 1 })
-      .limit(50)
-      .lean();
+    const managedQuery = this.buildManagedSearchQuery(params);
+    const [routes, managedRoutes] = await Promise.all([
+      Route.find(query)
+        .sort({ routeNumber: 1 })
+        .limit(50)
+        .lean(),
+      BusRoute.find(managedQuery)
+        .sort({ routeCode: 1 })
+        .limit(50)
+        .lean(),
+    ]);
 
-    return routes.map((route) => this.formatRoute(route));
+    return [
+      ...managedRoutes.map((route) => this.formatManagedRoute(route)),
+      ...routes.map((route) => this.formatRoute(route)),
+    ];
   }
 
   static formatRoute(route) {
@@ -586,6 +637,38 @@ export class RouteService {
       operatingHours: route.operatingHours,
       pathPoints: route.pathPoints || [],
       status: route.status,
+    };
+  }
+
+  static formatManagedRoute(route) {
+    const outboundStops = route.outboundRoute?.orderedStops || [];
+    const startStation = route.outboundRoute?.startStation || outboundStops[0] || {};
+    const endStation = route.outboundRoute?.endStation || outboundStops[outboundStops.length - 1] || {};
+
+    return {
+      id: route._id,
+      routeNumber: route.routeCode,
+      name: route.routeName,
+      origin: startStation.stopName || '',
+      destination: endStation.stopName || '',
+      stops: outboundStops.map((stop, index) => ({
+        name: stop.stopName,
+        order: stop.stopOrder || index + 1,
+        estimatedOffsetMinutes: stop.arrivalOffsetMinutes || index * 6,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+      })),
+      distanceKm: route.outboundRoute?.estimatedDistanceKm || 0,
+      estimatedDurationMinutes: route.outboundRoute?.estimatedDurationMinutes || 0,
+      fare: route.fareConfig?.baseFare || 0,
+      operatingHours: {
+        firstDeparture: route.scheduleConfig?.firstDepartureTime || '05:30',
+        lastDeparture: route.scheduleConfig?.lastDepartureTime || '21:00',
+        frequencyMinutes: route.scheduleConfig?.frequencyMinutes || 30,
+      },
+      pathPoints: route.outboundRoute?.polylinePath || [],
+      status: 'ACTIVE',
+      source: 'MANAGED_ROUTE',
     };
   }
 
@@ -609,7 +692,14 @@ export class RouteService {
       throw new Error('Invalid latitude or longitude');
     }
 
-    const routes = await Route.find({ status: 'ACTIVE' }).sort({ routeNumber: 1 }).lean();
+    const [legacyRoutes, managedRoutes] = await Promise.all([
+      Route.find({ status: 'ACTIVE' }).sort({ routeNumber: 1 }).lean(),
+      BusRoute.find({ status: 'PUBLISHED' }).sort({ routeCode: 1 }).lean(),
+    ]);
+    const routes = [
+      ...managedRoutes.map((route) => this.formatManagedRoute(route)),
+      ...legacyRoutes.map((route) => this.formatRoute(route)),
+    ];
     const nearbyStops = [];
     const suggestedRouteMap = new Map();
 
@@ -632,7 +722,7 @@ export class RouteService {
             longitude: stop.longitude,
             distanceKm: Number(distanceFromUserKm.toFixed(2)),
             route: {
-              id: route._id,
+              id: route.id,
               routeNumber: route.routeNumber,
               name: route.name,
               origin: route.origin,
@@ -643,7 +733,7 @@ export class RouteService {
             },
           });
 
-          suggestedRouteMap.set(String(route._id), this.formatRoute(route));
+          suggestedRouteMap.set(String(route.id), route);
         }
       }
     }
@@ -720,6 +810,14 @@ export class RouteService {
 
     const normalizedPreference = this.normalizePreference(preference);
     const routes = await Route.find({ status: 'ACTIVE' }).sort({ routeNumber: 1 }).lean();
+    const [legacyRoutes, managedRoutes] = await Promise.all([
+      Route.find({ status: 'ACTIVE' }).sort({ routeNumber: 1 }).lean(),
+      BusRoute.find({ status: 'PUBLISHED' }).sort({ routeCode: 1 }).lean(),
+    ]);
+    const routes = [
+      ...managedRoutes.map((route) => this.formatManagedRoute(route)),
+      ...legacyRoutes.map((route) => this.formatRoute(route)),
+    ];
     const candidates = [];
 
     for (const route of routes) {

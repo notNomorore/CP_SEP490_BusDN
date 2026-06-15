@@ -34,13 +34,15 @@ export const useRouteWorkflowStore = create(
       activeStep: 0,
       activeDirection: 'outboundRoute',
       selectedRouteId: '',
+      selectedRouteCode: '',
       draft: emptyRouteDraft(),
       setActiveStep: (activeStep) => set({ activeStep }),
       setActiveDirection: (activeDirection) => set({ activeDirection }),
-      resetDraft: () => set({ draft: emptyRouteDraft(), selectedRouteId: '', activeStep: 0 }),
+      resetDraft: () => set({ draft: emptyRouteDraft(), selectedRouteId: '', selectedRouteCode: '', activeStep: 0 }),
       loadRoute: (route) => set({
         draft: normalizeBidirectionalStopOrder(normalizeRouteFromApi(route)),
         selectedRouteId: route?._id || '',
+        selectedRouteCode: route?.routeCode || '',
         activeStep: 0,
       }),
       normalizeDirectionOrder: () => set((state) => {
@@ -284,8 +286,15 @@ export const useRouteWorkflowStore = create(
       partialize: (state) => ({
         activeStep: state.activeStep,
         activeDirection: state.activeDirection,
-        selectedRouteId: state.selectedRouteId,
+        selectedRouteId: '',
+        selectedRouteCode: '',
         draft: state.draft,
+      }),
+      version: 2,
+      migrate: (persistedState) => ({
+        ...persistedState,
+        selectedRouteId: '',
+        selectedRouteCode: '',
       }),
     }
   )

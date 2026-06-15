@@ -1,13 +1,14 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import Header from '../../../shared/components/navigation/Header.jsx';
 import { HOME_BUS_HERO_IMAGE } from '../../../shared/constants/images.js';
 import useTheme from '../../../shared/hooks/useTheme.js';
 import adminService from '../services/adminService.js';
 
 const roleOptions = ['ALL', 'ADMIN', 'PASSENGER', 'DRIVER', 'BUS_ASSISTANT'];
+const createAccountRoleOptions = ['DRIVER', 'BUS_ASSISTANT'];
 const statusOptions = ['ALL', 'ACTIVE', 'INACTIVE', 'LOCKED', 'PENDING_ACTIVATION'];
-const managedRoleOptions = ['DRIVER', 'BUS_ASSISTANT'];
+const emailRegex = /^[^\s@.]+(?:\.[^\s@.]+)*@[^\s@.]+(?:\.[^\s@.]+)+$/;
+const normalizeEmailInput = (value) => value.trim().replace(/\.+$/, '');
 
 const roleLabels = {
   ALL: 'Tất cả vai trò',
@@ -48,6 +49,13 @@ const defaultPagination = {
   totalPages: 1,
   total: 0,
   limit: 10,
+};
+
+const defaultCreateAccountForm = {
+  fullName: '',
+  email: '',
+  phone: '',
+  role: 'DRIVER',
 };
 
 const lockDurations = [
@@ -159,7 +167,6 @@ const Modal = ({
 };
 
 const UserAccountsPage = () => {
-  const navigate = useNavigate();
   const { isDarkMode } = useTheme();
   const [filters, setFilters] = useState(defaultFilters);
   const [users, setUsers] = useState([]);
@@ -181,17 +188,15 @@ const UserAccountsPage = () => {
     message: '',
     tone: 'default',
   });
-  const [isCreatingUser, setIsCreatingUser] = useState(false);
-  const [createUserOpen, setCreateUserOpen] = useState(false);
-  const [createUserForm, setCreateUserForm] = useState({
-    fullName: '',
-    email: '',
-    phone: '',
-    role: 'DRIVER',
-    password: '',
-    confirmPassword: '',
-  });
-  const [createUserErrors, setCreateUserErrors] = useState({});
+  const [isImportingUsers, setIsImportingUsers] = useState(false);
+  const [importUsersOpen, setImportUsersOpen] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [importErrors, setImportErrors] = useState({});
+  const [importResult, setImportResult] = useState(null);
+  const [createAccountOpen, setCreateAccountOpen] = useState(false);
+  const [createAccountForm, setCreateAccountForm] = useState(defaultCreateAccountForm);
+  const [createAccountErrors, setCreateAccountErrors] = useState({});
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [staffPerformance, setStaffPerformance] = useState({
     summary: {
       staffCount: 0,
@@ -532,51 +537,120 @@ const UserAccountsPage = () => {
     }
   };
 
-  const updateCreateUserForm = (key, value) => {
-    setCreateUserForm((current) => ({
+  const resetCreateAccount = () => {
+    setCreateAccountForm(defaultCreateAccountForm);
+    setCreateAccountErrors({});
+  };
+
+  const updateCreateAccountField = (key, value) => {
+    setCreateAccountForm((current) => ({
       ...current,
       [key]: value,
     }));
+    setCreateAccountErrors((current) => ({
+      ...current,
+      [key]: undefined,
+      general: undefined,
+    }));
   };
 
-  const resetCreateUserForm = () => {
-    setCreateUserForm({
-      fullName: '',
-      email: '',
-      phone: '',
-      role: 'DRIVER',
-      password: '',
-      confirmPassword: '',
-    });
-    setCreateUserErrors({});
+  const validateCreateAccountForm = () => {
+    const errors = {};
+    const normalizedEmail = normalizeEmailInput(createAccountForm.email);
+
+    if (!createAccountForm.fullName.trim()) {
+      errors.fullName = 'Vui lòng nhập họ tên.';
+    }
+
+    if (!normalizedEmail) {
+      errors.email = 'Vui lòng nhập email để gửi tài khoản và mật khẩu.';
+    }
+
+    if (normalizedEmail && !emailRegex.test(normalizedEmail)) {
+      errors.email = 'Email không hợp lệ. Kiểm tra lại phần đuôi email, không để dấu chấm ở cuối.';
+    }
+
+    if (createAccountForm.phone.trim() && !/^(\+84|0)[0-9]{9,10}$/.test(createAccountForm.phone.trim())) {
+      errors.phone = 'Số điện thoại không hợp lệ.';
+    }
+
+    setCreateAccountErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
-  const handleCreateManagedUser = async () => {
-    setIsCreatingUser(true);
-    setCreateUserErrors({});
+  const handleCreateAccount = async () => {
+    if (!validateCreateAccountForm()) {
+      return;
+    }
+
+    setIsCreatingAccount(true);
+    setCreateAccountErrors({});
 
     try {
-      await adminService.createUser(createUserForm);
-      setCreateUserOpen(false);
+      const response = await adminService.createUser({
+        fullName: createAccountForm.fullName.trim(),
+        email: normalizeEmailInput(createAccountForm.email) || undefined,
+        phone: createAccountForm.phone.trim() || undefined,
+        role: createAccountForm.role,
+      });
+
       setResultModal({
         open: true,
         title: 'Đã tạo tài khoản',
-        message: `Tài khoản ${roleLabels[createUserForm.role] || createUserForm.role} đã được tạo và gán quyền thành công.`,
+        message: response.message || 'Tài khoản và mật khẩu tạm thời đã được gửi về email đăng ký.',
         tone: 'success',
       });
-      resetCreateUserForm();
+      setCreateAccountOpen(false);
+      resetCreateAccount();
       await refreshUsers();
       await refreshStaffPerformance();
     } catch (createError) {
-      if (createError.errors) {
-        setCreateUserErrors(createError.errors);
-      } else {
-        setCreateUserErrors({
-          general: createError.message || 'Không thể tạo tài khoản quản lý',
-        });
-      }
+      const fieldErrors = createError.errors || {};
+      const detailedMessage = Object.values(fieldErrors).filter(Boolean).join(' ');
+      setCreateAccountErrors({
+        ...fieldErrors,
+        general: detailedMessage
+          ? `Thông tin chưa hợp lệ: ${detailedMessage}`
+          : [createError.message, createError.mailError].filter(Boolean).join(' Chi tiết: ') || 'Không thể tạo tài khoản',
+      });
     } finally {
-      setIsCreatingUser(false);
+      setIsCreatingAccount(false);
+    }
+  };
+
+  const resetImportUsers = () => {
+    setImportFile(null);
+    setImportErrors({});
+    setImportResult(null);
+  };
+
+  const handleImportUsers = async () => {
+    if (!importFile) {
+      setImportErrors({ general: 'Vui lòng chọn file import.' });
+      return;
+    }
+
+    setIsImportingUsers(true);
+    setImportErrors({});
+    setImportResult(null);
+
+    try {
+      const response = await adminService.importUsers(importFile);
+      setImportResult(response);
+      setResultModal({
+        open: true,
+        title: 'Đã import tài khoản',
+        message: response.message || 'Danh sách tài khoản nhân sự đã được xử lý. Mật khẩu tạm thời được gửi qua email.',
+        tone: response.failedCount > 0 ? 'default' : 'success',
+      });
+      await refreshUsers();
+      await refreshStaffPerformance();
+    } catch (importError) {
+      setImportErrors({
+        general: importError.message || 'Không thể import tài khoản nhân sự',
+      });
+    } finally {
+      setIsImportingUsers(false);
     }
   };
 
@@ -605,21 +679,35 @@ const UserAccountsPage = () => {
             <div>
               <h1 className={`text-3xl font-black tracking-tight ${headingClassName}`}>Quản lý tài khoản người dùng</h1>
               <p className={`mt-2 max-w-3xl text-sm ${bodyCopyClassName}`}>
-                Theo dõi quyền truy cập, vai trò, trạng thái tài khoản và tạo tài khoản nhân sự trong hệ thống.
+                Theo dõi quyền truy cập, vai trò, trạng thái tài khoản và import tài khoản nhân sự từ file.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setCreateUserOpen(true)}
-              className={`inline-flex h-12 items-center justify-center rounded-2xl px-5 text-sm font-bold text-slate-950 ${
-                isDarkMode
-                  ? 'bg-gradient-to-r from-emerald-300 to-cyan-300 shadow-[0_12px_30px_rgba(74,222,128,0.24)]'
-                  : 'bg-gradient-to-r from-emerald-300 to-cyan-400 shadow-[0_10px_24px_rgba(34,211,238,0.18)]'
-              }`}
-            >
-              <span className="material-symbols-outlined mr-2 text-lg">person_add</span>
-              Tạo tài khoản nhân sự
-            </button>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => setCreateAccountOpen(true)}
+                className={`inline-flex h-12 items-center justify-center rounded-2xl px-5 text-sm font-bold text-slate-950 ${
+                  isDarkMode
+                    ? 'bg-gradient-to-r from-emerald-300 to-cyan-300 shadow-[0_12px_30px_rgba(74,222,128,0.24)]'
+                    : 'bg-gradient-to-r from-emerald-300 to-cyan-400 shadow-[0_10px_24px_rgba(34,211,238,0.18)]'
+                }`}
+              >
+                <span className="material-symbols-outlined mr-2 text-lg">person_add</span>
+                Tạo tài khoản
+              </button>
+              <button
+                type="button"
+                onClick={() => setImportUsersOpen(true)}
+                className={`inline-flex h-12 items-center justify-center rounded-2xl border px-5 text-sm font-bold ${
+                  isDarkMode
+                    ? 'border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.07]'
+                    : 'border-slate-200 bg-white text-slate-700 shadow-[0_10px_24px_rgba(148,163,184,0.14)] hover:bg-slate-50'
+                }`}
+              >
+                <span className="material-symbols-outlined mr-2 text-lg">upload_file</span>
+                Import tài khoản nhân sự
+              </button>
+            </div>
           </div>
         </section>
 
@@ -946,46 +1034,20 @@ const UserAccountsPage = () => {
               </div>
             </section>
 
-            <section className={`rounded-[26px] border p-4 backdrop-blur ${sidePanelClassName}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className={`text-sm font-bold ${sideTitleClassName}`}>Báo cáo hiệu suất nhân viên</p>
-                  <p className={`mt-1 text-xs ${sideSubClassName}`}>Xem chuyến hoàn thành, sự cố và báo cáo hoạt động ở trang riêng.</p>
-                </div>
-                <span className={`material-symbols-outlined rounded-lg p-2 text-cyan-300 ${isDarkMode ? 'bg-white/6' : 'bg-cyan-50'}`}>monitoring</span>
-              </div>
-              <div className={`mt-4 rounded-2xl border p-4 ${isDarkMode ? 'border-white/6 bg-white/[0.03]' : 'border-slate-200 bg-slate-50'}`}>
-                <div className="grid grid-cols-2 gap-3">
-                  <QuickActionCard icon="badge" label="Tài khoản nhân sự" value={staffPerformance.summary.staffCount} isDarkMode={isDarkMode} />
-                  <QuickActionCard icon="local_shipping" label="Chuyến đã ghi nhận" value={staffPerformance.summary.totalCompletedTrips} isDarkMode={isDarkMode} />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => navigate('/admin/staff-performance')}
-                  className={`mt-4 w-full rounded-2xl px-4 py-3 text-sm font-bold text-slate-950 ${
-                    isDarkMode
-                      ? 'bg-gradient-to-r from-cyan-300 to-emerald-300'
-                      : 'bg-gradient-to-r from-cyan-400 to-emerald-300 shadow-[0_10px_24px_rgba(34,211,238,0.18)]'
-                  }`}
-                >
-                  Mở phân tích hiệu suất nhân viên
-                </button>
-              </div>
-            </section>
           </aside>
         </section>
 
       </main>
 
       <Modal
-        open={createUserOpen}
+        open={createAccountOpen}
         tone="success"
-        title="Tạo tài khoản quản lý"
-        description="Tạo tài khoản tài xế, phụ xe hoặc nhân viên và gán vai trò ngay khi tạo."
+        title="Tạo tài khoản mới"
+        description="Admin tạo tài khoản cho tài xế hoặc phụ xe. Hệ thống tự sinh mật khẩu tạm thời, gửi về email đăng ký và yêu cầu đổi mật khẩu ở lần đăng nhập đầu tiên."
         onClose={() => {
-          if (!isCreatingUser) {
-            setCreateUserOpen(false);
-            resetCreateUserForm();
+          if (!isCreatingAccount) {
+            setCreateAccountOpen(false);
+            resetCreateAccount();
           }
         }}
         actions={(
@@ -993,36 +1055,36 @@ const UserAccountsPage = () => {
             <button
               type="button"
               onClick={() => {
-                setCreateUserOpen(false);
-                resetCreateUserForm();
+                setCreateAccountOpen(false);
+                resetCreateAccount();
               }}
-              disabled={isCreatingUser}
+              disabled={isCreatingAccount}
               className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-slate-200 disabled:opacity-50"
             >
               Hủy
             </button>
             <button
               type="button"
-              onClick={handleCreateManagedUser}
-              disabled={isCreatingUser}
+              onClick={handleCreateAccount}
+              disabled={isCreatingAccount}
               className="rounded-2xl bg-gradient-to-r from-emerald-300 to-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 disabled:opacity-50"
             >
-              {isCreatingUser ? 'Đang tạo...' : 'Tạo tài khoản'}
+              {isCreatingAccount ? 'Đang tạo...' : 'Tạo tài khoản'}
             </button>
           </>
         )}
       >
         <div className="grid gap-4">
           <label className="block">
-            <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">Họ và tên</span>
+            <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">Họ tên</span>
             <input
               type="text"
-              value={createUserForm.fullName}
-              onChange={(event) => updateCreateUserForm('fullName', event.target.value)}
-              className="h-11 w-full rounded-2xl border border-white/8 bg-white/[0.04] px-4 text-sm text-white"
-              placeholder="Nhập họ và tên"
+              value={createAccountForm.fullName}
+              onChange={(event) => updateCreateAccountField('fullName', event.target.value)}
+              className="w-full rounded-2xl border border-white/8 bg-white/[0.04] px-4 py-3 text-sm text-white placeholder:text-slate-500"
+              placeholder="Nguyễn Văn A"
             />
-            {createUserErrors.fullName ? <p className="mt-2 text-xs text-rose-300">{createUserErrors.fullName}</p> : null}
+            {createAccountErrors.fullName ? <p className="mt-2 text-xs text-rose-200">{createAccountErrors.fullName}</p> : null}
           </label>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -1030,74 +1092,128 @@ const UserAccountsPage = () => {
               <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">Email</span>
               <input
                 type="email"
-                value={createUserForm.email}
-                onChange={(event) => updateCreateUserForm('email', event.target.value)}
-                className="h-11 w-full rounded-2xl border border-white/8 bg-white/[0.04] px-4 text-sm text-white"
-                placeholder="name@company.com"
+                value={createAccountForm.email}
+                onChange={(event) => updateCreateAccountField('email', event.target.value)}
+                className="w-full rounded-2xl border border-white/8 bg-white/[0.04] px-4 py-3 text-sm text-white placeholder:text-slate-500"
+                placeholder="user@example.com"
               />
-              {createUserErrors.email ? <p className="mt-2 text-xs text-rose-300">{createUserErrors.email}</p> : null}
+              {createAccountErrors.email ? <p className="mt-2 text-xs text-rose-200">{createAccountErrors.email}</p> : null}
             </label>
 
             <label className="block">
               <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">Số điện thoại</span>
               <input
-                type="text"
-                value={createUserForm.phone}
-                onChange={(event) => updateCreateUserForm('phone', event.target.value)}
-                className="h-11 w-full rounded-2xl border border-white/8 bg-white/[0.04] px-4 text-sm text-white"
-                placeholder="0xxxxxxxxx"
+                type="tel"
+                value={createAccountForm.phone}
+                onChange={(event) => updateCreateAccountField('phone', event.target.value)}
+                className="w-full rounded-2xl border border-white/8 bg-white/[0.04] px-4 py-3 text-sm text-white placeholder:text-slate-500"
+                placeholder="0901234567"
               />
-              {createUserErrors.phone ? <p className="mt-2 text-xs text-rose-300">{createUserErrors.phone}</p> : null}
+              {createAccountErrors.phone ? <p className="mt-2 text-xs text-rose-200">{createAccountErrors.phone}</p> : null}
             </label>
           </div>
 
-          {createUserErrors.identifier ? <p className="text-xs text-rose-300">{createUserErrors.identifier}</p> : null}
+          {createAccountErrors.identifier ? (
+            <div className="rounded-2xl border border-rose-400/15 bg-rose-400/10 px-4 py-3 text-xs text-rose-200">
+              {createAccountErrors.identifier}
+            </div>
+          ) : null}
 
           <label className="block">
             <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">Vai trò</span>
             <select
-              value={createUserForm.role}
-              onChange={(event) => updateCreateUserForm('role', event.target.value)}
+              value={createAccountForm.role}
+              onChange={(event) => updateCreateAccountField('role', event.target.value)}
               className="h-11 w-full rounded-2xl border border-white/8 bg-white/[0.04] px-4 text-sm text-white"
             >
-              {managedRoleOptions.map((role) => (
+              {createAccountRoleOptions.map((role) => (
                 <option key={role} value={role} style={{ color: '#0f172a', backgroundColor: '#ffffff' }}>
                   {roleLabels[role] || role}
                 </option>
               ))}
             </select>
-            {createUserErrors.role ? <p className="mt-2 text-xs text-rose-300">{createUserErrors.role}</p> : null}
           </label>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block">
-              <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">Mật khẩu</span>
-              <input
-                type="password"
-                value={createUserForm.password}
-                onChange={(event) => updateCreateUserForm('password', event.target.value)}
-                className="h-11 w-full rounded-2xl border border-white/8 bg-white/[0.04] px-4 text-sm text-white"
-                placeholder="Mật khẩu tạm thời"
-              />
-              {createUserErrors.password ? <p className="mt-2 text-xs text-rose-300">{createUserErrors.password}</p> : null}
-            </label>
-
-            <label className="block">
-              <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">Xác nhận mật khẩu</span>
-              <input
-                type="password"
-                value={createUserForm.confirmPassword}
-                onChange={(event) => updateCreateUserForm('confirmPassword', event.target.value)}
-                className="h-11 w-full rounded-2xl border border-white/8 bg-white/[0.04] px-4 text-sm text-white"
-                placeholder="Nhập lại mật khẩu"
-              />
-              {createUserErrors.confirmPassword ? <p className="mt-2 text-xs text-rose-300">{createUserErrors.confirmPassword}</p> : null}
-            </label>
+          <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4 text-xs leading-5 text-slate-300">
+            Tài khoản chỉ được tạo khi hệ thống gửi thành công email chứa thông tin đăng nhập và mật khẩu tạm thời.
           </div>
 
-          {createUserErrors.general ? (
+          {createAccountErrors.general ? (
             <div className="rounded-2xl border border-rose-400/15 bg-rose-400/10 px-4 py-3 text-xs text-rose-200">
-              {createUserErrors.general}
+              {createAccountErrors.general}
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+
+      <Modal
+        open={importUsersOpen}
+        tone="success"
+        title="Import tài khoản nhân sự"
+        description="Import danh sách từ file CSV xuất từ Excel. Cần có cột email/sđt, fullName, role; tài khoản không có email sẽ bị bỏ qua vì không thể gửi mật khẩu."
+        onClose={() => {
+          if (!isImportingUsers) {
+            setImportUsersOpen(false);
+            resetImportUsers();
+          }
+        }}
+        actions={(
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setImportUsersOpen(false);
+                resetImportUsers();
+              }}
+              disabled={isImportingUsers}
+              className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-slate-200 disabled:opacity-50"
+            >
+              Hủy
+            </button>
+            <button
+              type="button"
+              onClick={handleImportUsers}
+              disabled={isImportingUsers || !importFile}
+              className="rounded-2xl bg-gradient-to-r from-emerald-300 to-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 disabled:opacity-50"
+            >
+              {isImportingUsers ? 'Đang import...' : 'Import tài khoản'}
+            </button>
+          </>
+        )}
+      >
+        <div className="grid gap-4">
+          <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4 text-xs leading-5 text-slate-300">
+            <p className="font-semibold text-white">Mẫu cột:</p>
+            <p className="mt-1 font-mono">email,phone,fullName,role</p>
+            <p className="mt-1 font-mono">hoặc: email/sdt,fullName,role</p>
+            <p className="mt-2">Role hợp lệ: DRIVER, CONDUCTOR. Mật khẩu tạm thời sẽ tự sinh và gửi qua email. Tài khoản vận hành bắt buộc đổi mật khẩu ở lần đăng nhập đầu tiên.</p>
+          </div>
+
+          <label className="block">
+            <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">File import</span>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(event) => {
+                setImportFile(event.target.files?.[0] || null);
+                setImportErrors({});
+                setImportResult(null);
+              }}
+              className="w-full rounded-2xl border border-white/8 bg-white/[0.04] px-4 py-3 text-sm text-white file:mr-4 file:rounded-xl file:border-0 file:bg-emerald-300 file:px-3 file:py-2 file:text-sm file:font-bold file:text-slate-950"
+            />
+          </label>
+
+          {importErrors.general ? (
+            <div className="rounded-2xl border border-rose-400/15 bg-rose-400/10 px-4 py-3 text-xs text-rose-200">
+              {importErrors.general}
+            </div>
+          ) : null}
+
+          {importResult?.failed?.length ? (
+            <div className="max-h-40 overflow-y-auto rounded-2xl border border-amber-300/20 bg-amber-300/10 p-3 text-xs text-amber-100">
+              {importResult.failed.map((item) => (
+                <p key={`${item.rowNumber}-${item.email}`}>Dòng {item.rowNumber}: {item.reason}</p>
+              ))}
             </div>
           ) : null}
         </div>

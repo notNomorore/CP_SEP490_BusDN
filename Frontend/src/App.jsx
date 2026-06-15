@@ -249,6 +249,14 @@ function App() {
               </OperationsRoute>
             )}
           />
+          <Route
+            path="/admin/staff-performance"
+            element={
+              <AdminRoute>
+                <StaffPerformancePage />
+              </AdminRoute>
+            }
+          />
         </Routes>
       </AppInitializer>
     </Router>

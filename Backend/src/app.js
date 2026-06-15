@@ -28,6 +28,8 @@ import fareOperationsRoutes from './modules/fareOperations/fareOperations.routes
 import walkInTicketRoutes from './modules/walkInTickets/walkInTicket.routes.js';
 import passengerComplianceRoutes from './modules/passengerCompliance/passengerCompliance.routes.js';
 import busStopRoutes from './modules/busStops/busStopRoutes.js';
+import shiftRoutes from './modules/shifts/shiftRoutes.js';
+import { authMiddleware, authorizeRole } from './middleware/authMiddleware.js';
 
 export const createApp = () => {
   const app = express();
@@ -112,11 +114,11 @@ export const createApp = () => {
     );
   });
 
-  // Routes will be mounted here
   app.use('/api/auth', authRoutes);
   app.use('/api/priority-profile', priorityProfileRoutes);
   app.use('/api/customer-support', customerSupportRoutes);
   app.use('/api/admin', adminRoutes);
+  app.use('/api', authMiddleware, authorizeRole('ADMIN'), shiftRoutes);
   app.use('/api/profile', profileRoutes);
   app.use('/api/admin/promotions', promotionRoutes);
   app.use('/api/admin/revenue', revenueReportRoutes);
@@ -126,11 +128,10 @@ export const createApp = () => {
   app.use('/api/admin/fares', fareOperationsRoutes);
   app.use('/api/admin', walkInTicketRoutes);
   app.use('/api/admin', passengerComplianceRoutes);
-  // app.use('/api/routes', routeRoutes);
-  app.use('/api/routes', routeRoutes);
   app.use('/api/bus-stops', busStopRoutes);
+  app.use('/api/routes', routeRoutes);
   app.use('/api/schedule-operations', scheduleOperationsRoutes);
-  // etc...
+
 
   // 404 handler (must be after all routes)
   app.use(notFoundHandler);

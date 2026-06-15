@@ -3,32 +3,32 @@ import React from 'react';
 const Footer = () => {
   const sections = [
     {
-      title: 'Về chúng tôi',
+      title: 'Ve chung toi',
       links: [
-        'Giới thiệu Vexere.com',
-        'Tuyển dụng',
-        'Tin tức',
-        'Liên hệ'
-      ]
+        'Gioi thieu Vexere.com',
+        'Tuyen dung',
+        'Tin tuc',
+        'Lien he',
+      ],
     },
     {
-      title: 'Hỗ trợ',
+      title: 'Ho tro',
       links: [
-        'Hướng dẫn thanh toán',
-        'Quy chế Vexere.com',
+        'Huong dan thanh toan',
+        'Quy che Vexere.com',
         'Ticket Refund',
-        'Privacy Policy'
-      ]
+        'Privacy Policy',
+      ],
     },
     {
-      title: 'Trở thành đối tác',
+      title: 'Tro thanh doi tac',
       links: [
         'Partner Portal',
-        'Phần mềm quản lý nhà xe',
+        'Phan mem quan ly nha xe',
         'Bus Operators',
-        'Tổng đài AI'
-      ]
-    }
+        'Tong dai AI',
+      ],
+    },
   ];
 
   return (
@@ -83,11 +83,11 @@ const Footer = () => {
 
       <div className="container mx-auto px-8 pt-12 border-t border-white/5 text-center md:text-left flex flex-col md:flex-row justify-between items-center gap-4">
         <p className="text-sm opacity-50">
-          © 2024 Veridian Transit. The Guided Path to Seamless Travel.
+          (c) 2024 Veridian Transit. The Guided Path to Seamless Travel.
         </p>
         <div className="flex gap-8 text-sm opacity-50">
           <span>MST: 0315133726</span>
-          <span>TP. Hồ Chí Minh, Việt Nam</span>
+          <span>TP. Ho Chi Minh, Viet Nam</span>
         </div>
       </div>
     </footer>

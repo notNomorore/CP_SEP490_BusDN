@@ -108,6 +108,64 @@ const geocodeAddress = async (address) => {
   };
 };
 
+const parseGoogleAddressComponent = (components, types) => components.find((component) => (
+  types.some((type) => component.types?.includes(type))
+))?.long_name || '';
+
+export const searchStopAddresses = async (query) => {
+  const text = String(query || '').trim();
+  if (text.length < 3) return [];
+
+  if (config.googleMaps.apiKey) {
+    const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
+    url.searchParams.set('address', `${text}, Đà Nẵng, Việt Nam`);
+    url.searchParams.set('key', config.googleMaps.apiKey);
+    url.searchParams.set('language', 'vi');
+    url.searchParams.set('region', 'vn');
+    url.searchParams.set('bounds', '15.95,107.95|16.25,108.35');
+    const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const payload = await response.json();
+    if (!response.ok || !['OK', 'ZERO_RESULTS'].includes(payload.status)) {
+      throw Object.assign(new Error(payload.error_message || 'Không thể tìm kiếm địa chỉ.'), { statusCode: 502 });
+    }
+    return (payload.results || []).slice(0, 6).map((result) => ({
+      id: result.place_id,
+      displayName: result.formatted_address,
+      address: result.formatted_address,
+      latitude: result.geometry.location.lat,
+      longitude: result.geometry.location.lng,
+      district: parseGoogleAddressComponent(result.address_components || [], ['administrative_area_level_2']),
+      ward: parseGoogleAddressComponent(result.address_components || [], ['sublocality_level_1', 'administrative_area_level_3']),
+      source: 'GOOGLE',
+    }));
+  }
+
+  const url = new URL('https://nominatim.openstreetmap.org/search');
+  url.searchParams.set('q', `${text}, Đà Nẵng, Việt Nam`);
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('addressdetails', '1');
+  url.searchParams.set('limit', '6');
+  url.searchParams.set('countrycodes', 'vn');
+  url.searchParams.set('viewbox', '107.95,16.25,108.35,15.95');
+  url.searchParams.set('bounded', '1');
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'BusDN/1.0 (admin stop address search)' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw Object.assign(new Error('Không thể tìm kiếm địa chỉ trên bản đồ.'), { statusCode: 502 });
+  const payload = await response.json();
+  return payload.map((result) => ({
+    id: String(result.place_id),
+    displayName: result.display_name,
+    address: result.display_name,
+    latitude: Number(result.lat),
+    longitude: Number(result.lon),
+    district: result.address?.city_district || result.address?.district || result.address?.county || '',
+    ward: result.address?.suburb || result.address?.quarter || result.address?.neighbourhood || result.address?.village || '',
+    source: 'OPENSTREETMAP',
+  }));
+};
+
 const resolveRouteAssignment = async ({ routeId, direction }) => {
   if (!routeId) {
     return [];
