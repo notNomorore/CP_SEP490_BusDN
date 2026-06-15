@@ -68,6 +68,11 @@ export const routeService = {
     return response.data;
   },
 
+  getEstimatedArrivalTimes: async (routeId) => {
+    const response = await apiClient.get(`/routes/${routeId}/eta`);
+    return response.data;
+  },
+
   getFavoriteRoutes: async () => {
     const response = await apiClient.get('/profile/favorites/routes');
     return response.data;

@@ -825,6 +825,32 @@ export class RouteService {
     return stops[nextStopIndex] || stops[stops.length - 1] || null;
   }
 
+  static buildStopId(route, stop) {
+    const normalizedName = stop.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    return `${route.routeNumber}-${stop.order}-${normalizedName}`;
+  }
+
+  static calculateStopEtas(route, progress, status) {
+    const duration = route.estimatedDurationMinutes || 30;
+    const trafficMultiplier = status === 'Delayed' ? 1.25 : 1;
+
+    return (route.stops || []).map((stop) => {
+      const stopProgress = Math.min((stop.estimatedOffsetMinutes || 0) / duration, 1);
+      const minutesUntilArrival = Math.round((stopProgress - progress) * duration * trafficMultiplier);
+      const hasPassed = minutesUntilArrival < 0;
+      const etaMinutes = hasPassed ? null : Math.max(minutesUntilArrival, 1);
+
+      return {
+        stopId: this.buildStopId(route, stop),
+        stopName: stop.name,
+        stopOrder: stop.order,
+        etaMinutes,
+        estimatedArrivalTime: etaMinutes ? `${etaMinutes} min` : 'Passed',
+        status: hasPassed ? 'Passed' : status,
+      };
+    });
+  }
+
   static async getLiveBusLocations(routeId) {
     await this.ensureSampleRoutes();
 
@@ -860,6 +886,7 @@ export class RouteService {
       const progress = ((now % cycleMs) / cycleMs + offset) % 1;
       const currentLocation = this.interpolatePathPosition(pathPoints, progress);
       const nextStop = this.findNextStop(route, progress);
+      const status = index === 1 && progress > 0.82 ? 'Delayed' : 'Running';
       const remainingMinutes = Math.max(
         Math.round((1 - progress) * (route.estimatedDurationMinutes || 30)),
         1
@@ -867,6 +894,7 @@ export class RouteService {
       const arrivalToNextStopMinutes = nextStop
         ? Math.max(Math.round(((nextStop.estimatedOffsetMinutes || 0) / (route.estimatedDurationMinutes || 30) - progress) * (route.estimatedDurationMinutes || 30)), 1)
         : remainingMinutes;
+      const stopEtas = this.calculateStopEtas(route, progress, status);
 
       return {
         busId: `${route.routeNumber}-BUS-${index + 1}`,
@@ -875,16 +903,47 @@ export class RouteService {
         currentLocation,
         estimatedArrivalTime: `${Math.max(arrivalToNextStopMinutes, 1)} min`,
         nextStop: nextStop?.name || route.destination,
-        status: index === 1 && progress > 0.82 ? 'Delayed' : 'Running',
+        stopEtas,
+        status,
         lastUpdated: new Date(now).toISOString(),
+      };
+    });
+    const stopEtaSummary = (route.stops || []).map((stop) => {
+      const activeEtas = buses
+        .map((bus) => bus.stopEtas.find((eta) => eta.stopOrder === stop.order))
+        .filter((eta) => eta && typeof eta.etaMinutes === 'number')
+        .sort((first, second) => first.etaMinutes - second.etaMinutes);
+
+      return {
+        stopId: this.buildStopId(route, stop),
+        stopName: stop.name,
+        stopOrder: stop.order,
+        nextBusId: activeEtas[0] ? buses.find((bus) => (
+          bus.stopEtas.some((eta) => eta.stopId === activeEtas[0].stopId && eta.etaMinutes === activeEtas[0].etaMinutes)
+        ))?.busId : null,
+        etaMinutes: activeEtas[0]?.etaMinutes || null,
+        estimatedArrivalTime: activeEtas[0]?.estimatedArrivalTime || 'ETA unavailable',
+        status: activeEtas[0]?.status || 'Unavailable',
       };
     });
 
     return {
       route: this.formatRoute(route),
       buses,
+      stopEtaSummary,
       count: buses.length,
       refreshedAt: new Date(now).toISOString(),
+    };
+  }
+
+  static async getEstimatedArrivalTimes(routeId) {
+    const liveResult = await this.getLiveBusLocations(routeId);
+
+    return {
+      route: liveResult.route,
+      stopEtaSummary: liveResult.stopEtaSummary || [],
+      buses: liveResult.buses || [],
+      refreshedAt: liveResult.refreshedAt,
     };
   }
 }

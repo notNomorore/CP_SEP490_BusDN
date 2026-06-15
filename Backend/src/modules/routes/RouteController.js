@@ -106,6 +106,26 @@ export class RouteController {
       next(error);
     }
   }
+
+  static async eta(req, res, next) {
+    try {
+      const { routeId } = req.params;
+      const result = await RouteService.getEstimatedArrivalTimes(routeId);
+
+      return res.success(result, 'Estimated arrival times fetched successfully');
+    } catch (error) {
+      logger.error('ETA error:', error);
+
+      if (error.message === 'Bus not found') {
+        return res.status(404).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
 }
 
 export default RouteController;

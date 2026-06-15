@@ -522,6 +522,10 @@ const RouteDetailsPanel = ({
     { id: 'arrival', label: 'Lịch chạy' },
     { id: 'feedback', label: 'Feedback' },
   ];
+  const stopEtaSummary = liveBusData?.stopEtaSummary || [];
+  const getStopEta = (stop) => (
+    stopEtaSummary.find((eta) => eta.stopId === buildStopId(route, stop))
+  );
 
   return (
     <aside className="fixed bottom-0 right-0 top-[80px] z-[1200] flex w-[360px] max-w-[calc(100vw-24px)] flex-col border-l border-slate-200 bg-white shadow-2xl">
@@ -684,6 +688,27 @@ const RouteDetailsPanel = ({
                   ))}
                 </div>
               )}
+              {isLiveTracking && stopEtaSummary.length > 0 && (
+                <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                  <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-emerald-700">
+                    Estimated Arrival Time (ETA)
+                  </div>
+                  <div className="space-y-2">
+                    {stopEtaSummary.slice(0, 4).map((eta) => (
+                      <div key={eta.stopId} className="flex items-center justify-between gap-3 rounded bg-white px-3 py-2 text-xs">
+                        <div className="min-w-0">
+                          <div className="truncate font-black text-slate-900">{eta.stopName}</div>
+                          <div className="text-slate-500">{eta.nextBusId || 'No active bus'}</div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <div className="font-black text-emerald-700">{eta.estimatedArrivalTime}</div>
+                          <div className="text-[10px] font-bold uppercase text-slate-400">{eta.status}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
@@ -711,57 +736,86 @@ const RouteDetailsPanel = ({
 
         {detailTab === 'stops' && (
           <div className="space-y-3">
-            {directionStops.map((stop) => (
-              <div key={`${route.id}-${directionTab}-stop-${stop.order}`} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-black text-emerald-700">
-                  {stop.order}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="font-black text-slate-900">{stop.name}</div>
-                  <div className="text-xs text-slate-500">
-                    Minimum arrival: {addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onToggleFavoriteStop?.(route, stop)}
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${
-                    isStopFavorite?.(route, stop)
-                      ? 'border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100'
-                      : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
-                  }`}
-                  aria-label={isStopFavorite?.(route, stop) ? 'Remove favorite stop' : 'Save stop to favorites'}
-                >
-                  <span className="material-symbols-outlined text-[18px] leading-none">
-                    {isStopFavorite?.(route, stop) ? 'star' : 'star_border'}
+            {!isLiveTracking && (
+              <button
+                type="button"
+                onClick={() => onToggleLiveLocation?.(route)}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700 hover:bg-emerald-100"
+              >
+                <span className="material-symbols-outlined text-[18px]">schedule</span>
+                View realtime ETA
+              </button>
+            )}
+            {directionStops.map((stop) => {
+              const stopEta = getStopEta(stop);
+
+              return (
+                <div key={`${route.id}-${directionTab}-stop-${stop.order}`} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-black text-emerald-700">
+                    {stop.order}
                   </span>
-                </button>
-              </div>
-            ))}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-black text-slate-900">{stop.name}</div>
+                    <div className="text-xs text-slate-500">
+                      Minimum arrival: {addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}
+                    </div>
+                    <div className={`mt-1 text-xs font-black ${
+                      stopEta?.etaMinutes ? 'text-emerald-700' : 'text-slate-400'
+                    }`}>
+                      ETA: {stopEta?.estimatedArrivalTime || 'ETA unavailable'}
+                      {stopEta?.nextBusId ? ` • ${stopEta.nextBusId}` : ''}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onToggleFavoriteStop?.(route, stop)}
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${
+                      isStopFavorite?.(route, stop)
+                        ? 'border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100'
+                        : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
+                    }`}
+                    aria-label={isStopFavorite?.(route, stop) ? 'Remove favorite stop' : 'Save stop to favorites'}
+                  >
+                    <span className="material-symbols-outlined text-[18px] leading-none">
+                      {isStopFavorite?.(route, stop) ? 'star' : 'star_border'}
+                    </span>
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
 
         {detailTab === 'arrival' && (
           <div>
             <div className="rounded-lg border border-slate-200 bg-white">
-              <div className="grid grid-cols-3 border-b border-slate-100 px-3 py-2 text-xs font-black uppercase text-slate-400">
+              <div className="grid grid-cols-4 border-b border-slate-100 px-3 py-2 text-xs font-black uppercase text-slate-400">
                 <span>Stop</span>
                 <span>Minimum arrival</span>
+                <span>Live ETA</span>
                 <span>Frequency</span>
               </div>
-              {directionStops.map((stop) => (
-                <div
-                  key={`${route.id}-${directionTab}-arrival-${stop.order}`}
-                  className="grid grid-cols-3 gap-2 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0"
-                >
-                  <span className="font-semibold text-slate-800">{stop.name}</span>
-                  <span className="text-slate-600">{addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}</span>
-                  <span className="text-slate-600">Every {frequencyMinutes} min</span>
-                </div>
-              ))}
+              {directionStops.map((stop) => {
+                const stopEta = getStopEta(stop);
+
+                return (
+                  <div
+                    key={`${route.id}-${directionTab}-arrival-${stop.order}`}
+                    className="grid grid-cols-4 gap-2 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0"
+                  >
+                    <span className="font-semibold text-slate-800">{stop.name}</span>
+                    <span className="text-slate-600">{addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}</span>
+                    <span className={stopEta?.etaMinutes ? 'font-black text-emerald-700' : 'text-slate-400'}>
+                      {stopEta?.estimatedArrivalTime || 'Unavailable'}
+                    </span>
+                    <span className="text-slate-600">Every {frequencyMinutes} min</span>
+                  </div>
+                );
+              })}
             </div>
             <div className="mt-2 text-xs font-semibold text-slate-500">
               Minimum arrival time is calculated from the first departure at {firstDeparture}.
+              Live ETA updates automatically when live tracking is enabled.
             </div>
           </div>
         )}
