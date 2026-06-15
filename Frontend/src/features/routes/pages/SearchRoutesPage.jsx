@@ -6,6 +6,7 @@ import {
   Marker,
   Polyline,
   CircleMarker,
+  Tooltip,
   TileLayer,
   useMap,
   ZoomControl,
@@ -280,15 +281,31 @@ const MapCanvas = ({
           </>
         )}
 
-        {stops.filter(isValidLocation).map((stop) => (
-          <Marker
-            key={`${stop.name}-${stop.latitude.toFixed(5)}-${stop.longitude.toFixed(5)}`}
-            position={toLatLng(stop)}
-            icon={createBusIcon(stop.routeNumbers?.includes(selectedRoute?.routeNumber))}
-            title={stop.name}
-            interactive={false}
-          />
-        ))}
+        {stops.filter(isValidLocation).map((stop) => {
+          const isSelectedRouteStop = stop.routeNumbers?.includes(selectedRoute?.routeNumber);
+
+          return (
+            <Marker
+              key={`${stop.name}-${stop.latitude.toFixed(5)}-${stop.longitude.toFixed(5)}`}
+              position={toLatLng(stop)}
+              icon={createBusIcon(isSelectedRouteStop)}
+              title={stop.name}
+              interactive={false}
+            >
+              {isSelectedRouteStop && (
+                <Tooltip
+                  permanent
+                  direction="top"
+                  offset={[0, -24]}
+                  opacity={1}
+                  className="bus-stop-name-tooltip"
+                >
+                  {stop.name}
+                </Tooltip>
+              )}
+            </Marker>
+          );
+        })}
 
         {selectedRouteStop && (
           <Marker
@@ -532,6 +549,7 @@ const RouteDetailsPanel = ({
   isStopFavorite,
   isArrivalNotificationEnabled,
   isDelayNotificationEnabled,
+  panelMessage = '',
   onToggleFavorite,
   onToggleFavoriteStop,
   onToggleArrivalNotification,
@@ -648,6 +666,12 @@ const RouteDetailsPanel = ({
             </button>
           ))}
         </div>
+
+        {panelMessage && (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold leading-5 text-emerald-800">
+            {panelMessage}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -1379,6 +1403,7 @@ const SearchRoutesPage = () => {
   const isDelayNotificationEnabled = (route) => (
     delayNotificationIds.has(buildDelayNotificationId(route))
   );
+  const routePanelMessage = /notification|alert/i.test(favoriteMessage) ? favoriteMessage : '';
   const isLiveTrackingSelectedRoute = Boolean(
     selectedRoute?.id && isSameRouteId(liveRouteId, selectedRoute.id)
   );
@@ -1677,6 +1702,23 @@ const SearchRoutesPage = () => {
     }
 
     setSearchParams(nextParams);
+  };
+
+  const handleBackToAllRoutes = () => {
+    clearError();
+    setSearchParams({});
+    setQuery('');
+    setFrom('');
+    setTo('');
+    setBestFrom('');
+    setBestTo('');
+    setBestRouteResult(null);
+    setNearbyStops([]);
+    setSelectedRoute(null);
+    setLiveRouteId(null);
+    setLiveBusData(null);
+    setLiveError('');
+    setActiveTab('lookup');
   };
 
   const handleUseCurrentLocation = () => {
@@ -2324,8 +2366,20 @@ const SearchRoutesPage = () => {
 
             {(activeTab === 'lookup' || !bestRouteResult) && (
               <div className="mt-5 space-y-3">
-                <div className="text-sm font-bold text-slate-700">
-                  {routes.length} route{routes.length === 1 ? '' : 's'} found
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-bold text-slate-700">
+                    {routes.length} route{routes.length === 1 ? '' : 's'} found
+                  </div>
+                  {(activeFilters.q || activeFilters.from || activeFilters.to || selectedRoute || nearbyStops.length > 0 || bestRouteResult) && (
+                    <button
+                      type="button"
+                      onClick={handleBackToAllRoutes}
+                      className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-black text-slate-600 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                      Back
+                    </button>
+                  )}
                 </div>
                 {routes.map((route) => {
                   const isSelected = selectedRoute?.routeNumber === route.routeNumber;
@@ -2370,6 +2424,7 @@ const SearchRoutesPage = () => {
             isStopFavorite={isStopFavorite}
             isArrivalNotificationEnabled={isArrivalNotificationEnabled}
             isDelayNotificationEnabled={isDelayNotificationEnabled}
+            panelMessage={routePanelMessage}
             onToggleFavorite={handleToggleFavoriteRoute}
             onToggleFavoriteStop={handleToggleFavoriteStop}
             onToggleArrivalNotification={handleToggleArrivalNotification}

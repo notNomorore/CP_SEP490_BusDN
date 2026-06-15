@@ -18,18 +18,18 @@ const sampleRoutes = [
         longitude: 108.1690,
       },
       {
-        name: 'Dragon Bridge',
-        order: 2,
-        estimatedOffsetMinutes: 12,
-        latitude: 16.0614,
-        longitude: 108.2272,
-      },
-      {
         name: 'Han Market',
-        order: 3,
-        estimatedOffsetMinutes: 18,
+        order: 2,
+        estimatedOffsetMinutes: 14,
         latitude: 16.0681,
         longitude: 108.2245,
+      },
+      {
+        name: 'Dragon Bridge',
+        order: 3,
+        estimatedOffsetMinutes: 18,
+        latitude: 16.0614,
+        longitude: 108.2272,
       },
       {
         name: 'My Khe Beach',
@@ -73,22 +73,15 @@ const sampleRoutes = [
         longitude: 108.1690,
       },
       {
-        name: 'Thanh Khe District',
-        order: 2,
-        estimatedOffsetMinutes: 10,
-        latitude: 16.0679,
-        longitude: 108.1817,
-      },
-      {
         name: 'Lien Chieu',
-        order: 3,
-        estimatedOffsetMinutes: 25,
+        order: 2,
+        estimatedOffsetMinutes: 22,
         latitude: 16.0737,
         longitude: 108.1502,
       },
       {
         name: 'Hoa Khanh',
-        order: 4,
+        order: 3,
         estimatedOffsetMinutes: 35,
         latitude: 16.0750,
         longitude: 108.1428,
@@ -282,14 +275,15 @@ const sampleRoutes = [
     fare: 15000,
     stops: [
       { name: 'Da Nang Central', order: 1, estimatedOffsetMinutes: 0, latitude: 16.0667, longitude: 108.1690 },
-      { name: 'Thanh Khe District', order: 2, estimatedOffsetMinutes: 10, latitude: 16.0679, longitude: 108.1817 },
+      { name: 'Da Nang Airport', order: 2, estimatedOffsetMinutes: 12, latitude: 16.0544, longitude: 108.2022 },
       { name: 'Duy Tan University', order: 3, estimatedOffsetMinutes: 22, latitude: 16.0603, longitude: 108.2094 },
       { name: 'University Village', order: 4, estimatedOffsetMinutes: 32, latitude: 16.0475, longitude: 108.2175 },
     ],
     pathPoints: [
       { latitude: 16.0667, longitude: 108.1690 },
-      { latitude: 16.0679, longitude: 108.1817 },
-      { latitude: 16.0650, longitude: 108.1940 },
+      { latitude: 16.0632, longitude: 108.1840 },
+      { latitude: 16.0588, longitude: 108.1932 },
+      { latitude: 16.0544, longitude: 108.2022 },
       { latitude: 16.0603, longitude: 108.2094 },
       { latitude: 16.0550, longitude: 108.2140 },
       { latitude: 16.0475, longitude: 108.2175 },
@@ -404,15 +398,16 @@ const sampleRoutes = [
     fare: 15000,
     stops: [
       { name: 'Da Nang Central', order: 1, estimatedOffsetMinutes: 0, latitude: 16.0667, longitude: 108.1690 },
-      { name: 'Da Nang Airport', order: 2, estimatedOffsetMinutes: 10, latitude: 16.0544, longitude: 108.2022 },
+      { name: 'Han Market', order: 2, estimatedOffsetMinutes: 10, latitude: 16.0681, longitude: 108.2245 },
       { name: 'Museum of Cham Sculpture', order: 3, estimatedOffsetMinutes: 18, latitude: 16.0603, longitude: 108.2232 },
       { name: 'APEC Park', order: 4, estimatedOffsetMinutes: 25, latitude: 16.0549, longitude: 108.2238 },
     ],
     pathPoints: [
       { latitude: 16.0667, longitude: 108.1690 },
       { latitude: 16.0630, longitude: 108.1840 },
-      { latitude: 16.0544, longitude: 108.2022 },
-      { latitude: 16.0570, longitude: 108.2140 },
+      { latitude: 16.0645, longitude: 108.1985 },
+      { latitude: 16.0670, longitude: 108.2120 },
+      { latitude: 16.0681, longitude: 108.2245 },
       { latitude: 16.0603, longitude: 108.2232 },
       { latitude: 16.0549, longitude: 108.2238 },
     ],
@@ -512,6 +507,8 @@ const calculateDistanceKm = (start, end) => {
 
 export class RouteService {
   static async ensureSampleRoutes() {
+    await Route.deleteMany({ routeNumber: /^DN-DEMO/i });
+
     for (const route of sampleRoutes) {
       await Route.updateOne(
         { routeNumber: route.routeNumber },
@@ -522,7 +519,10 @@ export class RouteService {
   }
 
   static buildSearchQuery({ q, from, to }) {
-    const andConditions = [{ status: 'ACTIVE' }];
+    const andConditions = [
+      { status: 'ACTIVE' },
+      { routeNumber: { $not: /^DN-DEMO/i } },
+    ];
 
     if (q) {
       const searchRegex = new RegExp(q.trim(), 'i');
