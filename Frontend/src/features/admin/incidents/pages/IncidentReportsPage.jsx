@@ -27,6 +27,9 @@ const incidentTypes = [
   'PASSENGER_CONFLICT',
   'LOST_ITEM',
   'FOUND_ITEM',
+  'GPS_LOST_SIGNAL',
+  'VEHICLE_IDLE_TOO_LONG',
+  'SEVERE_DELAY',
   'OTHER',
 ];
 const severityOptions = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];

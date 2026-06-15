@@ -4,6 +4,7 @@ import User from '../auth/User.js';
 import ShiftAssignment from './ShiftAssignment.js';
 import OperationIncident from './OperationIncident.js';
 import VehicleInspection from './VehicleInspection.js';
+import VehicleIssueService from '../vehicleIssues/vehicleIssue.service.js';
 
 const TRAFFIC_CATEGORIES = [
   'HEAVY_TRAFFIC',
@@ -640,6 +641,12 @@ export class ScheduleOperationsService {
     );
 
     await Promise.all([
+      VehicleIssueService.createFromDriverReport({
+        assignment,
+        inspection,
+        userId,
+        payload,
+      }),
       TripSchedule.updateOne({ _id: assignment.trip._id }, { $set: { status: 'ASSIGNED' } }),
       FleetBus.updateOne(
         { _id: getScheduleVehicleId(assignment.trip) },

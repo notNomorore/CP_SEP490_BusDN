@@ -19,6 +19,7 @@ const Login = () => {
   // Forgot password state
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotOtp, setForgotOtp] = useState('');
+  const [forgotResetToken, setForgotResetToken] = useState('');
   const [forgotPassword, setForgotPassword] = useState('');
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
   const [forgotResendCountdown, setForgotResendCountdown] = useState(0);
@@ -138,6 +139,7 @@ const Login = () => {
     setView('login');
     setForgotEmail('');
     setForgotOtp('');
+    setForgotResetToken('');
     setForgotPassword('');
     setForgotConfirmPassword('');
   };
