@@ -14,7 +14,7 @@ const Header = ({ forceDarkMode = false }) => {
   const [notifications, setNotifications] = useState([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState(null);
-  const { isDarkMode, toggleTheme } = useTheme();
+  const { isDarkMode } = useTheme();
   const effectiveDarkMode = forceDarkMode || isDarkMode;
 
   useEffect(() => {
@@ -26,7 +26,6 @@ const Header = ({ forceDarkMode = false }) => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const adminUser = isAdmin();
   const navLinks = [
     { label: 'Manage Booking', path: '/profile', requiresAuth: true },
     { label: 'Promotions', path: '/admin/promotions', requiresAuth: true, adminOnly: true },
@@ -195,6 +194,7 @@ const Header = ({ forceDarkMode = false }) => {
 
           {isAuthenticated ? (
             <div className="flex items-center gap-3">
+              {isAdmin() ? (
                 <>
                   <button
                     type="button"
@@ -346,17 +346,20 @@ const Header = ({ forceDarkMode = false }) => {
                   </div>
                 </>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => navigate('/priority-profile')}
-                  className={`hidden rounded-full border px-4 py-2 text-sm font-semibold lg:inline-flex ${
-                    effectiveDarkMode
-                      ? 'border-white/10 text-surface-bright hover:bg-white/10'
-                      : 'border-slate-200 text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  Priority Profile
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/priority-profile')}
+                    className={`hidden rounded-full border px-4 py-2 text-sm font-semibold lg:inline-flex ${
+                      effectiveDarkMode
+                        ? 'border-white/10 text-surface-bright hover:bg-white/10'
+                        : 'border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    Priority Profile
+                  </button>
+                </>
+              )}
 
               <button
                 type="button"
@@ -394,13 +397,15 @@ const Header = ({ forceDarkMode = false }) => {
               <button
                 type="button"
                 onClick={handleLogout}
-                className={`rounded-full border px-4 py-2 text-sm font-semibold ${
+                title="Sign out"
+                aria-label="Sign out"
+                className={`inline-flex h-11 w-11 items-center justify-center rounded-full border ${
                   effectiveDarkMode
                     ? 'border-white/10 text-surface-bright hover:bg-white/10'
                     : 'border-slate-200 text-slate-700 hover:bg-slate-100'
                 }`}
               >
-                Sign Out
+                <span className="material-symbols-outlined text-[22px]">logout</span>
               </button>
             </div>
           ) : (

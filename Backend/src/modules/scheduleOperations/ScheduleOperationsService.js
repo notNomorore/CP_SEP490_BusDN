@@ -1372,10 +1372,10 @@ export class ScheduleOperationsService {
             ? `Chiều ảnh hưởng: ${affectedDirection}.`
             : '',
           type === 'ACCIDENT'
-            ? `Có người bị thương: ${Boolean(payload.injuriesReported) ? 'Có' : 'Không'}.`
+            ? `Có người bị thương: ${payload.injuriesReported ? 'Có' : 'Không'}.`
             : '',
           type === 'ACCIDENT'
-            ? `Đã báo cơ quan chức năng: ${Boolean(payload.policeNotified) ? 'Có' : 'Không'}.`
+            ? `Đã báo cơ quan chức năng: ${payload.policeNotified ? 'Có' : 'Không'}.`
             : '',
           type === 'PASSENGER_VIOLATION'
             ? `Loại vi phạm: ${payload.violationCategory}.`

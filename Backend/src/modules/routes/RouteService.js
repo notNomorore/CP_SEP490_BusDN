@@ -809,7 +809,6 @@ export class RouteService {
     }
 
     const normalizedPreference = this.normalizePreference(preference);
-    const routes = await Route.find({ status: 'ACTIVE' }).sort({ routeNumber: 1 }).lean();
     const [legacyRoutes, managedRoutes] = await Promise.all([
       Route.find({ status: 'ACTIVE' }).sort({ routeNumber: 1 }).lean(),
       BusRoute.find({ status: 'PUBLISHED' }).sort({ routeCode: 1 }).lean(),

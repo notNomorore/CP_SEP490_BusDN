@@ -57,6 +57,29 @@ h1, h2, h3, h4, h5, h6,
   color: #ecfdf5;
 }
 
+input::selection,
+textarea::selection {
+  background: rgba(181, 239, 209, 0.35);
+  color: #001a0f;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus {
+  -webkit-text-fill-color: #001a0f;
+  box-shadow: 0 0 0 1000px #ffffff inset;
+  transition: background-color 9999s ease-out 0s;
+}
+
+input,
+textarea,
+select {
+  color: #001a0f;
+}
+
 /* Smooth Transitions */
 * {
   @apply transition-colors transition-transform;

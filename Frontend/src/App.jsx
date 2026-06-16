@@ -17,6 +17,7 @@ import {
   LoginPage,
   RegisterPage,
   RegisterVerifyOtpPage,
+  ForcePasswordChangePage,
   ProtectedRoute,
   OperationsRoute,
   PublicRoute,
@@ -64,6 +65,14 @@ function App() {
               <PublicRoute>
                 <RegisterVerifyOtpPage />
               </PublicRoute>
+            )}
+          />
+          <Route
+            path="/auth/force-change-password"
+            element={(
+              <ProtectedRoute allowFirstLogin>
+                <ForcePasswordChangePage />
+              </ProtectedRoute>
             )}
           />
 
