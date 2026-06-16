@@ -203,6 +203,45 @@ const DelayNotificationSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const RouteChangeNotificationSchema = new mongoose.Schema(
+  {
+    subscriptionId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeNumber: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    tripId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    notificationStatus: {
+      type: String,
+      enum: ['ENABLED', 'DISABLED'],
+      default: 'ENABLED',
+    },
+    subscribedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const TravelHistorySchema = new mongoose.Schema(
   {
     routeNumber: {
@@ -314,6 +353,10 @@ const UserSchema = new mongoose.Schema(
     },
     delayNotifications: {
       type: [DelayNotificationSchema],
+      default: [],
+    },
+    routeChangeNotifications: {
+      type: [RouteChangeNotificationSchema],
       default: [],
     },
     notificationEnabled: {

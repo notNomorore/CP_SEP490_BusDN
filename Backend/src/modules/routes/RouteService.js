@@ -973,13 +973,57 @@ export class RouteService {
         status: activeEtas[0]?.status || 'Unavailable',
       };
     });
+    const routeChange = this.getRouteChangeNotice(route);
 
     return {
       route: this.formatRoute(route),
       buses,
       stopEtaSummary,
+      routeChange,
       count: buses.length,
       refreshedAt: new Date(now).toISOString(),
+    };
+  }
+
+  static getRouteChangeNotice(route) {
+    const routeChangeNotices = {
+      DN03: {
+        changeId: 'DN03-son-tra-maintenance',
+        tripId: `${route.routeNumber}-TRIP-01`,
+        reasonForChange: 'Road maintenance near Vo Nguyen Giap Beach Road',
+        changedStops: [
+          { stopName: 'Vo Nguyen Giap Beach Road', changeType: 'TEMPORARY_DELAY' },
+          { stopName: 'Linh Ung Pagoda', changeType: 'UPDATED_ARRIVAL_PATH' },
+        ],
+        updatedRoutePath: 'Buses use the coastal road and may slow down near Son Tra during maintenance.',
+        alternativeSuggestion: 'Board at Dragon Bridge or check ETA before going to Linh Ung Pagoda.',
+        status: 'ACTIVE',
+      },
+      DN10: {
+        changeId: 'DN10-port-event-detour',
+        tripId: `${route.routeNumber}-TRIP-02`,
+        reasonForChange: 'Temporary traffic control near Tien Sa Port',
+        changedStops: [
+          { stopName: 'Son Tra District Center', changeType: 'MODIFIED' },
+          { stopName: 'Tien Sa Port', changeType: 'TEMPORARY_DELAY' },
+        ],
+        updatedRoutePath: 'Route may use a short detour near the port entrance during traffic control.',
+        alternativeSuggestion: 'Use Son Tra District Center as the safer boarding point during the change.',
+        status: 'ACTIVE',
+      },
+    };
+
+    const notice = routeChangeNotices[route.routeNumber];
+
+    if (!notice) {
+      return null;
+    }
+
+    return {
+      routeId: String(route._id),
+      routeNumber: route.routeNumber,
+      ...notice,
+      detectedAt: new Date().toISOString(),
     };
   }
 

@@ -96,6 +96,27 @@ export class ProfileController {
     );
     return res.success(subscription, 'Delay notification disabled successfully');
   }
+
+  static async getRouteChangeNotifications(req, res) {
+    const subscriptions = await ProfileService.getRouteChangeNotifications(req.user.userId);
+    return res.success(subscriptions, 'Route change notifications retrieved successfully');
+  }
+
+  static async subscribeRouteChangeNotification(req, res) {
+    const subscription = await ProfileService.subscribeRouteChangeNotification(
+      req.user.userId,
+      req.body
+    );
+    return res.success(subscription, 'Route change notification enabled successfully', 201);
+  }
+
+  static async removeRouteChangeNotification(req, res) {
+    const subscription = await ProfileService.removeRouteChangeNotification(
+      req.user.userId,
+      req.params.subscriptionId
+    );
+    return res.success(subscription, 'Route change notification disabled successfully');
+  }
 }
 
 export default ProfileController;

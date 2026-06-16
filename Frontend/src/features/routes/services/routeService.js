@@ -132,6 +132,21 @@ export const routeService = {
     const response = await apiClient.delete(`/profile/notifications/delay/${encodeURIComponent(subscriptionId)}`);
     return response.data;
   },
+
+  getRouteChangeNotifications: async () => {
+    const response = await apiClient.get('/profile/notifications/route-change');
+    return response.data;
+  },
+
+  subscribeRouteChangeNotification: async (payload) => {
+    const response = await apiClient.post('/profile/notifications/route-change', payload);
+    return response.data;
+  },
+
+  removeRouteChangeNotification: async (subscriptionId) => {
+    const response = await apiClient.delete(`/profile/notifications/route-change/${encodeURIComponent(subscriptionId)}`);
+    return response.data;
+  },
 };
 
 export default routeService;

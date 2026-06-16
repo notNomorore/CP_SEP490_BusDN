@@ -450,6 +450,8 @@ const buildArrivalNotificationId = (route, stop) => (
 
 const buildDelayNotificationId = (route) => `${route.routeNumber}-delay`;
 
+const buildRouteChangeNotificationId = (route) => `${route.routeNumber}-route-change`;
+
 const RouteCard = ({
   route,
   compact = false,
@@ -549,11 +551,13 @@ const RouteDetailsPanel = ({
   isStopFavorite,
   isArrivalNotificationEnabled,
   isDelayNotificationEnabled,
+  isRouteChangeNotificationEnabled,
   panelMessage = '',
   onToggleFavorite,
   onToggleFavoriteStop,
   onToggleArrivalNotification,
   onToggleDelayNotification,
+  onToggleRouteChangeNotification,
   onToggleLiveLocation,
   onClose,
 }) => {
@@ -756,6 +760,28 @@ const RouteDetailsPanel = ({
                     />
                   </button>
                 </div>
+                <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div>
+                    <div className="text-sm font-black text-slate-900">Route change alerts</div>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Notify when this route has detours, stop changes, or temporary path updates.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onToggleRouteChangeNotification?.(route)}
+                    className={`relative h-7 w-12 shrink-0 rounded-full transition ${
+                      isRouteChangeNotificationEnabled?.(route) ? 'bg-emerald-600' : 'bg-slate-200'
+                    }`}
+                    aria-label={isRouteChangeNotificationEnabled?.(route) ? 'Disable route change alerts' : 'Enable route change alerts'}
+                  >
+                    <span
+                      className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${
+                        isRouteChangeNotificationEnabled?.(route) ? 'left-6' : 'left-1'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -836,6 +862,16 @@ const RouteDetailsPanel = ({
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+              {isLiveTracking && liveBusData?.routeChange && (
+                <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm text-amber-900">
+                  <div className="mb-1 flex items-center gap-2 text-[11px] font-black uppercase tracking-wide text-amber-700">
+                    <span className="material-symbols-outlined text-[16px]">route</span>
+                    Route change
+                  </div>
+                  <div className="font-semibold">{liveBusData.routeChange.reasonForChange}</div>
+                  <p className="mt-1 text-xs leading-5">{liveBusData.routeChange.updatedRoutePath}</p>
                 </div>
               )}
             </div>
@@ -1339,10 +1375,12 @@ const SearchRoutesPage = () => {
   const [favoriteMessage, setFavoriteMessage] = useState('');
   const [arrivalNotifications, setArrivalNotifications] = useState([]);
   const [delayNotifications, setDelayNotifications] = useState([]);
+  const [routeChangeNotifications, setRouteChangeNotifications] = useState([]);
   const [arrivalAlerts, setArrivalAlerts] = useState([]);
   const [delayAlerts, setDelayAlerts] = useState([]);
   const [notifiedArrivalKeys, setNotifiedArrivalKeys] = useState(new Set());
   const [notifiedDelayKeys, setNotifiedDelayKeys] = useState(new Set());
+  const [notifiedRouteChangeKeys, setNotifiedRouteChangeKeys] = useState(new Set());
   const [liveRouteId, setLiveRouteId] = useState(null);
   const [liveBusData, setLiveBusData] = useState(null);
   const [isLiveLoading, setIsLiveLoading] = useState(false);
@@ -1374,6 +1412,12 @@ const SearchRoutesPage = () => {
       .map((subscription) => String(subscription.subscriptionId))
   ), [delayNotifications]);
 
+  const routeChangeNotificationIds = useMemo(() => new Set(
+    routeChangeNotifications
+      .filter((subscription) => subscription.notificationStatus !== 'DISABLED')
+      .map((subscription) => String(subscription.subscriptionId))
+  ), [routeChangeNotifications]);
+
   const suggestedRouteOptions = useMemo(() => {
     if (!bestRouteResult) {
       return [];
@@ -1402,6 +1446,16 @@ const SearchRoutesPage = () => {
   );
   const isDelayNotificationEnabled = (route) => (
     delayNotificationIds.has(buildDelayNotificationId(route))
+  );
+  const isRouteChangeNotificationEnabled = (route) => (
+    routeChangeNotificationIds.has(buildRouteChangeNotificationId(route))
+    || routeChangeNotifications.some((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+      && (
+        subscription.routeNumber === route.routeNumber
+        || isSameRouteId(subscription.routeId, route.id)
+      )
+    ))
   );
   const routePanelMessage = /notification|alert/i.test(favoriteMessage) ? favoriteMessage : '';
   const isLiveTrackingSelectedRoute = Boolean(
@@ -1479,6 +1533,7 @@ const SearchRoutesPage = () => {
         setFavoriteStops([]);
         setArrivalNotifications([]);
         setDelayNotifications([]);
+        setRouteChangeNotifications([]);
         return;
       }
 
@@ -1488,11 +1543,13 @@ const SearchRoutesPage = () => {
           favoriteStopResult,
           arrivalNotificationResult,
           delayNotificationResult,
+          routeChangeNotificationResult,
         ] = await Promise.all([
           routeService.getFavoriteRoutes(),
           routeService.getFavoriteStops(),
           routeService.getArrivalNotifications(),
           routeService.getDelayNotifications(),
+          routeService.getRouteChangeNotifications(),
         ]);
 
         if (isMounted) {
@@ -1500,6 +1557,7 @@ const SearchRoutesPage = () => {
           setFavoriteStops(favoriteStopResult || []);
           setArrivalNotifications(arrivalNotificationResult || []);
           setDelayNotifications(delayNotificationResult || []);
+          setRouteChangeNotifications(routeChangeNotificationResult || []);
         }
       } catch (err) {
         if (isMounted && err.statusCode !== 403) {
@@ -1668,6 +1726,59 @@ const SearchRoutesPage = () => {
       });
     }
   }, [delayNotifications, liveBusData, notifiedDelayKeys]);
+
+  useEffect(() => {
+    if (!liveBusData?.routeChange || !routeChangeNotifications.length) {
+      return;
+    }
+
+    const routeChange = liveBusData.routeChange;
+    const activeSubscriptions = routeChangeNotifications.filter((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+      && (
+        isSameRouteId(subscription.routeId, liveBusData.route?.id)
+        || subscription.routeNumber === liveBusData.route?.routeNumber
+      )
+    ));
+
+    if (!activeSubscriptions.length) {
+      return;
+    }
+
+    const nextNotifiedKeys = new Set(notifiedRouteChangeKeys);
+    const nextAlerts = [];
+
+    activeSubscriptions.forEach((subscription) => {
+      const notificationKey = `${subscription.subscriptionId}-${routeChange.changeId}`;
+
+      if (nextNotifiedKeys.has(notificationKey)) {
+        return;
+      }
+
+      nextNotifiedKeys.add(notificationKey);
+      nextAlerts.push({
+        id: `${notificationKey}-${Date.now()}`,
+        title: 'Route change detected',
+        message: `${routeChange.routeNumber}: ${routeChange.reasonForChange}. ${routeChange.updatedRoutePath}`,
+        status: 'Route changed',
+      });
+    });
+
+    if (!nextAlerts.length) {
+      return;
+    }
+
+    setNotifiedRouteChangeKeys(nextNotifiedKeys);
+    setDelayAlerts((current) => [...nextAlerts, ...current].slice(0, 4));
+
+    if ('Notification' in window && Notification.permission === 'granted') {
+      nextAlerts.forEach((alert) => {
+        new Notification(alert.title, {
+          body: alert.message,
+        });
+      });
+    }
+  }, [liveBusData, notifiedRouteChangeKeys, routeChangeNotifications]);
 
   const clearError = () => {
     if (error) {
@@ -2028,6 +2139,65 @@ const SearchRoutesPage = () => {
       }
 
       setError(err.message || 'Unable to update delay notification.');
+    }
+  };
+
+  const handleToggleRouteChangeNotification = async (route) => {
+    setError('');
+    setFavoriteMessage('');
+
+    if (!user) {
+      setError('Please log in before enabling route change notifications.');
+      return;
+    }
+
+    const subscriptionId = buildRouteChangeNotificationId(route);
+    const existingSubscription = routeChangeNotifications.find((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+      && (
+        subscription.subscriptionId === subscriptionId
+        || subscription.routeNumber === route.routeNumber
+        || isSameRouteId(subscription.routeId, route.id)
+      )
+    ));
+
+    try {
+      if (existingSubscription) {
+        await routeService.removeRouteChangeNotification(existingSubscription.subscriptionId);
+        setRouteChangeNotifications((current) => (
+          current.filter((subscription) => subscription.subscriptionId !== existingSubscription.subscriptionId)
+        ));
+        setFavoriteMessage('Route change notification disabled.');
+        return;
+      }
+
+      if ('Notification' in window && Notification.permission === 'default') {
+        await Notification.requestPermission();
+      }
+
+      const subscription = await routeService.subscribeRouteChangeNotification({
+        routeId: route.id,
+        routeNumber: route.routeNumber,
+      });
+
+      setRouteChangeNotifications((current) => [
+        subscription,
+        ...current.filter((item) => item.subscriptionId !== subscription.subscriptionId),
+      ]);
+      setFavoriteMessage('Route change notification enabled for this route.');
+
+      if ('Notification' in window && Notification.permission === 'denied') {
+        setError('Browser notification permission is disabled. In-app route change alerts will still appear.');
+      }
+    } catch (err) {
+      if (err.message === 'Route change notification already enabled') {
+        const subscriptions = await routeService.getRouteChangeNotifications();
+        setRouteChangeNotifications(subscriptions || []);
+        setFavoriteMessage('Route change notification already enabled.');
+        return;
+      }
+
+      setError(err.message || 'Unable to update route change notification.');
     }
   };
 
@@ -2424,11 +2594,13 @@ const SearchRoutesPage = () => {
             isStopFavorite={isStopFavorite}
             isArrivalNotificationEnabled={isArrivalNotificationEnabled}
             isDelayNotificationEnabled={isDelayNotificationEnabled}
+            isRouteChangeNotificationEnabled={isRouteChangeNotificationEnabled}
             panelMessage={routePanelMessage}
             onToggleFavorite={handleToggleFavoriteRoute}
             onToggleFavoriteStop={handleToggleFavoriteStop}
             onToggleArrivalNotification={handleToggleArrivalNotification}
             onToggleDelayNotification={handleToggleDelayNotification}
+            onToggleRouteChangeNotification={handleToggleRouteChangeNotification}
             onToggleLiveLocation={handleToggleLiveLocation}
             onClose={() => setSelectedRoute(null)}
           />

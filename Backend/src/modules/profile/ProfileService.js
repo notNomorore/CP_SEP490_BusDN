@@ -421,6 +421,103 @@ export class ProfileService {
     };
   }
 
+  static buildRouteChangeNotificationId(route) {
+    return `${route.routeNumber}-route-change`;
+  }
+
+  static async getRouteChangeNotifications(userId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    return (user.routeChangeNotifications || []).filter((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+    ));
+  }
+
+  static async subscribeRouteChangeNotification(userId, payload) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const route = await this.findRouteForNotification(payload);
+
+    if (!route) {
+      throw new CustomError('Route not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const routeChangeNotifications = user.routeChangeNotifications || [];
+    const subscriptionId = this.buildRouteChangeNotificationId(route);
+    const existingIndex = routeChangeNotifications.findIndex((subscription) => (
+      subscription.subscriptionId === subscriptionId
+      || String(subscription.routeId) === String(route._id)
+      || subscription.routeNumber === route.routeNumber
+    ));
+
+    if (
+      existingIndex >= 0
+      && routeChangeNotifications[existingIndex].notificationStatus !== 'DISABLED'
+    ) {
+      throw new CustomError('Route change notification already enabled', HTTP_STATUS.CONFLICT);
+    }
+
+    const subscription = {
+      subscriptionId,
+      routeId: String(route._id),
+      routeNumber: route.routeNumber,
+      tripId: payload.tripId?.trim() || '',
+      notificationStatus: 'ENABLED',
+      subscribedAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    if (existingIndex >= 0) {
+      user.routeChangeNotifications.set(existingIndex, subscription);
+    } else {
+      user.routeChangeNotifications.push(subscription);
+    }
+
+    await ProfileRepository.save(user);
+
+    return subscription;
+  }
+
+  static async removeRouteChangeNotification(userId, subscriptionId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const routeChangeNotifications = user.routeChangeNotifications || [];
+    const existingIndex = routeChangeNotifications.findIndex((subscription) => (
+      subscription.subscriptionId === subscriptionId
+    ));
+
+    if (
+      existingIndex < 0
+      || routeChangeNotifications[existingIndex].notificationStatus === 'DISABLED'
+    ) {
+      throw new CustomError('Route change notification not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const removedSubscription = routeChangeNotifications[existingIndex].toObject
+      ? routeChangeNotifications[existingIndex].toObject()
+      : routeChangeNotifications[existingIndex];
+
+    user.routeChangeNotifications.splice(existingIndex, 1);
+    await ProfileRepository.save(user);
+
+    return {
+      ...removedSubscription,
+      notificationStatus: 'DISABLED',
+    };
+  }
+
   static async saveFavoriteRoute(userId, routeId) {
     await RouteService.ensureSampleRoutes();
 

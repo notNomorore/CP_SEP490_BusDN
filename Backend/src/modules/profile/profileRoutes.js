@@ -47,5 +47,11 @@ router.delete(
   '/notifications/delay/:subscriptionId',
   asyncHandler(ProfileController.removeDelayNotification)
 );
+router.get('/notifications/route-change', asyncHandler(ProfileController.getRouteChangeNotifications));
+router.post('/notifications/route-change', asyncHandler(ProfileController.subscribeRouteChangeNotification));
+router.delete(
+  '/notifications/route-change/:subscriptionId',
+  asyncHandler(ProfileController.removeRouteChangeNotification)
+);
 
 export default router;
