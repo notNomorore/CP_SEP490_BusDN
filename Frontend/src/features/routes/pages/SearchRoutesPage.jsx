@@ -6,6 +6,7 @@ import {
   Marker,
   Polyline,
   CircleMarker,
+  Tooltip,
   TileLayer,
   useMap,
   ZoomControl,
@@ -209,6 +210,8 @@ const MapCanvas = ({
   currentLocation,
   liveBusData,
   liveError,
+  arrivalAlerts,
+  onDismissArrivalAlert,
   onUseCurrentLocation,
 }) => {
   const routePath = selectedRoute?.pathPoints?.length
@@ -278,15 +281,31 @@ const MapCanvas = ({
           </>
         )}
 
-        {stops.filter(isValidLocation).map((stop) => (
-          <Marker
-            key={`${stop.name}-${stop.latitude.toFixed(5)}-${stop.longitude.toFixed(5)}`}
-            position={toLatLng(stop)}
-            icon={createBusIcon(stop.routeNumbers?.includes(selectedRoute?.routeNumber))}
-            title={stop.name}
-            interactive={false}
-          />
-        ))}
+        {stops.filter(isValidLocation).map((stop) => {
+          const isSelectedRouteStop = stop.routeNumbers?.includes(selectedRoute?.routeNumber);
+
+          return (
+            <Marker
+              key={`${stop.name}-${stop.latitude.toFixed(5)}-${stop.longitude.toFixed(5)}`}
+              position={toLatLng(stop)}
+              icon={createBusIcon(isSelectedRouteStop)}
+              title={stop.name}
+              interactive={false}
+            >
+              {isSelectedRouteStop && (
+                <Tooltip
+                  permanent
+                  direction="top"
+                  offset={[0, -24]}
+                  opacity={1}
+                  className="bus-stop-name-tooltip"
+                >
+                  {stop.name}
+                </Tooltip>
+              )}
+            </Marker>
+          );
+        })}
 
         {selectedRouteStop && (
           <Marker
@@ -366,10 +385,53 @@ const MapCanvas = ({
                   <div className="mt-1 text-xs text-slate-500">
                     Next stop: {bus.nextStop} • ETA {bus.estimatedArrivalTime}
                   </div>
+                  {bus.tripProgress && (
+                    <div className="mt-2">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
+                        <span>Trip progress</span>
+                        <span>{bus.tripProgress.progressPercent}%</span>
+                      </div>
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                        <div
+                          className="h-full rounded-full bg-emerald-600"
+                          style={{ width: `${bus.tripProgress.progressPercent}%` }}
+                        />
+                      </div>
+                      <div className="mt-1 text-[11px] text-slate-500">
+                        {bus.tripProgress.completedStops.length} completed • {bus.tripProgress.remainingStops.length} remaining • {bus.tripProgress.estimatedRemainingTime} left
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {arrivalAlerts.length > 0 && (
+        <div className="absolute left-5 top-5 z-[1000] w-80 space-y-2">
+          {arrivalAlerts.map((alert) => (
+            <div key={alert.id} className="rounded-xl border border-emerald-100 bg-white p-4 shadow-xl">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-black text-slate-950">
+                    <span className="material-symbols-outlined text-[19px] text-emerald-600">notifications_active</span>
+                    {alert.title}
+                  </div>
+                  <p className="mt-1 text-sm leading-5 text-slate-600">{alert.message}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onDismissArrivalAlert?.(alert.id)}
+                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  aria-label="Dismiss arrival notification"
+                >
+                  <span className="material-symbols-outlined text-[18px]">close</span>
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </section>
@@ -381,6 +443,14 @@ const buildStopId = (route, stop) => {
   const normalizedName = stop.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
   return `${route.routeNumber}-${stop.originalOrder || stop.order}-${normalizedName}`;
 };
+
+const buildArrivalNotificationId = (route, stop) => (
+  `${route.routeNumber}-${buildStopId(route, stop)}-arrival`
+);
+
+const buildDelayNotificationId = (route) => `${route.routeNumber}-delay`;
+
+const buildRouteChangeNotificationId = (route) => `${route.routeNumber}-route-change`;
 
 const RouteCard = ({
   route,
@@ -479,8 +549,15 @@ const RouteDetailsPanel = ({
   liveError = '',
   isFavorite = false,
   isStopFavorite,
+  isArrivalNotificationEnabled,
+  isDelayNotificationEnabled,
+  isRouteChangeNotificationEnabled,
+  panelMessage = '',
   onToggleFavorite,
   onToggleFavoriteStop,
+  onToggleArrivalNotification,
+  onToggleDelayNotification,
+  onToggleRouteChangeNotification,
   onToggleLiveLocation,
   onClose,
 }) => {
@@ -520,8 +597,13 @@ const RouteDetailsPanel = ({
     { id: 'info', label: 'Thông tin' },
     { id: 'stops', label: 'Trạm' },
     { id: 'arrival', label: 'Lịch chạy' },
+    { id: 'progress', label: 'Tiến độ' },
     { id: 'feedback', label: 'Feedback' },
   ];
+  const stopEtaSummary = liveBusData?.stopEtaSummary || [];
+  const getStopEta = (stop) => (
+    stopEtaSummary.find((eta) => eta.stopId === buildStopId(route, stop))
+  );
 
   return (
     <aside className="fixed bottom-0 right-0 top-[80px] z-[1200] flex w-[360px] max-w-[calc(100vw-24px)] flex-col border-l border-slate-200 bg-white shadow-2xl">
@@ -571,14 +653,14 @@ const RouteDetailsPanel = ({
           ))}
         </div>
 
-        <div className="mt-3 grid grid-cols-4 gap-1">
+        <div className="mt-3 grid grid-cols-5 gap-1">
           {detailTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setDetailTab(tab.id)}
               title={tab.label}
-              className={`min-w-0 truncate rounded-lg border px-1.5 py-2 text-[11px] font-black ${
+              className={`min-w-0 truncate rounded-lg border px-1 py-2 text-[10px] font-black ${
                 detailTab === tab.id
                   ? 'border-emerald-600 bg-emerald-50 text-emerald-700'
                   : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
@@ -588,6 +670,12 @@ const RouteDetailsPanel = ({
             </button>
           ))}
         </div>
+
+        {panelMessage && (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold leading-5 text-emerald-800">
+            {panelMessage}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -629,6 +717,72 @@ const RouteDetailsPanel = ({
               <div className="mb-1 text-[11px] font-black uppercase text-emerald-700">Route Description</div>
               Optimized route from {directionOrigin} to {directionDestination}, including key stops,
               operating hours, estimated minimum trip duration, fare, and nearby stop support.
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white">
+              <div className="border-b border-slate-100 px-4 py-3">
+                <div className="flex items-center gap-2 text-sm font-black text-slate-950">
+                  <span className="material-symbols-outlined text-[18px] text-emerald-600">notifications</span>
+                  Trip notification settings
+                </div>
+              </div>
+              <div className="divide-y divide-slate-100">
+                <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div>
+                    <div className="text-sm font-black text-slate-900">Bus arrival alerts</div>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Enable the bell beside a stop to receive approaching and arriving alerts.
+                    </p>
+                  </div>
+                  <span className="rounded bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase text-emerald-700">
+                    Stops
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div>
+                    <div className="text-sm font-black text-slate-900">Delay alerts</div>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Notify when a bus on this route is delayed beyond the expected schedule.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onToggleDelayNotification?.(route)}
+                    className={`relative h-7 w-12 shrink-0 rounded-full transition ${
+                      isDelayNotificationEnabled?.(route) ? 'bg-emerald-600' : 'bg-slate-200'
+                    }`}
+                    aria-label={isDelayNotificationEnabled?.(route) ? 'Disable delay alerts' : 'Enable delay alerts'}
+                  >
+                    <span
+                      className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${
+                        isDelayNotificationEnabled?.(route) ? 'left-6' : 'left-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div>
+                    <div className="text-sm font-black text-slate-900">Route change alerts</div>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Notify when this route has detours, stop changes, or temporary path updates.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onToggleRouteChangeNotification?.(route)}
+                    className={`relative h-7 w-12 shrink-0 rounded-full transition ${
+                      isRouteChangeNotificationEnabled?.(route) ? 'bg-emerald-600' : 'bg-slate-200'
+                    }`}
+                    aria-label={isRouteChangeNotificationEnabled?.(route) ? 'Disable route change alerts' : 'Enable route change alerts'}
+                  >
+                    <span
+                      className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${
+                        isRouteChangeNotificationEnabled?.(route) ? 'left-6' : 'left-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -680,8 +834,44 @@ const RouteDetailsPanel = ({
                       <div className="mt-1 text-xs text-slate-500">
                         Next stop: {bus.nextStop} - ETA {bus.estimatedArrivalTime}
                       </div>
+                      {bus.delay && (
+                        <div className="mt-2 rounded border border-amber-100 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                          Delayed {bus.delay.delayDurationMinutes} min • {bus.delay.delayReason}
+                        </div>
+                      )}
                     </div>
                   ))}
+                </div>
+              )}
+              {isLiveTracking && stopEtaSummary.length > 0 && (
+                <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                  <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-emerald-700">
+                    Estimated Arrival Time (ETA)
+                  </div>
+                  <div className="space-y-2">
+                    {stopEtaSummary.slice(0, 4).map((eta) => (
+                      <div key={eta.stopId} className="flex items-center justify-between gap-3 rounded bg-white px-3 py-2 text-xs">
+                        <div className="min-w-0">
+                          <div className="truncate font-black text-slate-900">{eta.stopName}</div>
+                          <div className="text-slate-500">{eta.nextBusId || 'No active bus'}</div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <div className="font-black text-emerald-700">{eta.estimatedArrivalTime}</div>
+                          <div className="text-[10px] font-bold uppercase text-slate-400">{eta.status}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {isLiveTracking && liveBusData?.routeChange && (
+                <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm text-amber-900">
+                  <div className="mb-1 flex items-center gap-2 text-[11px] font-black uppercase tracking-wide text-amber-700">
+                    <span className="material-symbols-outlined text-[16px]">route</span>
+                    Route change
+                  </div>
+                  <div className="font-semibold">{liveBusData.routeChange.reasonForChange}</div>
+                  <p className="mt-1 text-xs leading-5">{liveBusData.routeChange.updatedRoutePath}</p>
                 </div>
               )}
             </div>
@@ -711,58 +901,213 @@ const RouteDetailsPanel = ({
 
         {detailTab === 'stops' && (
           <div className="space-y-3">
-            {directionStops.map((stop) => (
-              <div key={`${route.id}-${directionTab}-stop-${stop.order}`} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-black text-emerald-700">
-                  {stop.order}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="font-black text-slate-900">{stop.name}</div>
-                  <div className="text-xs text-slate-500">
-                    Minimum arrival: {addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}
+            {!isLiveTracking && (
+              <button
+                type="button"
+                onClick={() => onToggleLiveLocation?.(route)}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700 hover:bg-emerald-100"
+              >
+                <span className="material-symbols-outlined text-[18px]">schedule</span>
+                View realtime ETA
+              </button>
+            )}
+            {directionStops.map((stop) => {
+              const stopEta = getStopEta(stop);
+
+              return (
+                <div key={`${route.id}-${directionTab}-stop-${stop.order}`} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-black text-emerald-700">
+                    {stop.order}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-black text-slate-900">{stop.name}</div>
+                    <div className="text-xs text-slate-500">
+                      Minimum arrival: {addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}
+                    </div>
+                    <div className={`mt-1 text-xs font-black ${
+                      stopEta?.etaMinutes ? 'text-emerald-700' : 'text-slate-400'
+                    }`}>
+                      ETA: {stopEta?.estimatedArrivalTime || 'ETA unavailable'}
+                      {stopEta?.nextBusId ? ` • ${stopEta.nextBusId}` : ''}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onToggleArrivalNotification?.(route, stop)}
+                      className={`flex h-8 w-8 items-center justify-center rounded-lg border ${
+                        isArrivalNotificationEnabled?.(route, stop)
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                          : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
+                      }`}
+                      aria-label={isArrivalNotificationEnabled?.(route, stop) ? 'Disable arrival notification' : 'Enable arrival notification'}
+                      title={isArrivalNotificationEnabled?.(route, stop) ? 'Disable arrival notification' : 'Enable arrival notification'}
+                    >
+                      <span className="material-symbols-outlined text-[18px] leading-none">
+                        {isArrivalNotificationEnabled?.(route, stop) ? 'notifications_active' : 'notifications'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onToggleFavoriteStop?.(route, stop)}
+                      className={`flex h-8 w-8 items-center justify-center rounded-lg border ${
+                        isStopFavorite?.(route, stop)
+                          ? 'border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100'
+                          : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
+                      }`}
+                      aria-label={isStopFavorite?.(route, stop) ? 'Remove favorite stop' : 'Save stop to favorites'}
+                      title={isStopFavorite?.(route, stop) ? 'Remove favorite stop' : 'Save stop to favorites'}
+                    >
+                      <span className="material-symbols-outlined text-[18px] leading-none">
+                        {isStopFavorite?.(route, stop) ? 'star' : 'star_border'}
+                      </span>
+                    </button>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => onToggleFavoriteStop?.(route, stop)}
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${
-                    isStopFavorite?.(route, stop)
-                      ? 'border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100'
-                      : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
-                  }`}
-                  aria-label={isStopFavorite?.(route, stop) ? 'Remove favorite stop' : 'Save stop to favorites'}
-                >
-                  <span className="material-symbols-outlined text-[18px] leading-none">
-                    {isStopFavorite?.(route, stop) ? 'star' : 'star_border'}
-                  </span>
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
         {detailTab === 'arrival' && (
           <div>
             <div className="rounded-lg border border-slate-200 bg-white">
-              <div className="grid grid-cols-3 border-b border-slate-100 px-3 py-2 text-xs font-black uppercase text-slate-400">
+              <div className="grid grid-cols-4 border-b border-slate-100 px-3 py-2 text-xs font-black uppercase text-slate-400">
                 <span>Stop</span>
                 <span>Minimum arrival</span>
+                <span>Live ETA</span>
                 <span>Frequency</span>
               </div>
-              {directionStops.map((stop) => (
-                <div
-                  key={`${route.id}-${directionTab}-arrival-${stop.order}`}
-                  className="grid grid-cols-3 gap-2 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0"
-                >
-                  <span className="font-semibold text-slate-800">{stop.name}</span>
-                  <span className="text-slate-600">{addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}</span>
-                  <span className="text-slate-600">Every {frequencyMinutes} min</span>
-                </div>
-              ))}
+              {directionStops.map((stop) => {
+                const stopEta = getStopEta(stop);
+
+                return (
+                  <div
+                    key={`${route.id}-${directionTab}-arrival-${stop.order}`}
+                    className="grid grid-cols-4 gap-2 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0"
+                  >
+                    <span className="font-semibold text-slate-800">{stop.name}</span>
+                    <span className="text-slate-600">{addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}</span>
+                    <span className={stopEta?.etaMinutes ? 'font-black text-emerald-700' : 'text-slate-400'}>
+                      {stopEta?.estimatedArrivalTime || 'Unavailable'}
+                    </span>
+                    <span className="text-slate-600">Every {frequencyMinutes} min</span>
+                  </div>
+                );
+              })}
             </div>
             <div className="mt-2 text-xs font-semibold text-slate-500">
               Minimum arrival time is calculated from the first departure at {firstDeparture}.
+              Live ETA updates automatically when live tracking is enabled.
             </div>
+          </div>
+        )}
+
+        {detailTab === 'progress' && (
+          <div className="space-y-3">
+            {!isLiveTracking && (
+              <div className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="text-sm font-black text-slate-950">Trip progress unavailable</div>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Start live location tracking to view completed stops, remaining stops, current bus position,
+                  trip status, and estimated remaining travel time.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onToggleLiveLocation?.(route)}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white hover:bg-slate-800"
+                >
+                  <span className="material-symbols-outlined text-[18px]">route</span>
+                  View trip progress
+                </button>
+              </div>
+            )}
+
+            {isLiveTracking && (liveBusData?.buses || []).map((bus) => {
+              const progress = bus.tripProgress;
+
+              if (!progress) {
+                return null;
+              }
+
+              return (
+                <div key={progress.tripId} className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-wide text-slate-400">{progress.tripId}</div>
+                      <div className="mt-1 font-black text-slate-950">{bus.busId}</div>
+                    </div>
+                    <span className={`rounded px-2 py-0.5 text-[10px] font-black uppercase ${
+                      progress.tripStatus === 'Delayed'
+                        ? 'bg-amber-50 text-amber-700'
+                        : 'bg-emerald-50 text-emerald-700'
+                    }`}>
+                      {progress.tripStatus}
+                    </span>
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between text-xs font-black text-slate-500">
+                      <span>Progress toward destination</span>
+                      <span>{progress.progressPercent}%</span>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="h-full rounded-full bg-emerald-600"
+                        style={{ width: `${progress.progressPercent}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="font-black uppercase text-slate-400">Current stop</div>
+                      <div className="mt-1 font-semibold text-slate-900">{progress.currentStop}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="font-black uppercase text-slate-400">Next stop</div>
+                      <div className="mt-1 font-semibold text-slate-900">{progress.nextStop}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="font-black uppercase text-slate-400">Completed</div>
+                      <div className="mt-1 font-semibold text-slate-900">{progress.completedStops.length} stops</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="font-black uppercase text-slate-400">Remaining time</div>
+                      <div className="mt-1 font-semibold text-slate-900">{progress.estimatedRemainingTime}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Completed stops</div>
+                    <div className="space-y-1">
+                      {progress.completedStops.length ? progress.completedStops.map((stop) => (
+                        <div key={stop.stopId} className="flex items-center gap-2 text-xs text-slate-600">
+                          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                          <span>{stop.stopName}</span>
+                        </div>
+                      )) : (
+                        <div className="text-xs text-slate-400">No stops completed yet.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Remaining stops</div>
+                    <div className="space-y-1">
+                      {progress.remainingStops.length ? progress.remainingStops.map((stop) => (
+                        <div key={stop.stopId} className="flex items-center gap-2 text-xs text-slate-600">
+                          <span className="h-2 w-2 rounded-full bg-slate-300" />
+                          <span>{stop.stopName}</span>
+                        </div>
+                      )) : (
+                        <div className="text-xs text-emerald-700">Trip is near completion.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -1028,6 +1373,14 @@ const SearchRoutesPage = () => {
   const [favoriteRoutes, setFavoriteRoutes] = useState([]);
   const [favoriteStops, setFavoriteStops] = useState([]);
   const [favoriteMessage, setFavoriteMessage] = useState('');
+  const [arrivalNotifications, setArrivalNotifications] = useState([]);
+  const [delayNotifications, setDelayNotifications] = useState([]);
+  const [routeChangeNotifications, setRouteChangeNotifications] = useState([]);
+  const [arrivalAlerts, setArrivalAlerts] = useState([]);
+  const [delayAlerts, setDelayAlerts] = useState([]);
+  const [notifiedArrivalKeys, setNotifiedArrivalKeys] = useState(new Set());
+  const [notifiedDelayKeys, setNotifiedDelayKeys] = useState(new Set());
+  const [notifiedRouteChangeKeys, setNotifiedRouteChangeKeys] = useState(new Set());
   const [liveRouteId, setLiveRouteId] = useState(null);
   const [liveBusData, setLiveBusData] = useState(null);
   const [isLiveLoading, setIsLiveLoading] = useState(false);
@@ -1046,6 +1399,24 @@ const SearchRoutesPage = () => {
   const favoriteStopIds = useMemo(() => new Set(
     favoriteStops.map((favoriteStop) => String(favoriteStop.stopId))
   ), [favoriteStops]);
+
+  const arrivalNotificationIds = useMemo(() => new Set(
+    arrivalNotifications
+      .filter((subscription) => subscription.notificationStatus !== 'DISABLED')
+      .map((subscription) => String(subscription.subscriptionId))
+  ), [arrivalNotifications]);
+
+  const delayNotificationIds = useMemo(() => new Set(
+    delayNotifications
+      .filter((subscription) => subscription.notificationStatus !== 'DISABLED')
+      .map((subscription) => String(subscription.subscriptionId))
+  ), [delayNotifications]);
+
+  const routeChangeNotificationIds = useMemo(() => new Set(
+    routeChangeNotifications
+      .filter((subscription) => subscription.notificationStatus !== 'DISABLED')
+      .map((subscription) => String(subscription.subscriptionId))
+  ), [routeChangeNotifications]);
 
   const suggestedRouteOptions = useMemo(() => {
     if (!bestRouteResult) {
@@ -1070,6 +1441,23 @@ const SearchRoutesPage = () => {
   );
 
   const isStopFavorite = (route, stop) => favoriteStopIds.has(buildStopId(route, stop));
+  const isArrivalNotificationEnabled = (route, stop) => (
+    arrivalNotificationIds.has(buildArrivalNotificationId(route, stop))
+  );
+  const isDelayNotificationEnabled = (route) => (
+    delayNotificationIds.has(buildDelayNotificationId(route))
+  );
+  const isRouteChangeNotificationEnabled = (route) => (
+    routeChangeNotificationIds.has(buildRouteChangeNotificationId(route))
+    || routeChangeNotifications.some((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+      && (
+        subscription.routeNumber === route.routeNumber
+        || isSameRouteId(subscription.routeId, route.id)
+      )
+    ))
+  );
+  const routePanelMessage = /notification|alert/i.test(favoriteMessage) ? favoriteMessage : '';
   const isLiveTrackingSelectedRoute = Boolean(
     selectedRoute?.id && isSameRouteId(liveRouteId, selectedRoute.id)
   );
@@ -1143,18 +1531,33 @@ const SearchRoutesPage = () => {
       if (!user) {
         setFavoriteRoutes([]);
         setFavoriteStops([]);
+        setArrivalNotifications([]);
+        setDelayNotifications([]);
+        setRouteChangeNotifications([]);
         return;
       }
 
       try {
-        const [favoriteRouteResult, favoriteStopResult] = await Promise.all([
+        const [
+          favoriteRouteResult,
+          favoriteStopResult,
+          arrivalNotificationResult,
+          delayNotificationResult,
+          routeChangeNotificationResult,
+        ] = await Promise.all([
           routeService.getFavoriteRoutes(),
           routeService.getFavoriteStops(),
+          routeService.getArrivalNotifications(),
+          routeService.getDelayNotifications(),
+          routeService.getRouteChangeNotifications(),
         ]);
 
         if (isMounted) {
           setFavoriteRoutes(favoriteRouteResult || []);
           setFavoriteStops(favoriteStopResult || []);
+          setArrivalNotifications(arrivalNotificationResult || []);
+          setDelayNotifications(delayNotificationResult || []);
+          setRouteChangeNotifications(routeChangeNotificationResult || []);
         }
       } catch (err) {
         if (isMounted && err.statusCode !== 403) {
@@ -1210,6 +1613,173 @@ const SearchRoutesPage = () => {
     };
   }, [liveRouteId]);
 
+  useEffect(() => {
+    if (!liveBusData?.stopEtaSummary?.length || !arrivalNotifications.length) {
+      return;
+    }
+
+    const activeSubscriptions = arrivalNotifications.filter((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+      && (
+        isSameRouteId(subscription.routeId, liveBusData.route?.id)
+        || subscription.routeNumber === liveBusData.route?.routeNumber
+      )
+    ));
+
+    const nextAlerts = [];
+    const nextNotifiedKeys = new Set(notifiedArrivalKeys);
+
+    activeSubscriptions.forEach((subscription) => {
+      const eta = liveBusData.stopEtaSummary.find((item) => item.stopId === subscription.stopId);
+      const threshold = Number(subscription.etaThresholdMinutes) || 5;
+
+      if (!eta || typeof eta.etaMinutes !== 'number' || eta.etaMinutes > threshold) {
+        return;
+      }
+
+      const notificationType = eta.etaMinutes <= 1 ? 'arriving' : 'approaching';
+      const notificationKey = `${subscription.subscriptionId}-${notificationType}`;
+
+      if (nextNotifiedKeys.has(notificationKey)) {
+        return;
+      }
+
+      nextNotifiedKeys.add(notificationKey);
+      nextAlerts.push({
+        id: `${notificationKey}-${Date.now()}`,
+        title: notificationType === 'arriving' ? 'Bus arriving now' : 'Bus approaching',
+        message: `${subscription.routeNumber} to ${subscription.stopName}: ${eta.estimatedArrivalTime}. ${eta.nextBusId || 'Tracked bus'} is ${eta.status.toLowerCase()}.`,
+        status: eta.status,
+      });
+    });
+
+    if (!nextAlerts.length) {
+      return;
+    }
+
+    setNotifiedArrivalKeys(nextNotifiedKeys);
+    setArrivalAlerts((current) => [...nextAlerts, ...current].slice(0, 4));
+
+    if ('Notification' in window && Notification.permission === 'granted') {
+      nextAlerts.forEach((alert) => {
+        new Notification(alert.title, {
+          body: alert.message,
+        });
+      });
+    }
+  }, [arrivalNotifications, liveBusData, notifiedArrivalKeys]);
+
+  useEffect(() => {
+    if (!liveBusData?.buses?.length || !delayNotifications.length) {
+      return;
+    }
+
+    const activeSubscriptions = delayNotifications.filter((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+      && (
+        isSameRouteId(subscription.routeId, liveBusData.route?.id)
+        || subscription.routeNumber === liveBusData.route?.routeNumber
+      )
+    ));
+
+    const delayedBuses = liveBusData.buses.filter((bus) => bus.status === 'Delayed' && bus.delay);
+    const nextAlerts = [];
+    const nextNotifiedKeys = new Set(notifiedDelayKeys);
+
+    activeSubscriptions.forEach((subscription) => {
+      delayedBuses.forEach((bus) => {
+        const delayMinutes = bus.delay?.delayDurationMinutes || 0;
+        const threshold = Number(subscription.delayThresholdMinutes) || 5;
+
+        if (delayMinutes < threshold) {
+          return;
+        }
+
+        const notificationKey = `${subscription.subscriptionId}-${bus.busId}-${delayMinutes}`;
+
+        if (nextNotifiedKeys.has(notificationKey)) {
+          return;
+        }
+
+        nextNotifiedKeys.add(notificationKey);
+        nextAlerts.push({
+          id: `${notificationKey}-${Date.now()}`,
+          title: 'Bus delayed',
+          message: `${subscription.routeNumber} ${bus.busId} is delayed ${delayMinutes} min. Reason: ${bus.delay.delayReason}. Updated ETA: ${bus.delay.updatedEta}.`,
+          status: 'Delayed',
+        });
+      });
+    });
+
+    if (!nextAlerts.length) {
+      return;
+    }
+
+    setNotifiedDelayKeys(nextNotifiedKeys);
+    setDelayAlerts((current) => [...nextAlerts, ...current].slice(0, 4));
+
+    if ('Notification' in window && Notification.permission === 'granted') {
+      nextAlerts.forEach((alert) => {
+        new Notification(alert.title, {
+          body: alert.message,
+        });
+      });
+    }
+  }, [delayNotifications, liveBusData, notifiedDelayKeys]);
+
+  useEffect(() => {
+    if (!liveBusData?.routeChange || !routeChangeNotifications.length) {
+      return;
+    }
+
+    const routeChange = liveBusData.routeChange;
+    const activeSubscriptions = routeChangeNotifications.filter((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+      && (
+        isSameRouteId(subscription.routeId, liveBusData.route?.id)
+        || subscription.routeNumber === liveBusData.route?.routeNumber
+      )
+    ));
+
+    if (!activeSubscriptions.length) {
+      return;
+    }
+
+    const nextNotifiedKeys = new Set(notifiedRouteChangeKeys);
+    const nextAlerts = [];
+
+    activeSubscriptions.forEach((subscription) => {
+      const notificationKey = `${subscription.subscriptionId}-${routeChange.changeId}`;
+
+      if (nextNotifiedKeys.has(notificationKey)) {
+        return;
+      }
+
+      nextNotifiedKeys.add(notificationKey);
+      nextAlerts.push({
+        id: `${notificationKey}-${Date.now()}`,
+        title: 'Route change detected',
+        message: `${routeChange.routeNumber}: ${routeChange.reasonForChange}. ${routeChange.updatedRoutePath}`,
+        status: 'Route changed',
+      });
+    });
+
+    if (!nextAlerts.length) {
+      return;
+    }
+
+    setNotifiedRouteChangeKeys(nextNotifiedKeys);
+    setDelayAlerts((current) => [...nextAlerts, ...current].slice(0, 4));
+
+    if ('Notification' in window && Notification.permission === 'granted') {
+      nextAlerts.forEach((alert) => {
+        new Notification(alert.title, {
+          body: alert.message,
+        });
+      });
+    }
+  }, [liveBusData, notifiedRouteChangeKeys, routeChangeNotifications]);
+
   const clearError = () => {
     if (error) {
       setError('');
@@ -1243,6 +1813,23 @@ const SearchRoutesPage = () => {
     }
 
     setSearchParams(nextParams);
+  };
+
+  const handleBackToAllRoutes = () => {
+    clearError();
+    setSearchParams({});
+    setQuery('');
+    setFrom('');
+    setTo('');
+    setBestFrom('');
+    setBestTo('');
+    setBestRouteResult(null);
+    setNearbyStops([]);
+    setSelectedRoute(null);
+    setLiveRouteId(null);
+    setLiveBusData(null);
+    setLiveError('');
+    setActiveTab('lookup');
   };
 
   const handleUseCurrentLocation = () => {
@@ -1451,6 +2038,169 @@ const SearchRoutesPage = () => {
     }
   };
 
+  const handleToggleArrivalNotification = async (route, stop) => {
+    setError('');
+    setFavoriteMessage('');
+
+    if (!user) {
+      setError('Please log in before enabling arrival notifications.');
+      return;
+    }
+
+    const subscriptionId = buildArrivalNotificationId(route, stop);
+
+    try {
+      if (arrivalNotificationIds.has(subscriptionId)) {
+        await routeService.removeArrivalNotification(subscriptionId);
+        setArrivalNotifications((current) => (
+          current.filter((subscription) => subscription.subscriptionId !== subscriptionId)
+        ));
+        setFavoriteMessage('Arrival notification disabled.');
+        return;
+      }
+
+      if ('Notification' in window && Notification.permission === 'default') {
+        await Notification.requestPermission();
+      }
+
+      const subscription = await routeService.subscribeArrivalNotification({
+        routeId: route.id,
+        stopId: buildStopId(route, stop),
+        stopName: stop.name,
+        order: stop.originalOrder || stop.order,
+        etaThresholdMinutes: 5,
+      });
+
+      setArrivalNotifications((current) => [
+        subscription,
+        ...current.filter((item) => item.subscriptionId !== subscription.subscriptionId),
+      ]);
+      setFavoriteMessage(
+        'Arrival notification enabled. You will be alerted when a bus is within 5 minutes of this stop.'
+      );
+
+      if ('Notification' in window && Notification.permission === 'denied') {
+        setError('Browser notification permission is disabled. In-app alerts will still appear.');
+      }
+    } catch (err) {
+      if (err.message === 'Arrival notification already enabled') {
+        setFavoriteMessage('Arrival notification already enabled.');
+        return;
+      }
+
+      setError(err.message || 'Unable to update arrival notification.');
+    }
+  };
+
+  const handleToggleDelayNotification = async (route) => {
+    setError('');
+    setFavoriteMessage('');
+
+    if (!user) {
+      setError('Please log in before enabling delay notifications.');
+      return;
+    }
+
+    const subscriptionId = buildDelayNotificationId(route);
+
+    try {
+      if (delayNotificationIds.has(subscriptionId)) {
+        await routeService.removeDelayNotification(subscriptionId);
+        setDelayNotifications((current) => (
+          current.filter((subscription) => subscription.subscriptionId !== subscriptionId)
+        ));
+        setFavoriteMessage('Delay notification disabled.');
+        return;
+      }
+
+      if ('Notification' in window && Notification.permission === 'default') {
+        await Notification.requestPermission();
+      }
+
+      const subscription = await routeService.subscribeDelayNotification({
+        routeId: route.id,
+        routeNumber: route.routeNumber,
+        delayThresholdMinutes: 5,
+      });
+
+      setDelayNotifications((current) => [
+        subscription,
+        ...current.filter((item) => item.subscriptionId !== subscription.subscriptionId),
+      ]);
+      setFavoriteMessage('Delay notification enabled for this route.');
+
+      if ('Notification' in window && Notification.permission === 'denied') {
+        setError('Browser notification permission is disabled. In-app delay alerts will still appear.');
+      }
+    } catch (err) {
+      if (err.message === 'Delay notification already enabled') {
+        setFavoriteMessage('Delay notification already enabled.');
+        return;
+      }
+
+      setError(err.message || 'Unable to update delay notification.');
+    }
+  };
+
+  const handleToggleRouteChangeNotification = async (route) => {
+    setError('');
+    setFavoriteMessage('');
+
+    if (!user) {
+      setError('Please log in before enabling route change notifications.');
+      return;
+    }
+
+    const subscriptionId = buildRouteChangeNotificationId(route);
+    const existingSubscription = routeChangeNotifications.find((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+      && (
+        subscription.subscriptionId === subscriptionId
+        || subscription.routeNumber === route.routeNumber
+        || isSameRouteId(subscription.routeId, route.id)
+      )
+    ));
+
+    try {
+      if (existingSubscription) {
+        await routeService.removeRouteChangeNotification(existingSubscription.subscriptionId);
+        setRouteChangeNotifications((current) => (
+          current.filter((subscription) => subscription.subscriptionId !== existingSubscription.subscriptionId)
+        ));
+        setFavoriteMessage('Route change notification disabled.');
+        return;
+      }
+
+      if ('Notification' in window && Notification.permission === 'default') {
+        await Notification.requestPermission();
+      }
+
+      const subscription = await routeService.subscribeRouteChangeNotification({
+        routeId: route.id,
+        routeNumber: route.routeNumber,
+      });
+
+      setRouteChangeNotifications((current) => [
+        subscription,
+        ...current.filter((item) => item.subscriptionId !== subscription.subscriptionId),
+      ]);
+      setFavoriteMessage('Route change notification enabled for this route.');
+
+      if ('Notification' in window && Notification.permission === 'denied') {
+        setError('Browser notification permission is disabled. In-app route change alerts will still appear.');
+      }
+    } catch (err) {
+      if (err.message === 'Route change notification already enabled') {
+        const subscriptions = await routeService.getRouteChangeNotifications();
+        setRouteChangeNotifications(subscriptions || []);
+        setFavoriteMessage('Route change notification already enabled.');
+        return;
+      }
+
+      setError(err.message || 'Unable to update route change notification.');
+    }
+  };
+
   const handleToggleLiveLocation = (route) => {
     clearError();
 
@@ -1470,6 +2220,11 @@ const SearchRoutesPage = () => {
     setLiveRouteId(route.id);
     setLiveBusData(null);
     setLiveError('');
+  };
+
+  const handleDismissArrivalAlert = (alertId) => {
+    setArrivalAlerts((current) => current.filter((alert) => alert.id !== alertId));
+    setDelayAlerts((current) => current.filter((alert) => alert.id !== alertId));
   };
 
   const handleFindBestRoute = async (event) => {
@@ -1781,8 +2536,20 @@ const SearchRoutesPage = () => {
 
             {(activeTab === 'lookup' || !bestRouteResult) && (
               <div className="mt-5 space-y-3">
-                <div className="text-sm font-bold text-slate-700">
-                  {routes.length} route{routes.length === 1 ? '' : 's'} found
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-bold text-slate-700">
+                    {routes.length} route{routes.length === 1 ? '' : 's'} found
+                  </div>
+                  {(activeFilters.q || activeFilters.from || activeFilters.to || selectedRoute || nearbyStops.length > 0 || bestRouteResult) && (
+                    <button
+                      type="button"
+                      onClick={handleBackToAllRoutes}
+                      className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-black text-slate-600 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                      Back
+                    </button>
+                  )}
                 </div>
                 {routes.map((route) => {
                   const isSelected = selectedRoute?.routeNumber === route.routeNumber;
@@ -1811,6 +2578,8 @@ const SearchRoutesPage = () => {
           currentLocation={currentLocation}
           liveBusData={liveBusData}
           liveError={liveError}
+          arrivalAlerts={[...delayAlerts, ...arrivalAlerts]}
+          onDismissArrivalAlert={handleDismissArrivalAlert}
           onUseCurrentLocation={handleUseCurrentLocation}
         />
         {selectedRoute && (
@@ -1823,8 +2592,15 @@ const SearchRoutesPage = () => {
             liveError={isLiveTrackingSelectedRoute ? liveError : ''}
             isFavorite={isRouteFavorite(selectedRoute)}
             isStopFavorite={isStopFavorite}
+            isArrivalNotificationEnabled={isArrivalNotificationEnabled}
+            isDelayNotificationEnabled={isDelayNotificationEnabled}
+            isRouteChangeNotificationEnabled={isRouteChangeNotificationEnabled}
+            panelMessage={routePanelMessage}
             onToggleFavorite={handleToggleFavoriteRoute}
             onToggleFavoriteStop={handleToggleFavoriteStop}
+            onToggleArrivalNotification={handleToggleArrivalNotification}
+            onToggleDelayNotification={handleToggleDelayNotification}
+            onToggleRouteChangeNotification={handleToggleRouteChangeNotification}
             onToggleLiveLocation={handleToggleLiveLocation}
             onClose={() => setSelectedRoute(null)}
           />

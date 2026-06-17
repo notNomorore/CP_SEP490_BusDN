@@ -205,6 +205,319 @@ export class ProfileService {
     };
   }
 
+  static buildArrivalNotificationId(route, stop) {
+    return `${route.routeNumber}-${this.buildStopId(route, stop)}-arrival`;
+  }
+
+  static async getArrivalNotifications(userId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    return (user.arrivalNotifications || []).filter((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+    ));
+  }
+
+  static async subscribeArrivalNotification(userId, payload) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const matchedStop = await this.findStopInRoutes(payload);
+
+    if (!matchedStop) {
+      throw new CustomError('Stop not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const { route, stop, stopId } = matchedStop;
+    const arrivalNotifications = user.arrivalNotifications || [];
+    const subscriptionId = this.buildArrivalNotificationId(route, stop);
+    const existingIndex = arrivalNotifications.findIndex((subscription) => (
+      subscription.subscriptionId === subscriptionId
+      || (
+        subscription.routeNumber === route.routeNumber
+        && subscription.stopId === stopId
+      )
+    ));
+
+    if (existingIndex >= 0 && arrivalNotifications[existingIndex].notificationStatus !== 'DISABLED') {
+      throw new CustomError('Arrival notification already enabled', HTTP_STATUS.CONFLICT);
+    }
+
+    const subscription = {
+      subscriptionId,
+      routeId: String(route._id),
+      routeNumber: route.routeNumber,
+      stopId,
+      stopName: stop.name,
+      busId: payload.busId?.trim() || '',
+      etaThresholdMinutes: Number(payload.etaThresholdMinutes) || 5,
+      notificationStatus: 'ENABLED',
+      subscribedAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    if (existingIndex >= 0) {
+      user.arrivalNotifications.set(existingIndex, subscription);
+    } else {
+      user.arrivalNotifications.push(subscription);
+    }
+
+    await ProfileRepository.save(user);
+
+    return subscription;
+  }
+
+  static async removeArrivalNotification(userId, subscriptionId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const arrivalNotifications = user.arrivalNotifications || [];
+    const existingIndex = arrivalNotifications.findIndex((subscription) => (
+      subscription.subscriptionId === subscriptionId
+    ));
+
+    if (
+      existingIndex < 0
+      || arrivalNotifications[existingIndex].notificationStatus === 'DISABLED'
+    ) {
+      throw new CustomError('Arrival notification not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const removedSubscription = arrivalNotifications[existingIndex].toObject
+      ? arrivalNotifications[existingIndex].toObject()
+      : arrivalNotifications[existingIndex];
+
+    user.arrivalNotifications.splice(existingIndex, 1);
+    await ProfileRepository.save(user);
+
+    return {
+      ...removedSubscription,
+      notificationStatus: 'DISABLED',
+    };
+  }
+
+  static buildDelayNotificationId(route) {
+    return `${route.routeNumber}-delay`;
+  }
+
+  static async findRouteForNotification({ routeId, routeNumber }) {
+    await RouteService.ensureSampleRoutes();
+
+    let route = null;
+
+    if (routeId) {
+      try {
+        route = await Route.findOne({ _id: routeId, status: 'ACTIVE' }).lean();
+      } catch {
+        route = null;
+      }
+    }
+
+    if (!route && routeNumber) {
+      route = await Route.findOne({ routeNumber, status: 'ACTIVE' }).lean();
+    }
+
+    return route;
+  }
+
+  static async getDelayNotifications(userId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    return (user.delayNotifications || []).filter((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+    ));
+  }
+
+  static async subscribeDelayNotification(userId, payload) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const route = await this.findRouteForNotification(payload);
+
+    if (!route) {
+      throw new CustomError('Route not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const delayNotifications = user.delayNotifications || [];
+    const subscriptionId = this.buildDelayNotificationId(route);
+    const existingIndex = delayNotifications.findIndex((subscription) => (
+      subscription.subscriptionId === subscriptionId
+      || String(subscription.routeId) === String(route._id)
+      || subscription.routeNumber === route.routeNumber
+    ));
+
+    if (existingIndex >= 0 && delayNotifications[existingIndex].notificationStatus !== 'DISABLED') {
+      throw new CustomError('Delay notification already enabled', HTTP_STATUS.CONFLICT);
+    }
+
+    const subscription = {
+      subscriptionId,
+      routeId: String(route._id),
+      routeNumber: route.routeNumber,
+      busId: payload.busId?.trim() || '',
+      tripId: payload.tripId?.trim() || '',
+      delayThresholdMinutes: Number(payload.delayThresholdMinutes) || 5,
+      notificationStatus: 'ENABLED',
+      subscribedAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    if (existingIndex >= 0) {
+      user.delayNotifications.set(existingIndex, subscription);
+    } else {
+      user.delayNotifications.push(subscription);
+    }
+
+    await ProfileRepository.save(user);
+
+    return subscription;
+  }
+
+  static async removeDelayNotification(userId, subscriptionId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const delayNotifications = user.delayNotifications || [];
+    const existingIndex = delayNotifications.findIndex((subscription) => (
+      subscription.subscriptionId === subscriptionId
+    ));
+
+    if (
+      existingIndex < 0
+      || delayNotifications[existingIndex].notificationStatus === 'DISABLED'
+    ) {
+      throw new CustomError('Delay notification not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const removedSubscription = delayNotifications[existingIndex].toObject
+      ? delayNotifications[existingIndex].toObject()
+      : delayNotifications[existingIndex];
+
+    user.delayNotifications.splice(existingIndex, 1);
+    await ProfileRepository.save(user);
+
+    return {
+      ...removedSubscription,
+      notificationStatus: 'DISABLED',
+    };
+  }
+
+  static buildRouteChangeNotificationId(route) {
+    return `${route.routeNumber}-route-change`;
+  }
+
+  static async getRouteChangeNotifications(userId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    return (user.routeChangeNotifications || []).filter((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+    ));
+  }
+
+  static async subscribeRouteChangeNotification(userId, payload) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const route = await this.findRouteForNotification(payload);
+
+    if (!route) {
+      throw new CustomError('Route not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const routeChangeNotifications = user.routeChangeNotifications || [];
+    const subscriptionId = this.buildRouteChangeNotificationId(route);
+    const existingIndex = routeChangeNotifications.findIndex((subscription) => (
+      subscription.subscriptionId === subscriptionId
+      || String(subscription.routeId) === String(route._id)
+      || subscription.routeNumber === route.routeNumber
+    ));
+
+    if (
+      existingIndex >= 0
+      && routeChangeNotifications[existingIndex].notificationStatus !== 'DISABLED'
+    ) {
+      throw new CustomError('Route change notification already enabled', HTTP_STATUS.CONFLICT);
+    }
+
+    const subscription = {
+      subscriptionId,
+      routeId: String(route._id),
+      routeNumber: route.routeNumber,
+      tripId: payload.tripId?.trim() || '',
+      notificationStatus: 'ENABLED',
+      subscribedAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    if (existingIndex >= 0) {
+      user.routeChangeNotifications.set(existingIndex, subscription);
+    } else {
+      user.routeChangeNotifications.push(subscription);
+    }
+
+    await ProfileRepository.save(user);
+
+    return subscription;
+  }
+
+  static async removeRouteChangeNotification(userId, subscriptionId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const routeChangeNotifications = user.routeChangeNotifications || [];
+    const existingIndex = routeChangeNotifications.findIndex((subscription) => (
+      subscription.subscriptionId === subscriptionId
+    ));
+
+    if (
+      existingIndex < 0
+      || routeChangeNotifications[existingIndex].notificationStatus === 'DISABLED'
+    ) {
+      throw new CustomError('Route change notification not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const removedSubscription = routeChangeNotifications[existingIndex].toObject
+      ? routeChangeNotifications[existingIndex].toObject()
+      : routeChangeNotifications[existingIndex];
+
+    user.routeChangeNotifications.splice(existingIndex, 1);
+    await ProfileRepository.save(user);
+
+    return {
+      ...removedSubscription,
+      notificationStatus: 'DISABLED',
+    };
+  }
+
   static async saveFavoriteRoute(userId, routeId) {
     await RouteService.ensureSampleRoutes();
 

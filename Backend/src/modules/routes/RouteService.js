@@ -19,18 +19,18 @@ const sampleRoutes = [
         longitude: 108.1690,
       },
       {
-        name: 'Dragon Bridge',
-        order: 2,
-        estimatedOffsetMinutes: 12,
-        latitude: 16.0614,
-        longitude: 108.2272,
-      },
-      {
         name: 'Han Market',
-        order: 3,
-        estimatedOffsetMinutes: 18,
+        order: 2,
+        estimatedOffsetMinutes: 14,
         latitude: 16.0681,
         longitude: 108.2245,
+      },
+      {
+        name: 'Dragon Bridge',
+        order: 3,
+        estimatedOffsetMinutes: 18,
+        latitude: 16.0614,
+        longitude: 108.2272,
       },
       {
         name: 'My Khe Beach',
@@ -74,22 +74,15 @@ const sampleRoutes = [
         longitude: 108.1690,
       },
       {
-        name: 'Thanh Khe District',
-        order: 2,
-        estimatedOffsetMinutes: 10,
-        latitude: 16.0679,
-        longitude: 108.1817,
-      },
-      {
         name: 'Lien Chieu',
-        order: 3,
-        estimatedOffsetMinutes: 25,
+        order: 2,
+        estimatedOffsetMinutes: 22,
         latitude: 16.0737,
         longitude: 108.1502,
       },
       {
         name: 'Hoa Khanh',
-        order: 4,
+        order: 3,
         estimatedOffsetMinutes: 35,
         latitude: 16.0750,
         longitude: 108.1428,
@@ -283,14 +276,15 @@ const sampleRoutes = [
     fare: 15000,
     stops: [
       { name: 'Da Nang Central', order: 1, estimatedOffsetMinutes: 0, latitude: 16.0667, longitude: 108.1690 },
-      { name: 'Thanh Khe District', order: 2, estimatedOffsetMinutes: 10, latitude: 16.0679, longitude: 108.1817 },
+      { name: 'Da Nang Airport', order: 2, estimatedOffsetMinutes: 12, latitude: 16.0544, longitude: 108.2022 },
       { name: 'Duy Tan University', order: 3, estimatedOffsetMinutes: 22, latitude: 16.0603, longitude: 108.2094 },
       { name: 'University Village', order: 4, estimatedOffsetMinutes: 32, latitude: 16.0475, longitude: 108.2175 },
     ],
     pathPoints: [
       { latitude: 16.0667, longitude: 108.1690 },
-      { latitude: 16.0679, longitude: 108.1817 },
-      { latitude: 16.0650, longitude: 108.1940 },
+      { latitude: 16.0632, longitude: 108.1840 },
+      { latitude: 16.0588, longitude: 108.1932 },
+      { latitude: 16.0544, longitude: 108.2022 },
       { latitude: 16.0603, longitude: 108.2094 },
       { latitude: 16.0550, longitude: 108.2140 },
       { latitude: 16.0475, longitude: 108.2175 },
@@ -405,15 +399,16 @@ const sampleRoutes = [
     fare: 15000,
     stops: [
       { name: 'Da Nang Central', order: 1, estimatedOffsetMinutes: 0, latitude: 16.0667, longitude: 108.1690 },
-      { name: 'Da Nang Airport', order: 2, estimatedOffsetMinutes: 10, latitude: 16.0544, longitude: 108.2022 },
+      { name: 'Han Market', order: 2, estimatedOffsetMinutes: 10, latitude: 16.0681, longitude: 108.2245 },
       { name: 'Museum of Cham Sculpture', order: 3, estimatedOffsetMinutes: 18, latitude: 16.0603, longitude: 108.2232 },
       { name: 'APEC Park', order: 4, estimatedOffsetMinutes: 25, latitude: 16.0549, longitude: 108.2238 },
     ],
     pathPoints: [
       { latitude: 16.0667, longitude: 108.1690 },
       { latitude: 16.0630, longitude: 108.1840 },
-      { latitude: 16.0544, longitude: 108.2022 },
-      { latitude: 16.0570, longitude: 108.2140 },
+      { latitude: 16.0645, longitude: 108.1985 },
+      { latitude: 16.0670, longitude: 108.2120 },
+      { latitude: 16.0681, longitude: 108.2245 },
       { latitude: 16.0603, longitude: 108.2232 },
       { latitude: 16.0549, longitude: 108.2238 },
     ],
@@ -513,6 +508,8 @@ const calculateDistanceKm = (start, end) => {
 
 export class RouteService {
   static async ensureSampleRoutes() {
+    await Route.deleteMany({ routeNumber: /^DN-DEMO/i });
+
     for (const route of sampleRoutes) {
       await Route.updateOne(
         { routeNumber: route.routeNumber },
@@ -523,7 +520,10 @@ export class RouteService {
   }
 
   static buildSearchQuery({ q, from, to }) {
-    const andConditions = [{ status: 'ACTIVE' }];
+    const andConditions = [
+      { status: 'ACTIVE' },
+      { routeNumber: { $not: /^DN-DEMO/i } },
+    ];
 
     if (q) {
       const searchRegex = new RegExp(q.trim(), 'i');
@@ -922,6 +922,68 @@ export class RouteService {
     return stops[nextStopIndex] || stops[stops.length - 1] || null;
   }
 
+  static buildStopId(route, stop) {
+    const normalizedName = stop.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    return `${route.routeNumber}-${stop.order}-${normalizedName}`;
+  }
+
+  static calculateStopEtas(route, progress, status) {
+    const duration = route.estimatedDurationMinutes || 30;
+    const trafficMultiplier = status === 'Delayed' ? 1.25 : 1;
+
+    return (route.stops || []).map((stop) => {
+      const stopProgress = Math.min((stop.estimatedOffsetMinutes || 0) / duration, 1);
+      const minutesUntilArrival = Math.round((stopProgress - progress) * duration * trafficMultiplier);
+      const hasPassed = minutesUntilArrival < 0;
+      const etaMinutes = hasPassed ? null : Math.max(minutesUntilArrival, 1);
+
+      return {
+        stopId: this.buildStopId(route, stop),
+        stopName: stop.name,
+        stopOrder: stop.order,
+        etaMinutes,
+        estimatedArrivalTime: etaMinutes ? `${etaMinutes} min` : 'Passed',
+        status: hasPassed ? 'Passed' : status,
+      };
+    });
+  }
+
+  static calculateTripProgress(route, progress, busId, status) {
+    const duration = route.estimatedDurationMinutes || 30;
+    const stops = route.stops || [];
+    const completedStops = stops.filter((stop) => (
+      Math.min((stop.estimatedOffsetMinutes || 0) / duration, 1) <= progress
+    ));
+    const remainingStops = stops.filter((stop) => (
+      Math.min((stop.estimatedOffsetMinutes || 0) / duration, 1) > progress
+    ));
+    const estimatedRemainingMinutes = Math.max(Math.round((1 - progress) * duration), 1);
+    const progressPercent = Math.min(Math.round(progress * 100), 99);
+    const tripStatus = progressPercent >= 97 ? 'Completed' : status;
+
+    return {
+      tripId: `${route.routeNumber}-TRIP-${busId.split('-').pop()}`,
+      busId,
+      routeId: String(route._id),
+      progressPercent,
+      completedStops: completedStops.map((stop) => ({
+        stopId: this.buildStopId(route, stop),
+        stopName: stop.name,
+        stopOrder: stop.order,
+      })),
+      remainingStops: remainingStops.map((stop) => ({
+        stopId: this.buildStopId(route, stop),
+        stopName: stop.name,
+        stopOrder: stop.order,
+      })),
+      tripStatus,
+      estimatedRemainingMinutes,
+      estimatedRemainingTime: `${estimatedRemainingMinutes} min`,
+      currentStop: completedStops[completedStops.length - 1]?.name || route.origin,
+      nextStop: remainingStops[0]?.name || route.destination,
+    };
+  }
+
   static async getLiveBusLocations(routeId) {
     await this.ensureSampleRoutes();
 
@@ -957,6 +1019,8 @@ export class RouteService {
       const progress = ((now % cycleMs) / cycleMs + offset) % 1;
       const currentLocation = this.interpolatePathPosition(pathPoints, progress);
       const nextStop = this.findNextStop(route, progress);
+      const status = index === 1 && progress > 0.82 ? 'Delayed' : 'Running';
+      const busId = `${route.routeNumber}-BUS-${index + 1}`;
       const remainingMinutes = Math.max(
         Math.round((1 - progress) * (route.estimatedDurationMinutes || 30)),
         1
@@ -964,24 +1028,111 @@ export class RouteService {
       const arrivalToNextStopMinutes = nextStop
         ? Math.max(Math.round(((nextStop.estimatedOffsetMinutes || 0) / (route.estimatedDurationMinutes || 30) - progress) * (route.estimatedDurationMinutes || 30)), 1)
         : remainingMinutes;
+      const stopEtas = this.calculateStopEtas(route, progress, status);
+      const tripProgress = this.calculateTripProgress(route, progress, busId, status);
+      const delayDurationMinutes = status === 'Delayed'
+        ? Math.max(Math.round((progress - 0.82) * (route.estimatedDurationMinutes || 30)) + 5, 5)
+        : 0;
 
       return {
-        busId: `${route.routeNumber}-BUS-${index + 1}`,
+        busId,
         routeId: String(route._id),
         routeNumber: route.routeNumber,
         currentLocation,
         estimatedArrivalTime: `${Math.max(arrivalToNextStopMinutes, 1)} min`,
         nextStop: nextStop?.name || route.destination,
-        status: index === 1 && progress > 0.82 ? 'Delayed' : 'Running',
+        stopEtas,
+        tripProgress,
+        status,
+        delay: status === 'Delayed' ? {
+          delayDurationMinutes,
+          delayReason: 'Traffic congestion',
+          updatedEta: `${Math.max(arrivalToNextStopMinutes + delayDurationMinutes, 1)} min`,
+        } : null,
         lastUpdated: new Date(now).toISOString(),
       };
     });
+    const stopEtaSummary = (route.stops || []).map((stop) => {
+      const activeEtas = buses
+        .map((bus) => bus.stopEtas.find((eta) => eta.stopOrder === stop.order))
+        .filter((eta) => eta && typeof eta.etaMinutes === 'number')
+        .sort((first, second) => first.etaMinutes - second.etaMinutes);
+
+      return {
+        stopId: this.buildStopId(route, stop),
+        stopName: stop.name,
+        stopOrder: stop.order,
+        nextBusId: activeEtas[0] ? buses.find((bus) => (
+          bus.stopEtas.some((eta) => eta.stopId === activeEtas[0].stopId && eta.etaMinutes === activeEtas[0].etaMinutes)
+        ))?.busId : null,
+        etaMinutes: activeEtas[0]?.etaMinutes || null,
+        estimatedArrivalTime: activeEtas[0]?.estimatedArrivalTime || 'ETA unavailable',
+        status: activeEtas[0]?.status || 'Unavailable',
+      };
+    });
+    const routeChange = this.getRouteChangeNotice(route);
 
     return {
       route: this.formatRoute(route),
       buses,
+      stopEtaSummary,
+      routeChange,
       count: buses.length,
       refreshedAt: new Date(now).toISOString(),
+    };
+  }
+
+  static getRouteChangeNotice(route) {
+    const routeChangeNotices = {
+      DN03: {
+        changeId: 'DN03-son-tra-maintenance',
+        tripId: `${route.routeNumber}-TRIP-01`,
+        reasonForChange: 'Road maintenance near Vo Nguyen Giap Beach Road',
+        changedStops: [
+          { stopName: 'Vo Nguyen Giap Beach Road', changeType: 'TEMPORARY_DELAY' },
+          { stopName: 'Linh Ung Pagoda', changeType: 'UPDATED_ARRIVAL_PATH' },
+        ],
+        updatedRoutePath: 'Buses use the coastal road and may slow down near Son Tra during maintenance.',
+        alternativeSuggestion: 'Board at Dragon Bridge or check ETA before going to Linh Ung Pagoda.',
+        status: 'ACTIVE',
+      },
+      DN10: {
+        changeId: 'DN10-port-event-detour',
+        tripId: `${route.routeNumber}-TRIP-02`,
+        reasonForChange: 'Temporary traffic control near Tien Sa Port',
+        changedStops: [
+          { stopName: 'Son Tra District Center', changeType: 'MODIFIED' },
+          { stopName: 'Tien Sa Port', changeType: 'TEMPORARY_DELAY' },
+        ],
+        updatedRoutePath: 'Route may use a short detour near the port entrance during traffic control.',
+        alternativeSuggestion: 'Use Son Tra District Center as the safer boarding point during the change.',
+        status: 'ACTIVE',
+      },
+    };
+
+    const notice = routeChangeNotices[route.routeNumber];
+
+    if (!notice) {
+      return null;
+    }
+
+    return {
+      routeId: String(route._id),
+      routeNumber: route.routeNumber,
+      ...notice,
+      detectedAt: new Date().toISOString(),
+    };
+  }
+
+  static async getEstimatedArrivalTimes(routeId) {
+    const liveResult = await this.getLiveBusLocations(routeId);
+
+    return {
+      route: liveResult.route,
+      stopEtaSummary: liveResult.stopEtaSummary || [],
+      buses: liveResult.buses || [],
+      tripProgress: (liveResult.buses || []).map((bus) => bus.tripProgress),
+      refreshedAt: liveResult.refreshedAt,
     };
   }
 }
