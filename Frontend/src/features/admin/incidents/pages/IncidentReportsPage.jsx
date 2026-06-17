@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
-import toast from 'react-hot-toast';
+import toast from '../../../../shared/utils/toast.js';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -33,6 +33,9 @@ const incidentTypes = [
   'PASSENGER_CONFLICT',
   'LOST_ITEM',
   'FOUND_ITEM',
+  'GPS_LOST_SIGNAL',
+  'VEHICLE_IDLE_TOO_LONG',
+  'SEVERE_DELAY',
   'OTHER',
 ];
 const severityOptions = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];

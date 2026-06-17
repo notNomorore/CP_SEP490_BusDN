@@ -6,6 +6,7 @@ import OperationIncident from './OperationIncident.js';
 import OperationNotification from './OperationNotification.js';
 import VehicleInspection from './VehicleInspection.js';
 import IncidentReport from '../incidents/IncidentReport.js';
+import VehicleIssueService from '../vehicleIssues/vehicleIssue.service.js';
 
 const TRAFFIC_CATEGORIES = [
   'HEAVY_TRAFFIC',
@@ -787,6 +788,12 @@ export class ScheduleOperationsService {
     );
 
     await Promise.all([
+      VehicleIssueService.createFromDriverReport({
+        assignment,
+        inspection,
+        userId,
+        payload,
+      }),
       TripSchedule.updateOne({ _id: assignment.trip._id }, { $set: { status: 'ASSIGNED' } }),
       FleetBus.updateOne(
         { _id: getScheduleVehicleId(assignment.trip) },
@@ -1372,10 +1379,10 @@ export class ScheduleOperationsService {
             ? `Chiều ảnh hưởng: ${affectedDirection}.`
             : '',
           type === 'ACCIDENT'
-            ? `Có người bị thương: ${Boolean(payload.injuriesReported) ? 'Có' : 'Không'}.`
+            ? `Có người bị thương: ${payload.injuriesReported ? 'Có' : 'Không'}.`
             : '',
           type === 'ACCIDENT'
-            ? `Đã báo cơ quan chức năng: ${Boolean(payload.policeNotified) ? 'Có' : 'Không'}.`
+            ? `Đã báo cơ quan chức năng: ${payload.policeNotified ? 'Có' : 'Không'}.`
             : '',
           type === 'PASSENGER_VIOLATION'
             ? `Loại vi phạm: ${payload.violationCategory}.`

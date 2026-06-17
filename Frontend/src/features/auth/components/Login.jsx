@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import useAuthStore from '../stores/authStore.js';
 import authService from '../services/authService.js';
 import AuthShell from '../components/AuthShell.jsx';
+import getRoleLandingPath from '../utils/roleRedirect.js';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -18,6 +19,7 @@ const Login = () => {
 
   // Forgot password state
   const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotResetToken, setForgotResetToken] = useState('');
   const [forgotOtp, setForgotOtp] = useState('');
   const [forgotPassword, setForgotPassword] = useState('');
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
@@ -33,7 +35,7 @@ const Login = () => {
 
     // Restore session if already logged in
     if (isAuthenticated) {
-      const redirect = searchParams.get('redirect') || '/';
+      const redirect = searchParams.get('redirect') || getRoleLandingPath(useAuthStore.getState().user);
       navigate(redirect);
     }
   }, [isAuthenticated, navigate, searchParams]);
@@ -59,8 +61,12 @@ const Login = () => {
     }
 
     try {
-      await login(identifier, password);
-      // Will navigate on isAuthenticated change
+      const result = await login(identifier, password);
+      if (result.user?.isFirstLogin && ['DRIVER', 'CONDUCTOR', 'BUS_ASSISTANT'].includes(result.user.role)) {
+        navigate('/auth/force-change-password', { replace: true });
+      } else {
+        navigate(getRoleLandingPath(result.user), { replace: true });
+      }
     } catch (err) {
       // Error is already in store
     }
@@ -137,7 +143,9 @@ const Login = () => {
   const returnToLogin = () => {
     setView('login');
     setForgotEmail('');
+    setForgotResetToken('');
     setForgotOtp('');
+    setForgotResetToken('');
     setForgotPassword('');
     setForgotConfirmPassword('');
   };
@@ -217,17 +225,17 @@ const Login = () => {
             </label>
 
             {/* Password Input */}
-            <label className="block space-y-2">
-              <span className="flex items-center justify-between text-sm font-semibold text-on-surface">
+            <div className="block space-y-2">
+              <div className="flex items-center justify-between gap-4 text-sm font-semibold text-on-surface">
                 <span>Password</span>
                 <button
                   type="button"
                   onClick={() => setView('forgot-email')}
-                  className="text-xs font-bold uppercase tracking-[0.18em] text-on-tertiary-fixed-variant hover:text-primary"
+                  className="inline-flex w-fit shrink-0 items-center justify-center text-xs font-bold uppercase tracking-[0.18em] text-on-tertiary-fixed-variant hover:text-primary"
                 >
                   Forgot password?
                 </button>
-              </span>
+              </div>
               <input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
@@ -235,7 +243,7 @@ const Login = () => {
                 placeholder="••••••••"
                 className="w-full rounded-2xl border border-outline-variant/60 bg-white px-4 py-3 text-base text-on-surface placeholder:text-outline/70 focus:border-on-tertiary-container focus:outline-none focus:ring-2 focus:ring-on-tertiary-container/20 shadow-sm"
               />
-            </label>
+            </div>
 
             {/* Remember Device */}
             <div className="flex items-center justify-between gap-4 text-sm text-on-surface-variant">

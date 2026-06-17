@@ -64,7 +64,6 @@ export class AuthController {
         message: 'Registration successful. OTP sent to your email/phone.',
         userId: result.userId,
         expiresAt: result.expiresAt,
-        ...(config.nodeEnv !== 'production' ? { devOtp: result.otp } : {}),
       });
     } catch (error) {
       logger.error('Registration error:', error);
@@ -188,7 +187,6 @@ export class AuthController {
         message: 'Verification OTP resent successfully',
         userId: result.userId,
         expiresAt: result.expiresAt,
-        ...(config.nodeEnv !== 'production' ? { devOtp: result.otp } : {}),
       });
     } catch (error) {
       logger.error('Resend OTP error:', error);
@@ -265,7 +263,7 @@ export class AuthController {
         || error.message.includes('not verified')
         || error.message.includes('locked')
       ) {
-        return res.status(401).json({
+        return res.status(error.code === 'ACCOUNT_LOCKED' ? 423 : 401).json({
           success: false,
           message: error.message,
           ...(error.code === 'ACCOUNT_LOCKED'
@@ -420,7 +418,11 @@ export class AuthController {
     } catch (error) {
       logger.error('Change password error:', error);
 
-      if (error.message.includes('incorrect') || error.message.includes('not found')) {
+      if (
+        error.message.includes('incorrect')
+        || error.message.includes('not found')
+        || error.message.includes('different')
+      ) {
         return res.status(400).json({
           success: false,
           message: error.message,

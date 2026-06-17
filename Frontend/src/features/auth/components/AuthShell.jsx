@@ -17,11 +17,11 @@ const AuthShell = ({
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
 
-      <main className="flex-1 pt-20">
-        <section className="px-4 py-6 md:px-6 md:py-8 lg:px-8">
-          <div className="mx-auto grid max-w-7xl overflow-hidden rounded-[2rem] border border-primary/8 bg-surface-container-lowest shadow-[0_32px_90px_rgba(0,26,15,0.12)] lg:grid-cols-2">
+      <main className="flex-1 pt-[72px]">
+        <section className="min-h-[calc(100vh-72px)]">
+          <div className="grid min-h-[calc(100vh-72px)] w-full overflow-hidden bg-surface-container-lowest lg:grid-cols-2">
             <div
-              className={`relative min-h-[320px] overflow-hidden ${
+              className={`relative min-h-[280px] overflow-hidden lg:min-h-[calc(100vh-72px)] ${
                 isImageRight ? 'lg:order-2' : ''
               }`}
             >
@@ -32,7 +32,7 @@ const AuthShell = ({
               />
               <div className="absolute inset-0 bg-[linear-gradient(160deg,rgba(0,26,15,0.88),rgba(0,49,32,0.55),rgba(43,164,113,0.2))]" />
 
-              <div className="relative flex h-full flex-col justify-end gap-6 p-8 text-surface-bright md:p-10 lg:p-14">
+              <div className="relative flex h-full flex-col justify-end gap-5 p-8 text-surface-bright md:p-10 lg:p-14">
                 <div className="space-y-4">
                   <span className="inline-flex w-fit rounded-full border border-white/15 bg-white/10 px-4 py-1 text-sm font-semibold uppercase tracking-[0.24em] text-tertiary-fixed">
                     {eyebrow}
@@ -63,8 +63,8 @@ const AuthShell = ({
               </div>
             </div>
 
-            <div className="flex items-center justify-center bg-[radial-gradient(circle_at_top,rgba(181,239,209,0.45),transparent_38%),linear-gradient(180deg,#ffffff_0%,#f2fcf8_100%)] px-6 py-10 md:px-10 lg:px-14 lg:py-14">
-              <div className="w-full max-w-md">{children}</div>
+            <div className="flex min-h-[calc(100vh-72px)] items-center justify-center overflow-y-auto bg-white px-6 py-8 md:px-10 lg:px-16 lg:py-10">
+              <div className="w-full max-w-xl">{children}</div>
             </div>
           </div>
         </section>

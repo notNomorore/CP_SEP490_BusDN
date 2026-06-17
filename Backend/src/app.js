@@ -25,6 +25,16 @@ import revenueReportRoutes from './modules/revenue/revenueReport.routes.js';
 import routeEfficiencyRoutes from './modules/analytics/routeEfficiency.routes.js';
 import incidentReportRoutes from './modules/incidents/incidentReport.routes.js';
 import systemMonitoringRoutes from './modules/systemMonitoring/systemMonitoring.routes.js';
+import fareOperationsRoutes from './modules/fareOperations/fareOperations.routes.js';
+import walkInTicketRoutes from './modules/walkInTickets/walkInTicket.routes.js';
+import passengerComplianceRoutes from './modules/passengerCompliance/passengerCompliance.routes.js';
+import fleetOperationsRoutes from './modules/fleetOperations/fleetOperations.routes.js';
+import fleetMonitoringRoutes from './modules/fleetMonitoring/fleetMonitoring.routes.js';
+import systemNotificationRoutes from './modules/systemNotifications/systemNotification.routes.js';
+import vehicleIssueRoutes from './modules/vehicleIssues/vehicleIssue.routes.js';
+import maintenanceApprovalRoutes from './modules/vehicleIssues/maintenanceApproval.routes.js';
+import vehicleReassignmentRoutes from './modules/vehicleReassignments/vehicleReassignment.routes.js';
+import busAssistantRoutes from './modules/busAssistant/busAssistant.routes.js';
 
 export const createApp = () => {
   const app = express();
@@ -55,17 +65,32 @@ export const createApp = () => {
 
   // Rate limiting
   const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // 100 requests per windowMs
-    message: 'Too many requests from this IP, please try again later.',
-    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+    windowMs: config.rateLimit.windowMs,
+    max: config.rateLimit.apiMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => req.path.startsWith('/auth/'),
+    handler: (req, res, _next, options) => res.status(options.statusCode).json({
+      success: false,
+      statusCode: options.statusCode,
+      message: 'Request limit reached. Please wait briefly and try again.',
+      retryAfter: res.getHeader('Retry-After') || null,
+      timestamp: new Date().toISOString(),
+    }),
   });
 
   const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: config.nodeEnv === 'development' ? 100 : 5,
-    message: 'Too many authentication attempts, please try again later.',
+    windowMs: config.rateLimit.windowMs,
+    max: config.rateLimit.authMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res, _next, options) => res.status(options.statusCode).json({
+      success: false,
+      statusCode: options.statusCode,
+      message: 'Too many authentication attempts. Please wait before trying again.',
+      retryAfter: res.getHeader('Retry-After') || null,
+      timestamp: new Date().toISOString(),
+    }),
   });
 
   app.use('/api/', limiter);
@@ -94,7 +119,6 @@ export const createApp = () => {
     );
   });
 
-  // Routes will be mounted here
   app.use('/api/auth', authRoutes);
   app.use('/api/priority-profile', priorityProfileRoutes);
   app.use('/api/customer-support', customerSupportRoutes);
@@ -105,11 +129,19 @@ export const createApp = () => {
   app.use('/api/admin/analytics', routeEfficiencyRoutes);
   app.use('/api/admin/incidents', incidentReportRoutes);
   app.use('/api/admin', systemMonitoringRoutes);
-  // app.use('/api/routes', routeRoutes);
-  app.use('/api/routes', routeRoutes);
+  app.use('/api/admin/fares', fareOperationsRoutes);
+  app.use('/api/admin', walkInTicketRoutes);
+  app.use('/api/admin', passengerComplianceRoutes);
   app.use('/api/bus-stops', busStopRoutes);
+  app.use('/api/admin/fleet', fleetMonitoringRoutes);
+  app.use('/api/admin/notifications', systemNotificationRoutes);
+  app.use('/api/admin/vehicle-issues', vehicleIssueRoutes);
+  app.use('/api/admin/maintenance', maintenanceApprovalRoutes);
+  app.use('/api/admin', vehicleReassignmentRoutes);
+  app.use('/api/bus-assistant', busAssistantRoutes);
+  app.use('/api/fleet-operations', fleetOperationsRoutes);
+  app.use('/api/routes', routeRoutes);
   app.use('/api/schedule-operations', scheduleOperationsRoutes);
-  // etc...
 
   // 404 handler (must be after all routes)
   app.use(notFoundHandler);

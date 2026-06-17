@@ -27,7 +27,7 @@ const PopularRoutes = () => {
   ];
 
   return (
-    <section className="py-24 container mx-auto px-6">
+    <section className="relative z-0 container mx-auto px-6 py-16 lg:py-20">
       <div className="flex justify-between items-end mb-12">
         <div>
           <span className="text-on-tertiary-container font-bold text-sm uppercase tracking-widest">
@@ -45,14 +45,14 @@ const PopularRoutes = () => {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-6 h-[700px]">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-12 md:auto-rows-[260px] lg:auto-rows-[300px]">
         <RouteCard
           route={routes[0]}
-          className="md:col-span-7"
+          className="min-h-[360px] md:col-span-7 md:row-span-2 md:min-h-0"
           isMainCard
         />
 
-        <div className="md:col-span-5 grid grid-rows-2 gap-6">
+        <div className="grid gap-6 md:col-span-5 md:row-span-2 md:grid-rows-2">
           <RouteCard route={routes[1]} />
           <RouteCard route={routes[2]} />
         </div>

@@ -10,6 +10,9 @@ export const INCIDENT_TYPES = [
   'PASSENGER_CONFLICT',
   'LOST_ITEM',
   'FOUND_ITEM',
+  'GPS_LOST_SIGNAL',
+  'VEHICLE_IDLE_TOO_LONG',
+  'SEVERE_DELAY',
   'OTHER',
 ];
 
@@ -86,7 +89,7 @@ const IncidentReportSchema = new mongoose.Schema(
     reporterId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      default: null,
       index: true,
     },
     reporterRole: {

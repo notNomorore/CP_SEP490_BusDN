@@ -1,10 +1,7 @@
-﻿# CP_SEP490_BusDN - Veridian Transit Platform
-
-Demo accounts:
-- nguyennhatminhnau@gmail.com | @Minh123 | admin
-- huhuhichic64@gmail.com | @Minh123 | khách
-- skykidclone80@gmail.com | @Minh123
-
+# CP_SEP490_BusDN
+nguyennhatminhnau@gmail.com |@Minh123| admin
+huhuhichic64@gmail.com | @Minh123 | khách
+skykidclone80@gmail.com / @Minh123
 Modern bus transportation booking system with real-time tracking, ticketing, and comprehensive fleet management.
 
 ## ðŸŽ¯ Project Overview
@@ -170,6 +167,38 @@ npm run test:ui      # Run tests with UI
 - `GET /api/auth/me` - Get current user (protected)
 - `POST /api/auth/change-password` - Change password (protected)
 - `PUT /api/auth/profile` - Update profile (protected)
+
+### Da Nang Bus Stops
+
+- `GET /api/bus-stops` - List active Da Nang bus stops. Supports `search`, `district`, `routeId`, `source`.
+- `GET /api/bus-stops/:id` - Get one bus stop with linked routes.
+- `POST /api/bus-stops/import` - Admin import from configured DanaBus/EcoBus endpoint or posted `stops`.
+- `POST /api/bus-stops/sync` - Admin sync from `DANABUS_STOP_API_URL`.
+- `GET /api/bus-stops/export/csv` - Admin CSV export with columns `stop_code,stop_name,address,latitude,longitude,district,ward,routes,source`.
+
+The live project uses MongoDB/Mongoose, so imported stops are saved into `RouteStation`. This lets the existing admin route creation screen use imported Da Nang stops immediately.
+
+#### Configuring DanaBus/EcoBus import
+
+The current official/public stop endpoint discovered from EcoBus/DanaBus is:
+
+```text
+https://ecobus.danang.gov.vn/api/api/BusStop/GetListBusStop
+```
+
+Set `DANABUS_STOP_API_URL` in `Backend/.env.local` if the endpoint changes. Do not hardcode sample stops.
+
+To find the endpoint:
+
+1. Open the official DanaBus/EcoBus web app in Chrome or Edge.
+2. Open DevTools with `F12`, then go to the `Network` tab.
+3. Filter requests by `Fetch/XHR`.
+4. Use the site feature that lists stops, searches stops, shows nearby stops, or opens route details.
+5. Look for JSON responses containing fields such as stop id/code/name/address/latitude/longitude.
+6. Copy the request URL and configure it as `DANABUS_STOP_API_URL`.
+7. Restart the backend and run `POST /api/bus-stops/sync` from the DanaBus station catalog inside `/admin/routes`.
+
+Only stops inside Da Nang are imported. The bounding box is latitude `15.85..16.25` and longitude `107.95..108.35`. Invalid rows are skipped and written into `BusStopSyncLog` with a reason.
 
 ### Future Endpoints
 

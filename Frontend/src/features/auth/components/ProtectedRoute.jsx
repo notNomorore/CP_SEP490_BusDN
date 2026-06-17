@@ -1,12 +1,15 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
 import useAuthStore from '../stores/authStore.js';
+import getRoleLandingPath from '../utils/roleRedirect.js';
+
+const OPERATIONS_ROLES = ['DRIVER', 'CONDUCTOR', 'BUS_ASSISTANT'];
 
 /**
  * Protected Route - requires authentication
  */
-export const ProtectedRoute = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuthStore();
+export const ProtectedRoute = ({ children, allowFirstLogin = false }) => {
+  const { isAuthenticated, isLoading, user } = useAuthStore();
 
   if (isLoading) {
     return (
@@ -21,6 +24,10 @@ export const ProtectedRoute = ({ children }) => {
 
   if (!isAuthenticated) {
     return <Navigate to="/auth/login" replace />;
+  }
+
+  if (!allowFirstLogin && user?.isFirstLogin && OPERATIONS_ROLES.includes(user.role)) {
+    return <Navigate to="/auth/force-change-password" replace />;
   }
 
   return children;
@@ -30,7 +37,7 @@ export const ProtectedRoute = ({ children }) => {
  * Admin Route - requires admin role
  */
 export const AdminRoute = ({ children }) => {
-  const { isAuthenticated, isLoading, isAdmin } = useAuthStore();
+  const { isAuthenticated, isLoading, isAdmin, user } = useAuthStore();
 
   if (isLoading) {
     return (
@@ -45,6 +52,10 @@ export const AdminRoute = ({ children }) => {
 
   if (!isAuthenticated) {
     return <Navigate to="/auth/login" replace />;
+  }
+
+  if (user?.isFirstLogin && OPERATIONS_ROLES.includes(user.role)) {
+    return <Navigate to="/auth/force-change-password" replace />;
   }
 
   if (!isAdmin()) {
@@ -58,7 +69,7 @@ export const AdminRoute = ({ children }) => {
  * Driver Route - requires driver role
  */
 export const DriverRoute = ({ children }) => {
-  const { isAuthenticated, isLoading, isDriver } = useAuthStore();
+  const { isAuthenticated, isLoading, isDriver, user } = useAuthStore();
 
   if (isLoading) {
     return (
@@ -75,7 +86,43 @@ export const DriverRoute = ({ children }) => {
     return <Navigate to="/auth/login" replace />;
   }
 
+  if (user?.isFirstLogin && OPERATIONS_ROLES.includes(user.role)) {
+    return <Navigate to="/auth/force-change-password" replace />;
+  }
+
   if (!isDriver()) {
+    return <Navigate to="/" replace />;
+  }
+
+  return children;
+};
+
+/**
+ * Bus Assistant Route - requires bus assistant role
+ */
+export const BusAssistantRoute = ({ children }) => {
+  const { isAuthenticated, isLoading, isBusAssistant, user } = useAuthStore();
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-on-surface-variant">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/auth/login" replace />;
+  }
+
+  if (user?.isFirstLogin && OPERATIONS_ROLES.includes(user.role)) {
+    return <Navigate to="/auth/force-change-password" replace />;
+  }
+
+  if (!isBusAssistant()) {
     return <Navigate to="/" replace />;
   }
 
@@ -114,7 +161,7 @@ export const OperationsRoute = ({ children }) => {
  * Public Route - only for non-authenticated users
  */
 export const PublicRoute = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, user } = useAuthStore();
 
   if (isLoading) {
     return (
@@ -128,7 +175,7 @@ export const PublicRoute = ({ children }) => {
   }
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={getRoleLandingPath(user)} replace />;
   }
 
   return children;

@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { format, formatDistanceToNowStrict } from 'date-fns';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import toast from 'react-hot-toast';
+import toast from '../../../shared/utils/toast.js';
 import {
   Bell,
   BusFront,
@@ -13,7 +12,6 @@ import {
   Clock3,
   CreditCard,
   LoaderCircle,
-  LogOut,
   Mail,
   MapPinned,
   Phone,
@@ -87,8 +85,7 @@ const formatDateValue = (value) => {
 };
 
 const ProfilePage = () => {
-  const navigate = useNavigate();
-  const { user, syncUser, logout } = useAuthStore();
+  const { user, syncUser } = useAuthStore();
   const [profile, setProfile] = useState(null);
   const [favoriteRoutes, setFavoriteRoutes] = useState([]);
   const [favoriteStops, setFavoriteStops] = useState([]);
@@ -274,11 +271,6 @@ const ProfilePage = () => {
     } finally {
       setIsPasswordSaving(false);
     }
-  };
-
-  const handleLogout = async () => {
-    await logout();
-    navigate('/auth/login');
   };
 
   if (isLoading) {
@@ -669,18 +661,8 @@ const ProfilePage = () => {
           <SectionCard
             id="security"
             ref={securityRef}
-            title="Security and Logout"
-            description="Manage password security and close the current session from your passenger account."
-            action={(
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="inline-flex items-center gap-2 rounded-full bg-error-container px-5 py-3 text-sm font-bold text-on-error-container hover:opacity-90"
-              >
-                <LogOut className="h-4 w-4" />
-                Logout
-              </button>
-            )}
+            title="Security"
+            description="Manage password security for your passenger account."
           >
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
               <ChangePasswordForm

@@ -18,12 +18,6 @@ const isTerminalStation = (station) => {
     || terminalText.includes('bus station');
 };
 
-const isRealTransitStation = (station) => (
-  station.source !== 'MANUAL'
-  || Boolean(station.sourceId)
-  || Boolean(station.googlePlaceId)
-);
-
 const TerminalPicker = ({
   label,
   placeholder,
@@ -105,14 +99,15 @@ const TerminalPicker = ({
   );
 };
 
-const CreateRouteStep = ({ inputClassName, panelClassName, stations }) => {
+const CreateRouteStep = ({ inputClassName, panelClassName, routes, stations }) => {
   const draft = useRouteWorkflowStore((state) => state.draft);
+  const selectedRouteId = useRouteWorkflowStore((state) => state.selectedRouteId);
   const updateDraft = useRouteWorkflowStore((state) => state.updateDraft);
   const setTerminal = useRouteWorkflowStore((state) => state.setTerminal);
   const setActiveStep = useRouteWorkflowStore((state) => state.setActiveStep);
 
   const terminalOptions = stations
-    .filter(isRealTransitStation)
+    .filter((station) => station.isActive !== false)
     .filter(isTerminalStation)
     .slice()
     .sort((left, right) => (left.stationName || '').localeCompare(right.stationName || ''));
@@ -120,6 +115,13 @@ const CreateRouteStep = ({ inputClassName, panelClassName, stations }) => {
     draft.outboundRoute.startStation,
     draft.outboundRoute.endStation
   );
+  const normalizedRouteCode = draft.routeCode.trim().toUpperCase();
+  const duplicateRoute = normalizedRouteCode
+    ? routes.find((route) => (
+      String(route._id || '') !== String(selectedRouteId || '')
+      && String(route.routeCode || '').trim().toUpperCase() === normalizedRouteCode
+    ))
+    : null;
 
   return (
     <section className={`rounded-2xl border p-6 ${panelClassName}`}>
@@ -134,7 +136,13 @@ const CreateRouteStep = ({ inputClassName, panelClassName, stations }) => {
       <div className="mt-8 grid max-w-5xl gap-5 md:grid-cols-2">
         <label>
           <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Mã tuyến</span>
-          <input className={inputClassName} value={draft.routeCode} onChange={(event) => updateDraft({ routeCode: event.target.value })} placeholder="VD: DN-01" />
+          <input
+            className={`${inputClassName} ${duplicateRoute ? 'border-rose-400 focus:border-rose-500' : ''}`}
+            value={draft.routeCode}
+            onChange={(event) => updateDraft({ routeCode: event.target.value.toUpperCase() })}
+            placeholder="VD: DN-01"
+          />
+          {duplicateRoute ? <span className="mt-2 block text-xs font-bold text-rose-600">Mã tuyến {normalizedRouteCode} đã được sử dụng bởi tuyến {duplicateRoute.routeName}.</span> : null}
         </label>
         <label>
           <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Tên tuyến</span>
@@ -161,7 +169,7 @@ const CreateRouteStep = ({ inputClassName, panelClassName, stations }) => {
       </div>
 
       <div className="mt-8 flex justify-end">
-        <button type="button" onClick={() => setActiveStep(1)} className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-black text-slate-950">
+        <button type="button" disabled={!normalizedRouteCode || Boolean(duplicateRoute)} onClick={() => setActiveStep(1)} className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">
           Lưu và tiếp tục
         </button>
       </div>
