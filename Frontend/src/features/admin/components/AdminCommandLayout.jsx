@@ -26,19 +26,27 @@ const labels = {
 
 const navigation = [
   { path: '/admin/dashboard', label: 'Vận hành đội xe', labelEn: 'Fleet Operations', icon: 'directions_bus' },
+  { path: '/admin/fleet/active-trips', label: 'Giám sát chuyến đang chạy', labelEn: 'Active Trips', icon: 'route' },
+  { path: '/admin/fleet/delayed-trips', label: 'Giám sát chuyến trễ', labelEn: 'Delayed Trips', icon: 'schedule' },
+  { path: '/admin/fleet/locations', label: 'Giám sát vị trí xe', labelEn: 'Fleet Location Monitor', icon: 'location_on' },
   { path: '/admin/routes', label: 'Quản lý tuyến & lịch', labelEn: 'Routes & Scheduling', icon: 'map' },
   { path: '/admin/analytics/route-efficiency', label: 'Phân tích tuyến', labelEn: 'Route Analytics', icon: 'monitoring' },
+  { path: '/admin/analytics/congested-routes', label: 'Tuyến ùn tắc', labelEn: 'Congested Routes', icon: 'traffic' },
+  { path: '/admin/analytics/feedback', label: 'Phân tích phản hồi', labelEn: 'Feedback Analytics', icon: 'reviews' },
   { path: '/admin/fare-operations', label: 'Vận hành giá vé', labelEn: 'Fare Operations', icon: 'payments' },
   { path: '/admin/promotions', label: 'Khuyến mãi', labelEn: 'Promotions', icon: 'sell' },
   { path: '/admin/promotions/statistics', label: 'Thống kê khuyến mãi', labelEn: 'Promotion Statistics', icon: 'bar_chart' },
   { path: '/admin/revenue', label: 'Doanh thu', labelEn: 'Revenue', icon: 'receipt_long' },
   { path: '/admin/walkin-tickets', label: 'Vé mua trực tiếp', labelEn: 'Walk-in Tickets', icon: 'confirmation_number' },
   { path: '/admin/incidents', label: 'Sự cố', labelEn: 'Incidents', icon: 'warning' },
+  { path: '/admin/vehicle-issues', label: 'Sự cố phương tiện', labelEn: 'Vehicle Issues', icon: 'build_circle' },
+  { path: '/admin/maintenance-approval', label: 'Duyệt bảo trì xe', labelEn: 'Maintenance Approval', icon: 'fact_check' },
   { path: '/admin/passenger-compliance', label: 'Vi phạm hành khách', labelEn: 'Passenger Compliance', icon: 'gpp_bad' },
   { path: '/admin/users', label: 'Quản lý người dùng', labelEn: 'User Management', icon: 'manage_accounts' },
   { path: '/admin/staff-performance', label: 'Hiệu suất nhân viên', labelEn: 'Staff Performance', icon: 'query_stats' },
   { path: '/admin/priority-verification', label: 'Xác minh ưu tiên', labelEn: 'Priority Verification', icon: 'verified_user' },
   { path: '/admin/customer-support', label: 'Hỗ trợ khách hàng', labelEn: 'Customer Support', icon: 'support_agent' },
+  { path: '/admin/system-notifications', label: 'Thông báo hệ thống', labelEn: 'System Notifications', icon: 'campaign' },
   { path: '/admin/system-monitoring', label: 'Giám sát hệ thống', labelEn: 'System Monitoring', icon: 'admin_panel_settings' },
 ];
 

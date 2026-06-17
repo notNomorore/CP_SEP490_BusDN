@@ -28,6 +28,12 @@ import fareOperationsRoutes from './modules/fareOperations/fareOperations.routes
 import walkInTicketRoutes from './modules/walkInTickets/walkInTicket.routes.js';
 import passengerComplianceRoutes from './modules/passengerCompliance/passengerCompliance.routes.js';
 import busStopRoutes from './modules/busStops/busStopRoutes.js';
+import fleetOperationsRoutes from './modules/fleetOperations/fleetOperations.routes.js';
+import fleetMonitoringRoutes from './modules/fleetMonitoring/fleetMonitoring.routes.js';
+import systemNotificationRoutes from './modules/systemNotifications/systemNotification.routes.js';
+import vehicleIssueRoutes from './modules/vehicleIssues/vehicleIssue.routes.js';
+import maintenanceApprovalRoutes from './modules/vehicleIssues/maintenanceApproval.routes.js';
+import vehicleReassignmentRoutes from './modules/vehicleReassignments/vehicleReassignment.routes.js';
 
 export const createApp = () => {
   const app = express();
@@ -126,6 +132,13 @@ export const createApp = () => {
   app.use('/api/admin', walkInTicketRoutes);
   app.use('/api/admin', passengerComplianceRoutes);
   app.use('/api/bus-stops', busStopRoutes);
+  app.use('/api/admin/fleet', fleetMonitoringRoutes);
+  app.use('/api/admin/notifications', systemNotificationRoutes);
+  app.use('/api/admin/vehicle-issues', vehicleIssueRoutes);
+  app.use('/api/admin/maintenance', maintenanceApprovalRoutes);
+  app.use('/api/admin', vehicleReassignmentRoutes);
+  app.use('/api/fleet-operations', fleetOperationsRoutes);
+  // app.use('/api/routes', routeRoutes);
   app.use('/api/routes', routeRoutes);
   app.use('/api/schedule-operations', scheduleOperationsRoutes);
 

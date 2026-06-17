@@ -140,6 +140,7 @@ const Login = () => {
     setForgotEmail('');
     setForgotResetToken('');
     setForgotOtp('');
+    setForgotResetToken('');
     setForgotPassword('');
     setForgotConfirmPassword('');
   };
