@@ -366,8 +366,8 @@ export class ScheduleOperationsService {
       ));
   }
 
-  static async listShiftSchedule() {
-    return [];
+  static async listShiftSchedule(userId, role, query = {}) {
+    return this.listAssignedTrips(userId, role, query);
   }
 
   static async listOperationNotifications(userId, role, query = {}) {

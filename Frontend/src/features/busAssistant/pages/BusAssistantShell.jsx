@@ -3,6 +3,8 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   BadgeCheck,
   Banknote,
+  BellRing,
+  CalendarDays,
   ClipboardCheck,
   FileWarning,
   LogOut,
@@ -10,6 +12,7 @@ import {
   Pencil,
   QrCode,
   ReceiptText,
+  Route,
   Save,
   Sun,
   UserRound,
@@ -21,6 +24,9 @@ import { getBusAssistantText } from '../busAssistantI18n.js';
 import useAuthStore from '../../auth/stores/authStore.js';
 
 const navItems = [
+  { to: '/bus-assistant/assigned-trips', labelKey: 'assignedTrips', label: 'Chuyến được phân công', icon: Route },
+  { to: '/bus-assistant/shift-schedule', labelKey: 'shiftSchedule', label: 'Lịch ca làm việc', icon: CalendarDays },
+  { to: '/bus-assistant/operation-notifications', labelKey: 'operationNotifications', label: 'Thông báo vận hành', icon: BellRing },
   { to: '/bus-assistant/validate-ticket', labelKey: 'validateQr', icon: QrCode },
   { to: '/bus-assistant/walkin-ticket', labelKey: 'walkInTicket', icon: ReceiptText },
   { to: '/bus-assistant/incident-reports', labelKey: 'incidentReports', label: 'Báo cáo sự cố', icon: FileWarning },
@@ -81,7 +87,7 @@ const BusAssistantShell = () => {
         <div className="flex w-full flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between xl:px-10 2xl:px-12">
           <button
             type="button"
-            onClick={() => navigate('/bus-assistant/validate-ticket')}
+            onClick={() => navigate('/bus-assistant/assigned-trips')}
             className="flex items-center gap-3 text-left"
           >
             <span className="grid h-10 w-10 place-items-center rounded bg-emerald-400 text-slate-950">

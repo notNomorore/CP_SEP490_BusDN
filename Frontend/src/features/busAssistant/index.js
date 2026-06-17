@@ -1,4 +1,9 @@
 export { default as BusAssistantShell } from './pages/BusAssistantShell.jsx';
+export {
+  AssignedTripsPage,
+  OperationNotificationsPage,
+  ShiftSchedulePage,
+} from './pages/OperationsPages.jsx';
 export { default as ValidateQrTicketPage } from './pages/ValidateQrTicketPage.jsx';
 export { default as CreateWalkInTicketPage } from './pages/CreateWalkInTicketPage.jsx';
 export { default as IncidentReportPage } from './pages/IncidentReportPage.jsx';
