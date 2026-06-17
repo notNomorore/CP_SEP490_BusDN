@@ -62,6 +62,9 @@ export const adminService = {
   updateBusStop: async (stopId, data) => {
     return apiClient.put(`/bus-stops/${stopId}`, data);
   },
+  deleteBusStop: async (stopId) => {
+    return apiClient.delete(`/bus-stops/${stopId}`);
+  },
   syncDanaBusStops: async () => {
     return apiClient.post('/bus-stops/sync');
   },

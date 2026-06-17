@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
+import toast from 'react-hot-toast';
 import 'leaflet/dist/leaflet.css';
 import Header from '../../../../shared/components/navigation/Header.jsx';
 import { HOME_BUS_HERO_IMAGE } from '../../../../shared/constants/images.js';
@@ -179,13 +180,7 @@ const draftStopMarkerIcon = () => L.divIcon({
 });
 
 const StopMapPicker = ({
-  addressSearchLoading,
-  addressSearchResults,
   form,
-  mapSearchQuery,
-  mapSearchResults,
-  onMapSearchChange,
-  onPickAddress,
   onPickLocation,
   onPickStation,
   stations,
@@ -290,68 +285,6 @@ const StopMapPicker = ({
   return (
     <div className="relative min-h-[320px] overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
       <div ref={elementRef} className="h-[360px] w-full" />
-      <div
-        className="absolute left-3 right-3 top-3 z-[500] max-w-[380px] rounded-xl border border-slate-200/80 bg-white/95 p-2.5 shadow-lg backdrop-blur"
-        onClick={(event) => event.stopPropagation()}
-        onDoubleClick={(event) => event.stopPropagation()}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <label className="block">
-          <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Tìm nhanh trên map</span>
-          <input
-            value={mapSearchQuery}
-            onChange={(event) => onMapSearchChange(event.target.value)}
-            placeholder="Nhập mã, tên hoặc địa chỉ trạm..."
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100"
-          />
-        </label>
-        <div className="mt-2 max-h-48 space-y-1.5 overflow-y-auto pr-1">
-          {addressSearchResults.length ? (
-            <div className="pb-1">
-              <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-[0.16em] text-cyan-700">Địa chỉ trên bản đồ</p>
-              <div className="space-y-1.5">
-                {addressSearchResults.map((result) => (
-                  <button
-                    key={`address-${result.id}`}
-                    type="button"
-                    onClick={() => onPickAddress(result)}
-                    className="w-full rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-left text-xs transition hover:border-cyan-400 hover:bg-white hover:shadow-sm"
-                  >
-                    <span className="block text-sm font-black text-slate-900">{result.displayName}</span>
-                    <span className="mt-1 block font-bold text-cyan-700">Bấm để hiển thị vị trí trên bản đồ</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          {mapSearchResults.length ? <p className="px-1 pt-1 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-700">Trạm đã có</p> : null}
-          {mapSearchResults.map((station) => (
-            <button
-              key={station._id}
-              type="button"
-              onClick={() => onPickStation(station)}
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs transition hover:border-emerald-300 hover:bg-white hover:shadow-sm"
-            >
-              <span className="block truncate text-sm font-black text-slate-900">{station.stationCode ? `${station.stationCode} - ` : ''}{station.stationName}</span>
-              <span className="mt-0.5 block truncate text-slate-500">{station.address}</span>
-              <span className="mt-1 grid grid-cols-2 gap-1 text-[11px] font-bold text-emerald-700">
-                <span className="rounded-md bg-emerald-50 px-2 py-1">Vĩ độ {Number(station.latitude).toFixed(6)}</span>
-                <span className="rounded-md bg-emerald-50 px-2 py-1">Kinh độ {Number(station.longitude).toFixed(6)}</span>
-              </span>
-            </button>
-          ))}
-          {addressSearchLoading ? (
-            <div className="rounded-lg border border-dashed border-cyan-200 bg-cyan-50 p-3 text-xs font-semibold text-cyan-700">
-              Đang tìm địa chỉ...
-            </div>
-          ) : null}
-          {mapSearchQuery.trim() && !mapSearchResults.length && !addressSearchResults.length && !addressSearchLoading ? (
-            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-500">
-              Không tìm thấy địa chỉ hoặc trạm phù hợp.
-            </div>
-          ) : null}
-        </div>
-      </div>
       <div className="pointer-events-none absolute bottom-4 left-4 z-[500] max-w-[260px] rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 text-xs font-semibold leading-5 text-slate-700 shadow-md backdrop-blur">
         Bấm bản đồ để lấy tọa độ. Kéo marker xanh để chỉnh vị trí trạm.
       </div>
@@ -1163,19 +1096,22 @@ const FleetOperationsPanel = ({ buses, onSaved, routes }) => {
 };
 
 const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
-  const [query, setQuery] = useState('');
+  const [addressQuery, setAddressQuery] = useState('');
+  const [stationQuery, setStationQuery] = useState('');
   const [editingStationId, setEditingStationId] = useState('');
   const [form, setForm] = useState(emptyStopForm);
   const [errors, setErrors] = useState({});
   const [message, setMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [deletingStationId, setDeletingStationId] = useState('');
   const [addressSearchResults, setAddressSearchResults] = useState([]);
   const [addressSearchLoading, setAddressSearchLoading] = useState(false);
-  const skipStationAutoPickRef = useRef(false);
+  const [selectedAddressResult, setSelectedAddressResult] = useState(null);
 
   const matchingStations = useMemo(() => {
-    const normalizedQuery = normalizeStationSearch(query);
+    const normalizedQuery = normalizeStationSearch(stationQuery);
     return stations
+      .filter((station) => station.source === 'MANUAL')
       .filter((station) => !normalizedQuery || [
         station.stationCode,
         station.stationName,
@@ -1183,47 +1119,58 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
         station.district,
         station.ward,
       ].some((value) => normalizeStationSearch(value).includes(normalizedQuery)));
-  }, [query, stations]);
-  const filteredStations = useMemo(() => matchingStations.slice(0, 6), [matchingStations]);
-  const mapSearchResults = useMemo(() => {
-    if (!query.trim()) return [];
-    return matchingStations
-      .filter((station) => isInsideDaNang(station.latitude, station.longitude))
-      .slice(0, 8);
-  }, [matchingStations, query]);
+  }, [stationQuery, stations]);
+  const filteredStations = matchingStations;
   const quickSuggestions = useMemo(() => {
-    if (filteredStations.length) return filteredStations.slice(0, 5);
     return stations
       .filter((station) => isInsideDaNang(station.latitude, station.longitude))
       .slice(0, 5);
-  }, [filteredStations, stations]);
+  }, [stations]);
 
-  useEffect(() => {
-    const searchText = query.trim();
+  const searchAddress = async (event) => {
+    event?.preventDefault();
+    const searchText = addressQuery.trim();
     if (searchText.length < 3) {
       setAddressSearchResults([]);
-      setAddressSearchLoading(false);
-      return undefined;
+      setSelectedAddressResult(null);
+      setMessage('Nhập ít nhất 3 ký tự để tìm địa điểm.');
+      return;
     }
 
-    let active = true;
-    const timeoutId = window.setTimeout(async () => {
-      setAddressSearchLoading(true);
-      try {
-        const response = await adminService.searchStopAddresses(searchText);
-        if (active) setAddressSearchResults(response.results || []);
-      } catch (_error) {
-        if (active) setAddressSearchResults([]);
-      } finally {
-        if (active) setAddressSearchLoading(false);
+    setAddressSearchLoading(true);
+    setSelectedAddressResult(null);
+    setMessage('');
+    try {
+      const response = await adminService.searchStopAddresses(searchText);
+      const results = response.results || [];
+      setAddressSearchResults(results);
+      const firstResult = results[0];
+      if (firstResult) {
+        setSelectedAddressResult(firstResult);
+        setEditingStationId('');
+        setForm((current) => ({
+          ...current,
+          _id: '',
+          address: firstResult.address || firstResult.displayName || current.address,
+          latitude: Number(firstResult.latitude).toFixed(6),
+          longitude: Number(firstResult.longitude).toFixed(6),
+          district: firstResult.district || current.district,
+          ward: firstResult.ward || current.ward,
+        }));
+        setErrors((current) => ({ ...current, address: undefined, latitude: undefined, longitude: undefined }));
+        setMessage(firstResult.exactStreetNumber
+          ? 'Đã hiển thị đúng vị trí số nhà trên bản đồ.'
+          : 'Đã hiển thị vị trí gần đúng trên bản đồ. Có thể kéo marker xanh để chỉnh lại.');
+      } else {
+        setMessage('Không tìm thấy địa điểm phù hợp.');
       }
-    }, 350);
-
-    return () => {
-      active = false;
-      window.clearTimeout(timeoutId);
-    };
-  }, [query]);
+    } catch (error) {
+      setAddressSearchResults([]);
+      setMessage(error?.message || 'Không thể tìm địa điểm.');
+    } finally {
+      setAddressSearchLoading(false);
+    }
+  };
 
   const resetForm = () => {
     setEditingStationId('');
@@ -1231,10 +1178,15 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
     setErrors({});
     setMessage('');
     setAddressSearchResults([]);
+    setSelectedAddressResult(null);
+    setAddressQuery('');
+    setStationQuery('');
   };
 
-  const handleStationSearchChange = (value) => {
-    setQuery(value);
+  const handleAddressSearchChange = (value) => {
+    setAddressQuery(value);
+    setAddressSearchResults([]);
+    setSelectedAddressResult(null);
     setEditingStationId('');
   };
 
@@ -1268,8 +1220,30 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
     editStation(station);
     setMessage('Đã điền thông tin từ trạm gợi ý.');
   };
+
+  const deleteStation = async (station) => {
+    const stationName = station.stationName || 'trạm này';
+    if (!window.confirm(`Xóa trạm "${stationName}"? Thao tác này không thể hoàn tác.`)) return;
+
+    setDeletingStationId(station._id);
+    setMessage('');
+    try {
+      await adminService.deleteBusStop(station._id);
+      if (String(editingStationId) === String(station._id)) resetForm();
+      await onSaved?.();
+      const successMessage = `Đã xóa trạm "${stationName}".`;
+      setMessage(successMessage);
+      toast.success(successMessage);
+    } catch (error) {
+      const errorMessage = error?.message || 'Không thể xóa trạm.';
+      setMessage(errorMessage);
+      toast.error(errorMessage);
+    } finally {
+      setDeletingStationId('');
+    }
+  };
   const pickAddressResult = (result) => {
-    skipStationAutoPickRef.current = true;
+    setSelectedAddressResult(result);
     setEditingStationId('');
     setForm((current) => ({
       ...current,
@@ -1280,45 +1254,38 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
       district: result.district || current.district,
       ward: result.ward || current.ward,
     }));
-    setQuery(result.displayName || result.address || query);
     setErrors((current) => ({ ...current, address: undefined, latitude: undefined, longitude: undefined }));
     setMessage('Đã chọn địa chỉ và hiển thị vị trí trên bản đồ.');
-    setAddressSearchResults([]);
   };
 
-  useEffect(() => {
-    const normalizedQuery = normalizeStationSearch(query);
-    if (!normalizedQuery || editingStationId) return;
-    if (skipStationAutoPickRef.current) {
-      skipStationAutoPickRef.current = false;
+  const fillStopFromSearch = () => {
+    const result = selectedAddressResult || addressSearchResults[0];
+    if (!result) {
+      setMessage('Hãy tìm và chọn một địa điểm trước khi thêm trạm nhanh.');
       return;
     }
 
-    const exactMatch = mapSearchResults.find((station) => [
-      station.stationCode,
-      station.stationName,
-    ].some((value) => normalizeStationSearch(value) === normalizedQuery));
-    const stationToRender = exactMatch || (mapSearchResults.length === 1 ? mapSearchResults[0] : null);
-    if (!stationToRender) return;
-
-    setEditingStationId(stationToRender._id);
-    setForm({
-      _id: stationToRender._id || '',
-      stationCode: stationToRender.stationCode || '',
-      stationName: stationToRender.stationName || '',
-      address: stationToRender.address || '',
-      latitude: stationToRender.latitude ?? '',
-      longitude: stationToRender.longitude ?? '',
-      district: stationToRender.district || '',
-      ward: stationToRender.ward || '',
-      isMainStation: Boolean(stationToRender.isMainStation),
-    });
-    setErrors((current) => ({ ...current, latitude: undefined, longitude: undefined }));
-  }, [editingStationId, mapSearchResults, query]);
+    const suggestedName = String(result.displayName || result.address || addressQuery)
+      .split(',')[0]
+      .trim();
+    setEditingStationId('');
+    setSelectedAddressResult(result);
+    setForm((current) => ({
+      ...current,
+      _id: '',
+      stationName: current.stationName || suggestedName,
+      address: result.address || result.displayName || current.address,
+      latitude: Number(result.latitude).toFixed(6),
+      longitude: Number(result.longitude).toFixed(6),
+      district: result.district || current.district,
+      ward: result.ward || current.ward,
+    }));
+    setErrors((current) => ({ ...current, stationName: undefined, address: undefined, latitude: undefined, longitude: undefined }));
+    setMessage('Đã điền nhanh tên trạm, địa chỉ và tọa độ.');
+  };
 
   const validateForm = () => {
     const nextErrors = {};
-    if (!form.stationCode.trim()) nextErrors.stationCode = 'Nhập mã trạm';
     if (!form.stationName.trim()) nextErrors.stationName = 'Nhập tên trạm';
     if (!form.address.trim()) nextErrors.address = 'Nhập địa chỉ';
     if (!Number.isFinite(Number(form.latitude))) nextErrors.latitude = 'Tọa độ không hợp lệ';
@@ -1351,9 +1318,12 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
       }
       resetForm();
       setMessage(successMessage);
+      toast.success(successMessage);
       await onSaved?.();
     } catch (error) {
-      setMessage(error?.message || 'Không thể lưu trạm.');
+      const errorMessage = error?.message || 'Không thể lưu trạm.';
+      setMessage(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setIsSaving(false);
     }
@@ -1380,23 +1350,66 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
             <h3 className="text-sm font-black text-slate-950">Thông tin trạm</h3>
             <p className="mt-1 text-xs text-slate-500">Nhập thông tin cơ bản hoặc chọn nhanh một trạm trên bản đồ.</p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label>
-              <span className={`mb-1 block text-[11px] font-bold uppercase tracking-[0.18em] ${labelClassName}`}>Mã trạm</span>
-              <input className={stopInputClassName} value={form.stationCode} onChange={(event) => setForm((current) => ({ ...current, stationCode: event.target.value }))} />
-              {errors.stationCode ? <span className="mt-1 block text-xs text-rose-600">{errors.stationCode}</span> : null}
-            </label>
-            <label>
-              <span className={`mb-1 block text-[11px] font-bold uppercase tracking-[0.18em] ${labelClassName}`}>Tên trạm</span>
-              <input className={stopInputClassName} value={form.stationName} onChange={(event) => setForm((current) => ({ ...current, stationName: event.target.value }))} />
-              {errors.stationName ? <span className="mt-1 block text-xs text-rose-600">{errors.stationName}</span> : null}
-            </label>
-          </div>
+          <label>
+            <span className={`mb-1 block text-[11px] font-bold uppercase tracking-[0.18em] ${labelClassName}`}>Tên trạm</span>
+            <input className={stopInputClassName} value={form.stationName} onChange={(event) => setForm((current) => ({ ...current, stationName: event.target.value }))} />
+            {errors.stationName ? <span className="mt-1 block text-xs text-rose-600">{errors.stationName}</span> : null}
+          </label>
           <label>
             <span className={`mb-1 block text-[11px] font-bold uppercase tracking-[0.18em] ${labelClassName}`}>Địa chỉ</span>
             <input className={stopInputClassName} value={form.address} onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))} />
             {errors.address ? <span className="mt-1 block text-xs text-rose-600">{errors.address}</span> : null}
           </label>
+          <div>
+            <span className={`mb-1 block text-[11px] font-bold uppercase tracking-[0.18em] ${labelClassName}`}>Tìm địa điểm</span>
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_44px_160px]">
+              <input
+                className={stopInputClassName}
+                value={addressQuery}
+                onChange={(event) => handleAddressSearchChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') searchAddress(event);
+                }}
+                placeholder="Nhập địa chỉ hoặc tên địa điểm..."
+              />
+              <button
+                type="button"
+                onClick={searchAddress}
+                disabled={addressSearchLoading}
+                aria-label="Tìm địa điểm"
+                className="h-11 rounded-lg border border-slate-200 bg-white text-lg font-black text-slate-700 transition hover:border-cyan-300 hover:text-cyan-700 disabled:opacity-60"
+              >
+                {addressSearchLoading ? '…' : '⌕'}
+              </button>
+              <button
+                type="button"
+                onClick={fillStopFromSearch}
+                disabled={!selectedAddressResult && !addressSearchResults.length}
+                className="h-11 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-black text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Thêm trạm nhanh
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">Chỉ tìm trong khu vực Đà Nẵng. Chọn kết quả để xem vị trí, sau đó có thể kéo marker để chỉnh tọa độ.</p>
+            {addressSearchResults.length ? (
+              <div className="mt-2 grid max-h-40 gap-1.5 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
+                {addressSearchResults.map((result) => {
+                  const isSelected = String(selectedAddressResult?.id || '') === String(result.id || '');
+                  return (
+                    <button
+                      key={`address-${result.id}`}
+                      type="button"
+                      onClick={() => pickAddressResult(result)}
+                      className={`rounded-lg border px-3 py-2 text-left text-xs transition ${isSelected ? 'border-cyan-400 bg-cyan-50' : 'border-slate-200 hover:border-cyan-300 hover:bg-slate-50'}`}
+                    >
+                      <span className="block text-sm font-black text-slate-900">{result.displayName}</span>
+                      <span className="mt-1 block font-semibold text-slate-500">{result.exactStreetNumber ? 'Khớp số nhà' : 'Bấm để xem trên bản đồ'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <label>
               <span className={`mb-1 block text-[11px] font-bold uppercase tracking-[0.18em] ${labelClassName}`}>Latitude</span>
@@ -1429,13 +1442,7 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
         </form>
         <div className="grid content-start gap-3">
           <StopMapPicker
-            addressSearchLoading={addressSearchLoading}
-            addressSearchResults={addressSearchResults}
             form={form}
-            mapSearchQuery={query}
-            mapSearchResults={mapSearchResults}
-            onMapSearchChange={handleStationSearchChange}
-            onPickAddress={pickAddressResult}
             onPickLocation={pickMapLocation}
             onPickStation={pickSuggestedStation}
             stations={stations}
@@ -1463,20 +1470,36 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
       <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-black text-slate-950">Danh sách trạm</h3>
-            <p className="mt-1 text-xs text-slate-500">Tìm trạm đã có để cập nhật nhanh thông tin.</p>
+            <h3 className="text-sm font-black text-slate-950">Trạm được tạo mới</h3>
+            <p className="mt-1 text-xs text-slate-500">Xem, sửa hoặc xóa các trạm do admin tạo thủ công.</p>
           </div>
           <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-slate-600">{filteredStations.length}</span>
         </div>
-        <input className={stopInputClassName} placeholder="Tìm trạm để cập nhật..." value={query} onChange={(event) => handleStationSearchChange(event.target.value)} />
+        <input className={stopInputClassName} placeholder="Tìm theo tên hoặc địa chỉ..." value={stationQuery} onChange={(event) => setStationQuery(event.target.value)} />
         <div className="mt-3 grid max-h-64 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
           {filteredStations.map((station) => (
-            <button key={station._id} type="button" onClick={() => editStation(station)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-emerald-300 hover:shadow-sm">
-              <span className="block font-black text-slate-900">{station.stationCode} - {station.stationName}</span>
-              <span className="mt-1 block text-xs text-slate-500">{station.address}</span>
+            <div key={station._id} className="rounded-lg border border-slate-200 bg-white p-3 text-sm transition hover:border-emerald-300 hover:shadow-sm">
+              <span className="block font-black text-slate-900">{station.stationName}</span>
+              <span className="mt-1 block text-xs leading-5 text-slate-500">{station.address}</span>
+              <span className="mt-1 block text-xs text-slate-400">
+                {Number(station.latitude).toFixed(6)}, {Number(station.longitude).toFixed(6)}
+              </span>
               <span className="mt-1 block text-xs text-slate-400">{station.routeAssignments?.length || 0} lượt gán | {routes.length} tuyến trong thư viện</span>
-            </button>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => editStation(station)} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-100">
+                  Xem / Sửa
+                </button>
+                <button type="button" onClick={() => deleteStation(station)} disabled={deletingStationId === station._id} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:opacity-50">
+                  {deletingStationId === station._id ? 'Đang xóa...' : 'Xóa'}
+                </button>
+              </div>
+            </div>
           ))}
+          {!filteredStations.length ? (
+            <div className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-500 sm:col-span-2 xl:col-span-3">
+              {stationQuery ? 'Không tìm thấy trạm được tạo mới phù hợp.' : 'Chưa có trạm nào do admin tạo.'}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

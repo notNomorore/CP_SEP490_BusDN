@@ -13,12 +13,6 @@ const directionTabs = [
   { key: 'inboundRoute', label: 'Chiều về' },
 ];
 
-const isRealTransitStation = (station) => (
-  station.source !== 'MANUAL'
-  || Boolean(station.sourceId)
-  || Boolean(station.googlePlaceId)
-);
-
 const DefinePathStep = ({ inputClassName, panelClassName, stations, isDarkMode }) => {
   const [stationQuery, setStationQuery] = useState('');
   const [selectedStopIndex, setSelectedStopIndex] = useState(null);
@@ -71,7 +65,6 @@ const DefinePathStep = ({ inputClassName, panelClassName, stations, isDarkMode }
     if (!query) return [];
     return stations
       .filter((station) => station.isActive !== false)
-      .filter(isRealTransitStation)
       .filter((station) => [
         station.stationName,
         station.stationCode,

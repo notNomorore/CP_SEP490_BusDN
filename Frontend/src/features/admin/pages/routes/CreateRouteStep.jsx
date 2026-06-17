@@ -18,12 +18,6 @@ const isTerminalStation = (station) => {
     || terminalText.includes('bus station');
 };
 
-const isRealTransitStation = (station) => (
-  station.source !== 'MANUAL'
-  || Boolean(station.sourceId)
-  || Boolean(station.googlePlaceId)
-);
-
 const TerminalPicker = ({
   label,
   placeholder,
@@ -113,7 +107,7 @@ const CreateRouteStep = ({ inputClassName, panelClassName, routes, stations }) =
   const setActiveStep = useRouteWorkflowStore((state) => state.setActiveStep);
 
   const terminalOptions = stations
-    .filter(isRealTransitStation)
+    .filter((station) => station.isActive !== false)
     .filter(isTerminalStation)
     .slice()
     .sort((left, right) => (left.stationName || '').localeCompare(right.stationName || ''));
