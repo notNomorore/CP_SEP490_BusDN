@@ -2,13 +2,21 @@ import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../../../features/auth/stores/authStore.js';
 import useLanguage from '../../hooks/useLanguage.js';
+import apiClient from '../../services/apiClient.js';
+import useTheme from '../../hooks/useTheme.js';
+import getRoleLandingPath from '../../../features/auth/utils/roleRedirect.js';
 
-const Header = () => {
+const Header = ({ forceDarkMode = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isAuthenticated, isAdmin, isDriver, isBusAssistant, logout } = useAuthStore();
   const { language, toggleLanguage } = useLanguage();
   const [isScrolled, setIsScrolled] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [selectedNotification, setSelectedNotification] = useState(null);
+  const { isDarkMode } = useTheme();
+  const effectiveDarkMode = forceDarkMode || isDarkMode;
 
   useEffect(() => {
     const handleScroll = () => {
@@ -34,15 +42,62 @@ const Header = () => {
   ].filter((link) => (!link.adminOnly || isAdmin()) && (!link.hideForAdmin || !isAdmin()));
 
   const authCta =
-    location.pathname === '/auth/register'
+    location.pathname === '/auth/register' || location.pathname === '/register'
       ? { label: 'Sign In', path: '/auth/login' }
-      : location.pathname === '/auth/login'
-        ? { label: 'Create Account', path: '/auth/register' }
-        : { label: 'Sign In', path: '/auth/login' };
+      : { label: 'Create Account', path: '/auth/register' };
 
-  const displayName = user?.fullName?.trim() || 'Passenger';
+  const displayName = user?.fullName?.trim() || 'Hanh khach';
   const profileInitial = displayName.charAt(0).toUpperCase();
   const nextLanguageLabel = language === 'en' ? 'Chuyển sang tiếng Việt' : 'Switch to English';
+  const isOperationsUser = isAuthenticated && (isDriver() || isBusAssistant());
+  const unreadNotificationCount = notifications.filter((notification) => !notification.isRead).length;
+
+  useEffect(() => {
+    if (!isOperationsUser) {
+      setNotifications([]);
+      setIsNotificationsOpen(false);
+      setSelectedNotification(null);
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    const loadNotifications = async () => {
+      try {
+        const response = await apiClient.get('/schedule-operations/operation-notifications');
+        if (isMounted) {
+          setNotifications(response.data?.notifications || []);
+        }
+      } catch {
+        if (isMounted) {
+          setNotifications([]);
+        }
+      }
+    };
+
+    loadNotifications();
+    const intervalId = window.setInterval(loadNotifications, 60000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [isOperationsUser]);
+
+  const formatNotificationTime = (value) => {
+    if (!value) return '';
+
+    try {
+      return new Intl.DateTimeFormat('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(new Date(value));
+    } catch {
+      return '';
+    }
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -50,7 +105,7 @@ const Header = () => {
   };
 
   const handleBrandClick = () => {
-    navigate(isAdmin() ? '/admin/dashboard' : '/');
+    navigate(getRoleLandingPath(user));
   };
 
   const handleNavClick = (event, link) => {
@@ -75,19 +130,27 @@ const Header = () => {
   return (
     <header
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        isScrolled
-          ? 'glass-nav shadow-2xl shadow-primary/20'
-          : 'bg-primary shadow-2xl shadow-primary/20'
+        effectiveDarkMode
+          ? (
+            isScrolled
+              ? 'glass-nav-dark shadow-2xl shadow-primary/20'
+              : 'bg-primary shadow-2xl shadow-primary/20'
+          )
+          : (
+            isScrolled
+              ? 'glass-nav-light shadow-xl shadow-slate-300/30'
+              : 'bg-white/95 shadow-lg shadow-slate-300/20'
+          )
       }`}
     >
       <div className="flex justify-between items-center w-full px-6 py-4 max-w-screen-2xl mx-auto">
-        {/* Logo */}
         <div className="flex items-center gap-8">
           <button
             onClick={handleBrandClick}
             className="text-2xl font-display font-black tracking-tight text-surface-bright hover:opacity-90 transition-opacity"
+            type="button"
           >
-            Veridian Transit
+            BusDN
           </button>
 
           {/* Navigation - Hidden on mobile */}
@@ -113,9 +176,7 @@ const Header = () => {
           </nav>
         </div>
 
-        {/* Right Section */}
         <div className="flex items-center gap-4 text-on-primary">
-          {/* Support Info - Hidden on mobile */}
           <div className="hidden md:flex items-center gap-4 mr-4">
             <span className="text-label-md font-body opacity-80">Hotline 24/7</span>
             <button
@@ -139,72 +200,205 @@ const Header = () => {
                   <button
                     type="button"
                     onClick={() => navigate('/admin/routes')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
                   >
                     Route Management
                   </button>
                   <button
                     type="button"
                     onClick={() => navigate('/admin/users')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
                   >
                     User Accounts
                   </button>
                   <button
                     type="button"
                     onClick={() => navigate('/admin/priority-verification')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
                   >
                     Verify Profiles
                   </button>
                   <button
                     type="button"
                     onClick={() => navigate('/admin/customer-support')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
                   >
                     Customer Support
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/admin/routes')}
+                    className={`rounded-full border px-4 py-2 text-sm font-semibold ${
+                      location.pathname === '/admin/routes'
+                        ? 'border-emerald-300 bg-emerald-300 text-slate-950'
+                        : effectiveDarkMode
+                          ? 'border-white/10 text-surface-bright hover:bg-white/10'
+                          : 'border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    Route Control
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/admin/users')}
+                    className={`rounded-full border px-4 py-2 text-sm font-semibold ${
+                      location.pathname === '/admin/users'
+                        ? 'border-emerald-300 bg-emerald-300 text-slate-950'
+                        : effectiveDarkMode
+                          ? 'border-white/10 text-surface-bright hover:bg-white/10'
+                          : 'border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    Accounts
+                  </button>
                 </>
               ) : isDriver() || isBusAssistant() ? (
-                <button
-                  type="button"
-                  onClick={() => navigate('/operations/schedule')}
-                  className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
-                >
-                  Operations Schedule
-                </button>
+                <>
+                  {isBusAssistant() ? (
+                    <button
+                      type="button"
+                      onClick={() => navigate('/bus-assistant/validate-ticket')}
+                      className="hidden rounded-full border border-emerald-300 bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-200 lg:inline-flex"
+                    >
+                      Bus Assistant
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => navigate(isBusAssistant() ? '/bus-assistant/shift-revenue' : '/operations/schedule')}
+                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                  >
+                    {isBusAssistant() ? 'Shift Revenue' : 'Operations Schedule'}
+                  </button>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsNotificationsOpen((current) => !current);
+                        setSelectedNotification(null);
+                      }}
+                      className="relative inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/10 text-surface-bright hover:bg-white/10"
+                      aria-label="Operation notifications"
+                    >
+                      <span className="material-symbols-outlined text-[22px]">notifications</span>
+                      {unreadNotificationCount > 0 ? (
+                        <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-black text-white">
+                          {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
+                        </span>
+                      ) : null}
+                    </button>
+
+                    {isNotificationsOpen ? (
+                      <div className="absolute right-0 top-14 z-[60] w-[360px] overflow-hidden rounded-2xl border border-white/15 bg-white text-slate-950 shadow-2xl">
+                        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                          <div>
+                            <p className="text-sm font-black">Thông báo vận hành</p>
+                            <p className="text-xs text-slate-500">
+                              {notifications.length} thông báo từ điều hành
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => navigate('/operations/schedule')}
+                            className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
+                          >
+                            Lịch chạy
+                          </button>
+                        </div>
+
+                        <div className="max-h-[360px] overflow-y-auto">
+                          {!notifications.length ? (
+                            <div className="px-4 py-8 text-center text-sm text-slate-500">
+                              Chưa có thông báo vận hành.
+                            </div>
+                          ) : notifications.map((notification) => (
+                            <button
+                              key={notification.id}
+                              type="button"
+                              onClick={() => setSelectedNotification(notification)}
+                              className={`block w-full border-b border-slate-100 px-4 py-3 text-left hover:bg-emerald-50 ${
+                                selectedNotification?.id === notification.id ? 'bg-emerald-50' : 'bg-white'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="line-clamp-1 text-sm font-black text-slate-950">
+                                  {notification.title}
+                                </span>
+                                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                                  {notification.priority || 'NORMAL'}
+                                </span>
+                              </div>
+                              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">
+                                {notification.message}
+                              </p>
+                              <p className="mt-2 text-[11px] font-semibold text-slate-400">
+                                {formatNotificationTime(notification.createdAt || notification.activeFrom)}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+
+                        {selectedNotification ? (
+                          <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
+                            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">
+                              Chi tiết
+                            </p>
+                            <h4 className="mt-1 text-sm font-black text-slate-950">
+                              {selectedNotification.title}
+                            </h4>
+                            <p className="mt-2 text-sm leading-6 text-slate-700">
+                              {selectedNotification.message}
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => navigate('/priority-profile')}
-                  className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
-                >
-                  Priority Profile
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/priority-profile')}
+                    className={`hidden rounded-full border px-4 py-2 text-sm font-semibold lg:inline-flex ${
+                      effectiveDarkMode
+                        ? 'border-white/10 text-surface-bright hover:bg-white/10'
+                        : 'border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    Priority Profile
+                  </button>
+                </>
               )}
 
               <button
                 type="button"
                 onClick={() => navigate('/profile')}
-                className="flex items-center gap-3 rounded-full border border-white/10 bg-white/10 px-3 py-2 text-left text-surface-bright backdrop-blur-md hover:bg-white/15"
+                className={`flex items-center gap-3 rounded-full border px-3 py-2 text-left backdrop-blur-md ${
+                  effectiveDarkMode
+                    ? 'border-white/10 bg-white/10 text-surface-bright hover:bg-white/15'
+                    : 'border-slate-200 bg-white/80 text-slate-800 hover:bg-white'
+                }`}
                 aria-label="Current user profile"
               >
                 {user?.avatar ? (
                   <img
                     src={user.avatar}
                     alt={displayName}
-                    className="h-10 w-10 rounded-full object-cover border border-white/20"
+                    className={`h-10 w-10 rounded-full object-cover ${effectiveDarkMode ? 'border border-white/20' : 'border border-slate-200'}`}
                   />
                 ) : (
-                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-on-tertiary-container font-bold text-primary">
+                  <span className={`flex h-10 w-10 items-center justify-center rounded-full font-bold ${
+                    effectiveDarkMode ? 'bg-on-tertiary-container text-primary' : 'bg-emerald-100 text-emerald-800'
+                  }`}>
                     {profileInitial}
                   </span>
                 )}
                 <span className="hidden md:flex flex-col">
-                  <span className="text-xs uppercase tracking-[0.2em] text-surface-variant/70">
+                  <span className={`text-xs uppercase tracking-[0.2em] ${effectiveDarkMode ? 'text-surface-variant/70' : 'text-slate-500'}`}>
                     Signed in
                   </span>
-                  <span className="text-sm font-semibold text-surface-bright">
+                  <span className={`text-sm font-semibold ${effectiveDarkMode ? 'text-surface-bright' : 'text-slate-900'}`}>
                     {displayName}
                   </span>
                 </span>
@@ -213,13 +407,20 @@ const Header = () => {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10"
+                title="Sign out"
+                aria-label="Sign out"
+                className={`inline-flex h-11 w-11 items-center justify-center rounded-full border ${
+                  effectiveDarkMode
+                    ? 'border-white/10 text-surface-bright hover:bg-white/10'
+                    : 'border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
               >
-                Logout
+                <span className="material-symbols-outlined text-[22px]">logout</span>
               </button>
             </div>
           ) : (
             <button
+              type="button"
               onClick={() => navigate(authCta.path)}
               className="bg-on-tertiary-container text-primary font-bold px-6 py-2 rounded-full active:scale-95 transition-transform hover:shadow-lg"
             >
@@ -230,9 +431,13 @@ const Header = () => {
       </div>
 
       <style>{`
-        .glass-nav {
+        .glass-nav-dark {
           backdrop-filter: blur(12px);
           background-color: rgba(0, 26, 15, 0.85);
+        }
+        .glass-nav-light {
+          backdrop-filter: blur(12px);
+          background-color: rgba(255, 255, 255, 0.86);
         }
       `}</style>
     </header>

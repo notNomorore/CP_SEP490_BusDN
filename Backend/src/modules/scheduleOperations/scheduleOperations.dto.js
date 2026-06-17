@@ -149,11 +149,34 @@ export const OperationIncidentResponseDTO = {
     policeNotified: incident.policeNotified,
     canContinue: incident.canContinue,
     requiresReplacementVehicle: incident.requiresReplacementVehicle,
+    passengerViolation: incident.passengerViolation || null,
+    passengerConflict: incident.passengerConflict || null,
+    foundItem: incident.foundItem || null,
     evidenceFiles: incident.evidenceFiles || [],
     reportedAt: incident.reportedAt,
     acknowledgedAt: incident.acknowledgedAt,
     resolvedAt: incident.resolvedAt,
     adminNote: incident.adminNote,
+  }),
+};
+
+export const OperationNotificationResponseDTO = {
+  format: (notification, actorId) => ({
+    id: notification._id,
+    title: notification.title,
+    message: notification.message,
+    category: notification.category,
+    priority: notification.priority,
+    targetRoles: notification.targetRoles || [],
+    route: notification.route || null,
+    trip: notification.trip || null,
+    vehicle: notification.vehicle || null,
+    activeFrom: notification.activeFrom,
+    expiresAt: notification.expiresAt,
+    isRead: (notification.readBy || []).some((item) => (
+      String(item.user || item) === String(actorId)
+    )),
+    createdAt: notification.createdAt,
   }),
 };
 

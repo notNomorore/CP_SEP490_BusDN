@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AuthShell from '../components/AuthShell';
+import authService from '../services/authService.js';
 import useAuthStore from '../stores/authStore.js';
+import getRoleLandingPath from '../utils/roleRedirect.js';
 
 const getErrorMessage = (error) => {
   if (!error) {
@@ -17,6 +19,20 @@ const getErrorMessage = (error) => {
   }
 
   if (typeof error === 'object') {
+    if (error.code === 'ACCOUNT_LOCKED') {
+      const reason = error.reason ? ` Lý do: ${error.reason}.` : '';
+      const lockedUntil = error.lockedUntil ? ` Thời hạn khóa đến: ${new Date(error.lockedUntil).toLocaleString('vi-VN')}.` : '';
+      return error.message || `Tài khoản đã bị khóa.${reason}${lockedUntil} Vui lòng liên hệ quản trị viên để được hỗ trợ.`;
+    }
+
+    if (error.message) {
+      return error.message;
+    }
+
+    if (error.statusCode === 401 || error.status === 401 || error.response?.status === 401) {
+      return 'Email/số điện thoại hoặc mật khẩu không đúng, hoặc tài khoản chưa được phép đăng nhập.';
+    }
+
     return Object.values(error).flat().join(' ');
   }
 
@@ -24,9 +40,9 @@ const getErrorMessage = (error) => {
 };
 
 const LoginPage = () => {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const {
-    login,
     requestPasswordReset,
     resetPassword,
     isLoading,
@@ -37,6 +53,8 @@ const LoginPage = () => {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
+  const [submitError, setSubmitError] = useState('');
+  const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [resetIdentifier, setResetIdentifier] = useState('');
   const [resetToken, setResetToken] = useState('');
@@ -50,21 +68,47 @@ const LoginPage = () => {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    const lockMessage = sessionStorage.getItem('authLockMessage');
+    if (lockMessage) {
+      setSubmitError(lockMessage);
+      sessionStorage.removeItem('authLockMessage');
+    }
+  }, []);
+
   useEffect(() => () => clearError(), [clearError]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     clearError();
+    setSubmitError('');
+    setMessage('');
+    setIsSubmittingLogin(true);
 
     try {
-      await login(identifier.trim(), password);
-    } catch {
-      // Error state is handled by the store.
+      const result = await authService.login(identifier.trim(), password);
+      useAuthStore.setState({
+        user: result.user,
+        token: result.token,
+        isAuthenticated: true,
+        error: null,
+      });
+      if (result.user?.isFirstLogin && ['DRIVER', 'CONDUCTOR', 'BUS_ASSISTANT'].includes(result.user.role)) {
+        navigate('/auth/force-change-password', { replace: true });
+      } else {
+        navigate(getRoleLandingPath(result.user), { replace: true });
+      }
+    } catch (loginError) {
+      const errorMessage = getErrorMessage(loginError) || 'Đăng nhập thất bại. Vui lòng kiểm tra tài khoản, mật khẩu hoặc trạng thái tài khoản.';
+      setSubmitError(errorMessage);
+    } finally {
+      setIsSubmittingLogin(false);
     }
   };
 
   const openForgotPassword = () => {
     clearError();
+    setSubmitError('');
     setMessage('');
     setResetIdentifier(identifier);
     setAuthMode('forgot-request');
@@ -72,6 +116,7 @@ const LoginPage = () => {
 
   const backToLogin = () => {
     clearError();
+    setSubmitError('');
     setAuthMode('login');
     setResetToken('');
     setResetOtp('');
@@ -82,6 +127,7 @@ const LoginPage = () => {
   const handleForgotPasswordRequest = async (event) => {
     event.preventDefault();
     clearError();
+    setSubmitError('');
     setMessage('');
 
     try {
@@ -108,6 +154,7 @@ const LoginPage = () => {
   const handleResetPassword = async (event) => {
     event.preventDefault();
     clearError();
+    setSubmitError('');
     setMessage('');
 
     if (newPassword !== confirmPassword) {
@@ -130,6 +177,8 @@ const LoginPage = () => {
       // Error state is handled by the store.
     }
   };
+
+  const visibleError = submitError || getErrorMessage(error);
 
   return (
     <AuthShell
@@ -163,15 +212,19 @@ const LoginPage = () => {
           </div>
         </div>
 
-        {message && (
-          <div className="rounded-2xl border border-on-tertiary-container/20 bg-on-tertiary-container/10 px-4 py-3 text-sm text-on-tertiary-fixed-variant">
-            {message}
+        {visibleError && (
+          <div
+            className="rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-bold leading-6 text-red-800 shadow-sm"
+            role="alert"
+            aria-live="assertive"
+          >
+            {visibleError}
           </div>
         )}
 
-        {error && (
-          <div className="rounded-2xl border border-error/20 bg-error-container px-4 py-3 text-sm text-on-error-container">
-            {getErrorMessage(error)}
+        {message && (
+          <div className="rounded-2xl border border-on-tertiary-container/20 bg-on-tertiary-container/10 px-4 py-3 text-sm text-on-tertiary-fixed-variant">
+            {message}
           </div>
         )}
 
@@ -190,7 +243,10 @@ const LoginPage = () => {
                     autoComplete="username"
                     placeholder="name@example.com"
                     value={identifier}
-                    onChange={(event) => setIdentifier(event.target.value)}
+                    onChange={(event) => {
+                      setIdentifier(event.target.value);
+                      setSubmitError('');
+                    }}
                     className="w-full border-0 bg-transparent p-0 text-base text-on-surface placeholder:text-outline/70 focus:ring-0"
                   />
                 </span>
@@ -215,7 +271,10 @@ const LoginPage = () => {
                     autoComplete="current-password"
                     placeholder="********"
                     value={password}
-                    onChange={(event) => setPassword(event.target.value)}
+                    onChange={(event) => {
+                      setPassword(event.target.value);
+                      setSubmitError('');
+                    }}
                     className="w-full border-0 bg-transparent p-0 text-base text-on-surface placeholder:text-outline/70 focus:ring-0"
                   />
                   <button
@@ -246,10 +305,10 @@ const LoginPage = () => {
 
               <button
                 type="submit"
-                disabled={isLoading || !identifier.trim() || !password}
+                disabled={isSubmittingLogin || !identifier.trim() || !password}
                 className="w-full rounded-full bg-primary px-6 py-4 text-base font-bold text-on-primary shadow-lg shadow-primary/15 hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isLoading ? 'Signing In...' : 'Sign In'}
+                {isSubmittingLogin ? 'Signing In...' : 'Sign In'}
               </button>
             </form>
 

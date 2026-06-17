@@ -1,10 +1,11 @@
 import SupportCase from './SupportCase.js';
+import OperationIncident from '../scheduleOperations/OperationIncident.js';
 
 export class CustomerSupportService {
   static buildCaseQuery({ type, status, priority }) {
-    const query = {};
+    const query = { type: 'COMPLAINT' };
 
-    if (type && type !== 'ALL') {
+    if (type === 'COMPLAINT') {
       query.type = type;
     }
 
@@ -21,11 +22,11 @@ export class CustomerSupportService {
 
   static async createCase(userId, data) {
     const supportCase = new SupportCase({
-      type: data.type,
+      type: 'COMPLAINT',
       passenger: userId,
       title: data.title.trim(),
       description: data.description.trim(),
-      category: data.category || (data.type === 'LOST_ITEM' ? 'LOST_ITEM' : 'OTHER'),
+      category: data.category || 'OTHER',
       priority: data.priority || 'NORMAL',
       routeName: data.routeName?.trim(),
       tripCode: data.tripCode?.trim(),
@@ -33,15 +34,6 @@ export class CustomerSupportService {
       incidentAt: data.incidentAt ? new Date(data.incidentAt) : undefined,
       contactPhone: data.contactPhone?.trim(),
       contactEmail: data.contactEmail?.trim(),
-      lostItem: data.type === 'LOST_ITEM'
-        ? {
-          itemName: data.lostItem.itemName.trim(),
-          itemDescription: data.lostItem.itemDescription?.trim(),
-          lastSeenLocation: data.lostItem.lastSeenLocation?.trim(),
-          lostAt: data.lostItem.lostAt ? new Date(data.lostItem.lostAt) : undefined,
-          recoveryStatus: 'REPORTED',
-        }
-        : undefined,
     });
 
     await supportCase.save();
@@ -92,12 +84,23 @@ export class CustomerSupportService {
       throw new Error('Only complaint cases can be responded through this action');
     }
 
+    if (supportCase.status === 'CLOSED') {
+      throw new Error('Closed complaint cases cannot be responded again');
+    }
+
+    const statusBefore = supportCase.status;
+    const statusAfter = data.status || 'IN_PROGRESS';
+
     supportCase.responses.push({
       message: data.message.trim(),
       responder: adminId,
+      statusBefore,
+      statusAfter,
+      responseType: 'COMPLAINT_RESPONSE',
+      visibleToPassenger: true,
       createdAt: new Date(),
     });
-    supportCase.status = data.status || 'IN_PROGRESS';
+    supportCase.status = statusAfter;
     supportCase.assignedTo = supportCase.assignedTo || adminId;
 
     if (supportCase.status === 'RESOLVED') {
@@ -112,48 +115,102 @@ export class CustomerSupportService {
     return this.getCaseById(caseId);
   }
 
-  static async updateLostItemCase(caseId, adminId, data) {
-    const supportCase = await this.getCaseById(caseId);
+  static buildFoundItemQuery({ status, recoveryStatus }) {
+    const query = { type: 'FOUND_ITEM' };
 
-    if (supportCase.type !== 'LOST_ITEM') {
-      throw new Error('Only lost item cases can be handled through this action');
+    if (status && status !== 'ALL') {
+      query.status = status;
     }
 
-    if (data.note?.trim()) {
-      supportCase.responses.push({
-        message: data.note.trim(),
-        responder: adminId,
-        createdAt: new Date(),
-      });
+    if (recoveryStatus && recoveryStatus !== 'ALL') {
+      query['foundItem.recoveryStatus'] = recoveryStatus;
     }
 
-    if (data.status) {
-      supportCase.status = data.status;
+    return query;
+  }
+
+  static async listFoundItemCases({ status = 'ALL', recoveryStatus = 'ALL', page = 1, limit = 20 }) {
+    const normalizedPage = Math.max(Number.parseInt(page, 10) || 1, 1);
+    const normalizedLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 20, 1), 100);
+    const query = this.buildFoundItemQuery({ status, recoveryStatus });
+
+    const [items, total] = await Promise.all([
+      OperationIncident.find(query)
+        .populate('driver', 'fullName email phone phoneNumber role')
+        .populate('route', 'routeNumber routeName name')
+        .populate('vehicle', 'busCode plateNumber')
+        .populate('trip', 'scheduleCode routeName serviceDate departureTime')
+        .sort({ reportedAt: -1, createdAt: -1 })
+        .skip((normalizedPage - 1) * normalizedLimit)
+        .limit(normalizedLimit),
+      OperationIncident.countDocuments(query),
+    ]);
+
+    return {
+      items,
+      meta: {
+        page: normalizedPage,
+        limit: normalizedLimit,
+        total,
+        totalPages: Math.ceil(total / normalizedLimit),
+      },
+    };
+  }
+
+  static async getFoundItemCaseById(caseId) {
+    const incident = await OperationIncident.findOne({ _id: caseId, type: 'FOUND_ITEM' })
+      .populate('driver', 'fullName email phone phoneNumber role')
+      .populate('route', 'routeNumber routeName name')
+      .populate('vehicle', 'busCode plateNumber')
+      .populate('trip', 'scheduleCode routeName serviceDate departureTime');
+
+    if (!incident) {
+      throw new Error('Found item case not found');
     }
 
-    if (data.recoveryStatus) {
-      supportCase.lostItem.recoveryStatus = data.recoveryStatus;
+    return incident;
+  }
+
+  static mapFoundItemRecoveryStatus(recoveryStatus) {
+    if (recoveryStatus === 'STORED') return 'ACKNOWLEDGED';
+    if (recoveryStatus === 'RETURNED') return 'RESOLVED';
+    if (recoveryStatus === 'CANCELLED') return 'CANCELLED';
+    return 'OPEN';
+  }
+
+  static async updateFoundItemCase(caseId, adminId, data) {
+    const incident = await this.getFoundItemCaseById(caseId);
+    const recoveryStatus = data.recoveryStatus || incident.foundItem?.recoveryStatus || 'REPORTED';
+    const status = this.mapFoundItemRecoveryStatus(recoveryStatus);
+    const now = new Date();
+
+    incident.foundItem = {
+      ...(incident.foundItem || {}),
+      recoveryStatus,
+      handedTo: data.handedTo !== undefined
+        ? String(data.handedTo || '').trim()
+        : incident.foundItem?.handedTo || '',
+    };
+    incident.status = status;
+    incident.adminNote = data.adminNote !== undefined
+      ? String(data.adminNote || '').trim()
+      : incident.adminNote || '';
+
+    if (status === 'ACKNOWLEDGED' && !incident.acknowledgedAt) {
+      incident.acknowledgedAt = now;
     }
 
-    if (data.recoveryStatus === 'FOUND') {
-      supportCase.lostItem.foundAt = new Date();
-      supportCase.status = data.status || 'IN_PROGRESS';
+    if (status === 'RESOLVED') {
+      incident.resolvedAt = now;
     }
 
-    if (data.recoveryStatus === 'RETURNED') {
-      supportCase.lostItem.returnedAt = new Date();
-      supportCase.status = 'RESOLVED';
-      supportCase.resolvedAt = new Date();
+    if (status === 'OPEN') {
+      incident.acknowledgedAt = null;
+      incident.resolvedAt = null;
     }
 
-    if (supportCase.status === 'CLOSED') {
-      supportCase.closedAt = new Date();
-    }
-
-    supportCase.assignedTo = supportCase.assignedTo || adminId;
-
-    await supportCase.save();
-    return this.getCaseById(caseId);
+    await incident.save();
+    return this.getFoundItemCaseById(caseId);
   }
 }
 

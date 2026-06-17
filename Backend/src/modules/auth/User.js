@@ -28,6 +28,15 @@ const FavoriteRouteSchema = new mongoose.Schema(
       default: '#2ba471',
     },
     lastBoardedAt: Date,
+    savedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    favoriteStatus: {
+      type: String,
+      enum: ['SAVED', 'REMOVED'],
+      default: 'SAVED',
+    },
   },
   { _id: false }
 );
@@ -37,6 +46,16 @@ const FavoriteStopSchema = new mongoose.Schema(
     stopId: {
       type: String,
       trim: true,
+    },
+    routeId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    routeNumber: {
+      type: String,
+      trim: true,
+      default: '',
     },
     stopName: {
       type: String,
@@ -57,6 +76,167 @@ const FavoriteStopSchema = new mongoose.Schema(
       type: Number,
       min: 0,
       default: 0,
+    },
+    latitude: {
+      type: Number,
+      min: -90,
+      max: 90,
+    },
+    longitude: {
+      type: Number,
+      min: -180,
+      max: 180,
+    },
+    savedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    favoriteStatus: {
+      type: String,
+      enum: ['SAVED', 'REMOVED'],
+      default: 'SAVED',
+    },
+  },
+  { _id: false }
+);
+
+const ArrivalNotificationSchema = new mongoose.Schema(
+  {
+    subscriptionId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeNumber: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    stopId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    stopName: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    busId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    etaThresholdMinutes: {
+      type: Number,
+      min: 1,
+      default: 5,
+    },
+    notificationStatus: {
+      type: String,
+      enum: ['ENABLED', 'DISABLED'],
+      default: 'ENABLED',
+    },
+    subscribedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
+const DelayNotificationSchema = new mongoose.Schema(
+  {
+    subscriptionId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeNumber: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    busId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    tripId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    delayThresholdMinutes: {
+      type: Number,
+      min: 1,
+      default: 5,
+    },
+    notificationStatus: {
+      type: String,
+      enum: ['ENABLED', 'DISABLED'],
+      default: 'ENABLED',
+    },
+    subscribedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
+const RouteChangeNotificationSchema = new mongoose.Schema(
+  {
+    subscriptionId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeNumber: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    tripId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    notificationStatus: {
+      type: String,
+      enum: ['ENABLED', 'DISABLED'],
+      default: 'ENABLED',
+    },
+    subscribedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
     },
   },
   { _id: false }
@@ -151,8 +331,33 @@ const UserSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['PASSENGER', 'DRIVER', 'BUS_ASSISTANT', 'ADMIN'],
+      enum: ['PASSENGER', 'DRIVER', 'CONDUCTOR', 'BUS_ASSISTANT', 'ADMIN'],
       default: 'PASSENGER',
+    },
+    driverLicense: {
+      licenseNumber: { type: String, trim: true, default: '' },
+      permittedVehicleTypes: { type: [String], default: [] },
+      expiresAt: Date,
+      status: {
+        type: String,
+        enum: ['VALID', 'EXPIRED', 'SUSPENDED', 'UNVERIFIED'],
+        default: 'UNVERIFIED',
+      },
+    },
+    staffAvailability: {
+      leaveRequests: {
+        type: [{
+          startDate: Date,
+          endDate: Date,
+          status: {
+            type: String,
+            enum: ['PENDING', 'APPROVED', 'REJECTED', 'ACTIVE', 'CANCELLED'],
+            default: 'PENDING',
+          },
+          reason: { type: String, trim: true, default: '' },
+        }],
+        default: [],
+      },
     },
     status: {
       type: String,
@@ -165,6 +370,18 @@ const UserSchema = new mongoose.Schema(
     },
     favoriteStops: {
       type: [FavoriteStopSchema],
+      default: [],
+    },
+    arrivalNotifications: {
+      type: [ArrivalNotificationSchema],
+      default: [],
+    },
+    delayNotifications: {
+      type: [DelayNotificationSchema],
+      default: [],
+    },
+    routeChangeNotifications: {
+      type: [RouteChangeNotificationSchema],
       default: [],
     },
     notificationEnabled: {
@@ -274,6 +491,11 @@ const UserSchema = new mongoose.Schema(
         default: 0,
         min: 0,
       },
+      delayedTrips: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
       onTimeRate: {
         type: Number,
         default: 100,
@@ -298,6 +520,10 @@ const UserSchema = new mongoose.Schema(
         message: {
           type: String,
           trim: true,
+        },
+        actorId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
         },
         createdAt: {
           type: Date,

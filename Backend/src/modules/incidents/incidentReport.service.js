@@ -1,7 +1,8 @@
-import mongoose from 'mongoose';
+﻿import mongoose from 'mongoose';
 import { HTTP_STATUS, PAGINATION } from '../../constants/index.js';
 import { CustomError } from '../../middleware/errorHandler.js';
 import IncidentReport from './IncidentReport.js';
+import OperationIncident from '../scheduleOperations/OperationIncident.js';
 
 const toPositiveInteger = (value, fallback, max = Number.MAX_SAFE_INTEGER) => {
   const parsed = Number.parseInt(value, 10);
@@ -67,42 +68,51 @@ const safeUser = (user) => {
   };
 };
 
-const readRelatedDocument = async (collectionName, id) => {
+const readRelatedDocument = async (collectionNames, id) => {
   if (!id || !mongoose.connection.db) {
     return null;
   }
 
-  const collections = await mongoose.connection.db
-    .listCollections({ name: collectionName })
-    .toArray();
-  if (!collections.length) {
-    return null;
+  const names = Array.isArray(collectionNames) ? collectionNames : [collectionNames];
+  for (const collectionName of names) {
+    const collections = await mongoose.connection.db
+      .listCollections({ name: collectionName })
+      .toArray();
+    if (!collections.length) {
+      continue;
+    }
+
+    const document = await mongoose.connection.db.collection(collectionName).findOne({
+      _id: new mongoose.Types.ObjectId(id),
+    });
+    if (document) {
+      return document;
+    }
   }
 
-  return mongoose.connection.db.collection(collectionName).findOne({
-    _id: new mongoose.Types.ObjectId(id),
-  });
+  return null;
 };
 
 const enrichRelatedInfo = async (incident) => {
   const [route, trip, vehicle] = await Promise.all([
-    readRelatedDocument('routes', incident.routeId),
-    readRelatedDocument('trips', incident.tripId),
-    readRelatedDocument('vehicles', incident.vehicleId),
+    readRelatedDocument(['busroutes', 'routes'], incident.routeId),
+    readRelatedDocument(['tripschedules', 'trips'], incident.tripId),
+    readRelatedDocument(['fleetbuses', 'vehicles'], incident.vehicleId),
   ]);
 
   return {
     route: route
       ? {
           _id: route._id,
-          name: route.name || route.routeName || route.routeNumber || route.code,
-          routeNumber: route.routeNumber || route.code || '',
+          name: route.routeName || route.name || route.routeNumber || route.code,
+          routeNumber: route.routeCode || route.routeNumber || route.code || '',
         }
       : null,
     trip: trip
       ? {
           _id: trip._id,
           status: trip.status,
+          scheduleCode: trip.scheduleCode || '',
           scheduledStart: trip.scheduledStart || trip.departureTime,
           actualStart: trip.actualStart || trip.startedAt,
         }
@@ -110,7 +120,7 @@ const enrichRelatedInfo = async (incident) => {
     vehicle: vehicle
       ? {
           _id: vehicle._id,
-          label: vehicle.licensePlate || vehicle.code || vehicle.name,
+          label: vehicle.plateNumber || vehicle.licensePlate || vehicle.busCode || vehicle.code || vehicle.name,
           status: vehicle.status,
         }
       : null,
@@ -137,8 +147,139 @@ const logAudit = async ({ action, actorId, incidentId, metadata = {} }) => {
   }
 };
 
+const buildSourceUpsert = (report) => ({
+  updateOne: {
+    filter: {
+      sourceType: report.sourceType,
+      sourceId: report.sourceId,
+    },
+    update: {
+      $setOnInsert: report,
+    },
+    upsert: true,
+  },
+});
+
+const operationIncidentSourceType = (type) => `OPERATION_${type}`;
+
+const operationIncidentTitle = (incident) => {
+  const label = {
+    TRIP_REJECTION: 'Tài xế từ chối chuyến',
+    VEHICLE_ISSUE: 'Báo lỗi xe trước chuyến',
+    TRAFFIC_CONGESTION: 'Báo kẹt xe',
+    ACCIDENT: 'Báo tai nạn',
+    PASSENGER_VIOLATION: 'Báo hành khách vi phạm',
+    PASSENGER_CONFLICT: 'Báo xung đột hành khách',
+    FOUND_ITEM: 'Báo đồ tìm thấy',
+  }[incident.type] || 'Báo cáo vận hành';
+  return `${label} - ${incident.incidentCode}`;
+};
+
+const operationIncidentStatus = (status) => {
+  if (status === 'RESOLVED') return 'RESOLVED';
+  if (status === 'ACKNOWLEDGED') return 'IN_PROGRESS';
+  if (status === 'CANCELLED') return 'REJECTED';
+  return 'PENDING';
+};
+
+const incidentReportStatusToOperationStatus = (status) => {
+  if (status === 'IN_PROGRESS') return 'ACKNOWLEDGED';
+  if (status === 'RESOLVED') return 'RESOLVED';
+  if (status === 'REJECTED') return 'CANCELLED';
+  return 'OPEN';
+};
+
+const operationIncidentDescription = (incident) => [
+  `${incident.reporterRole === 'BUS_ASSISTANT' ? 'Phụ xe' : 'Tài xế'} gửi báo cáo trong lúc vận hành chuyến.`,
+  `Loại sự cố: ${incident.type}.`,
+  `Vị trí: ${incident.locationText || 'Chưa có vị trí mô tả.'}.`,
+  incident.type === 'TRAFFIC_CONGESTION'
+    ? `Ước tính trễ: ${incident.estimatedDelayMinutes || 0} phút.`
+    : '',
+  incident.type === 'TRAFFIC_CONGESTION' && incident.trafficCategory
+    ? `Loại kẹt xe: ${incident.trafficCategory}.`
+    : '',
+  incident.type === 'TRAFFIC_CONGESTION' && incident.affectedDirection
+    ? `Chiều ảnh hưởng: ${incident.affectedDirection}.`
+    : '',
+  incident.type === 'ACCIDENT'
+    ? `Có người bị thương: ${incident.injuriesReported ? 'Có' : 'Không'}.`
+    : '',
+  incident.type === 'ACCIDENT'
+    ? `Đã báo cơ quan chức năng: ${incident.policeNotified ? 'Có' : 'Không'}.`
+    : '',
+  incident.type === 'PASSENGER_VIOLATION'
+    ? `Loại vi phạm: ${incident.passengerViolation?.violationCategory || 'OTHER'}.`
+    : '',
+  incident.type === 'PASSENGER_VIOLATION'
+    ? `Mô tả hành khách: ${incident.passengerViolation?.passengerDescription || 'Chưa ghi nhận'}.`
+    : '',
+  incident.type === 'PASSENGER_VIOLATION'
+    ? `Hành động đã xử lý: ${incident.passengerViolation?.actionTaken || 'Chưa ghi nhận'}.`
+    : '',
+  incident.type === 'PASSENGER_CONFLICT'
+    ? `Nhóm xung đột: ${incident.passengerConflict?.conflictCategory || 'OTHER'}.`
+    : '',
+  incident.type === 'PASSENGER_CONFLICT'
+    ? `Các bên liên quan: ${incident.passengerConflict?.partiesInvolved || 'Chưa ghi nhận'}.`
+    : '',
+  incident.type === 'PASSENGER_CONFLICT'
+    ? `Hành động đã xử lý: ${incident.passengerConflict?.actionTaken || 'Chưa ghi nhận'}.`
+    : '',
+  incident.type === 'FOUND_ITEM'
+    ? `Tên đồ vật: ${incident.foundItem?.itemName || 'Chưa ghi nhận'}.`
+    : '',
+  incident.type === 'FOUND_ITEM'
+    ? `Vị trí tìm thấy: ${incident.foundItem?.foundLocation || incident.locationText || 'Chưa ghi nhận'}.`
+    : '',
+  incident.type === 'FOUND_ITEM' && incident.foundItem?.handedTo
+    ? `Bàn giao cho: ${incident.foundItem.handedTo}.`
+    : '',
+  `Mô tả: ${incident.description || 'Không có mô tả.'}`,
+].filter(Boolean).join('\n');
+
 export class IncidentReportService {
+  static async syncOperationalSources() {
+    const [operationIncidents] = await Promise.all([
+      OperationIncident.find({
+        type: { $in: ['TRIP_REJECTION', 'VEHICLE_ISSUE', 'TRAFFIC_CONGESTION', 'ACCIDENT', 'PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'] },
+        driver: { $ne: null },
+      }).sort({ reportedAt: -1, updatedAt: -1 }).limit(300).lean(),
+    ]);
+
+    const operations = [
+      ...operationIncidents.map((incident) => buildSourceUpsert({
+        reporterId: incident.driver,
+        reporterRole: incident.reporterRole || 'DRIVER',
+        incidentType: incident.type,
+        title: operationIncidentTitle(incident),
+        description: operationIncidentDescription(incident),
+        routeId: incident.route || null,
+        tripId: incident.trip || null,
+        vehicleId: incident.vehicle || null,
+        location: incident.locationText || '',
+        latitude: Number.isFinite(Number(incident.latitude)) ? Number(incident.latitude) : null,
+        longitude: Number.isFinite(Number(incident.longitude)) ? Number(incident.longitude) : null,
+        severity: incident.severity || 'MEDIUM',
+        status: operationIncidentStatus(incident.status),
+        attachments: (incident.evidenceFiles || []).map((file) => file.url).filter(Boolean),
+        sourceModule: 'SCHEDULE_OPERATIONS',
+        sourceType: operationIncidentSourceType(incident.type),
+        sourceId: incident._id,
+        createdAt: incident.reportedAt || incident.createdAt || new Date(),
+      })),
+    ];
+
+    if (!operations.length) {
+      return;
+    }
+
+    await IncidentReport.bulkWrite(operations, { ordered: false });
+  }
+
   static async getIncidents(query) {
+    await this.syncOperationalSources();
+
     const page = toPositiveInteger(query.page, PAGINATION.DEFAULT_PAGE);
     const limit = toPositiveInteger(query.limit, PAGINATION.DEFAULT_LIMIT, PAGINATION.MAX_LIMIT);
     const filter = buildFilter(query);
@@ -173,11 +314,14 @@ export class IncidentReportService {
       ]),
     ]);
 
+    const relatedInfo = await Promise.all(incidents.map((incident) => enrichRelatedInfo(incident)));
+
     return {
-      incidents: incidents.map((incident) => ({
+      incidents: incidents.map((incident, index) => ({
         ...incident,
         reporter: safeUser(incident.reporterId),
         reporterId: incident.reporterId?._id || incident.reporterId,
+        ...relatedInfo[index],
       })),
       pagination: {
         page,
@@ -196,6 +340,8 @@ export class IncidentReportService {
   }
 
   static async getIncidentById(id, actor) {
+    await this.syncOperationalSources();
+
     const incident = await IncidentReport.findById(id)
       .populate('reporterId', 'fullName role avatar')
       .populate('resolvedBy', 'fullName role avatar')
@@ -236,12 +382,22 @@ export class IncidentReportService {
 
     const previousStatus = incident.status;
     const adminNote = String(payload.adminNote || '').trim();
+    const resolutionSummary = String(payload.resolutionSummary || '').trim();
+    const handlingAction = payload.handlingAction || incident.handlingAction || 'TRIAGE_ONLY';
+    const responsibleUnit = payload.responsibleUnit || incident.responsibleUnit || 'OPERATION_CENTER';
+
     incident.status = payload.status;
     incident.adminNote = adminNote || incident.adminNote;
+    incident.resolutionSummary = resolutionSummary || incident.resolutionSummary;
+    incident.handlingAction = handlingAction;
+    incident.responsibleUnit = responsibleUnit;
     incident.statusHistory.push({
       fromStatus: previousStatus,
       toStatus: payload.status,
       adminNote,
+      resolutionSummary,
+      handlingAction,
+      responsibleUnit,
       changedBy: actor.userId,
       changedAt: new Date(),
     });
@@ -256,6 +412,20 @@ export class IncidentReportService {
 
     await incident.save();
 
+    if (incident.sourceModule === 'SCHEDULE_OPERATIONS' && incident.sourceId) {
+      const operationStatus = incidentReportStatusToOperationStatus(payload.status);
+      await OperationIncident.findByIdAndUpdate(incident.sourceId, {
+        status: operationStatus,
+        adminNote: incident.resolutionSummary || incident.adminNote,
+        acknowledgedAt: ['ACKNOWLEDGED', 'RESOLVED', 'CANCELLED'].includes(operationStatus)
+          ? new Date()
+          : null,
+        resolvedAt: ['RESOLVED', 'CANCELLED'].includes(operationStatus)
+          ? new Date()
+          : null,
+      });
+    }
+
     await logAudit({
       action: 'INCIDENT_STATUS_UPDATED',
       actorId: actor?.userId,
@@ -263,6 +433,8 @@ export class IncidentReportService {
       metadata: {
         fromStatus: previousStatus,
         toStatus: payload.status,
+        handlingAction,
+        responsibleUnit,
       },
     });
 
@@ -270,6 +442,8 @@ export class IncidentReportService {
   }
 
   static async getOverviewStatistics() {
+    await this.syncOperationalSources();
+
     const [
       totalIncidents,
       incidentsByType,
@@ -343,3 +517,4 @@ export class IncidentReportService {
 }
 
 export default IncidentReportService;
+

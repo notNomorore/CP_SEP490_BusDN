@@ -6,12 +6,33 @@ import { config } from './config/environment.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { createApp } from './app.js';
 import logger from './utils/logger.js';
+import registerFleetOperationSockets from './modules/fleetOperations/fleetOperations.socket.js';
+
+let isConnectingDatabase = false;
+
+const connectDatabaseWithRetry = async () => {
+  if (isConnectingDatabase) {
+    return;
+  }
+
+  isConnectingDatabase = true;
+  try {
+    await connectDatabase();
+  } catch (error) {
+    logger.warn('MongoDB unavailable during startup. Retrying in 15 seconds...');
+    setTimeout(() => {
+      isConnectingDatabase = false;
+      connectDatabaseWithRetry();
+    }, 15000);
+    return;
+  }
+
+  isConnectingDatabase = false;
+};
 
 const startServer = async () => {
   try {
     logger.info('Initializing server...');
-    await connectDatabase();
-
     const app = createApp();
     const server = http.createServer(app);
 
@@ -19,6 +40,8 @@ const startServer = async () => {
       cors: config.cors,
       transports: ['websocket', 'polling'],
     });
+
+    registerFleetOperationSockets(io);
 
     io.on('connection', (socket) => {
       logger.info(`Socket.IO client connected: ${socket.id}`);
@@ -68,7 +91,6 @@ const startServer = async () => {
     process.on('unhandledRejection', (reason, promise) => {
       logger.error('Unhandled Rejection at:', promise);
       logger.error('Unhandled Rejection reason:', reason);
-      process.exit(1);
     });
 
     server.listen(config.port, config.host, () => {
@@ -76,6 +98,8 @@ const startServer = async () => {
       logger.info(`Environment: ${config.nodeEnv}`);
       logger.info('Socket.IO server is ready on /socket.io');
     });
+
+    connectDatabaseWithRetry();
   } catch (error) {
     logger.error('Failed to start server:', error);
     process.exit(1);

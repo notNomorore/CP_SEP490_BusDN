@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
+import toast from 'react-hot-toast';
 import 'leaflet/dist/leaflet.css';
 import Header from '../../../../shared/components/navigation/Header.jsx';
 import { HOME_BUS_HERO_IMAGE } from '../../../../shared/constants/images.js';
@@ -26,6 +27,7 @@ const operationSections = [
 ];
 
 operationSections.push({ key: 'scheduling', label: 'Điều phối lịch chuyến', hint: 'Tạo lịch, gán xe và nhân sự theo chuyến' });
+operationSections.push({ key: 'shift-list', label: 'Danh sách ca làm', hint: 'Xem, chỉnh sửa và xóa các ca đã tạo' });
 
 const busStatusLabels = {
   ACTIVE: 'Đang hoạt động',
@@ -81,8 +83,6 @@ const createEmptyScheduleForm = () => ({
   notes: '',
 });
 
-const emptyScheduleForm = createEmptyScheduleForm();
-
 const scheduleStatusLabels = {
   PLANNED: 'Đã lập lịch',
   ASSIGNED: 'Đã phân công',
@@ -119,6 +119,35 @@ const getRouteDurationMinutes = (route, direction) => {
   return Math.max(0, Number(computeDirection(routeDirection).estimatedDurationMinutes || 0));
 };
 
+const isSameDateInputValue = (value, dateInputValue) => (
+  Boolean(value && dateInputValue) && toDateInputValue(value) === dateInputValue
+);
+
+const isActiveShiftAssignment = (assignment) => ['ASSIGNED', 'IN_PROGRESS'].includes(assignment?.status);
+
+const isTimeRangeInsideShift = ({ departureTime, expectedArrivalTime }, shift) => {
+  const departure = parseClockToMinutes(departureTime);
+  const arrival = parseClockToMinutes(expectedArrivalTime || departureTime);
+  const shiftStart = parseClockToMinutes(shift?.startTime);
+  const shiftEnd = parseClockToMinutes(shift?.endTime);
+  return departure !== null
+    && arrival !== null
+    && shiftStart !== null
+    && shiftEnd !== null
+    && departure <= arrival
+    && departure >= shiftStart
+    && arrival <= shiftEnd;
+};
+
+const scheduleTimeRangesOverlap = (first, second) => {
+  const firstStart = parseClockToMinutes(first.departureTime);
+  const firstEnd = parseClockToMinutes(first.expectedArrivalTime || first.departureTime);
+  const secondStart = parseClockToMinutes(second.departureTime);
+  const secondEnd = parseClockToMinutes(second.expectedArrivalTime || second.departureTime);
+  if ([firstStart, firstEnd, secondStart, secondEnd].some((value) => value === null)) return false;
+  return firstStart < secondEnd && secondStart < firstEnd;
+};
+
 const buildScheduleCode = ({ departureTime, direction, route, serviceDate }) => {
   if (!route?.routeCode || !serviceDate || !departureTime) return '';
   const dateToken = serviceDate.replace(/-/g, '').slice(2);
@@ -150,7 +179,12 @@ const draftStopMarkerIcon = () => L.divIcon({
   popupAnchor: [0, -28],
 });
 
-const StopMapPicker = ({ form, onPickLocation, onPickStation, stations }) => {
+const StopMapPicker = ({
+  form,
+  onPickLocation,
+  onPickStation,
+  stations,
+}) => {
   const elementRef = useRef(null);
   const mapRef = useRef(null);
   const layerRef = useRef(null);
@@ -249,9 +283,9 @@ const StopMapPicker = ({ form, onPickLocation, onPickStation, stations }) => {
   }, [form._id, form.latitude, form.longitude, form.stationName, stations]);
 
   return (
-    <div className="relative min-h-[360px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
-      <div ref={elementRef} className="h-[420px] w-full" />
-      <div className="pointer-events-none absolute left-4 top-4 max-w-[280px] rounded-2xl border border-white/20 bg-slate-950/75 px-4 py-3 text-xs font-semibold leading-5 text-white shadow-lg">
+    <div className="relative min-h-[320px] overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
+      <div ref={elementRef} className="h-[360px] w-full" />
+      <div className="pointer-events-none absolute bottom-4 left-4 z-[500] max-w-[260px] rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 text-xs font-semibold leading-5 text-slate-700 shadow-md backdrop-blur">
         Bấm bản đồ để lấy tọa độ. Kéo marker xanh để chỉnh vị trí trạm.
       </div>
       <style>{`
@@ -400,68 +434,50 @@ const ScheduleRouteMap = ({ schedule, routes }) => {
   );
 };
 
-const ScheduleListPanel = ({ onEditSchedule, onSelectSchedule, routes, schedules, selectedScheduleId }) => (
+const ScheduleListPanel = ({ onDeleteSchedule, onEditSchedule, onSelectSchedule, routes, schedules, selectedScheduleId }) => (
   <div className="rounded-2xl border border-slate-200 bg-white p-4 text-slate-900">
     <div className="flex items-start justify-between gap-3">
       <div>
-        <h2 className="text-lg font-black text-slate-950">Danh sách lịch chuyến</h2>
-        <p className="mt-1 text-xs leading-5 text-slate-500">Bấm vào một chuyến để xem lộ trình theo tuyến và chiều chạy.</p>
+        <h2 className="text-lg font-black text-slate-950">Danh sách ca làm</h2>
+        <p className="mt-1 text-xs leading-5 text-slate-500">Xem, chỉnh sửa hoặc xóa từng ca trong lịch điều phối tuyến.</p>
       </div>
-      <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">{schedules.length} lịch</span>
+      <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">{schedules.length} ca</span>
     </div>
-    <div className="mt-4 max-h-[520px] space-y-2 overflow-y-auto pr-1">
-      {schedules.map((schedule) => {
-        const route = getScheduleRoute(schedule, routes);
-        const isSelected = String(schedule._id || '') === String(selectedScheduleId || '');
-        return (
-          <div
-            key={schedule._id}
-            role="button"
-            tabIndex={0}
-            onClick={() => onSelectSchedule(schedule)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                onSelectSchedule(schedule);
-              }
-            }}
-            className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
-              isSelected
-                ? 'border-emerald-300 bg-emerald-50'
-                : 'border-slate-200 bg-slate-50 hover:border-emerald-300'
-            }`}
-          >
-            <span className="block font-black text-slate-900">
-              {schedule.scheduleCode} - {schedule.departureTime}{schedule.expectedArrivalTime ? ` đến ${schedule.expectedArrivalTime}` : ''}
-            </span>
-            <span className="mt-1 block text-xs text-slate-500">
-              {toDateInputValue(schedule.serviceDate)} | {route?.routeCode || schedule.routeCode} | {scheduleDirectionLabels[schedule.direction] || schedule.direction} | {scheduleStatusLabels[schedule.status] || schedule.status}
-            </span>
-            <span className="mt-1 block text-xs text-slate-500">
-              {schedule.vehicle?.busCode || 'Chưa gán xe'} | {schedule.driver?.fullName || 'Chưa gán tài xế'} | {schedule.assistant?.fullName || 'Chưa gán phụ xe'}
-            </span>
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={(event) => {
-                event.stopPropagation();
-                onEditSchedule(schedule);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onEditSchedule(schedule);
-                }
-              }}
-              className="mt-3 inline-flex rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:border-emerald-300"
-            >
-              Sửa lịch
-            </span>
-          </div>
-        );
-      })}
-      {!schedules.length ? <div className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">Chưa có lịch chuyến.</div> : null}
+    <div className="mt-4 max-h-[560px] overflow-auto rounded-xl border border-slate-200">
+      <table className="w-full min-w-[1320px] border-collapse text-left text-xs">
+        <thead className="sticky top-0 z-10 bg-slate-100 text-slate-600">
+          <tr>
+            {['Mã ca', 'Tuyến', 'Ngày', 'Thời gian', 'Chiều', 'Xe', 'Tài xế', 'Phụ xe', 'Trạng thái', 'Ghi chú', 'Thao tác'].map((label) => (
+              <th key={label} className="border-b border-slate-200 px-3 py-3 font-black uppercase">{label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {schedules.map((schedule) => {
+            const route = getScheduleRoute(schedule, routes);
+            const isSelected = String(schedule._id || '') === String(selectedScheduleId || '');
+            const vehicle = schedule.vehicle?.busId || {};
+            const driver = schedule.driver?.userId || {};
+            const assistant = schedule.assistant?.userId || {};
+            return (
+              <tr key={schedule._id} onClick={() => onSelectSchedule(schedule)} className={`cursor-pointer border-b border-slate-100 align-top transition ${isSelected ? 'bg-emerald-50' : 'hover:bg-slate-50'}`}>
+                <td className="px-3 py-3 font-black text-slate-900">{schedule.scheduleCode}</td>
+                <td className="px-3 py-3"><span className="block font-bold">{route?.routeCode || schedule.routeCode || '-'}</span><span className="mt-1 block max-w-56 text-slate-500">{route?.routeName || schedule.routeName || '-'}</span></td>
+                <td className="px-3 py-3 whitespace-nowrap">{toDateInputValue(schedule.serviceDate)}</td>
+                <td className="px-3 py-3 whitespace-nowrap font-bold">{schedule.departureTime || '--:--'} - {schedule.expectedArrivalTime || '--:--'}</td>
+                <td className="px-3 py-3 whitespace-nowrap">{scheduleDirectionLabels[schedule.direction] || schedule.direction}</td>
+                <td className="px-3 py-3"><span className="block font-bold">{schedule.vehicle?.busCode || vehicle.busCode || 'Chưa gán'}</span><span className="mt-1 block text-slate-500">{schedule.vehicle?.plateNumber || vehicle.plateNumber || ''}</span></td>
+                <td className="px-3 py-3"><span className="block font-bold">{schedule.driver?.fullName || driver.fullName || 'Chưa gán'}</span><span className="mt-1 block text-slate-500">{schedule.driver?.phone || driver.phoneNumber || ''}</span></td>
+                <td className="px-3 py-3"><span className="block font-bold">{schedule.assistant?.fullName || assistant.fullName || 'Chưa gán'}</span><span className="mt-1 block text-slate-500">{schedule.assistant?.phone || assistant.phoneNumber || ''}</span></td>
+                <td className="px-3 py-3 whitespace-nowrap"><span className="rounded-full bg-slate-100 px-2 py-1 font-bold">{scheduleStatusLabels[schedule.status] || schedule.status}</span></td>
+                <td className="px-3 py-3 max-w-52 text-slate-500">{schedule.notes || '-'}</td>
+                <td className="px-3 py-3"><div className="flex gap-2"><button type="button" onClick={(event) => { event.stopPropagation(); onEditSchedule(schedule); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-bold hover:border-emerald-300">Sửa</button><button type="button" disabled={schedule.status === 'IN_PROGRESS'} onClick={(event) => { event.stopPropagation(); onDeleteSchedule(schedule); }} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 font-bold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40">Xóa</button></div></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {!schedules.length ? <div className="p-6 text-center text-sm text-slate-500">Chưa có ca làm.</div> : null}
     </div>
   </div>
 );
@@ -531,11 +547,73 @@ const toAssignedPerson = (userId, people) => {
   } : {};
 };
 
-const SchedulingOperationsPanel = ({ assistantStaff, buses, drivers, editingSchedule, onSaved, routes, schedules }) => {
+const FrequencyScheduleModal = ({ onClose, onSaved, routes }) => {
+  const [form, setForm] = useState({ routeId: '', startDate: toDateInputValue(), endDate: toDateInputValue(), autoAssign: true, replaceScheduled: false });
+  const [rows, setRows] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  const selectedRoute = routes.find((route) => String(route._id) === String(form.routeId));
+
+  const generate = async () => {
+    if (!form.routeId || !form.startDate || !form.endDate) return setMessage('Vui lòng chọn tuyến và khoảng ngày.');
+    setIsLoading(true);
+    setMessage('');
+    try {
+      const response = await adminService.generateTripSchedulePreview(form);
+      setRows(response.rows || []);
+      if (!response.rows?.length) setMessage('Không có ngày hoạt động trong khoảng đã chọn.');
+    } catch (error) {
+      setMessage(error?.message || 'Không thể sinh lịch theo tần suất tuyến.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const confirm = async () => {
+    setIsLoading(true);
+    try {
+      const response = await adminService.confirmGeneratedTripSchedules(rows, form.replaceScheduled);
+      await onSaved?.();
+      setMessage(`Đã tạo ${response.schedules?.length || 0} lịch chuyến.`);
+      onClose();
+    } catch (error) {
+      setMessage(error?.message || 'Không thể lưu lịch chuyến.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm">
+      <div className="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-xl bg-white p-5 text-slate-900 shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
+          <div><h2 className="text-xl font-black">Sinh lịch theo tần suất tuyến</h2><p className="mt-1 text-sm text-slate-500">Tạo bản xem trước trước khi lưu chính thức.</p></div>
+          <button type="button" onClick={onClose} className="h-9 w-9 rounded-lg border border-slate-200 text-xl">×</button>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <label className="md:col-span-3"><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Tuyến *</span><select className="h-11 w-full rounded-lg border border-slate-200 px-3" value={form.routeId} onChange={(event) => setForm((current) => ({ ...current, routeId: event.target.value }))}><option value="">Chọn tuyến</option>{routes.map((route) => <option key={route._id} value={route._id}>{route.routeCode} - {route.routeName}</option>)}</select></label>
+          <label><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Từ ngày *</span><input type="date" className="h-11 w-full rounded-lg border border-slate-200 px-3" value={form.startDate} onChange={(event) => setForm((current) => ({ ...current, startDate: event.target.value }))} /></label>
+          <label><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Đến ngày *</span><input type="date" min={form.startDate} className="h-11 w-full rounded-lg border border-slate-200 px-3" value={form.endDate} onChange={(event) => setForm((current) => ({ ...current, endDate: event.target.value }))} /></label>
+          <div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{selectedRoute ? `${selectedRoute.scheduleConfig?.firstDepartureTime || '--:--'} - ${selectedRoute.scheduleConfig?.lastDepartureTime || '--:--'} · ${selectedRoute.scheduleConfig?.frequencyMinutes || 0} phút/chuyến` : 'Chọn tuyến để xem cấu hình.'}</div>
+        </div>
+        <div className="mt-4 grid gap-2 md:grid-cols-2">
+          <label className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 text-sm font-bold"><input type="checkbox" checked={form.autoAssign} onChange={(event) => setForm((current) => ({ ...current, autoAssign: event.target.checked }))} /> Tự gán xe, tài xế và phụ xe</label>
+          <label className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 text-sm font-bold"><input type="checkbox" checked={form.replaceScheduled} onChange={(event) => setForm((current) => ({ ...current, replaceScheduled: event.target.checked }))} /> Xóa lịch PLANNED cũ trong khoảng ngày</label>
+        </div>
+        <div className="mt-4 flex gap-2"><button type="button" disabled={isLoading} onClick={generate} className="rounded-lg bg-violet-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{rows.length ? 'Sinh lại' : 'Sinh lịch'}</button><button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-bold">Đóng</button></div>
+        {message ? <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{message}</div> : null}
+        {rows.length ? <div className="mt-5"><div className="mb-3 flex justify-between"><h3 className="font-black">Bản xem trước</h3><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold">{rows.length} chuyến</span></div><div className="max-h-96 overflow-auto rounded-lg border border-slate-200"><table className="min-w-[1050px] w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr>{['Ngày', 'Mã lịch', 'Chiều', 'Xuất bến', 'Đến', 'Xe', 'Tài xế', 'Phụ xe', 'Cảnh báo', ''].map((item) => <th key={item} className="px-3 py-3 font-black uppercase text-slate-500">{item}</th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.previewId} className="border-t border-slate-200"><td className="px-3 py-3">{row.serviceDate}</td><td className="px-3 py-3 font-bold">{row.scheduleCode}</td><td className="px-3 py-3">{scheduleDirectionLabels[row.direction]}</td><td className="px-3 py-3">{row.departureTime}</td><td className="px-3 py-3">{row.expectedArrivalTime}</td><td className="px-3 py-3">{row.vehicle?.busCode || 'Chưa gán'}</td><td className="px-3 py-3">{row.driver?.fullName || 'Chưa gán'}</td><td className="px-3 py-3">{row.assistant?.fullName || 'Chưa gán'}</td><td className="px-3 py-3 text-amber-700">{row.warnings?.join(' ') || 'Hợp lệ'}</td><td className="px-3 py-3"><button type="button" onClick={() => setRows((current) => current.filter((item) => item.previewId !== row.previewId))} className="text-rose-600">Xóa</button></td></tr>)}</tbody></table></div><div className="mt-4 flex justify-end"><button type="button" disabled={isLoading} onClick={confirm} className="rounded-lg bg-emerald-500 px-5 py-3 text-sm font-black text-emerald-950 disabled:opacity-50">Xác nhận tạo lịch</button></div></div> : null}
+      </div>
+    </div>
+  );
+};
+
+const SchedulingOperationsPanel = ({ assistantStaff, buses, driverShiftAssignments, drivers, editingSchedule, onSaved, routes, schedules, shifts }) => {
   const [editingScheduleId, setEditingScheduleId] = useState('');
   const [form, setForm] = useState(() => createEmptyScheduleForm());
   const [message, setMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [showFrequencyGenerator, setShowFrequencyGenerator] = useState(false);
   const inputClassName = 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-emerald-300';
   const labelClassName = 'mb-1 block text-xs font-bold uppercase tracking-[0.16em] text-slate-500';
   const availableBuses = useMemo(() => buses.filter((bus) => bus.status !== 'MAINTENANCE'), [buses]);
@@ -552,16 +630,49 @@ const SchedulingOperationsPanel = ({ assistantStaff, buses, drivers, editingSche
     return schedules.find((schedule) => (
       String(schedule._id || '') !== String(editingScheduleId || '')
       && schedule.status !== 'CANCELLED'
-      && schedule.status !== 'COMPLETED'
-      && toDateInputValue(schedule.serviceDate) === form.serviceDate
-      && schedule.departureTime === form.departureTime
+      && isSameDateInputValue(schedule.serviceDate, form.serviceDate)
+      && scheduleTimeRangesOverlap(form, schedule)
       && (
         (form.busId && String(schedule.vehicle?.busId || '') === String(form.busId))
         || (form.driverId && String(schedule.driver?.userId || '') === String(form.driverId))
         || (form.assistantId && String(schedule.assistant?.userId || '') === String(form.assistantId))
       )
     ));
-  }, [editingScheduleId, form.assistantId, form.busId, form.departureTime, form.driverId, form.serviceDate, schedules]);
+  }, [editingScheduleId, form, schedules]);
+  const availableDrivers = useMemo(() => {
+    if (!form.serviceDate || !form.departureTime || !form.expectedArrivalTime) return [];
+    return drivers.filter((driver) => {
+      const hasMatchingShift = driverShiftAssignments.some((assignment) => {
+        const assignedDriverId = assignment.driverId?._id || assignment.driverId;
+        const shift = typeof assignment.shiftId === 'object' && assignment.shiftId !== null
+          ? assignment.shiftId
+          : shifts.find((item) => String(item._id) === String(assignment.shiftId));
+        return String(assignedDriverId || '') === String(driver._id || '')
+          && isActiveShiftAssignment(assignment)
+          && isSameDateInputValue(assignment.workDate, form.serviceDate)
+          && shift?.status === 'ACTIVE'
+          && isTimeRangeInsideShift(form, shift);
+      });
+      if (!hasMatchingShift) return false;
+      return !schedules.some((schedule) => (
+        String(schedule._id || '') !== String(editingScheduleId || '')
+        && schedule.status !== 'CANCELLED'
+        && isSameDateInputValue(schedule.serviceDate, form.serviceDate)
+        && String(schedule.driver?.userId || '') === String(driver._id || '')
+        && scheduleTimeRangesOverlap(form, schedule)
+      ));
+    });
+  }, [driverShiftAssignments, drivers, editingScheduleId, form, schedules, shifts]);
+  const availableAssistants = useMemo(() => {
+    if (!form.serviceDate || !form.departureTime || !form.expectedArrivalTime) return [];
+    return assistantStaff.filter((assistant) => !schedules.some((schedule) => (
+      String(schedule._id || '') !== String(editingScheduleId || '')
+      && schedule.status !== 'CANCELLED'
+      && isSameDateInputValue(schedule.serviceDate, form.serviceDate)
+      && String(schedule.assistant?.userId || '') === String(assistant._id || '')
+      && scheduleTimeRangesOverlap(form, schedule)
+    )));
+  }, [assistantStaff, editingScheduleId, form, schedules]);
 
   useEffect(() => {
     if (!estimatedDurationMinutes || !form.departureTime) return;
@@ -574,6 +685,20 @@ const SchedulingOperationsPanel = ({ assistantStaff, buses, drivers, editingSche
         : { ...current, expectedArrivalTime }
     ));
   }, [estimatedDurationMinutes, form.departureTime]);
+
+  useEffect(() => {
+    if (!form.driverId) return;
+    const isStillAvailable = availableDrivers.some((driver) => String(driver._id || '') === String(form.driverId));
+    if (!isStillAvailable) {
+      setForm((current) => ({ ...current, driverId: '' }));
+    }
+  }, [availableDrivers, form.driverId]);
+
+  useEffect(() => {
+    if (!form.assistantId) return;
+    const isStillAvailable = availableAssistants.some((assistant) => String(assistant._id || '') === String(form.assistantId));
+    if (!isStillAvailable) setForm((current) => ({ ...current, assistantId: '' }));
+  }, [availableAssistants, form.assistantId]);
 
   const resetForm = () => {
     setEditingScheduleId('');
@@ -668,14 +793,19 @@ const SchedulingOperationsPanel = ({ assistantStaff, buses, drivers, editingSche
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 text-slate-900">
-      <div className="flex items-start justify-between gap-3">
+    <div className="rounded-xl border border-slate-200 bg-white p-5 text-slate-900 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
         <div>
           <h2 className="text-lg font-black text-slate-950">Điều phối lịch chuyến</h2>
           <p className="mt-1 text-xs leading-5 text-slate-500">Tạo lịch chạy thực tế theo tuyến, chiều, giờ xuất bến, xe và kíp vận hành.</p>
         </div>
-        <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">{schedules.length} lịch</span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">{schedules.length} lịch</span>
+          <button type="button" onClick={() => setShowFrequencyGenerator(true)} className="rounded-lg bg-violet-600 px-4 py-2 text-xs font-black text-white">Sinh lịch theo tần suất</button>
+        </div>
       </div>
+
+      {showFrequencyGenerator ? <FrequencyScheduleModal onClose={() => setShowFrequencyGenerator(false)} onSaved={onSaved} routes={routes} /> : null}
 
       <form onSubmit={saveSchedule} className="mt-4 grid gap-3">
         <div className="grid gap-2 lg:grid-cols-4">
@@ -696,7 +826,7 @@ const SchedulingOperationsPanel = ({ assistantStaff, buses, drivers, editingSche
             <input type="time" className={inputClassName} value={form.expectedArrivalTime} onChange={(event) => updateForm({ expectedArrivalTime: event.target.value })} />
           </label>
         </div>
-        <div className="grid gap-2 lg:grid-cols-4">
+        <div className="grid gap-2 lg:grid-cols-2">
           <label>
             <span className={labelClassName}>Tuyến</span>
             <select className={inputClassName} value={form.routeId} onChange={(event) => updateForm({ routeId: event.target.value })}>
@@ -709,16 +839,6 @@ const SchedulingOperationsPanel = ({ assistantStaff, buses, drivers, editingSche
             <select className={inputClassName} value={form.direction} onChange={(event) => updateForm({ direction: event.target.value })}>
               <option value="OUTBOUND">Chiều đi</option>
               <option value="INBOUND">Chiều về</option>
-            </select>
-          </label>
-          <label>
-            <span className={labelClassName}>Ca trực</span>
-            <input className={inputClassName} placeholder="VD: Ca sáng 05:30-13:30" value={form.shiftLabel} onChange={(event) => updateForm({ shiftLabel: event.target.value })} />
-          </label>
-          <label>
-            <span className={labelClassName}>Trạng thái</span>
-            <select className={inputClassName} value={form.status} onChange={(event) => updateForm({ status: event.target.value })}>
-              {Object.entries(scheduleStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </label>
         </div>
@@ -734,15 +854,21 @@ const SchedulingOperationsPanel = ({ assistantStaff, buses, drivers, editingSche
             <span className={labelClassName}>Tài xế</span>
             <select className={inputClassName} value={form.driverId} onChange={(event) => updateForm({ driverId: event.target.value })}>
               <option value="">Chưa gán tài xế</option>
-              {drivers.map((driver) => <option key={driver._id} value={driver._id}>{driver.fullName}{driver.phone ? ` - ${driver.phone}` : ''}</option>)}
+              {availableDrivers.map((driver) => <option key={driver._id} value={driver._id}>{driver.fullName}{driver.phone ? ` - ${driver.phone}` : ''}</option>)}
             </select>
+            {form.serviceDate && form.departureTime && form.expectedArrivalTime && !availableDrivers.length ? (
+              <span className="mt-1 block text-xs font-semibold text-amber-600">Khong co tai xe co ca lam phu hop hoac tai xe da ban trong khung gio nay.</span>
+            ) : null}
           </label>
           <label>
             <span className={labelClassName}>Phụ xe</span>
             <select className={inputClassName} value={form.assistantId} onChange={(event) => updateForm({ assistantId: event.target.value })}>
               <option value="">Chưa gán phụ xe</option>
-              {assistantStaff.map((staff) => <option key={staff._id} value={staff._id}>{staff.fullName}{staff.phone ? ` - ${staff.phone}` : ''}</option>)}
+              {availableAssistants.map((staff) => <option key={staff._id} value={staff._id}>{staff.fullName}{staff.phone ? ` - ${staff.phone}` : ''}</option>)}
             </select>
+            {form.serviceDate && form.departureTime && form.expectedArrivalTime && !availableAssistants.length ? (
+              <span className="mt-1 block text-xs font-semibold text-amber-600">Không có phụ xe rảnh trong khung giờ này.</span>
+            ) : null}
           </label>
         </div>
         {selectedRoute ? (
@@ -970,37 +1096,98 @@ const FleetOperationsPanel = ({ buses, onSaved, routes }) => {
 };
 
 const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
-  const [query, setQuery] = useState('');
+  const [addressQuery, setAddressQuery] = useState('');
+  const [stationQuery, setStationQuery] = useState('');
   const [editingStationId, setEditingStationId] = useState('');
   const [form, setForm] = useState(emptyStopForm);
   const [errors, setErrors] = useState({});
   const [message, setMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [deletingStationId, setDeletingStationId] = useState('');
+  const [addressSearchResults, setAddressSearchResults] = useState([]);
+  const [addressSearchLoading, setAddressSearchLoading] = useState(false);
+  const [selectedAddressResult, setSelectedAddressResult] = useState(null);
 
-  const filteredStations = useMemo(() => {
-    const normalizedQuery = normalizeStationSearch(query);
+  const matchingStations = useMemo(() => {
+    const normalizedQuery = normalizeStationSearch(stationQuery);
     return stations
+      .filter((station) => station.source === 'MANUAL')
       .filter((station) => !normalizedQuery || [
         station.stationCode,
         station.stationName,
         station.address,
         station.district,
         station.ward,
-      ].some((value) => normalizeStationSearch(value).includes(normalizedQuery)))
-      .slice(0, 6);
-  }, [query, stations]);
+      ].some((value) => normalizeStationSearch(value).includes(normalizedQuery)));
+  }, [stationQuery, stations]);
+  const filteredStations = matchingStations;
   const quickSuggestions = useMemo(() => {
-    if (filteredStations.length) return filteredStations.slice(0, 5);
     return stations
       .filter((station) => isInsideDaNang(station.latitude, station.longitude))
       .slice(0, 5);
-  }, [filteredStations, stations]);
+  }, [stations]);
+
+  const searchAddress = async (event) => {
+    event?.preventDefault();
+    const searchText = addressQuery.trim();
+    if (searchText.length < 3) {
+      setAddressSearchResults([]);
+      setSelectedAddressResult(null);
+      setMessage('Nhập ít nhất 3 ký tự để tìm địa điểm.');
+      return;
+    }
+
+    setAddressSearchLoading(true);
+    setSelectedAddressResult(null);
+    setMessage('');
+    try {
+      const response = await adminService.searchStopAddresses(searchText);
+      const results = response.results || [];
+      setAddressSearchResults(results);
+      const firstResult = results[0];
+      if (firstResult) {
+        setSelectedAddressResult(firstResult);
+        setEditingStationId('');
+        setForm((current) => ({
+          ...current,
+          _id: '',
+          address: firstResult.address || firstResult.displayName || current.address,
+          latitude: Number(firstResult.latitude).toFixed(6),
+          longitude: Number(firstResult.longitude).toFixed(6),
+          district: firstResult.district || current.district,
+          ward: firstResult.ward || current.ward,
+        }));
+        setErrors((current) => ({ ...current, address: undefined, latitude: undefined, longitude: undefined }));
+        setMessage(firstResult.exactStreetNumber
+          ? 'Đã hiển thị đúng vị trí số nhà trên bản đồ.'
+          : 'Đã hiển thị vị trí gần đúng trên bản đồ. Có thể kéo marker xanh để chỉnh lại.');
+      } else {
+        setMessage('Không tìm thấy địa điểm phù hợp.');
+      }
+    } catch (error) {
+      setAddressSearchResults([]);
+      setMessage(error?.message || 'Không thể tìm địa điểm.');
+    } finally {
+      setAddressSearchLoading(false);
+    }
+  };
 
   const resetForm = () => {
     setEditingStationId('');
     setForm(emptyStopForm);
     setErrors({});
     setMessage('');
+    setAddressSearchResults([]);
+    setSelectedAddressResult(null);
+    setAddressQuery('');
+    setStationQuery('');
+  };
+
+  const handleAddressSearchChange = (value) => {
+    setAddressQuery(value);
+    setAddressSearchResults([]);
+    setSelectedAddressResult(null);
+    setEditingStationId('');
   };
 
   const editStation = (station) => {
@@ -1034,9 +1221,71 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
     setMessage('Đã điền thông tin từ trạm gợi ý.');
   };
 
+  const deleteStation = async (station) => {
+    const stationName = station.stationName || 'trạm này';
+    if (!window.confirm(`Xóa trạm "${stationName}"? Thao tác này không thể hoàn tác.`)) return;
+
+    setDeletingStationId(station._id);
+    setMessage('');
+    try {
+      await adminService.deleteBusStop(station._id);
+      if (String(editingStationId) === String(station._id)) resetForm();
+      await onSaved?.();
+      const successMessage = `Đã xóa trạm "${stationName}".`;
+      setMessage(successMessage);
+      toast.success(successMessage);
+    } catch (error) {
+      const errorMessage = error?.message || 'Không thể xóa trạm.';
+      setMessage(errorMessage);
+      toast.error(errorMessage);
+    } finally {
+      setDeletingStationId('');
+    }
+  };
+  const pickAddressResult = (result) => {
+    setSelectedAddressResult(result);
+    setEditingStationId('');
+    setForm((current) => ({
+      ...current,
+      _id: '',
+      address: result.address || result.displayName || '',
+      latitude: Number(result.latitude).toFixed(6),
+      longitude: Number(result.longitude).toFixed(6),
+      district: result.district || current.district,
+      ward: result.ward || current.ward,
+    }));
+    setErrors((current) => ({ ...current, address: undefined, latitude: undefined, longitude: undefined }));
+    setMessage('Đã chọn địa chỉ và hiển thị vị trí trên bản đồ.');
+  };
+
+  const fillStopFromSearch = () => {
+    const result = selectedAddressResult || addressSearchResults[0];
+    if (!result) {
+      setMessage('Hãy tìm và chọn một địa điểm trước khi thêm trạm nhanh.');
+      return;
+    }
+
+    const suggestedName = String(result.displayName || result.address || addressQuery)
+      .split(',')[0]
+      .trim();
+    setEditingStationId('');
+    setSelectedAddressResult(result);
+    setForm((current) => ({
+      ...current,
+      _id: '',
+      stationName: current.stationName || suggestedName,
+      address: result.address || result.displayName || current.address,
+      latitude: Number(result.latitude).toFixed(6),
+      longitude: Number(result.longitude).toFixed(6),
+      district: result.district || current.district,
+      ward: result.ward || current.ward,
+    }));
+    setErrors((current) => ({ ...current, stationName: undefined, address: undefined, latitude: undefined, longitude: undefined }));
+    setMessage('Đã điền nhanh tên trạm, địa chỉ và tọa độ.');
+  };
+
   const validateForm = () => {
     const nextErrors = {};
-    if (!form.stationCode.trim()) nextErrors.stationCode = 'Nhập mã trạm';
     if (!form.stationName.trim()) nextErrors.stationName = 'Nhập tên trạm';
     if (!form.address.trim()) nextErrors.address = 'Nhập địa chỉ';
     if (!Number.isFinite(Number(form.latitude))) nextErrors.latitude = 'Tọa độ không hợp lệ';
@@ -1069,16 +1318,19 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
       }
       resetForm();
       setMessage(successMessage);
+      toast.success(successMessage);
       await onSaved?.();
     } catch (error) {
-      setMessage(error?.message || 'Không thể lưu trạm.');
+      const errorMessage = error?.message || 'Không thể lưu trạm.';
+      setMessage(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setIsSaving(false);
     }
   };
 
   const labelClassName = isDarkMode ? 'text-slate-400' : 'text-slate-500';
-  const stopInputClassName = 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-emerald-300';
+  const stopInputClassName = 'h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100';
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 text-slate-900">
@@ -1089,29 +1341,76 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
             Tạo và cập nhật trạm dừng. Gán trạm vào tuyến tại bước Dựng lộ trình bằng cách thêm trạm vào chiều tuyến.
           </p>
         </div>
-        <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">{stations.length}</span>
+        <span className="shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">{stations.length}</span>
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <form onSubmit={saveStop} className="grid gap-3">
-          <div className="grid gap-2 sm:grid-cols-2">
-            <label>
-              <span className={`mb-1 block text-[11px] font-bold uppercase tracking-[0.18em] ${labelClassName}`}>Mã trạm</span>
-              <input className={stopInputClassName} value={form.stationCode} onChange={(event) => setForm((current) => ({ ...current, stationCode: event.target.value }))} />
-              {errors.stationCode ? <span className="mt-1 block text-xs text-rose-600">{errors.stationCode}</span> : null}
-            </label>
-            <label>
-              <span className={`mb-1 block text-[11px] font-bold uppercase tracking-[0.18em] ${labelClassName}`}>Tên trạm</span>
-              <input className={stopInputClassName} value={form.stationName} onChange={(event) => setForm((current) => ({ ...current, stationName: event.target.value }))} />
-              {errors.stationName ? <span className="mt-1 block text-xs text-rose-600">{errors.stationName}</span> : null}
-            </label>
+      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <form onSubmit={saveStop} className="grid content-start gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          <div>
+            <h3 className="text-sm font-black text-slate-950">Thông tin trạm</h3>
+            <p className="mt-1 text-xs text-slate-500">Nhập thông tin cơ bản hoặc chọn nhanh một trạm trên bản đồ.</p>
           </div>
+          <label>
+            <span className={`mb-1 block text-[11px] font-bold uppercase tracking-[0.18em] ${labelClassName}`}>Tên trạm</span>
+            <input className={stopInputClassName} value={form.stationName} onChange={(event) => setForm((current) => ({ ...current, stationName: event.target.value }))} />
+            {errors.stationName ? <span className="mt-1 block text-xs text-rose-600">{errors.stationName}</span> : null}
+          </label>
           <label>
             <span className={`mb-1 block text-[11px] font-bold uppercase tracking-[0.18em] ${labelClassName}`}>Địa chỉ</span>
             <input className={stopInputClassName} value={form.address} onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))} />
             {errors.address ? <span className="mt-1 block text-xs text-rose-600">{errors.address}</span> : null}
           </label>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div>
+            <span className={`mb-1 block text-[11px] font-bold uppercase tracking-[0.18em] ${labelClassName}`}>Tìm địa điểm</span>
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_44px_160px]">
+              <input
+                className={stopInputClassName}
+                value={addressQuery}
+                onChange={(event) => handleAddressSearchChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') searchAddress(event);
+                }}
+                placeholder="Nhập địa chỉ hoặc tên địa điểm..."
+              />
+              <button
+                type="button"
+                onClick={searchAddress}
+                disabled={addressSearchLoading}
+                aria-label="Tìm địa điểm"
+                className="h-11 rounded-lg border border-slate-200 bg-white text-lg font-black text-slate-700 transition hover:border-cyan-300 hover:text-cyan-700 disabled:opacity-60"
+              >
+                {addressSearchLoading ? '…' : '⌕'}
+              </button>
+              <button
+                type="button"
+                onClick={fillStopFromSearch}
+                disabled={!selectedAddressResult && !addressSearchResults.length}
+                className="h-11 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-black text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Thêm trạm nhanh
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">Chỉ tìm trong khu vực Đà Nẵng. Chọn kết quả để xem vị trí, sau đó có thể kéo marker để chỉnh tọa độ.</p>
+            {addressSearchResults.length ? (
+              <div className="mt-2 grid max-h-40 gap-1.5 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
+                {addressSearchResults.map((result) => {
+                  const isSelected = String(selectedAddressResult?.id || '') === String(result.id || '');
+                  return (
+                    <button
+                      key={`address-${result.id}`}
+                      type="button"
+                      onClick={() => pickAddressResult(result)}
+                      className={`rounded-lg border px-3 py-2 text-left text-xs transition ${isSelected ? 'border-cyan-400 bg-cyan-50' : 'border-slate-200 hover:border-cyan-300 hover:bg-slate-50'}`}
+                    >
+                      <span className="block text-sm font-black text-slate-900">{result.displayName}</span>
+                      <span className="mt-1 block font-semibold text-slate-500">{result.exactStreetNumber ? 'Khớp số nhà' : 'Bấm để xem trên bản đồ'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
             <label>
               <span className={`mb-1 block text-[11px] font-bold uppercase tracking-[0.18em] ${labelClassName}`}>Latitude</span>
               <input className={stopInputClassName} value={form.latitude} onChange={(event) => setForm((current) => ({ ...current, latitude: event.target.value }))} />
@@ -1123,39 +1422,39 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
               {errors.longitude ? <span className="mt-1 block text-xs text-rose-600">{errors.longitude}</span> : null}
             </label>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2">
             <input className={stopInputClassName} placeholder="Quận/huyện" value={form.district} onChange={(event) => setForm((current) => ({ ...current, district: event.target.value }))} />
             <input className={stopInputClassName} placeholder="Phường/xã" value={form.ward} onChange={(event) => setForm((current) => ({ ...current, ward: event.target.value }))} />
           </div>
-          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-            <input type="checkbox" checked={form.isMainStation} onChange={(event) => setForm((current) => ({ ...current, isMainStation: event.target.checked }))} />
+          <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700">
+            <input type="checkbox" className="h-4 w-4 accent-emerald-500" checked={form.isMainStation} onChange={(event) => setForm((current) => ({ ...current, isMainStation: event.target.checked }))} />
             Trạm chính / bến đầu cuối
           </label>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <button type="submit" disabled={isSaving} className="rounded-xl bg-emerald-400 px-4 py-3 text-sm font-black text-slate-950 disabled:opacity-60">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button type="submit" disabled={isSaving} className="h-11 rounded-lg bg-emerald-400 px-4 text-sm font-black text-slate-950 shadow-sm transition hover:bg-emerald-300 disabled:opacity-60">
               {editingStationId ? 'Cập nhật trạm' : 'Tạo trạm mới'}
             </button>
-            <button type="button" onClick={resetForm} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700">
+            <button type="button" onClick={resetForm} className="h-11 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50">
               Làm mới
             </button>
           </div>
-          {message ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">{message}</div> : null}
+          {message ? <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">{message}</div> : null}
         </form>
-        <div className="grid gap-3">
+        <div className="grid content-start gap-3">
           <StopMapPicker
             form={form}
             onPickLocation={pickMapLocation}
             onPickStation={pickSuggestedStation}
             stations={stations}
           />
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-sm font-black text-slate-950">Gợi ý nhanh</h3>
               <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">{quickSuggestions.length}</span>
             </div>
-            <div className="mt-3 grid gap-2">
+            <div className="mt-3 grid max-h-56 gap-2 overflow-y-auto pr-1">
               {quickSuggestions.map((station) => (
-                <button key={station._id} type="button" onClick={() => pickSuggestedStation(station)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:border-emerald-300">
+                <button key={station._id} type="button" onClick={() => pickSuggestedStation(station)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-emerald-300 hover:shadow-sm">
                   <span className="block font-black text-slate-900">{station.stationName || station.stationCode}</span>
                   <span className="mt-1 block text-xs text-slate-500">{station.address}</span>
                 </button>
@@ -1168,16 +1467,39 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
         </div>
       </div>
 
-      <div className="mt-5">
-        <input className={stopInputClassName} placeholder="Tìm trạm để cập nhật..." value={query} onChange={(event) => setQuery(event.target.value)} />
-        <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-black text-slate-950">Trạm được tạo mới</h3>
+            <p className="mt-1 text-xs text-slate-500">Xem, sửa hoặc xóa các trạm do admin tạo thủ công.</p>
+          </div>
+          <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-slate-600">{filteredStations.length}</span>
+        </div>
+        <input className={stopInputClassName} placeholder="Tìm theo tên hoặc địa chỉ..." value={stationQuery} onChange={(event) => setStationQuery(event.target.value)} />
+        <div className="mt-3 grid max-h-64 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
           {filteredStations.map((station) => (
-            <button key={station._id} type="button" onClick={() => editStation(station)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm hover:border-emerald-300">
-              <span className="block font-black text-slate-900">{station.stationCode} - {station.stationName}</span>
-              <span className="mt-1 block text-xs text-slate-500">{station.address}</span>
+            <div key={station._id} className="rounded-lg border border-slate-200 bg-white p-3 text-sm transition hover:border-emerald-300 hover:shadow-sm">
+              <span className="block font-black text-slate-900">{station.stationName}</span>
+              <span className="mt-1 block text-xs leading-5 text-slate-500">{station.address}</span>
+              <span className="mt-1 block text-xs text-slate-400">
+                {Number(station.latitude).toFixed(6)}, {Number(station.longitude).toFixed(6)}
+              </span>
               <span className="mt-1 block text-xs text-slate-400">{station.routeAssignments?.length || 0} lượt gán | {routes.length} tuyến trong thư viện</span>
-            </button>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => editStation(station)} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-100">
+                  Xem / Sửa
+                </button>
+                <button type="button" onClick={() => deleteStation(station)} disabled={deletingStationId === station._id} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:opacity-50">
+                  {deletingStationId === station._id ? 'Đang xóa...' : 'Xóa'}
+                </button>
+              </div>
+            </div>
           ))}
+          {!filteredStations.length ? (
+            <div className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-500 sm:col-span-2 xl:col-span-3">
+              {stationQuery ? 'Không tìm thấy trạm được tạo mới phù hợp.' : 'Chưa có trạm nào do admin tạo.'}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -1194,6 +1516,8 @@ const RouteWorkflowPage = () => {
   const [scheduleForEditing, setScheduleForEditing] = useState(null);
   const [drivers, setDrivers] = useState([]);
   const [assistantStaff, setAssistantStaff] = useState([]);
+  const [shifts, setShifts] = useState([]);
+  const [driverShiftAssignments, setDriverShiftAssignments] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeOperationSection, setActiveOperationSection] = useState('routes');
@@ -1216,18 +1540,22 @@ const RouteWorkflowPage = () => {
     setIsLoading(true);
     setError('');
     try {
-      const [stationsResponse, routesResponse, busesResponse, staffResponse, schedulesResponse] = await Promise.all([
+      const [stationsResponse, routesResponse, busesResponse, staffResponse, schedulesResponse, shiftsResponse, shiftAssignmentsResponse] = await Promise.all([
         adminService.getStations({ limit: 1000 }),
         adminService.getRoutes({ limit: 100 }),
         adminService.getBuses(),
         adminService.getDrivers(),
         adminService.getTripSchedules({ limit: 100 }),
+        adminService.getShifts({ status: 'ACTIVE' }),
+        adminService.getShiftAssignments(),
       ]);
       setStations(stationsResponse.stations || []);
       setRoutes(routesResponse.routes || []);
       setBuses(busesResponse.buses || []);
       setDrivers(staffResponse.drivers || []);
       setAssistantStaff(staffResponse.assistantStaff || []);
+      setShifts(shiftsResponse.shifts || []);
+      setDriverShiftAssignments(shiftAssignmentsResponse.driverAssignments || []);
       const nextSchedules = schedulesResponse.schedules || [];
       setSchedules(nextSchedules);
       setSelectedSchedule((current) => (
@@ -1246,6 +1574,18 @@ const RouteWorkflowPage = () => {
     loadData();
   }, []);
 
+  const deleteSchedule = async (schedule) => {
+    const confirmed = window.confirm(`Xóa ca ${schedule.scheduleCode}? Thao tác này không thể hoàn tác.`);
+    if (!confirmed) return;
+    try {
+      await adminService.deleteTripSchedule(schedule._id);
+      if (String(scheduleForEditing?._id || '') === String(schedule._id)) setScheduleForEditing(null);
+      await loadData();
+    } catch (deleteError) {
+      setError(deleteError?.message || 'Không thể xóa ca làm.');
+    }
+  };
+
   const openRoute = async (routeId) => {
     try {
       const response = await adminService.getRouteDetail(routeId);
@@ -1259,8 +1599,7 @@ const RouteWorkflowPage = () => {
 
   const suspendRoute = async (routeId) => {
     try {
-      const response = await adminService.suspendRoute(routeId, { reason: 'Tạm dừng bởi quản trị viên' });
-      loadRoute(normalizeRouteFromApi(response.route));
+      await adminService.suspendRoute(routeId, { reason: 'Tạm dừng bởi quản trị viên' });
       await loadData();
     } catch (routeError) {
       setError(routeError?.message || 'Không thể tạm dừng tuyến.');
@@ -1268,10 +1607,10 @@ const RouteWorkflowPage = () => {
   };
 
   const activeStepContent = [
-    <CreateRouteStep key="create" inputClassName={inputClassName} panelClassName={panelClassName} stations={stations} />,
+    <CreateRouteStep key="create" inputClassName={inputClassName} panelClassName={panelClassName} routes={routes} stations={stations} />,
     <DefinePathStep key="path" inputClassName={inputClassName} panelClassName={panelClassName} stations={stations} isDarkMode={isDarkMode} />,
     <ConfigureScheduleStep key="schedule" inputClassName={inputClassName} panelClassName={panelClassName} />,
-    <ReviewRouteStep key="review" panelClassName={panelClassName} isDarkMode={isDarkMode} onSaved={loadData} />,
+    <ReviewRouteStep key="review" panelClassName={panelClassName} isDarkMode={isDarkMode} onSaved={loadData} routes={routes} />,
   ];
 
   if (isLoading) {
@@ -1328,7 +1667,7 @@ const RouteWorkflowPage = () => {
           {error ? <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
           <div className={`mb-5 rounded-2xl border p-3 ${panelClassName}`}>
-            <div className="grid gap-3 lg:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
               {operationSections.map((section) => (
                 <button
                   key={section.key}
@@ -1385,10 +1724,10 @@ const RouteWorkflowPage = () => {
               <div className="mt-4 max-h-[520px] space-y-3 overflow-y-auto pr-1">
                 {routes.length ? routes.map((route) => (
                   <div key={route._id} className="rounded-xl border border-slate-200 bg-white p-3 text-slate-800">
-                    <button type="button" onClick={() => openRoute(route._id)} className="w-full text-left hover:text-emerald-700">
+                    <div className="w-full text-left">
                       <span className="block text-sm font-black">{route.routeCode} - {route.routeName}</span>
                       <span className="mt-1 block text-xs text-slate-500">{routeStatusLabels[route.status] || route.status} - {route.analytics?.totalStops || 0} trạm</span>
-                    </button>
+                    </div>
                     <div className="mt-3 grid grid-cols-2 gap-2">
                       <button type="button" onClick={() => openRoute(route._id)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold">
                         Cập nhật
@@ -1463,11 +1802,13 @@ const RouteWorkflowPage = () => {
               <SchedulingOperationsPanel
                 assistantStaff={assistantStaff}
                 buses={buses}
+                driverShiftAssignments={driverShiftAssignments}
                 drivers={drivers}
                 editingSchedule={scheduleForEditing}
                 onSaved={loadData}
                 routes={routes}
                 schedules={schedules}
+                shifts={shifts}
               />
               <aside className={`rounded-2xl border p-5 ${panelClassName}`}>
                 <h2 className="text-lg font-black">Tổng quan lịch chuyến</h2>
@@ -1481,11 +1822,17 @@ const RouteWorkflowPage = () => {
                 </div>
               </aside>
               </div>
-              <div className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
+            </section>
+          ) : null}
+
+          {activeOperationSection === 'shift-list' ? (
+            <section className="mb-5 grid gap-5">
                 <ScheduleListPanel
+                  onDeleteSchedule={deleteSchedule}
                   onEditSchedule={(schedule) => {
                     setScheduleForEditing(schedule);
                     setSelectedSchedule(schedule);
+                    setActiveOperationSection('scheduling');
                   }}
                   onSelectSchedule={setSelectedSchedule}
                   routes={routes}
@@ -1493,7 +1840,6 @@ const RouteWorkflowPage = () => {
                   selectedScheduleId={selectedSchedule?._id}
                 />
                 <ScheduleRouteDetailPanel routes={routes} schedule={selectedSchedule} />
-              </div>
             </section>
           ) : null}
         </div>

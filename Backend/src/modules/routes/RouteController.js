@@ -49,8 +49,8 @@ export class RouteController {
 
   static async best(req, res, next) {
     try {
-      const { from = '', to = '' } = req.query;
-      const result = await RouteService.findBestRoute({ from, to });
+      const { from = '', to = '', preference = 'fastest' } = req.query;
+      const result = await RouteService.findBestRoute({ from, to, preference });
 
       return res.success(result, 'Best route calculated successfully');
     } catch (error) {
@@ -58,6 +58,66 @@ export class RouteController {
 
       if (error.message === 'Departure and destination are required') {
         return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async suggestions(req, res, next) {
+    try {
+      const { from = '', to = '', preference = 'fastest' } = req.query;
+      const result = await RouteService.suggestRouteOptions({ from, to, preference });
+
+      return res.success(result, 'Route options suggested successfully');
+    } catch (error) {
+      logger.error('Route suggestion error:', error);
+
+      if (error.message === 'Departure and destination are required') {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async live(req, res, next) {
+    try {
+      const { routeId } = req.params;
+      const result = await RouteService.getLiveBusLocations(routeId);
+
+      return res.success(result, 'Live bus locations fetched successfully');
+    } catch (error) {
+      logger.error('Live bus location error:', error);
+
+      if (error.message === 'Bus not found') {
+        return res.status(404).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async eta(req, res, next) {
+    try {
+      const { routeId } = req.params;
+      const result = await RouteService.getEstimatedArrivalTimes(routeId);
+
+      return res.success(result, 'Estimated arrival times fetched successfully');
+    } catch (error) {
+      logger.error('ETA error:', error);
+
+      if (error.message === 'Bus not found') {
+        return res.status(404).json({
           success: false,
           message: error.message,
         });

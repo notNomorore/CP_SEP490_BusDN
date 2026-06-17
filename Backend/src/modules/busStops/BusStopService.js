@@ -108,6 +108,96 @@ const geocodeAddress = async (address) => {
   };
 };
 
+const parseGoogleAddressComponent = (components, types) => components.find((component) => (
+  types.some((type) => component.types?.includes(type))
+))?.long_name || '';
+
+const extractRequestedStreetNumber = (value) => String(value || '').trim().match(/^\s*(\d+[A-Za-z]?(?:[/-]\d+[A-Za-z]?)?)/)?.[1] || '';
+const normalizeStreetNumber = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, '');
+const rankAddressResult = (result, requestedStreetNumber) => {
+  const exactStreetNumber = requestedStreetNumber
+    && normalizeStreetNumber(result.streetNumber) === normalizeStreetNumber(requestedStreetNumber);
+  const preciseType = result.resultTypes?.some((type) => ['street_address', 'premise', 'subpremise'].includes(type));
+  return (exactStreetNumber ? 100 : 0) + (preciseType ? 20 : 0) + (result.partialMatch ? -10 : 0);
+};
+
+export const searchStopAddresses = async (query) => {
+  const text = String(query || '').trim();
+  if (text.length < 3) return [];
+  const requestedStreetNumber = extractRequestedStreetNumber(text);
+
+  if (config.googleMaps.apiKey) {
+    const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
+    url.searchParams.set('address', `${text}, Đà Nẵng, Việt Nam`);
+    url.searchParams.set('key', config.googleMaps.apiKey);
+    url.searchParams.set('language', 'vi');
+    url.searchParams.set('region', 'vn');
+    url.searchParams.set('bounds', '15.95,107.95|16.25,108.35');
+    const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const payload = await response.json();
+    if (!response.ok || !['OK', 'ZERO_RESULTS'].includes(payload.status)) {
+      throw Object.assign(new Error(payload.error_message || 'Không thể tìm kiếm địa chỉ.'), { statusCode: 502 });
+    }
+    return (payload.results || [])
+      .map((result) => {
+        const resultTypes = result.types || [];
+        const streetNumber = parseGoogleAddressComponent(result.address_components || [], ['street_number']);
+        return {
+          id: result.place_id,
+          displayName: result.formatted_address,
+          address: result.formatted_address,
+          latitude: result.geometry.location.lat,
+          longitude: result.geometry.location.lng,
+          district: parseGoogleAddressComponent(result.address_components || [], ['administrative_area_level_2']),
+          ward: parseGoogleAddressComponent(result.address_components || [], ['sublocality_level_1', 'administrative_area_level_3']),
+          streetNumber,
+          exactStreetNumber: Boolean(requestedStreetNumber)
+            && normalizeStreetNumber(streetNumber) === normalizeStreetNumber(requestedStreetNumber),
+          resultTypes,
+          partialMatch: Boolean(result.partial_match),
+          source: 'GOOGLE',
+        };
+      })
+      .sort((left, right) => rankAddressResult(right, requestedStreetNumber) - rankAddressResult(left, requestedStreetNumber))
+      .slice(0, 6);
+  }
+
+  const url = new URL('https://nominatim.openstreetmap.org/search');
+  url.searchParams.set('q', `${text}, Đà Nẵng, Việt Nam`);
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('addressdetails', '1');
+  url.searchParams.set('limit', '6');
+  url.searchParams.set('countrycodes', 'vn');
+  url.searchParams.set('viewbox', '107.95,16.25,108.35,15.95');
+  url.searchParams.set('bounded', '1');
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'BusDN/1.0 (admin stop address search)' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw Object.assign(new Error('Không thể tìm kiếm địa chỉ trên bản đồ.'), { statusCode: 502 });
+  const payload = await response.json();
+  return payload
+    .map((result) => {
+      const streetNumber = result.address?.house_number || '';
+      return {
+        id: String(result.place_id),
+        displayName: result.display_name,
+        address: result.display_name,
+        latitude: Number(result.lat),
+        longitude: Number(result.lon),
+        district: result.address?.city_district || result.address?.district || result.address?.county || '',
+        ward: result.address?.suburb || result.address?.quarter || result.address?.neighbourhood || result.address?.village || '',
+        streetNumber,
+        exactStreetNumber: Boolean(requestedStreetNumber)
+          && normalizeStreetNumber(streetNumber) === normalizeStreetNumber(requestedStreetNumber),
+        resultTypes: [result.type].filter(Boolean),
+        partialMatch: false,
+        source: 'OPENSTREETMAP',
+      };
+    })
+    .sort((left, right) => rankAddressResult(right, requestedStreetNumber) - rankAddressResult(left, requestedStreetNumber));
+};
+
 const resolveRouteAssignment = async ({ routeId, direction }) => {
   if (!routeId) {
     return [];

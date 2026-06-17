@@ -1,5 +1,6 @@
 import React from 'react';
 import BookingWidget from './BookingWidget';
+import { HOME_BUS_HERO_IMAGE } from '../../../shared/constants/images.js';
 
 const Hero = () => {
   return (
@@ -8,7 +9,7 @@ const Hero = () => {
       <div className="absolute inset-0 z-0">
         <img
           className="w-full h-full object-cover"
-          src="https://lh3.googleusercontent.com/aida-public/AB6AXuBLL6gcNVAz1070IFnBqgdsc8gxkluQJSMV3V9XR6bICz9zXNMcKwT5EklYJ5p7lKSYbnWVw--1pmoac3vwagHKeKWqaanGqT-etqPbkze2AoyqqJUfGu7RvkBVZtW9_L4wuMidiPLgIl-UfxgUpFWopPEo4Yx58UGIoJVl7BzxXW_dUocCZvTmZA--2bmnQuTvW7H7xox332bFpzLRy2t6tlAdE9RKUoXdKNzmcgKave5mWio7Qq94XHTx5dFFiIceLBybqknScYM"
+          src={HOME_BUS_HERO_IMAGE}
           alt="Modern coach bus"
         />
         <div className="absolute inset-0 hero-gradient"></div>

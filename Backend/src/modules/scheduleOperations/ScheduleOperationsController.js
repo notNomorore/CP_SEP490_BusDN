@@ -1,6 +1,7 @@
 import ScheduleOperationsService from './ScheduleOperationsService.js';
 import {
   OperationIncidentResponseDTO,
+  OperationNotificationResponseDTO,
   ShiftAssignmentResponseDTO,
   VehicleInspectionResponseDTO,
 } from './scheduleOperations.dto.js';
@@ -49,6 +50,29 @@ export class ScheduleOperationsController {
       );
     } catch (error) {
       logger.error('List shift schedule error:', error);
+      next(error);
+    }
+  }
+
+  static async listOperationNotifications(req, res, next) {
+    try {
+      const notifications = await ScheduleOperationsService.listOperationNotifications(
+        req.user.userId,
+        req.user.role,
+        req.query
+      );
+
+      return res.success(
+        {
+          notifications: notifications.map((notification) => (
+            OperationNotificationResponseDTO.format(notification, req.user.userId)
+          )),
+          count: notifications.length,
+        },
+        'Operation notifications retrieved successfully'
+      );
+    } catch (error) {
+      logger.error('List operation notifications error:', error);
       next(error);
     }
   }

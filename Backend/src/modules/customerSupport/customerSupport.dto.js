@@ -1,7 +1,8 @@
-const CASE_TYPES = ['COMPLAINT', 'LOST_ITEM'];
+const CASE_TYPES = ['COMPLAINT'];
 const CASE_STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'REJECTED', 'CLOSED'];
+const COMPLAINT_RESPONSE_STATUSES = ['IN_PROGRESS', 'RESOLVED', 'REJECTED', 'CLOSED'];
 const CASE_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
-const RECOVERY_STATUSES = ['REPORTED', 'SEARCHING', 'FOUND', 'RETURNED', 'UNRECOVERED'];
+const LOST_ITEM_RECOVERY_STATUSES = ['REPORTED', 'STORED', 'RETURNED', 'CANCELLED'];
 
 export const CreateSupportCaseDTO = {
   validate: (body) => {
@@ -23,10 +24,6 @@ export const CreateSupportCaseDTO = {
       errors.priority = 'Priority is invalid';
     }
 
-    if (body.type === 'LOST_ITEM' && !body.lostItem?.itemName?.trim()) {
-      errors.itemName = 'Lost item name is required';
-    }
-
     return Object.keys(errors).length === 0 ? null : errors;
   },
 };
@@ -39,28 +36,12 @@ export const RespondSupportCaseDTO = {
       errors.message = 'Response message is required';
     }
 
-    if (body.status && !CASE_STATUSES.includes(body.status)) {
+    if (body.message?.trim() && body.message.trim().length < 10) {
+      errors.message = 'Response message must be at least 10 characters';
+    }
+
+    if (body.status && !COMPLAINT_RESPONSE_STATUSES.includes(body.status)) {
       errors.status = 'Status is invalid';
-    }
-
-    return Object.keys(errors).length === 0 ? null : errors;
-  },
-};
-
-export const UpdateLostItemCaseDTO = {
-  validate: (body) => {
-    const errors = {};
-
-    if (body.status && !CASE_STATUSES.includes(body.status)) {
-      errors.status = 'Status is invalid';
-    }
-
-    if (body.recoveryStatus && !RECOVERY_STATUSES.includes(body.recoveryStatus)) {
-      errors.recoveryStatus = 'Recovery status is invalid';
-    }
-
-    if (body.note !== undefined && !body.note?.trim()) {
-      errors.note = 'Case note cannot be empty';
     }
 
     return Object.keys(errors).length === 0 ? null : errors;
@@ -90,7 +71,6 @@ export const SupportCaseResponseDTO = {
     incidentAt: supportCase.incidentAt,
     contactPhone: supportCase.contactPhone,
     contactEmail: supportCase.contactEmail,
-    lostItem: supportCase.lostItem,
     responses: supportCase.responses || [],
     assignedTo: supportCase.assignedTo,
     resolvedAt: supportCase.resolvedAt,
@@ -100,9 +80,79 @@ export const SupportCaseResponseDTO = {
   }),
 };
 
+export const UpdateFoundItemCaseDTO = {
+  validate: (body) => {
+    const errors = {};
+
+    if (body.recoveryStatus && !LOST_ITEM_RECOVERY_STATUSES.includes(body.recoveryStatus)) {
+      errors.recoveryStatus = 'Lost item recovery status is invalid';
+    }
+
+    if (body.adminNote !== undefined && !body.adminNote?.trim()) {
+      errors.adminNote = 'Admin note cannot be empty';
+    }
+
+    return Object.keys(errors).length === 0 ? null : errors;
+  },
+};
+
+export const FoundItemCaseResponseDTO = {
+  format: (incident) => ({
+    id: incident._id,
+    incidentCode: incident.incidentCode,
+    status: incident.status,
+    severity: incident.severity,
+    recoveryStatus: incident.foundItem?.recoveryStatus || 'REPORTED',
+    itemName: incident.foundItem?.itemName || '',
+    itemDescription: incident.foundItem?.itemDescription || incident.description,
+    foundLocation: incident.foundItem?.foundLocation || incident.locationText,
+    handedTo: incident.foundItem?.handedTo || '',
+    adminNote: incident.adminNote || '',
+    reporterRole: incident.reporterRole,
+    reporter: incident.driver
+      ? {
+        id: incident.driver._id || incident.driver,
+        fullName: incident.driver.fullName,
+        email: incident.driver.email,
+        phone: incident.driver.phone || incident.driver.phoneNumber,
+        role: incident.driver.role,
+      }
+      : null,
+    route: incident.route
+      ? {
+        id: incident.route._id || incident.route,
+        routeNumber: incident.route.routeNumber,
+        name: incident.route.routeName || incident.route.name,
+      }
+      : null,
+    vehicle: incident.vehicle
+      ? {
+        id: incident.vehicle._id || incident.vehicle,
+        busCode: incident.vehicle.busCode,
+        plateNumber: incident.vehicle.plateNumber,
+      }
+      : null,
+    trip: incident.trip
+      ? {
+        id: incident.trip._id || incident.trip,
+        scheduleCode: incident.trip.scheduleCode,
+        routeName: incident.trip.routeName,
+        serviceDate: incident.trip.serviceDate,
+        departureTime: incident.trip.departureTime,
+      }
+      : null,
+    evidenceFiles: incident.evidenceFiles || [],
+    reportedAt: incident.reportedAt,
+    acknowledgedAt: incident.acknowledgedAt,
+    resolvedAt: incident.resolvedAt,
+    createdAt: incident.createdAt,
+    updatedAt: incident.updatedAt,
+  }),
+};
+
 export {
   CASE_TYPES,
   CASE_STATUSES,
   CASE_PRIORITIES,
-  RECOVERY_STATUSES,
+  LOST_ITEM_RECOVERY_STATUSES,
 };
