@@ -107,14 +107,7 @@ function App() {
             )}
           />
 
-          <Route
-            path="/search"
-            element={(
-              <ProtectedRoute>
-                <SearchRoutesPage />
-              </ProtectedRoute>
-            )}
-          />
+          <Route path="/search" element={<SearchRoutesPage />} />
           <Route
             path="/priority-profile"
             element={(

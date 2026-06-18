@@ -625,7 +625,7 @@ export class RouteService {
 
   static formatRoute(route) {
     return {
-      id: route._id,
+      id: route._id || route.id,
       routeNumber: route.routeNumber,
       name: route.name,
       origin: route.origin,
@@ -646,6 +646,7 @@ export class RouteService {
     const endStation = route.outboundRoute?.endStation || outboundStops[outboundStops.length - 1] || {};
 
     return {
+      _id: route._id,
       id: route._id,
       routeNumber: route.routeCode,
       name: route.routeName,
@@ -670,6 +671,47 @@ export class RouteService {
       status: 'ACTIVE',
       source: 'MANAGED_ROUTE',
     };
+  }
+
+  static async findActiveRoute(routeId, routeNumber = routeId) {
+    await this.ensureSampleRoutes();
+
+    let route = null;
+
+    if (routeId) {
+      try {
+        route = await Route.findOne({ _id: routeId, status: 'ACTIVE' }).lean();
+      } catch {
+        route = null;
+      }
+    }
+
+    if (!route && routeNumber) {
+      route = await Route.findOne({ routeNumber, status: 'ACTIVE' }).lean();
+    }
+
+    if (route) {
+      return route;
+    }
+
+    let managedRoute = null;
+
+    if (routeId) {
+      try {
+        managedRoute = await BusRoute.findOne({ _id: routeId, status: 'PUBLISHED' }).lean();
+      } catch {
+        managedRoute = null;
+      }
+    }
+
+    if (!managedRoute && routeNumber) {
+      managedRoute = await BusRoute.findOne({
+        routeCode: routeNumber,
+        status: 'PUBLISHED',
+      }).lean();
+    }
+
+    return managedRoute ? this.formatManagedRoute(managedRoute) : null;
   }
 
   static async findNearbyRoutes({ latitude, longitude, radiusKm = 5 }) {
@@ -985,17 +1027,7 @@ export class RouteService {
   }
 
   static async getLiveBusLocations(routeId) {
-    await this.ensureSampleRoutes();
-
-    let route = await Route.findOne({ routeNumber: routeId, status: 'ACTIVE' }).lean();
-
-    if (!route) {
-      try {
-        route = await Route.findOne({ _id: routeId, status: 'ACTIVE' }).lean();
-      } catch {
-        route = null;
-      }
-    }
+    const route = await this.findActiveRoute(routeId, routeId);
 
     if (!route) {
       throw new Error('Bus not found');
@@ -1036,7 +1068,7 @@ export class RouteService {
 
       return {
         busId,
-        routeId: String(route._id),
+        routeId: String(route._id || route.id),
         routeNumber: route.routeNumber,
         currentLocation,
         estimatedArrivalTime: `${Math.max(arrivalToNextStopMinutes, 1)} min`,
@@ -1117,7 +1149,7 @@ export class RouteService {
     }
 
     return {
-      routeId: String(route._id),
+      routeId: String(route._id || route.id),
       routeNumber: route.routeNumber,
       ...notice,
       detectedAt: new Date().toISOString(),

@@ -124,26 +124,6 @@ const normalizeStopLocation = (stop) => {
   return stop;
 };
 
-const createBusIcon = (isSelected) => L.divIcon({
-  className: '',
-  iconAnchor: [18, 46],
-  popupAnchor: [0, -44],
-  html: `
-    <div class="relative flex flex-col items-center">
-      <div class="flex h-9 w-9 items-center justify-center rounded-full border-[3px] bg-white shadow-lg ${
-        isSelected
-          ? 'border-emerald-700 text-emerald-700 ring-[6px] ring-emerald-300/55'
-          : 'border-emerald-500 text-emerald-600 ring-2 ring-white/80'
-      }">
-        <span class="material-symbols-outlined text-[20px]">directions_bus</span>
-      </div>
-      <div class="h-0 w-0 border-x-[7px] border-x-transparent ${
-        isSelected ? 'border-t-emerald-700' : 'border-t-emerald-500'
-      } border-t-[10px]"></div>
-    </div>
-  `,
-});
-
 const currentLocationIcon = L.divIcon({
   className: '',
   iconAnchor: [24, 24],
@@ -181,12 +161,6 @@ const liveBusIcon = (status) => {
   });
 };
 
-const RouteLabelIcon = (routeNumber) => L.divIcon({
-  className: '',
-  iconAnchor: [18, -2],
-  html: `<span class="rounded-full bg-emerald-700 px-2 py-0.5 text-[11px] font-bold text-white shadow">${routeNumber}</span>`,
-});
-
 const MapAutoFocus = ({ selectedRoute, currentLocation }) => {
   const map = useMap();
 
@@ -200,7 +174,8 @@ const MapAutoFocus = ({ selectedRoute, currentLocation }) => {
       map.fitBounds(validPath.map(toLatLng), {
         animate: true,
         maxZoom: ROUTE_FIT_MAX_ZOOM,
-        padding: [40, 40],
+        paddingTopLeft: [60, 60],
+        paddingBottomRight: [400, 60],
       });
       return;
     }
@@ -212,11 +187,6 @@ const MapAutoFocus = ({ selectedRoute, currentLocation }) => {
 
     if (isValidLocation(currentLocation)) {
       map.setView(toLatLng(currentLocation), ROUTE_FIT_MAX_ZOOM, { animate: true });
-      return;
-    }
-
-    if (isValidLocation(currentLocation)) {
-      map.setView(toLatLng(currentLocation), 15, { animate: true });
       return;
     }
 
@@ -239,10 +209,6 @@ const MapCanvas = ({
     ? selectedRoute.pathPoints
     : selectedRoute?.stops || [];
   const routePositions = routePath.filter(isValidLocation).map(toLatLng);
-  const selectedRouteStop = selectedRoute?.stops
-    ?.map(normalizeStopLocation)
-    .find(isValidLocation);
-
   return (
     <section className="relative min-w-0 flex-1 overflow-hidden bg-slate-200">
       <MapContainer
@@ -270,72 +236,51 @@ const MapCanvas = ({
           <>
             <Polyline
               positions={routePositions}
-              pathOptions={{ color: '#ffffff', weight: 9, opacity: 0.9, lineCap: 'round', lineJoin: 'round' }}
+              pathOptions={{
+                color: '#0f172a',
+                weight: 13,
+                opacity: 0.82,
+                lineCap: 'round',
+                lineJoin: 'round',
+              }}
             />
             <Polyline
               positions={routePositions}
-              pathOptions={{ color: '#059669', weight: 5, opacity: 1, lineCap: 'round', lineJoin: 'round' }}
+              pathOptions={{
+                color: '#34d399',
+                weight: 8,
+                opacity: 1,
+                lineCap: 'round',
+                lineJoin: 'round',
+              }}
             />
-            {routePositions.map((position) => (
-              <CircleMarker
-                key={`${position[0]}-${position[1]}`}
-                center={position}
-                radius={3}
-                pathOptions={{
-                  color: '#ffffff',
-                  fillColor: '#ffffff',
-                  fillOpacity: 1,
-                  weight: 1,
-                }}
-                interactive={false}
-              />
-            ))}
           </>
         )}
 
-        {stops.filter(isValidLocation).map((stop) => {
-          const isSelectedRouteStop = stop.routeNumbers?.includes(selectedRoute?.routeNumber);
-
-          return (
-            <Marker
-              key={`${stop.name}-${stop.latitude.toFixed(5)}-${stop.longitude.toFixed(5)}`}
-              position={toLatLng(stop)}
-              icon={createBusIcon(isSelectedRouteStop)}
-              title={stop.name}
-              interactive={false}
-            >
-              {isSelectedRouteStop && (
-                <Tooltip
-                  permanent
-                  direction="top"
-                  offset={[0, -24]}
-                  opacity={1}
-                  className="bus-stop-name-tooltip"
-                >
-                  {stop.name}
-                </Tooltip>
-              )}
-            </Marker>
-          );
-        })}
-
         {(selectedRoute?.stops || []).filter(isValidLocation).map((stop, index) => {
           const isEndpoint = index === 0 || index === selectedRoute.stops.length - 1;
+          const isOrigin = index === 0;
 
           return (
             <CircleMarker
               key={`${selectedRoute.id}-${stop.order}-${stop.name}`}
               center={toLatLng(stop)}
-              radius={isEndpoint ? 7 : 4}
+              radius={isEndpoint ? 10 : 4}
               pathOptions={{
-                color: '#ffffff',
-                fillColor: isEndpoint ? '#047857' : '#10b981',
+                color: isEndpoint ? '#0f172a' : '#ffffff',
+                fillColor: isEndpoint ? (isOrigin ? '#22c55e' : '#f97316') : '#10b981',
                 fillOpacity: 1,
-                weight: isEndpoint ? 3 : 2,
+                weight: isEndpoint ? 4 : 2,
               }}
             >
-              <Tooltip direction="top" offset={[0, -6]} opacity={0.95}>
-                {index + 1}. {stop.name}
+              <Tooltip
+                permanent={isEndpoint}
+                direction="top"
+                offset={[0, isEndpoint ? -10 : -6]}
+                opacity={0.98}
+              >
+                {isEndpoint ? `${isOrigin ? 'Start' : 'End'}: ` : `${index + 1}. `}
+                {stop.name}
               </Tooltip>
             </CircleMarker>
           );
@@ -364,6 +309,21 @@ const MapCanvas = ({
       {!selectedRoute && (
         <div className="pointer-events-none absolute left-1/2 top-6 z-[1000] -translate-x-1/2 rounded-full border border-slate-200 bg-white/95 px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm backdrop-blur">
           Select “View details” to display a route
+        </div>
+      )}
+
+      {selectedRoute && (
+        <div className="pointer-events-none absolute left-5 top-5 z-[1000] rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-emerald-600 px-2 py-1 text-xs font-black text-white">
+              {selectedRoute.routeNumber}
+            </span>
+            <span className="text-sm font-black text-slate-900">Selected route</span>
+          </div>
+          <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-600">
+            <span className="h-1.5 w-10 rounded-full bg-emerald-400 ring-2 ring-slate-900" />
+            Route path
+          </div>
         </div>
       )}
 
@@ -588,13 +548,11 @@ const RouteDetailsPanel = ({
   isLiveTracking = false,
   isLiveLoading = false,
   liveError = '',
-  isFavorite = false,
   isStopFavorite,
   isArrivalNotificationEnabled,
   isDelayNotificationEnabled,
   isRouteChangeNotificationEnabled,
   panelMessage = '',
-  onToggleFavorite,
   onToggleFavoriteStop,
   onToggleArrivalNotification,
   onToggleDelayNotification,
@@ -1502,43 +1460,6 @@ const SearchRoutesPage = () => {
   const isLiveTrackingSelectedRoute = Boolean(
     selectedRoute?.id && isSameRouteId(liveRouteId, selectedRoute.id)
   );
-
-  const mapStops = useMemo(() => {
-    const seen = new Set();
-    const stops = [];
-
-    for (const route of routes) {
-      for (const stop of route.stops || []) {
-        const normalizedStop = normalizeStopLocation(stop);
-        const key = `${normalizedStop.name}-${normalizedStop.latitude.toFixed(5)}-${normalizedStop.longitude.toFixed(5)}`;
-
-        if (!seen.has(key)) {
-          seen.add(key);
-          stops.push({ ...normalizedStop, routeNumbers: [route.routeNumber] });
-        } else {
-          const existingStop = stops.find((item) => (
-            `${item.name}-${item.latitude.toFixed(5)}-${item.longitude.toFixed(5)}` === key
-          ));
-
-          if (existingStop && !existingStop.routeNumbers.includes(route.routeNumber)) {
-            existingStop.routeNumbers.push(route.routeNumber);
-          }
-        }
-      }
-    }
-
-    if (Array.isArray(bestRouteResult.suggestions)) {
-      return bestRouteResult.suggestions;
-    }
-
-    return [
-      ...(bestRouteResult.bestRoute ? [{ ...bestRouteResult.bestRoute, isRecommended: true }] : []),
-      ...(bestRouteResult.alternatives || []).map((alternative) => ({
-        ...alternative,
-        isRecommended: false,
-      })),
-    ];
-  }, [bestRouteResult]);
 
   useEffect(() => {
     let isMounted = true;

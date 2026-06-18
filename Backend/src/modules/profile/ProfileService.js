@@ -1,6 +1,5 @@
 import { CustomError } from '../../middleware/errorHandler.js';
 import { HTTP_STATUS } from '../../constants/index.js';
-import Route from '../routes/Route.js';
 import RouteService from '../routes/RouteService.js';
 import ProfileRepository from './ProfileRepository.js';
 import { ProfileResponseDTO } from './profile.dto.js';
@@ -98,11 +97,9 @@ export class ProfileService {
     return `${route.routeNumber}-${stop.order}-${normalizedName}`;
   }
 
-  static async findStopInRoutes({ routeId, stopId, stopName, order }) {
-    await RouteService.ensureSampleRoutes();
-
-    const routeQuery = routeId ? { _id: routeId, status: 'ACTIVE' } : { status: 'ACTIVE' };
-    const routes = await Route.find(routeQuery).lean();
+  static async findStopInRoutes({ routeId, routeNumber, stopId, stopName, order }) {
+    const route = await RouteService.findActiveRoute(routeId, routeNumber);
+    const routes = route ? [route] : [];
 
     for (const route of routes) {
       const stop = (route.stops || []).find((candidate) => {
@@ -310,23 +307,7 @@ export class ProfileService {
   }
 
   static async findRouteForNotification({ routeId, routeNumber }) {
-    await RouteService.ensureSampleRoutes();
-
-    let route = null;
-
-    if (routeId) {
-      try {
-        route = await Route.findOne({ _id: routeId, status: 'ACTIVE' }).lean();
-      } catch {
-        route = null;
-      }
-    }
-
-    if (!route && routeNumber) {
-      route = await Route.findOne({ routeNumber, status: 'ACTIVE' }).lean();
-    }
-
-    return route;
+    return RouteService.findActiveRoute(routeId, routeNumber);
   }
 
   static async getDelayNotifications(userId) {
@@ -527,7 +508,7 @@ export class ProfileService {
       throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
     }
 
-    const route = await Route.findById(routeId).lean();
+    const route = await RouteService.findActiveRoute(routeId, routeId);
 
     if (!route) {
       throw new CustomError('Route not found', HTTP_STATUS.NOT_FOUND);

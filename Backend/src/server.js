@@ -93,13 +93,16 @@ const startServer = async () => {
       logger.error('Unhandled Rejection reason:', reason);
     });
 
+    // Complete the initial database connection attempt before accepting API
+    // requests. With Mongoose buffering disabled, listening first creates a
+    // startup race where route requests fail before the connection is ready.
+    await connectDatabaseWithRetry();
+
     server.listen(config.port, config.host, () => {
       logger.info(`Server running at http://${config.host}:${config.port}`);
       logger.info(`Environment: ${config.nodeEnv}`);
       logger.info('Socket.IO server is ready on /socket.io');
     });
-
-    connectDatabaseWithRetry();
   } catch (error) {
     logger.error('Failed to start server:', error);
     process.exit(1);

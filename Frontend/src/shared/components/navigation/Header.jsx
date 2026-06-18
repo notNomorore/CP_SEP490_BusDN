@@ -37,7 +37,7 @@ const Header = ({ forceDarkMode = false }) => {
     { label: 'Incidents', path: '/admin/incidents', requiresAuth: true, adminOnly: true },
     { label: 'Monitoring', path: '/admin/system-monitoring', requiresAuth: true, adminOnly: true },
     { label: 'Become a Partner', href: '#', hideForAdmin: true },
-    { label: 'Routes', href: '#', hideForAdmin: true },
+    { label: 'Routes', path: '/search', hideForAdmin: true },
     { label: 'Help', href: '#', hideForAdmin: true }
   ].filter((link) => (!link.adminOnly || isAdmin()) && (!link.hideForAdmin || !isAdmin()));
 
