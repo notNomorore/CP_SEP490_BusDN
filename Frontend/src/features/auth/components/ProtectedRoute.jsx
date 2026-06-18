@@ -5,8 +5,6 @@ import getRoleLandingPath from '../utils/roleRedirect.js';
 
 const OPERATIONS_ROLES = ['DRIVER', 'CONDUCTOR', 'BUS_ASSISTANT'];
 
-const OPERATIONS_ROLES = ['DRIVER', 'CONDUCTOR', 'BUS_ASSISTANT'];
-
 /**
  * Protected Route - requires authentication
  */

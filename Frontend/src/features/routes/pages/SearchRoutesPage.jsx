@@ -319,6 +319,9 @@ const MapCanvas = ({
           );
         })}
 
+        {(selectedRoute?.stops || []).filter(isValidLocation).map((stop, index) => {
+          const isEndpoint = index === 0 || index === selectedRoute.stops.length - 1;
+
           return (
             <CircleMarker
               key={`${selectedRoute.id}-${stop.order}-${stop.name}`}
@@ -1536,32 +1539,6 @@ const SearchRoutesPage = () => {
       })),
     ];
   }, [bestRouteResult]);
-
-  const isRouteFavorite = (route) => (
-    favoriteRouteIds.has(String(route.id)) || favoriteRouteIds.has(String(route.routeNumber))
-  );
-
-  const isStopFavorite = (route, stop) => favoriteStopIds.has(buildStopId(route, stop));
-  const isArrivalNotificationEnabled = (route, stop) => (
-    arrivalNotificationIds.has(buildArrivalNotificationId(route, stop))
-  );
-  const isDelayNotificationEnabled = (route) => (
-    delayNotificationIds.has(buildDelayNotificationId(route))
-  );
-  const isRouteChangeNotificationEnabled = (route) => (
-    routeChangeNotificationIds.has(buildRouteChangeNotificationId(route))
-    || routeChangeNotifications.some((subscription) => (
-      subscription.notificationStatus !== 'DISABLED'
-      && (
-        subscription.routeNumber === route.routeNumber
-        || isSameRouteId(subscription.routeId, route.id)
-      )
-    ))
-  );
-  const routePanelMessage = /notification|alert/i.test(favoriteMessage) ? favoriteMessage : '';
-  const isLiveTrackingSelectedRoute = Boolean(
-    selectedRoute?.id && isSameRouteId(liveRouteId, selectedRoute.id)
-  );
 
   useEffect(() => {
     let isMounted = true;

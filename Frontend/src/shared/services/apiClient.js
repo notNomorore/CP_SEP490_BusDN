@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const DEFAULT_API_URL = 'http://localhost:5000';
+const DEFAULT_API_URL = 'http://localhost:3000';
 const DEFAULT_API_PATH = '/api';
 const DEFAULT_API_BASE_URL = `${DEFAULT_API_URL}${DEFAULT_API_PATH}`;
 
