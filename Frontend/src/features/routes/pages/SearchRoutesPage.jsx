@@ -15,11 +15,26 @@ import { useSearchParams } from 'react-router-dom';
 import routeService from '../services/routeService';
 import useAuthStore from '../../auth/stores/authStore';
 import Header from '../../../shared/components/navigation/Header';
+import {
+  DA_NANG_MAP_CONFIG,
+  isInsideDaNang,
+} from '../../../shared/config/mapConfig.js';
 
-const INITIAL_MAP_ZOOM = 13;
-const MIN_MAP_ZOOM = 11;
-const MAX_MAP_ZOOM = 19;
-const DEFAULT_CENTER = { latitude: 16.0614, longitude: 108.2272 };
+const {
+  bounds: DA_NANG_BOUNDS,
+  center: DA_NANG_CENTER,
+  initialZoom: INITIAL_MAP_ZOOM,
+  minZoom: MIN_MAP_ZOOM,
+  maxZoom: MAX_MAP_ZOOM,
+  routeFitMaxZoom: ROUTE_FIT_MAX_ZOOM,
+  maxBoundsViscosity: MAX_BOUNDS_VISCOSITY,
+  tileUrl: MAP_TILE_URL,
+  tileAttribution: MAP_TILE_ATTRIBUTION,
+} = DA_NANG_MAP_CONFIG;
+const DEFAULT_CENTER = {
+  latitude: DA_NANG_CENTER[0],
+  longitude: DA_NANG_CENTER[1],
+};
 const DA_NANG_CENTRAL = { name: 'Da Nang Central', latitude: 16.0667, longitude: 108.1690 };
 const ROUTE_PREFERENCES = [
   { id: 'fastest', label: 'Fastest Route', icon: 'bolt' },
@@ -92,7 +107,9 @@ const getRouteCenter = (route) => {
 const toLatLng = ({ latitude, longitude }) => [latitude, longitude];
 
 const isValidLocation = (location) => (
-  typeof location?.latitude === 'number' && typeof location?.longitude === 'number'
+  typeof location?.latitude === 'number'
+  && typeof location?.longitude === 'number'
+  && isInsideDaNang(location.latitude, location.longitude)
 );
 
 const normalizeStopLocation = (stop) => {
@@ -106,26 +123,6 @@ const normalizeStopLocation = (stop) => {
 
   return stop;
 };
-
-const createBusIcon = (isSelected) => L.divIcon({
-  className: '',
-  iconAnchor: [18, 46],
-  popupAnchor: [0, -44],
-  html: `
-    <div class="relative flex flex-col items-center">
-      <div class="flex h-9 w-9 items-center justify-center rounded-full border-[3px] bg-white shadow-lg ${
-        isSelected
-          ? 'border-emerald-700 text-emerald-700 ring-[6px] ring-emerald-300/55'
-          : 'border-emerald-500 text-emerald-600 ring-2 ring-white/80'
-      }">
-        <span class="material-symbols-outlined text-[20px]">directions_bus</span>
-      </div>
-      <div class="h-0 w-0 border-x-[7px] border-x-transparent ${
-        isSelected ? 'border-t-emerald-700' : 'border-t-emerald-500'
-      } border-t-[10px]"></div>
-    </div>
-  `,
-});
 
 const currentLocationIcon = L.divIcon({
   className: '',
@@ -164,12 +161,6 @@ const liveBusIcon = (status) => {
   });
 };
 
-const RouteLabelIcon = (routeNumber) => L.divIcon({
-  className: '',
-  iconAnchor: [18, -2],
-  html: `<span class="rounded-full bg-emerald-700 px-2 py-0.5 text-[11px] font-bold text-white shadow">${routeNumber}</span>`,
-});
-
 const MapAutoFocus = ({ selectedRoute, currentLocation }) => {
   const map = useMap();
 
@@ -182,19 +173,19 @@ const MapAutoFocus = ({ selectedRoute, currentLocation }) => {
     if (validPath.length > 1) {
       map.fitBounds(validPath.map(toLatLng), {
         animate: true,
-        maxZoom: 15,
-        padding: [80, 80],
+        maxZoom: ROUTE_FIT_MAX_ZOOM,
+        padding: [40, 40],
       });
       return;
     }
 
     if (validPath.length === 1) {
-      map.setView(toLatLng(validPath[0]), 15, { animate: true });
+      map.setView(toLatLng(validPath[0]), ROUTE_FIT_MAX_ZOOM, { animate: true });
       return;
     }
 
     if (isValidLocation(currentLocation)) {
-      map.setView(toLatLng(currentLocation), 15, { animate: true });
+      map.setView(toLatLng(currentLocation), ROUTE_FIT_MAX_ZOOM, { animate: true });
       return;
     }
 
@@ -205,7 +196,6 @@ const MapAutoFocus = ({ selectedRoute, currentLocation }) => {
 };
 
 const MapCanvas = ({
-  stops,
   selectedRoute,
   currentLocation,
   liveBusData,
@@ -218,9 +208,9 @@ const MapCanvas = ({
     ? selectedRoute.pathPoints
     : selectedRoute?.stops || [];
   const routePositions = routePath.filter(isValidLocation).map(toLatLng);
-  const selectedRouteStop = selectedRoute?.stops
-    ?.map(normalizeStopLocation)
-    .find(isValidLocation);
+  const routeStops = (selectedRoute?.stops || [])
+    .map(normalizeStopLocation)
+    .filter(isValidLocation);
 
   return (
     <section className="relative min-w-0 flex-1 overflow-hidden bg-slate-200">
@@ -229,22 +219,17 @@ const MapCanvas = ({
         zoom={INITIAL_MAP_ZOOM}
         minZoom={MIN_MAP_ZOOM}
         maxZoom={MAX_MAP_ZOOM}
+        maxBounds={DA_NANG_BOUNDS}
+        maxBoundsViscosity={MAX_BOUNDS_VISCOSITY}
         zoomControl={false}
-        zoomDelta={0.5}
-        zoomSnap={0.25}
-        wheelPxPerZoomLevel={160}
+        scrollWheelZoom
         preferCanvas
         className="h-full w-full"
       >
         <TileLayer
-          attribution="Map data © OpenStreetMap"
-          detectRetina
-          keepBuffer={4}
-          maxNativeZoom={19}
+          attribution={MAP_TILE_ATTRIBUTION}
           maxZoom={MAX_MAP_ZOOM}
-          updateWhenIdle
-          updateWhenZooming={false}
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          url={MAP_TILE_URL}
         />
 
         <MapAutoFocus selectedRoute={selectedRoute} currentLocation={currentLocation} />
@@ -254,66 +239,36 @@ const MapCanvas = ({
           <>
             <Polyline
               positions={routePositions}
-              pathOptions={{ color: '#ffffff', weight: 12, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }}
+              pathOptions={{ color: '#ffffff', weight: 9, opacity: 0.9, lineCap: 'round', lineJoin: 'round' }}
             />
             <Polyline
               positions={routePositions}
-              pathOptions={{ color: '#10b981', weight: 7, opacity: 0.98, lineCap: 'round', lineJoin: 'round' }}
+              pathOptions={{ color: '#059669', weight: 5, opacity: 1, lineCap: 'round', lineJoin: 'round' }}
             />
-            <Polyline
-              positions={routePositions}
-              pathOptions={{ color: '#047857', weight: 2, opacity: 0.9, lineCap: 'round', lineJoin: 'round' }}
-            />
-            {routePositions.map((position) => (
-              <CircleMarker
-                key={`${position[0]}-${position[1]}`}
-                center={position}
-                radius={3}
-                pathOptions={{
-                  color: '#ffffff',
-                  fillColor: '#ffffff',
-                  fillOpacity: 1,
-                  weight: 1,
-                }}
-                interactive={false}
-              />
-            ))}
           </>
         )}
 
-        {stops.filter(isValidLocation).map((stop) => {
-          const isSelectedRouteStop = stop.routeNumbers?.includes(selectedRoute?.routeNumber);
+        {routeStops.map((stop, index) => {
+          const isEndpoint = index === 0 || index === routeStops.length - 1;
 
           return (
-            <Marker
-              key={`${stop.name}-${stop.latitude.toFixed(5)}-${stop.longitude.toFixed(5)}`}
-              position={toLatLng(stop)}
-              icon={createBusIcon(isSelectedRouteStop)}
-              title={stop.name}
-              interactive={false}
+            <CircleMarker
+              key={`${selectedRoute.id}-${stop.order}-${stop.name}`}
+              center={toLatLng(stop)}
+              radius={isEndpoint ? 7 : 4}
+              pathOptions={{
+                color: '#ffffff',
+                fillColor: isEndpoint ? '#047857' : '#10b981',
+                fillOpacity: 1,
+                weight: isEndpoint ? 3 : 2,
+              }}
             >
-              {isSelectedRouteStop && (
-                <Tooltip
-                  permanent
-                  direction="top"
-                  offset={[0, -24]}
-                  opacity={1}
-                  className="bus-stop-name-tooltip"
-                >
-                  {stop.name}
-                </Tooltip>
-              )}
-            </Marker>
+              <Tooltip direction="top" offset={[0, -6]} opacity={0.95}>
+                {index + 1}. {stop.name}
+              </Tooltip>
+            </CircleMarker>
           );
         })}
-
-        {selectedRouteStop && (
-          <Marker
-            position={toLatLng(selectedRouteStop)}
-            icon={RouteLabelIcon(selectedRoute.routeNumber)}
-            interactive={false}
-          />
-        )}
 
         {isValidLocation(currentLocation) && (
           <Marker
@@ -334,6 +289,12 @@ const MapCanvas = ({
           />
         ))}
       </MapContainer>
+
+      {!selectedRoute && (
+        <div className="pointer-events-none absolute left-1/2 top-6 z-[1000] -translate-x-1/2 rounded-full border border-slate-200 bg-white/95 px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm backdrop-blur">
+          Select “View details” to display a route
+        </div>
+      )}
 
       <button
         type="button"
@@ -461,16 +422,7 @@ const RouteCard = ({
   onToggleFavorite,
 }) => (
   <article
-    role="button"
-    tabIndex={0}
-    onClick={onSelect}
-    onKeyDown={(event) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        onSelect?.();
-      }
-    }}
-    className={`relative block w-full rounded-xl border bg-white p-4 pr-14 text-left shadow-sm transition hover:border-emerald-500 hover:shadow-md ${
+    className={`relative block w-full rounded-xl border bg-white p-4 pr-14 text-left shadow-sm transition ${
       isHighlighted ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-slate-200'
     }`}
   >
@@ -537,6 +489,15 @@ const RouteCard = ({
         </div>
       </div>
     )}
+
+    <button
+      type="button"
+      onClick={onSelect}
+      className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-emerald-700"
+    >
+      <span className="material-symbols-outlined text-[18px]">map</span>
+      View details
+    </button>
   </article>
 );
 
@@ -1462,33 +1423,6 @@ const SearchRoutesPage = () => {
     selectedRoute?.id && isSameRouteId(liveRouteId, selectedRoute.id)
   );
 
-  const mapStops = useMemo(() => {
-    const seen = new Set();
-    const stops = [];
-
-    for (const route of routes) {
-      for (const stop of route.stops || []) {
-        const normalizedStop = normalizeStopLocation(stop);
-        const key = `${normalizedStop.name}-${normalizedStop.latitude.toFixed(5)}-${normalizedStop.longitude.toFixed(5)}`;
-
-        if (!seen.has(key)) {
-          seen.add(key);
-          stops.push({ ...normalizedStop, routeNumbers: [route.routeNumber] });
-        } else {
-          const existingStop = stops.find((item) => (
-            `${item.name}-${item.latitude.toFixed(5)}-${item.longitude.toFixed(5)}` === key
-          ));
-
-          if (existingStop && !existingStop.routeNumbers.includes(route.routeNumber)) {
-            existingStop.routeNumbers.push(route.routeNumber);
-          }
-        }
-      }
-    }
-
-    return stops;
-  }, [routes]);
-
   useEffect(() => {
     let isMounted = true;
 
@@ -2258,7 +2192,7 @@ const SearchRoutesPage = () => {
       if (nextSuggestions.length) {
         const nextRoutes = nextSuggestions.map((item) => item.route);
         setRoutes(nextRoutes);
-        setSelectedRoute(nextSuggestions[0].route);
+        setSelectedRoute(null);
       } else {
         setSelectedRoute(null);
       }
@@ -2573,7 +2507,6 @@ const SearchRoutesPage = () => {
         </aside>
 
         <MapCanvas
-          stops={mapStops}
           selectedRoute={selectedRoute}
           currentLocation={currentLocation}
           liveBusData={liveBusData}
