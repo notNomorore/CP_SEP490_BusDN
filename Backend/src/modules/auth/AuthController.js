@@ -24,12 +24,19 @@ export class AuthController {
    */
   static async register(req, res, next) {
     try {
-      const { email, phone, fullName, password, confirmPassword } = req.body;
+      const {
+        email,
+        phone,
+        phoneNumber,
+        fullName,
+        password,
+        confirmPassword,
+      } = req.body;
 
       // Validate input
       const validationErrors = RegisterDTO.validate({
         email,
-        phone,
+        phone: phoneNumber || phone,
         fullName,
         password,
         confirmPassword,
@@ -46,7 +53,7 @@ export class AuthController {
       // Register user
       const result = await AuthService.registerUser({
         email,
-        phone,
+        phone: phoneNumber || phone,
         fullName,
         password,
       });
@@ -56,7 +63,6 @@ export class AuthController {
         message: 'Registration successful. OTP sent to your email/phone.',
         userId: result.userId,
         expiresAt: result.expiresAt,
-        ...(config.nodeEnv !== 'production' ? { devOtp: result.otp } : {}),
       });
     } catch (error) {
       logger.error('Registration error:', error);
@@ -78,10 +84,14 @@ export class AuthController {
    */
   static async verifyOTP(req, res, next) {
     try {
-      const { email, phone, otp } = req.body;
+      const { email, phone, phoneNumber, otp } = req.body;
 
       // Validate input
-      const validationErrors = VerifyOtpDTO.validate({ email, phone, otp });
+      const validationErrors = VerifyOtpDTO.validate({
+        email,
+        phone: phoneNumber || phone,
+        otp,
+      });
 
       if (validationErrors) {
         return res.status(400).json({
@@ -92,7 +102,7 @@ export class AuthController {
       }
 
       // Verify OTP
-      const user = await AuthService.verifyOTP(email, phone, otp);
+      const user = await AuthService.verifyOTP(email, phoneNumber || phone, otp);
 
       return res.json({
         success: true,
@@ -103,6 +113,13 @@ export class AuthController {
       logger.error('OTP verification error:', error);
 
       if (error.message.includes('Invalid OTP') || error.message.includes('expired')) {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      if (error.message === 'No OTP request found') {
         return res.status(400).json({
           success: false,
           message: error.message,
@@ -126,9 +143,12 @@ export class AuthController {
    */
   static async resendOTP(req, res, next) {
     try {
-      const { email, phone } = req.body;
+      const { email, phone, phoneNumber } = req.body;
 
-      const validationErrors = ResendOtpDTO.validate({ email, phone });
+      const validationErrors = ResendOtpDTO.validate({
+        email,
+        phone: phoneNumber || phone,
+      });
 
       if (validationErrors) {
         return res.status(400).json({
@@ -138,14 +158,13 @@ export class AuthController {
         });
       }
 
-      const result = await AuthService.resendVerificationOTP(email, phone);
+      const result = await AuthService.resendVerificationOTP(email, phoneNumber || phone);
 
       return res.json({
         success: true,
         message: 'Verification OTP resent successfully',
         userId: result.userId,
         expiresAt: result.expiresAt,
-        ...(config.nodeEnv !== 'production' ? { devOtp: result.otp } : {}),
       });
     } catch (error) {
       logger.error('Resend OTP error:', error);
@@ -206,13 +225,21 @@ export class AuthController {
       logger.error('Login error:', error);
 
       if (
-        error.message.includes('Invalid email/phone')
+        error.code === 'ACCOUNT_LOCKED'
+        || error.message.includes('Invalid email/phone')
         || error.message.includes('not verified')
         || error.message.includes('locked')
       ) {
         return res.status(401).json({
           success: false,
           message: error.message,
+          ...(error.code === 'ACCOUNT_LOCKED'
+            ? {
+              code: error.code,
+              reason: error.reason,
+              lockedUntil: error.lockedUntil,
+            }
+            : {}),
         });
       }
 
@@ -226,10 +253,13 @@ export class AuthController {
    */
   static async forgotPassword(req, res, next) {
     try {
-      const { email, phone } = req.body;
+      const { email, phone, phoneNumber } = req.body;
 
       // Validate input
-      const validationErrors = ForgotPasswordDTO.validate({ email, phone });
+      const validationErrors = ForgotPasswordDTO.validate({
+        email,
+        phone: phoneNumber || phone,
+      });
 
       if (validationErrors) {
         return res.status(400).json({
@@ -240,7 +270,7 @@ export class AuthController {
       }
 
       // Request password reset
-      const result = await AuthService.requestPasswordReset(email, phone);
+      const result = await AuthService.requestPasswordReset(email, phoneNumber || phone);
 
       return res.json({
         success: true,

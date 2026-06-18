@@ -13,9 +13,9 @@ export const useAuthStore = create((set, get) => ({
   error: null,
 
   // Selectors
-  isAdmin: () => get().user?.role === 'ADMIN' || get().user?.role === 'STAFF',
+  isAdmin: () => get().user?.role === 'ADMIN',
   isDriver: () => get().user?.role === 'DRIVER',
-  isConductor: () => get().user?.role === 'CONDUCTOR',
+  isConductor: () => get().user?.role === 'CONDUCTOR' || get().user?.role === 'BUS ASSISTANT',
   isPassenger: () => get().user?.role === 'PASSENGER',
 
   // Actions
@@ -43,6 +43,8 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const result = await authService.verifyOTP(data);
+      set({ error: null });
+
       return result;
     } catch (error) {
       const errorMsg = error.message || 'OTP verification failed';
@@ -235,6 +237,14 @@ export const useAuthStore = create((set, get) => ({
    */
   clearError: () => {
     set({ error: null });
+  },
+
+  syncUser: (user) => {
+    authService.setStoredUser(user);
+    set({
+      user,
+      isAuthenticated: true,
+    });
   },
 
   /**

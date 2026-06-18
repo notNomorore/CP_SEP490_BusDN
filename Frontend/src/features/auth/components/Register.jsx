@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../stores/authStore.js';
+import authService from '../services/authService.js';
 import AuthShell from '../components/AuthShell.jsx';
 
 const Register = () => {
@@ -14,12 +15,11 @@ const Register = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showConfirmPassword] = useState(false);
 
   // Step 1: OTP Verification
   const [otp, setOtp] = useState('');
   const [otpResendCountdown, setOtpResendCountdown] = useState(0);
-  const [userId, setUserId] = useState(null);
 
   // Current step
   const [step, setStep] = useState('personal'); // 'personal' | 'otp' | 'success'
@@ -62,7 +62,7 @@ const Register = () => {
     }
 
     try {
-      const result = await register({
+      await register({
         fullName,
         email: email || undefined,
         phone: phone || undefined,
@@ -70,7 +70,6 @@ const Register = () => {
         confirmPassword,
       });
 
-      setUserId(result.userId);
       setStep('otp');
       setOtpResendCountdown(60);
     } catch (err) {
@@ -109,12 +108,9 @@ const Register = () => {
   const handleResendOtp = async () => {
     clearError();
     try {
-      await register({
-        fullName,
+      await authService.resendOtp({
         email: email || undefined,
         phone: phone || undefined,
-        password,
-        confirmPassword,
       });
 
       setOtpResendCountdown(60);

@@ -5,7 +5,9 @@ export const RegisterDTO = {
   validate: (body) => {
     const errors = {};
 
-    if (!body.email && !body.phone) {
+    const phoneValue = body.phoneNumber || body.phone;
+
+    if (!body.email && !phoneValue) {
       errors.identifier = 'Email or phone is required';
     }
 
@@ -16,10 +18,10 @@ export const RegisterDTO = {
       }
     }
 
-    if (body.phone) {
+    if (phoneValue) {
       const phoneRegex = /^(\+84|0)[0-9]{9,10}$/;
-      if (!phoneRegex.test(body.phone)) {
-        errors.phone = 'Invalid phone format';
+      if (!phoneRegex.test(phoneValue)) {
+        errors.phoneNumber = 'Invalid phone format';
       }
     }
 
@@ -75,7 +77,7 @@ export const VerifyOtpDTO = {
   validate: (body) => {
     const errors = {};
 
-    if (!body.email && !body.phone) {
+    if (!body.email && !(body.phoneNumber || body.phone)) {
       errors.identifier = 'Email or phone is required';
     }
 
@@ -94,7 +96,7 @@ export const ResendOtpDTO = {
   validate: (body) => {
     const errors = {};
 
-    if (!body.email && !body.phone) {
+    if (!body.email && !(body.phoneNumber || body.phone)) {
       errors.identifier = 'Email or phone is required';
     }
 
@@ -109,7 +111,7 @@ export const ForgotPasswordDTO = {
   validate: (body) => {
     const errors = {};
 
-    if (!body.email && !body.phone) {
+    if (!body.email && !(body.phoneNumber || body.phone)) {
       errors.identifier = 'Email or phone is required';
     }
 
@@ -194,14 +196,26 @@ export const UserResponseDTO = {
   format: (user) => ({
     id: user._id,
     email: user.email,
-    phone: user.phone,
+    phone: user.phoneNumber,
+    phoneNumber: user.phoneNumber,
     fullName: user.fullName,
     avatar: user.avatar,
+    gender: user.gender,
+    dateOfBirth: user.dateOfBirth,
+    address: user.address,
     role: user.role,
     status: user.status,
     isVerified: user.isVerified,
     isFirstLogin: user.isFirstLogin,
     walletBalance: user.walletBalance,
+    notificationEnabled: user.notificationEnabled,
+    monthlyPassStatus: user.monthlyPassStatus,
+    monthlyPassExpireDate: user.monthlyPassExpireDate,
+    favoriteRoutes: user.favoriteRoutes,
+    favoriteStops: user.favoriteStops,
+    travelHistory: user.travelHistory,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
   }),
 };
 

@@ -1,7 +1,7 @@
 # CP_SEP490_BusDN
 nguyennhatminhnau@gmail.com | @Minh123 | admin
 huhuhichic64@gmail.com | @Minh123 | khách
-
+skykidclone80@gmail.com / @Minh123
 Modern bus transportation booking system with real-time tracking, ticketing, and comprehensive fleet management.
 
 ## 🎯 Project Overview
@@ -97,7 +97,7 @@ See [AUTH_DOCUMENTATION.md](./AUTH_DOCUMENTATION.md) for complete details.
 cd Backend
 
 # Install dependencies
-npm install
+npm install -g commitizen
 
 # Create .env.local file
 cp .env.example .env.local

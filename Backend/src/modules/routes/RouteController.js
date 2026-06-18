@@ -1,0 +1,131 @@
+import RouteService from './RouteService.js';
+import logger from '../../utils/logger.js';
+
+export class RouteController {
+  static async search(req, res, next) {
+    try {
+      const { q = '', from = '', to = '' } = req.query;
+      const routes = await RouteService.searchRoutes({ q, from, to });
+
+      return res.success(
+        {
+          routes,
+          count: routes.length,
+          filters: { q, from, to },
+        },
+        'Routes fetched successfully'
+      );
+    } catch (error) {
+      logger.error('Route search error:', error);
+      next(error);
+    }
+  }
+
+  static async nearby(req, res, next) {
+    try {
+      const { latitude, longitude, radiusKm = 5 } = req.query;
+      const result = await RouteService.findNearbyRoutes({ latitude, longitude, radiusKm });
+
+      return res.success(
+        {
+          ...result,
+          count: result.routes.length,
+        },
+        'Nearby routes fetched successfully'
+      );
+    } catch (error) {
+      logger.error('Nearby route search error:', error);
+
+      if (error.message === 'Invalid latitude or longitude') {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async best(req, res, next) {
+    try {
+      const { from = '', to = '', preference = 'fastest' } = req.query;
+      const result = await RouteService.findBestRoute({ from, to, preference });
+
+      return res.success(result, 'Best route calculated successfully');
+    } catch (error) {
+      logger.error('Best route search error:', error);
+
+      if (error.message === 'Departure and destination are required') {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async suggestions(req, res, next) {
+    try {
+      const { from = '', to = '', preference = 'fastest' } = req.query;
+      const result = await RouteService.suggestRouteOptions({ from, to, preference });
+
+      return res.success(result, 'Route options suggested successfully');
+    } catch (error) {
+      logger.error('Route suggestion error:', error);
+
+      if (error.message === 'Departure and destination are required') {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async live(req, res, next) {
+    try {
+      const { routeId } = req.params;
+      const result = await RouteService.getLiveBusLocations(routeId);
+
+      return res.success(result, 'Live bus locations fetched successfully');
+    } catch (error) {
+      logger.error('Live bus location error:', error);
+
+      if (error.message === 'Bus not found') {
+        return res.status(404).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async eta(req, res, next) {
+    try {
+      const { routeId } = req.params;
+      const result = await RouteService.getEstimatedArrivalTimes(routeId);
+
+      return res.success(result, 'Estimated arrival times fetched successfully');
+    } catch (error) {
+      logger.error('ETA error:', error);
+
+      if (error.message === 'Bus not found') {
+        return res.status(404).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+}
+
+export default RouteController;

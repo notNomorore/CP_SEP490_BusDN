@@ -28,7 +28,6 @@ const PopularRoutes = () => {
 
   return (
     <section className="py-24 container mx-auto px-6">
-      {/* Header */}
       <div className="flex justify-between items-end mb-12">
         <div>
           <span className="text-on-tertiary-container font-bold text-sm uppercase tracking-widest">
@@ -46,16 +45,13 @@ const PopularRoutes = () => {
         </button>
       </div>
 
-      {/* Asymmetric Grid */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6 h-[700px]">
-        {/* Main Large Card */}
         <RouteCard
           route={routes[0]}
           className="md:col-span-7"
           isMainCard
         />
 
-        {/* Secondary Cards */}
         <div className="md:col-span-5 grid grid-rows-2 gap-6">
           <RouteCard route={routes[1]} />
           <RouteCard route={routes[2]} />
@@ -74,10 +70,8 @@ const RouteCard = ({ route, className = '', isMainCard = false }) => {
         alt={route.title}
       />
 
-      {/* Overlay */}
       <div className={`absolute inset-0 ${isMainCard ? 'bg-gradient-to-t from-primary via-transparent to-transparent opacity-80' : 'bg-gradient-to-t from-primary/80 to-transparent'}`}></div>
 
-      {/* Content */}
       <div className={`absolute bottom-0 left-0 ${isMainCard ? 'p-8' : 'p-6'} text-surface-bright w-full`}>
         {isMainCard && route.badge && (
           <span className="bg-primary-fixed text-on-primary-fixed px-3 py-1 rounded-full text-xs font-bold mb-3 inline-block">
