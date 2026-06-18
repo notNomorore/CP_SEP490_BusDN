@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import useAuthStore from '../stores/authStore.js';
 import authService from '../services/authService.js';
 import AuthShell from '../components/AuthShell.jsx';
+import getRoleLandingPath from '../utils/roleRedirect.js';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -34,7 +35,7 @@ const Login = () => {
 
     // Restore session if already logged in
     if (isAuthenticated) {
-      const redirect = searchParams.get('redirect') || '/';
+      const redirect = searchParams.get('redirect') || getRoleLandingPath(useAuthStore.getState().user);
       navigate(redirect);
     }
   }, [isAuthenticated, navigate, searchParams]);
@@ -60,8 +61,12 @@ const Login = () => {
     }
 
     try {
-      await login(identifier, password);
-      // Will navigate on isAuthenticated change
+      const result = await login(identifier, password);
+      if (result.user?.isFirstLogin && ['DRIVER', 'CONDUCTOR', 'BUS_ASSISTANT'].includes(result.user.role)) {
+        navigate('/auth/force-change-password', { replace: true });
+      } else {
+        navigate(getRoleLandingPath(result.user), { replace: true });
+      }
     } catch (err) {
       // Error is already in store
     }

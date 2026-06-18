@@ -4,6 +4,7 @@ import useAuthStore from '../../../features/auth/stores/authStore.js';
 import useLanguage from '../../hooks/useLanguage.js';
 import apiClient from '../../services/apiClient.js';
 import useTheme from '../../hooks/useTheme.js';
+import getRoleLandingPath from '../../../features/auth/utils/roleRedirect.js';
 
 const Header = ({ forceDarkMode = false }) => {
   const navigate = useNavigate();
@@ -104,7 +105,7 @@ const Header = ({ forceDarkMode = false }) => {
   };
 
   const handleBrandClick = () => {
-    navigate(isAdmin() ? '/admin/dashboard' : '/');
+    navigate(getRoleLandingPath(user));
   };
 
   const handleNavClick = (event, link) => {
@@ -253,12 +254,21 @@ const Header = ({ forceDarkMode = false }) => {
                 </>
               ) : isDriver() || isBusAssistant() ? (
                 <>
+                  {isBusAssistant() ? (
+                    <button
+                      type="button"
+                      onClick={() => navigate('/bus-assistant/validate-ticket')}
+                      className="hidden rounded-full border border-emerald-300 bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-200 lg:inline-flex"
+                    >
+                      Bus Assistant
+                    </button>
+                  ) : null}
                   <button
                     type="button"
-                    onClick={() => navigate('/operations/schedule')}
+                    onClick={() => navigate(isBusAssistant() ? '/bus-assistant/shift-revenue' : '/operations/schedule')}
                     className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
                   >
-                    Operations Schedule
+                    {isBusAssistant() ? 'Shift Revenue' : 'Operations Schedule'}
                   </button>
                   <div className="relative">
                     <button

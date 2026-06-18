@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AuthShell from '../components/AuthShell';
 import useAuthStore from '../stores/authStore.js';
+import getRoleLandingPath from '../utils/roleRedirect.js';
 
 const ForcePasswordChangePage = () => {
   const navigate = useNavigate();
-  const { changePassword, isLoading, error, clearError } = useAuthStore();
+  const { changePassword, isLoading, error, clearError, user } = useAuthStore();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -28,7 +29,7 @@ const ForcePasswordChangePage = () => {
 
     try {
       await changePassword({ currentPassword, newPassword, confirmPassword });
-      navigate('/', { replace: true });
+      navigate(getRoleLandingPath(user), { replace: true });
     } catch {
       // Store error is rendered below.
     }

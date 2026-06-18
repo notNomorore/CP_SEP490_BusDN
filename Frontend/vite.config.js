@@ -8,7 +8,7 @@ const frontendRunId = Date.now().toString()
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const apiBaseUrl = env.VITE_API_BASE_URL || ''
-  const apiOrigin = apiBaseUrl.replace(/\/api\/?$/, '') || env.VITE_API_URL || 'http://localhost:5000'
+  const apiOrigin = apiBaseUrl.replace(/\/api\/?$/, '') || env.VITE_API_URL || 'http://localhost:3000'
 
   return {
     plugins: [react()],

@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AuthShell from '../components/AuthShell';
 import authService from '../services/authService.js';
 import useAuthStore from '../stores/authStore.js';
+import getRoleLandingPath from '../utils/roleRedirect.js';
 
 const getErrorMessage = (error) => {
   if (!error) {
@@ -94,6 +95,8 @@ const LoginPage = () => {
       });
       if (result.user?.isFirstLogin && ['DRIVER', 'CONDUCTOR', 'BUS_ASSISTANT'].includes(result.user.role)) {
         navigate('/auth/force-change-password', { replace: true });
+      } else {
+        navigate(getRoleLandingPath(result.user), { replace: true });
       }
     } catch (loginError) {
       const errorMessage = getErrorMessage(loginError) || 'Đăng nhập thất bại. Vui lòng kiểm tra tài khoản, mật khẩu hoặc trạng thái tài khoản.';

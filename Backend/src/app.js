@@ -34,10 +34,7 @@ import systemNotificationRoutes from './modules/systemNotifications/systemNotifi
 import vehicleIssueRoutes from './modules/vehicleIssues/vehicleIssue.routes.js';
 import maintenanceApprovalRoutes from './modules/vehicleIssues/maintenanceApproval.routes.js';
 import vehicleReassignmentRoutes from './modules/vehicleReassignments/vehicleReassignment.routes.js';
-<<<<<<< HEAD
-=======
 import busAssistantRoutes from './modules/busAssistant/busAssistant.routes.js';
->>>>>>> origin/HoangVu
 
 export const createApp = () => {
   const app = express();
@@ -141,10 +138,8 @@ export const createApp = () => {
   app.use('/api/admin/vehicle-issues', vehicleIssueRoutes);
   app.use('/api/admin/maintenance', maintenanceApprovalRoutes);
   app.use('/api/admin', vehicleReassignmentRoutes);
-<<<<<<< HEAD
-=======
+
   app.use('/api/bus-assistant', busAssistantRoutes);
->>>>>>> origin/HoangVu
   app.use('/api/fleet-operations', fleetOperationsRoutes);
   // app.use('/api/routes', routeRoutes);
   app.use('/api/routes', routeRoutes);

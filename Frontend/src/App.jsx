@@ -26,8 +26,16 @@ import {
   OperationsRoute,
   PublicRoute,
   AdminRoute,
+  BusAssistantRoute,
 } from './features/auth';
 import { ProfilePage } from './features/profile';
+import {
+  BusAssistantShell,
+  CreateWalkInTicketPage,
+  RevenueSummaryPage,
+  ShiftRevenuePage,
+  ValidateQrTicketPage,
+} from './features/busAssistant';
 import {
   PromotionManagementPage,
   PromotionStatisticsPage,
@@ -272,6 +280,20 @@ function App() {
               </OperationsRoute>
             )}
           />
+          <Route
+            path="/bus-assistant"
+            element={(
+              <BusAssistantRoute>
+                <BusAssistantShell />
+              </BusAssistantRoute>
+            )}
+          >
+            <Route index element={<ValidateQrTicketPage />} />
+            <Route path="validate-ticket" element={<ValidateQrTicketPage />} />
+            <Route path="walkin-ticket" element={<CreateWalkInTicketPage />} />
+            <Route path="shift-revenue" element={<ShiftRevenuePage />} />
+            <Route path="revenue-summary" element={<RevenueSummaryPage />} />
+          </Route>
           <Route
             path="/admin/staff-performance"
             element={

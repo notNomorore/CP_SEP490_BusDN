@@ -124,6 +124,26 @@ const normalizeStopLocation = (stop) => {
   return stop;
 };
 
+const createBusIcon = (isSelected) => L.divIcon({
+  className: '',
+  iconAnchor: [18, 46],
+  popupAnchor: [0, -44],
+  html: `
+    <div class="relative flex flex-col items-center">
+      <div class="flex h-9 w-9 items-center justify-center rounded-full border-[3px] bg-white shadow-lg ${
+        isSelected
+          ? 'border-emerald-700 text-emerald-700 ring-[6px] ring-emerald-300/55'
+          : 'border-emerald-500 text-emerald-600 ring-2 ring-white/80'
+      }">
+        <span class="material-symbols-outlined text-[20px]">directions_bus</span>
+      </div>
+      <div class="h-0 w-0 border-x-[7px] border-x-transparent ${
+        isSelected ? 'border-t-emerald-700' : 'border-t-emerald-500'
+      } border-t-[10px]"></div>
+    </div>
+  `,
+});
+
 const currentLocationIcon = L.divIcon({
   className: '',
   iconAnchor: [24, 24],
@@ -161,6 +181,12 @@ const liveBusIcon = (status) => {
   });
 };
 
+const RouteLabelIcon = (routeNumber) => L.divIcon({
+  className: '',
+  iconAnchor: [18, -2],
+  html: `<span class="rounded-full bg-emerald-700 px-2 py-0.5 text-[11px] font-bold text-white shadow">${routeNumber}</span>`,
+});
+
 const MapAutoFocus = ({ selectedRoute, currentLocation }) => {
   const map = useMap();
 
@@ -189,6 +215,11 @@ const MapAutoFocus = ({ selectedRoute, currentLocation }) => {
       return;
     }
 
+    if (isValidLocation(currentLocation)) {
+      map.setView(toLatLng(currentLocation), 15, { animate: true });
+      return;
+    }
+
     map.setView(toLatLng(DEFAULT_CENTER), INITIAL_MAP_ZOOM, { animate: true });
   }, [currentLocation, map, selectedRoute]);
 
@@ -208,9 +239,9 @@ const MapCanvas = ({
     ? selectedRoute.pathPoints
     : selectedRoute?.stops || [];
   const routePositions = routePath.filter(isValidLocation).map(toLatLng);
-  const routeStops = (selectedRoute?.stops || [])
-    .map(normalizeStopLocation)
-    .filter(isValidLocation);
+  const selectedRouteStop = selectedRoute?.stops
+    ?.map(normalizeStopLocation)
+    .find(isValidLocation);
 
   return (
     <section className="relative min-w-0 flex-1 overflow-hidden bg-slate-200">
@@ -245,11 +276,48 @@ const MapCanvas = ({
               positions={routePositions}
               pathOptions={{ color: '#059669', weight: 5, opacity: 1, lineCap: 'round', lineJoin: 'round' }}
             />
+            {routePositions.map((position) => (
+              <CircleMarker
+                key={`${position[0]}-${position[1]}`}
+                center={position}
+                radius={3}
+                pathOptions={{
+                  color: '#ffffff',
+                  fillColor: '#ffffff',
+                  fillOpacity: 1,
+                  weight: 1,
+                }}
+                interactive={false}
+              />
+            ))}
           </>
         )}
 
-        {routeStops.map((stop, index) => {
-          const isEndpoint = index === 0 || index === routeStops.length - 1;
+        {stops.filter(isValidLocation).map((stop) => {
+          const isSelectedRouteStop = stop.routeNumbers?.includes(selectedRoute?.routeNumber);
+
+          return (
+            <Marker
+              key={`${stop.name}-${stop.latitude.toFixed(5)}-${stop.longitude.toFixed(5)}`}
+              position={toLatLng(stop)}
+              icon={createBusIcon(isSelectedRouteStop)}
+              title={stop.name}
+              interactive={false}
+            >
+              {isSelectedRouteStop && (
+                <Tooltip
+                  permanent
+                  direction="top"
+                  offset={[0, -24]}
+                  opacity={1}
+                  className="bus-stop-name-tooltip"
+                >
+                  {stop.name}
+                </Tooltip>
+              )}
+            </Marker>
+          );
+        })}
 
           return (
             <CircleMarker
@@ -422,7 +490,16 @@ const RouteCard = ({
   onToggleFavorite,
 }) => (
   <article
-    className={`relative block w-full rounded-xl border bg-white p-4 pr-14 text-left shadow-sm transition ${
+    role="button"
+    tabIndex={0}
+    onClick={onSelect}
+    onKeyDown={(event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onSelect?.();
+      }
+    }}
+    className={`relative block w-full rounded-xl border bg-white p-4 pr-14 text-left shadow-sm transition hover:border-emerald-500 hover:shadow-md ${
       isHighlighted ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-slate-200'
     }`}
   >
@@ -1423,6 +1500,69 @@ const SearchRoutesPage = () => {
     selectedRoute?.id && isSameRouteId(liveRouteId, selectedRoute.id)
   );
 
+  const mapStops = useMemo(() => {
+    const seen = new Set();
+    const stops = [];
+
+    for (const route of routes) {
+      for (const stop of route.stops || []) {
+        const normalizedStop = normalizeStopLocation(stop);
+        const key = `${normalizedStop.name}-${normalizedStop.latitude.toFixed(5)}-${normalizedStop.longitude.toFixed(5)}`;
+
+        if (!seen.has(key)) {
+          seen.add(key);
+          stops.push({ ...normalizedStop, routeNumbers: [route.routeNumber] });
+        } else {
+          const existingStop = stops.find((item) => (
+            `${item.name}-${item.latitude.toFixed(5)}-${item.longitude.toFixed(5)}` === key
+          ));
+
+          if (existingStop && !existingStop.routeNumbers.includes(route.routeNumber)) {
+            existingStop.routeNumbers.push(route.routeNumber);
+          }
+        }
+      }
+    }
+
+    if (Array.isArray(bestRouteResult.suggestions)) {
+      return bestRouteResult.suggestions;
+    }
+
+    return [
+      ...(bestRouteResult.bestRoute ? [{ ...bestRouteResult.bestRoute, isRecommended: true }] : []),
+      ...(bestRouteResult.alternatives || []).map((alternative) => ({
+        ...alternative,
+        isRecommended: false,
+      })),
+    ];
+  }, [bestRouteResult]);
+
+  const isRouteFavorite = (route) => (
+    favoriteRouteIds.has(String(route.id)) || favoriteRouteIds.has(String(route.routeNumber))
+  );
+
+  const isStopFavorite = (route, stop) => favoriteStopIds.has(buildStopId(route, stop));
+  const isArrivalNotificationEnabled = (route, stop) => (
+    arrivalNotificationIds.has(buildArrivalNotificationId(route, stop))
+  );
+  const isDelayNotificationEnabled = (route) => (
+    delayNotificationIds.has(buildDelayNotificationId(route))
+  );
+  const isRouteChangeNotificationEnabled = (route) => (
+    routeChangeNotificationIds.has(buildRouteChangeNotificationId(route))
+    || routeChangeNotifications.some((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+      && (
+        subscription.routeNumber === route.routeNumber
+        || isSameRouteId(subscription.routeId, route.id)
+      )
+    ))
+  );
+  const routePanelMessage = /notification|alert/i.test(favoriteMessage) ? favoriteMessage : '';
+  const isLiveTrackingSelectedRoute = Boolean(
+    selectedRoute?.id && isSameRouteId(liveRouteId, selectedRoute.id)
+  );
+
   useEffect(() => {
     let isMounted = true;
 
@@ -2192,7 +2332,7 @@ const SearchRoutesPage = () => {
       if (nextSuggestions.length) {
         const nextRoutes = nextSuggestions.map((item) => item.route);
         setRoutes(nextRoutes);
-        setSelectedRoute(null);
+        setSelectedRoute(nextSuggestions[0].route);
       } else {
         setSelectedRoute(null);
       }
