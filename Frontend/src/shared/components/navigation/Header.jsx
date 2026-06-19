@@ -42,10 +42,10 @@ const Header = ({ forceDarkMode = false }) => {
     { key: 'passenger.nav.help', href: '/#support', hideForAdmin: true }
   ].filter((link) => (!link.adminOnly || isAdmin()) && (!link.hideForAdmin || !isAdmin()));
 
-  const authCta =
-    location.pathname === '/auth/register' || location.pathname === '/register'
-      ? { key: 'passenger.auth.signIn', path: '/auth/login' }
-      : { key: 'passenger.auth.createAccount', path: '/auth/register' };
+  const isLoginPage = location.pathname === '/auth/login' || location.pathname === '/login';
+  const authCta = isLoginPage
+    ? { label: 'Create Account', path: '/auth/register' }
+    : { label: 'Sign In', path: '/auth/login' };
 
   const displayName = user?.fullName?.trim() || t('passenger.fallbackName');
   const profileInitial = displayName.charAt(0).toUpperCase();

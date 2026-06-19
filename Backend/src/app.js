@@ -33,6 +33,7 @@ import vehicleIssueRoutes from './modules/vehicleIssues/vehicleIssue.routes.js';
 import maintenanceApprovalRoutes from './modules/vehicleIssues/maintenanceApproval.routes.js';
 import vehicleReassignmentRoutes from './modules/vehicleReassignments/vehicleReassignment.routes.js';
 import busAssistantRoutes from './modules/busAssistant/busAssistant.routes.js';
+import scheduleOperationsRoutes from './modules/scheduleOperations/scheduleOperationsRoutes.js';
 
 export const createApp = () => {
   const app = express();
@@ -139,7 +140,7 @@ export const createApp = () => {
   app.use('/api/bus-assistant', busAssistantRoutes);
   app.use('/api/fleet-operations', fleetOperationsRoutes);
   app.use('/api/routes', routeRoutes);
-  // app.use('/api/schedule-operations', scheduleOperationsRoutes);
+  app.use('/api/schedule-operations', scheduleOperationsRoutes);
   // app.use('/api/bus-stops', busStopRoutes);
   // 404 handler (must be after all routes)
   app.use(notFoundHandler);

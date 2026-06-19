@@ -285,7 +285,7 @@ export const AssignedTripsPage = () => {
 
   return (
     <PageShell
-      title="UC39 - Chuyến được phân công"
+      title="Chuyến được phân công"
       subtitle="Xem các chuyến mà điều hành đã phân cho phụ xe và tiếp nhận hoặc từ chối nếu có lý do."
       icon={Route}
       filters={filters}
@@ -339,7 +339,7 @@ export const ShiftSchedulePage = () => {
 
   return (
     <PageShell
-      title="UC40 - Lịch ca làm việc"
+      title="Lịch ca làm việc"
       subtitle="Theo dõi giờ nhận ca, hạn có mặt, giờ kết thúc và hướng dẫn làm việc của phụ xe."
       icon={CalendarDays}
       filters={filters}
@@ -407,7 +407,7 @@ export const OperationNotificationsPage = () => {
 
   return (
     <PageShell
-      title="UC49 - Thông báo vận hành"
+      title="Thông báo vận hành"
       subtitle="Nhận chỉ đạo từ trung tâm điều hành: cập nhật tuyến, đổi lịch, thông báo khẩn hoặc hướng dẫn phục vụ."
       icon={BellRing}
       filters={filters}

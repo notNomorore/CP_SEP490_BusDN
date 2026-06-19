@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle,
   Camera,
-  CheckCircle2,
   Clock3,
   FileWarning,
   PackageSearch,
@@ -278,7 +276,7 @@ const IncidentReportPage = () => {
   const mutedText = isDarkMode ? 'text-slate-400' : 'text-slate-500';
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="grid gap-5">
       <section className={shellClass}>
         <div className={isDarkMode ? 'border-b border-white/10 p-4' : 'border-b border-slate-200 p-4'}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -520,37 +518,6 @@ const IncidentReportPage = () => {
         </div>
       </section>
 
-      <aside className={shellClass}>
-        <div className={isDarkMode ? 'border-b border-white/10 p-4' : 'border-b border-slate-200 p-4'}>
-          <h2 className="flex items-center gap-2 text-base font-black">
-            <CheckCircle2 size={18} className="text-emerald-400" />
-            Luồng xử lý
-          </h2>
-          <p className={`mt-1 text-sm ${mutedText}`}>
-            Báo cáo được lưu vào Operation Incidents và đồng bộ sang Incident Reports để admin tiếp nhận.
-          </p>
-        </div>
-        <div className="space-y-3 p-4 text-sm">
-          {[
-            ['UC50', 'Báo hành khách vi phạm khi chuyến đang vận hành.'],
-            ['UC51', 'Báo xung đột hành khách khi chuyến đang vận hành.'],
-            ['UC52', 'Báo đồ tìm thấy trong hoặc sau chuyến.'],
-          ].map(([code, text]) => (
-            <div key={code} className={isDarkMode ? 'rounded bg-white/5 p-3' : 'rounded bg-emerald-50 p-3'}>
-              <p className="font-black text-emerald-500">{code}</p>
-              <p className={mutedText}>{text}</p>
-            </div>
-          ))}
-          <div className={isDarkMode ? 'rounded border border-amber-400/30 bg-amber-400/10 p-3 text-amber-100' : 'rounded border border-amber-200 bg-amber-50 p-3 text-amber-900'}>
-            <div className="flex gap-2">
-              <AlertTriangle size={18} className="mt-0.5 shrink-0" />
-              <p>
-                UC50/UC51 không tự kết thúc chuyến. Điều hành sẽ xem và xử lý ở trang admin incidents.
-              </p>
-            </div>
-          </div>
-        </div>
-      </aside>
     </div>
   );
 };

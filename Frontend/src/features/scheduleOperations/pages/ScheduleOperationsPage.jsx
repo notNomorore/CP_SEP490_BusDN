@@ -1804,7 +1804,7 @@ const OperationNotificationsPanel = ({ notifications = [] }) => {
         <div>
           <div className="flex items-center gap-2 text-sm font-black uppercase text-cyan-900">
             <BellRing className="h-4 w-4" />
-            UC49 - Thông báo vận hành
+            Thông báo vận hành
           </div>
           <p className="mt-1 text-sm text-slate-600">
             Thông báo từ điều hành về tuyến, lịch chạy hoặc chỉ đạo khẩn.
@@ -2038,7 +2038,7 @@ const ScheduleOperationsPage = () => {
               }`}
             >
               <Route className="h-4 w-4" />
-              UC39 - Chuyến được phân công ({assignedTrips.length})
+              Chuyến được phân công ({assignedTrips.length})
             </button>
             <button
               type="button"
@@ -2047,7 +2047,7 @@ const ScheduleOperationsPage = () => {
               className="flex cursor-not-allowed items-center justify-center gap-2 border-b-2 border-transparent px-4 py-4 text-sm font-bold text-slate-400"
             >
               <CalendarDays className="h-4 w-4" />
-              UC40 - Lịch ca làm việc (làm sau)
+              Lịch ca làm việc (làm sau)
             </button>
           </div>
 
