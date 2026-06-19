@@ -23,11 +23,9 @@ import revenueReportRoutes from './modules/revenue/revenueReport.routes.js';
 import routeEfficiencyRoutes from './modules/analytics/routeEfficiency.routes.js';
 import incidentReportRoutes from './modules/incidents/incidentReport.routes.js';
 import systemMonitoringRoutes from './modules/systemMonitoring/systemMonitoring.routes.js';
-import scheduleOperationsRoutes from './modules/scheduleOperations/scheduleOperationsRoutes.js';
 import fareOperationsRoutes from './modules/fareOperations/fareOperations.routes.js';
 import walkInTicketRoutes from './modules/walkInTickets/walkInTicket.routes.js';
 import passengerComplianceRoutes from './modules/passengerCompliance/passengerCompliance.routes.js';
-import busStopRoutes from './modules/busStops/busStopRoutes.js';
 import fleetOperationsRoutes from './modules/fleetOperations/fleetOperations.routes.js';
 import fleetMonitoringRoutes from './modules/fleetMonitoring/fleetMonitoring.routes.js';
 import systemNotificationRoutes from './modules/systemNotifications/systemNotification.routes.js';
@@ -141,10 +139,8 @@ export const createApp = () => {
 
   app.use('/api/bus-assistant', busAssistantRoutes);
   app.use('/api/fleet-operations', fleetOperationsRoutes);
-  // app.use('/api/routes', routeRoutes);
   app.use('/api/routes', routeRoutes);
   app.use('/api/schedule-operations', scheduleOperationsRoutes);
-
 
   // 404 handler (must be after all routes)
   app.use(notFoundHandler);
