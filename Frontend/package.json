@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "lint": "eslint . --ext .js,.jsx",
     "lint:fix": "eslint . --ext .js,.jsx --fix",
+    "i18n:admin": "node scripts/generate-admin-translations.mjs",
+    "i18n:generate": "node scripts/generate-admin-translations.mjs",
     "test": "vitest",
     "test:ui": "vitest --ui"
   },

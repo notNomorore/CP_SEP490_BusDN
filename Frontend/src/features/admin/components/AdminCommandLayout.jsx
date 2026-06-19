@@ -1,79 +1,32 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../../auth/stores/authStore.js';
-import useLanguage from '../../../shared/hooks/useLanguage.js';
-
-const labels = {
-  en: {
-    brand: 'BusDN Command',
-    subtitle: 'Regional Operations Center',
-    center: 'Unified administration workspace',
-    search: 'Search admin modules...',
-    emergency: 'Emergency Alert',
-    logout: 'Logout',
-    switchLanguage: 'Switch to Vietnamese',
-  },
-  vi: {
-    brand: 'Điều hành BusDN',
-    subtitle: 'Trung tâm vận hành khu vực',
-    center: 'Trung tâm điều hành quản trị thống nhất',
-    search: 'Tìm chức năng quản trị...',
-    emergency: 'Cảnh báo khẩn cấp',
-    logout: 'Đăng xuất',
-    switchLanguage: 'Switch to English',
-  },
-};
-
-const navigation = [
-  { path: '/admin/dashboard', label: 'Vận hành đội xe', labelEn: 'Fleet Operations', icon: 'directions_bus' },
-  { path: '/admin/fleet/active-trips', label: 'Giám sát chuyến đang chạy', labelEn: 'Active Trips', icon: 'route' },
-  { path: '/admin/fleet/delayed-trips', label: 'Giám sát chuyến trễ', labelEn: 'Delayed Trips', icon: 'schedule' },
-  { path: '/admin/fleet/locations', label: 'Giám sát vị trí xe', labelEn: 'Fleet Location Monitor', icon: 'location_on' },
-  { path: '/admin/routes', label: 'Quản lý tuyến & lịch', labelEn: 'Routes & Scheduling', icon: 'map' },
-  { path: '/admin/analytics/route-efficiency', label: 'Phân tích tuyến', labelEn: 'Route Analytics', icon: 'monitoring' },
-  { path: '/admin/analytics/congested-routes', label: 'Tuyến ùn tắc', labelEn: 'Congested Routes', icon: 'traffic' },
-  { path: '/admin/analytics/feedback', label: 'Phân tích phản hồi', labelEn: 'Feedback Analytics', icon: 'reviews' },
-  { path: '/admin/fare-operations', label: 'Vận hành giá vé', labelEn: 'Fare Operations', icon: 'payments' },
-  { path: '/admin/promotions', label: 'Khuyến mãi', labelEn: 'Promotions', icon: 'sell' },
-  { path: '/admin/promotions/statistics', label: 'Thống kê khuyến mãi', labelEn: 'Promotion Statistics', icon: 'bar_chart' },
-  { path: '/admin/revenue', label: 'Doanh thu', labelEn: 'Revenue', icon: 'receipt_long' },
-  { path: '/admin/walkin-tickets', label: 'Vé mua trực tiếp', labelEn: 'Walk-in Tickets', icon: 'confirmation_number' },
-  { path: '/admin/incidents', label: 'Sự cố', labelEn: 'Incidents', icon: 'warning' },
-  { path: '/admin/vehicle-issues', label: 'Sự cố phương tiện', labelEn: 'Vehicle Issues', icon: 'build_circle' },
-  { path: '/admin/maintenance-approval', label: 'Duyệt bảo trì xe', labelEn: 'Maintenance Approval', icon: 'fact_check' },
-  { path: '/admin/passenger-compliance', label: 'Vi phạm hành khách', labelEn: 'Passenger Compliance', icon: 'gpp_bad' },
-  { path: '/admin/users', label: 'Quản lý người dùng', labelEn: 'User Management', icon: 'manage_accounts' },
-  { path: '/admin/staff-performance', label: 'Hiệu suất nhân viên', labelEn: 'Staff Performance', icon: 'query_stats' },
-  { path: '/admin/priority-verification', label: 'Xác minh ưu tiên', labelEn: 'Priority Verification', icon: 'verified_user' },
-  { path: '/admin/customer-support', label: 'Hỗ trợ khách hàng', labelEn: 'Customer Support', icon: 'support_agent' },
-  { path: '/admin/system-notifications', label: 'Thông báo hệ thống', labelEn: 'System Notifications', icon: 'campaign' },
-  { path: '/admin/system-monitoring', label: 'Giám sát hệ thống', labelEn: 'System Monitoring', icon: 'admin_panel_settings' },
-];
+import useAdminI18n, { getAdminMessage } from '../../../shared/i18n/adminI18n.js';
+import { adminNavigation } from '../../../shared/i18n/adminMessages.js';
 
 const AdminCommandLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuthStore();
-  const { language, toggleLanguage } = useLanguage();
+  const { language, toggleLanguage, t } = useAdminI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const copy = labels[language] || labels.en;
   const displayName = user?.fullName?.trim() || 'Admin';
   const initial = displayName.charAt(0).toUpperCase();
 
   const activeItem = useMemo(() => {
-    return [...navigation]
+    return [...adminNavigation]
       .sort((left, right) => right.path.length - left.path.length)
       .find((item) => location.pathname === item.path || location.pathname.startsWith(`${item.path}/`))
-      || navigation[0];
+      || adminNavigation[0];
   }, [location.pathname]);
 
   const visibleNavigation = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return navigation;
-    return navigation.filter((item) => (
-      item.label.toLowerCase().includes(keyword)
-      || item.labelEn.toLowerCase().includes(keyword)
+    if (!keyword) return adminNavigation;
+    return adminNavigation.filter((item) => (
+      getAdminMessage('vi', item.key).toLowerCase().includes(keyword)
+      || getAdminMessage('en', item.key).toLowerCase().includes(keyword)
     ));
   }, [search]);
 
@@ -82,16 +35,31 @@ const AdminCommandLayout = () => {
     navigate('/');
   };
 
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!mobileOpen) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setMobileOpen(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [mobileOpen]);
+
   const sidebar = (
     <aside className="flex h-full w-[250px] shrink-0 flex-col overflow-hidden bg-primary-container px-3 py-4 text-primary-fixed-dim shadow-2xl shadow-primary/15">
       <div className="mb-4 px-3">
         <button type="button" onClick={() => navigate('/admin/dashboard')} className="text-left">
-          <h1 className="text-lg font-headline font-extrabold text-primary-fixed">{copy.brand}</h1>
-          <p className="text-xs font-medium text-on-primary-container">{copy.subtitle}</p>
+          <h1 className="text-lg font-headline font-extrabold text-primary-fixed">{t('admin.brand')}</h1>
+          <p className="text-xs font-medium text-on-primary-container">{t('admin.subtitle')}</p>
         </button>
       </div>
 
-      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+      <nav aria-label={t('admin.navigation.label')} className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
         {visibleNavigation.map((item) => (
           <NavLink
             key={item.path}
@@ -105,15 +73,20 @@ const AdminCommandLayout = () => {
             }`}
           >
             <span className="material-symbols-outlined shrink-0 text-[20px]">{item.icon}</span>
-            <span>{language === 'vi' ? item.label : item.labelEn}</span>
+            <span>{t(item.key)}</span>
           </NavLink>
         ))}
       </nav>
 
       <div className="mt-3 space-y-2 px-1">
-        <button type="button" className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-error px-3 text-sm font-bold text-on-error">
+        <button
+          type="button"
+          disabled
+          title={t('admin.common.emergencyUnavailable')}
+          className="flex h-11 w-full cursor-not-allowed items-center justify-center gap-2 rounded-xl bg-error px-3 text-sm font-bold text-on-error opacity-70"
+        >
           <span className="material-symbols-outlined text-lg">emergency</span>
-          <span>{copy.emergency}</span>
+          <span>{t('admin.common.emergencyAlert')}</span>
         </button>
         <button
           type="button"
@@ -121,7 +94,7 @@ const AdminCommandLayout = () => {
           className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-primary-fixed/15 px-3 text-sm font-bold text-primary-fixed hover:bg-on-primary-fixed-variant/20"
         >
           <span className="material-symbols-outlined text-lg">logout</span>
-          <span>{copy.logout}</span>
+          <span>{t('admin.common.logout')}</span>
         </button>
       </div>
     </aside>
@@ -132,8 +105,13 @@ const AdminCommandLayout = () => {
       <div className="hidden lg:block">{sidebar}</div>
 
       {mobileOpen ? (
-        <div className="fixed inset-0 z-[80] flex lg:hidden">
-          <button type="button" aria-label="Close navigation" onClick={() => setMobileOpen(false)} className="absolute inset-0 bg-black/45" />
+        <div
+          className="fixed inset-0 z-[80] flex lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('admin.navigation.label')}
+        >
+          <button type="button" aria-label={t('admin.navigation.close')} onClick={() => setMobileOpen(false)} className="absolute inset-0 bg-black/45" />
           <div className="relative h-full">{sidebar}</div>
         </div>
       ) : null}
@@ -141,14 +119,20 @@ const AdminCommandLayout = () => {
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="z-40 flex h-20 shrink-0 items-center justify-between gap-4 bg-surface/95 px-4 shadow-[0_20px_40px_rgba(0,26,15,0.06)] backdrop-blur-md sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
-            <button type="button" onClick={() => setMobileOpen(true)} className="rounded-xl p-2 hover:bg-surface-container-low lg:hidden">
-              <span className="material-symbols-outlined">menu</span>
+            <button
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              className="rounded-xl p-2 hover:bg-surface-container-low lg:hidden"
+              aria-label={t('admin.navigation.open')}
+              aria-expanded={mobileOpen}
+            >
+              <span className="material-symbols-outlined" aria-hidden="true">menu</span>
             </button>
             <div className="min-w-0">
               <h2 className="truncate text-lg font-headline font-black text-primary sm:text-xl">
-                {language === 'vi' ? activeItem.label : activeItem.labelEn}
+                {t(activeItem.key)}
               </h2>
-              <p className="hidden text-xs font-medium text-on-surface-variant sm:block">{copy.center}</p>
+              <p className="hidden text-xs font-medium text-on-surface-variant sm:block">{t('admin.header.workspace')}</p>
             </div>
           </div>
 
@@ -159,20 +143,28 @@ const AdminCommandLayout = () => {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 className="w-64 rounded-full border-0 bg-surface-container-low py-2 pl-10 pr-4 text-sm focus:ring-2 focus:ring-on-tertiary-container"
-                placeholder={copy.search}
+                placeholder={t('admin.header.search')}
+                aria-label={t('admin.header.search')}
               />
             </label>
-            <button type="button" className="relative rounded-full p-2 text-on-surface-variant hover:bg-surface-container-low">
-              <span className="material-symbols-outlined">notifications</span>
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-error" />
+            <button
+              type="button"
+              disabled
+              title={t('admin.header.notificationsUnavailable')}
+              aria-label={t('admin.header.notificationsUnavailable')}
+              className="relative cursor-not-allowed rounded-full p-2 text-on-surface-variant opacity-60"
+            >
+              <span className="material-symbols-outlined" aria-hidden="true">notifications</span>
+              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-error" aria-hidden="true" />
             </button>
             <button
               type="button"
               onClick={toggleLanguage}
-              title={copy.switchLanguage}
+              title={t('admin.header.switchLanguage')}
+              aria-label={t('admin.header.switchLanguage')}
               className="inline-flex h-10 min-w-12 items-center justify-center rounded-full border border-outline-variant/40 bg-surface-container-low px-3 text-sm font-black text-primary"
             >
-              {language === 'en' ? 'VI' : 'EN'}
+              {language === 'en' ? 'EN' : 'VN'}
             </button>
             <div title={displayName} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-surface-container-highest bg-secondary-container text-sm font-black text-secondary">
               {initial}

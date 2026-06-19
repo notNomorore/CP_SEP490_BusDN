@@ -235,9 +235,10 @@ const MapCanvas = ({
     ? selectedRoute.pathPoints
     : selectedRoute?.stops || [];
   const routePositions = routePath.filter(isValidLocation).map(toLatLng);
-  const selectedRouteStop = selectedRoute?.stops
-    ?.map(normalizeStopLocation)
-    .find(isValidLocation);
+  const stops = (selectedRoute?.stops || [])
+    .map(normalizeStopLocation)
+    .filter(isValidLocation);
+  const selectedRouteStop = stops[0];
 
   return (
     <section className="relative min-w-0 flex-1 overflow-hidden bg-slate-200">
@@ -305,8 +306,9 @@ const MapCanvas = ({
           </>
         )}
 
-        {stops.filter(isValidLocation).map((stop) => {
-          const isSelectedRouteStop = stop.routeNumbers?.includes(selectedRoute?.routeNumber);
+        {stops.map((stop, index) => {
+          const isOrigin = index === 0;
+          const isEndpoint = isOrigin || index === stops.length - 1;
 
           return (
             <CircleMarker
@@ -1515,33 +1517,6 @@ const SearchRoutesPage = () => {
   const isLiveTrackingSelectedRoute = Boolean(
     selectedRoute?.id && isSameRouteId(liveRouteId, selectedRoute.id)
   );
-
-  const mapStops = useMemo(() => {
-    const seen = new Set();
-    const stops = [];
-
-    for (const route of routes) {
-      for (const stop of route.stops || []) {
-        const normalizedStop = normalizeStopLocation(stop);
-        const key = `${normalizedStop.name}-${normalizedStop.latitude.toFixed(5)}-${normalizedStop.longitude.toFixed(5)}`;
-
-        if (!seen.has(key)) {
-          seen.add(key);
-          stops.push({ ...normalizedStop, routeNumbers: [route.routeNumber] });
-        } else {
-          const existingStop = stops.find((item) => (
-            `${item.name}-${item.latitude.toFixed(5)}-${item.longitude.toFixed(5)}` === key
-          ));
-
-          if (existingStop && !existingStop.routeNumbers.includes(route.routeNumber)) {
-            existingStop.routeNumbers.push(route.routeNumber);
-          }
-        }
-      }
-    }
-
-    return stops;
-  }, [routes]);
 
   useEffect(() => {
     let isMounted = true;

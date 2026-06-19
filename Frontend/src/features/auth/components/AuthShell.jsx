@@ -21,7 +21,7 @@ const AuthShell = ({
         <section className="min-h-[calc(100vh-72px)]">
           <div className="grid min-h-[calc(100vh-72px)] w-full overflow-hidden bg-surface-container-lowest lg:grid-cols-2">
             <div
-              className={`relative min-h-[280px] overflow-hidden lg:min-h-[calc(100vh-72px)] ${
+              className={`relative hidden min-h-[280px] overflow-hidden lg:block lg:min-h-[calc(100vh-72px)] ${
                 isImageRight ? 'lg:order-2' : ''
               }`}
             >
@@ -63,7 +63,7 @@ const AuthShell = ({
               </div>
             </div>
 
-            <div className="flex min-h-[calc(100vh-72px)] items-center justify-center overflow-y-auto bg-white px-6 py-8 md:px-10 lg:px-16 lg:py-10">
+            <div className="flex min-h-[calc(100svh-72px)] items-center justify-center overflow-y-auto bg-white px-5 py-8 sm:px-6 md:px-10 lg:min-h-[calc(100vh-72px)] lg:px-16 lg:py-10">
               <div className="w-full max-w-xl">{children}</div>
             </div>
           </div>

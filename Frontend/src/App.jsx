@@ -9,7 +9,6 @@ import {
   AdminCommandLayout,
   AdminActiveTripsPage,
   AdminDelayedTripsPage,
-  AdminFleetLocationPage,
   DashboardAdminPage,
   RouteControlPage,
   StaffPerformancePage,
@@ -53,11 +52,14 @@ import { SystemMonitoringPage } from './features/admin/systemMonitoring';
 import { FareOperationsPage } from './features/admin/fareOperations';
 import { WalkInTicketMonitoringPage } from './features/admin/walkInTickets';
 import { PassengerCompliancePage } from './features/admin/passengerCompliance';
+import NotFoundPage from './shared/components/common/NotFoundPage.jsx';
+import I18nBoundary from './shared/components/I18nBoundary.jsx';
 
 function App() {
   return (
     <Router>
-      <AppInitializer>
+      <I18nBoundary>
+        <AppInitializer>
         <Routes>
           <Route path="/" element={<HomePage />} />
 
@@ -149,7 +151,7 @@ function App() {
             <Route path="dashboard" element={<DashboardAdminPage embedded />} />
             <Route path="fleet/active-trips" element={<AdminActiveTripsPage />} />
             <Route path="fleet/delayed-trips" element={<AdminDelayedTripsPage />} />
-            <Route path="fleet/locations" element={<AdminFleetLocationPage />} />
+            <Route path="fleet/locations" element={<DashboardAdminPage embedded />} />
             <Route path="routes" element={<RouteControlPage />} />
             <Route path="users" element={<UserAccountsPage />} />
             <Route path="staff-performance" element={<StaffPerformancePage />} />
@@ -303,8 +305,10 @@ function App() {
               </AdminRoute>
             }
           />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
-      </AppInitializer>
+        </AppInitializer>
+      </I18nBoundary>
     </Router>
   );
 }

@@ -24,11 +24,13 @@
 /* Global Font Setup */
 html {
   @apply scroll-smooth;
+  scroll-padding-top: 6rem;
 }
 
 body {
   @apply bg-background text-on-surface font-body;
   font-family: 'Inter', sans-serif;
+  min-width: 320px;
   background:
     radial-gradient(circle at top right, rgba(181, 239, 209, 0.42), transparent 26%),
     linear-gradient(180deg, #f4faf7 0%, #eef6f2 45%, #f7fbf9 100%);
@@ -80,13 +82,10 @@ select {
   color: #001a0f;
 }
 
-/* Smooth Transitions */
-* {
-  @apply transition-colors transition-transform;
-}
-
-button {
-  @apply active:scale-95 transition-transform;
+.dark input,
+.dark textarea,
+.dark select {
+  color: #e2e8f0;
 }
 
 .glass-card {
@@ -127,7 +126,7 @@ button {
 
 /* Focus Ring */
 :focus-visible {
-  @apply outline-2 outline-offset-2 outline-primary;
+  @apply outline outline-2 outline-offset-2 outline-primary;
 }
 
 .dark :focus-visible {
@@ -144,6 +143,21 @@ input:focus,
 textarea:focus,
 select:focus {
   @apply ring-2 ring-on-tertiary-container;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .leaflet-tooltip.bus-stop-name-tooltip {
