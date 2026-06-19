@@ -34,6 +34,21 @@ const navItems = [
   { to: '/bus-assistant/revenue-summary', labelKey: 'revenueSummary', icon: ClipboardCheck },
 ];
 
+const navItemOrder = [
+  '/bus-assistant/validate-ticket',
+  '/bus-assistant/walkin-ticket',
+  '/bus-assistant/incident-reports',
+  '/bus-assistant/shift-revenue',
+  '/bus-assistant/revenue-summary',
+  '/bus-assistant/assigned-trips',
+  '/bus-assistant/shift-schedule',
+  '/bus-assistant/operation-notifications',
+];
+
+const orderedNavItems = navItemOrder
+  .map((path) => navItems.find((item) => item.to === path))
+  .filter(Boolean);
+
 const BusAssistantShell = () => {
   const navigate = useNavigate();
   const { language, toggleLanguage } = useLanguage();
@@ -168,7 +183,7 @@ const BusAssistantShell = () => {
           ? 'flex h-fit flex-col gap-2 rounded border border-white/10 bg-white/[0.04] p-3 lg:sticky lg:top-6'
           : 'flex h-fit flex-col gap-2 rounded border border-emerald-100 bg-white p-3 shadow-sm lg:sticky lg:top-6'}
         >
-          {navItems.map((item) => {
+          {orderedNavItems.map((item) => {
             const Icon = item.icon;
             return (
               <NavLink
