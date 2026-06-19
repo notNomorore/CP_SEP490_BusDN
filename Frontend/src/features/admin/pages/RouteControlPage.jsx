@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Header from '../../../shared/components/navigation/Header.jsx';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -2809,5 +2809,3 @@ const RouteControlPage = () => {
 };
 
 export default RouteControlPage;
-
-

@@ -124,6 +124,26 @@ const normalizeStopLocation = (stop) => {
   return stop;
 };
 
+const createBusIcon = (isSelected) => L.divIcon({
+  className: '',
+  iconAnchor: [18, 46],
+  popupAnchor: [0, -44],
+  html: `
+    <div class="relative flex flex-col items-center">
+      <div class="flex h-9 w-9 items-center justify-center rounded-full border-[3px] bg-white shadow-lg ${
+        isSelected
+          ? 'border-emerald-700 text-emerald-700 ring-[6px] ring-emerald-300/55'
+          : 'border-emerald-500 text-emerald-600 ring-2 ring-white/80'
+      }">
+        <span class="material-symbols-outlined text-[20px]">directions_bus</span>
+      </div>
+      <div class="h-0 w-0 border-x-[7px] border-x-transparent ${
+        isSelected ? 'border-t-emerald-700' : 'border-t-emerald-500'
+      } border-t-[10px]"></div>
+    </div>
+  `,
+});
+
 const currentLocationIcon = L.divIcon({
   className: '',
   iconAnchor: [24, 24],
@@ -160,6 +180,12 @@ const liveBusIcon = (status) => {
     `,
   });
 };
+
+const RouteLabelIcon = (routeNumber) => L.divIcon({
+  className: '',
+  iconAnchor: [18, -2],
+  html: `<span class="rounded-full bg-emerald-700 px-2 py-0.5 text-[11px] font-bold text-white shadow">${routeNumber}</span>`,
+});
 
 const MapAutoFocus = ({ selectedRoute, currentLocation }) => {
   const map = useMap();
@@ -209,6 +235,10 @@ const MapCanvas = ({
     ? selectedRoute.pathPoints
     : selectedRoute?.stops || [];
   const routePositions = routePath.filter(isValidLocation).map(toLatLng);
+  const selectedRouteStop = selectedRoute?.stops
+    ?.map(normalizeStopLocation)
+    .find(isValidLocation);
+
   return (
     <section className="relative min-w-0 flex-1 overflow-hidden bg-slate-200">
       <MapContainer
@@ -254,12 +284,29 @@ const MapCanvas = ({
                 lineJoin: 'round',
               }}
             />
+            <Polyline
+              positions={routePositions}
+              pathOptions={{ color: '#047857', weight: 2, opacity: 0.9, lineCap: 'round', lineJoin: 'round' }}
+            />
+            {routePositions.map((position) => (
+              <CircleMarker
+                key={`${position[0]}-${position[1]}`}
+                center={position}
+                radius={3}
+                pathOptions={{
+                  color: '#ffffff',
+                  fillColor: '#ffffff',
+                  fillOpacity: 1,
+                  weight: 1,
+                }}
+                interactive={false}
+              />
+            ))}
           </>
         )}
 
-        {(selectedRoute?.stops || []).filter(isValidLocation).map((stop, index) => {
-          const isEndpoint = index === 0 || index === selectedRoute.stops.length - 1;
-          const isOrigin = index === 0;
+        {stops.filter(isValidLocation).map((stop) => {
+          const isSelectedRouteStop = stop.routeNumbers?.includes(selectedRoute?.routeNumber);
 
           return (
             <CircleMarker
@@ -285,6 +332,14 @@ const MapCanvas = ({
             </CircleMarker>
           );
         })}
+
+        {selectedRouteStop && (
+          <Marker
+            position={toLatLng(selectedRouteStop)}
+            icon={RouteLabelIcon(selectedRoute.routeNumber)}
+            interactive={false}
+          />
+        )}
 
         {isValidLocation(currentLocation) && (
           <Marker
@@ -1460,6 +1515,33 @@ const SearchRoutesPage = () => {
   const isLiveTrackingSelectedRoute = Boolean(
     selectedRoute?.id && isSameRouteId(liveRouteId, selectedRoute.id)
   );
+
+  const mapStops = useMemo(() => {
+    const seen = new Set();
+    const stops = [];
+
+    for (const route of routes) {
+      for (const stop of route.stops || []) {
+        const normalizedStop = normalizeStopLocation(stop);
+        const key = `${normalizedStop.name}-${normalizedStop.latitude.toFixed(5)}-${normalizedStop.longitude.toFixed(5)}`;
+
+        if (!seen.has(key)) {
+          seen.add(key);
+          stops.push({ ...normalizedStop, routeNumbers: [route.routeNumber] });
+        } else {
+          const existingStop = stops.find((item) => (
+            `${item.name}-${item.latitude.toFixed(5)}-${item.longitude.toFixed(5)}` === key
+          ));
+
+          if (existingStop && !existingStop.routeNumbers.includes(route.routeNumber)) {
+            existingStop.routeNumbers.push(route.routeNumber);
+          }
+        }
+      }
+    }
+
+    return stops;
+  }, [routes]);
 
   useEffect(() => {
     let isMounted = true;

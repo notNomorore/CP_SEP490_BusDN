@@ -30,10 +30,14 @@ import {
 } from './features/auth';
 import { ProfilePage } from './features/profile';
 import {
+  AssignedTripsPage,
   BusAssistantShell,
   CreateWalkInTicketPage,
+  IncidentReportPage,
+  OperationNotificationsPage,
   RevenueSummaryPage,
   ShiftRevenuePage,
+  ShiftSchedulePage,
   ValidateQrTicketPage,
 } from './features/busAssistant';
 import {
@@ -281,9 +285,13 @@ function App() {
               </BusAssistantRoute>
             )}
           >
-            <Route index element={<ValidateQrTicketPage />} />
+            <Route index element={<AssignedTripsPage />} />
+            <Route path="assigned-trips" element={<AssignedTripsPage />} />
+            <Route path="shift-schedule" element={<ShiftSchedulePage />} />
+            <Route path="operation-notifications" element={<OperationNotificationsPage />} />
             <Route path="validate-ticket" element={<ValidateQrTicketPage />} />
             <Route path="walkin-ticket" element={<CreateWalkInTicketPage />} />
+            <Route path="incident-reports" element={<IncidentReportPage />} />
             <Route path="shift-revenue" element={<ShiftRevenuePage />} />
             <Route path="revenue-summary" element={<RevenueSummaryPage />} />
           </Route>

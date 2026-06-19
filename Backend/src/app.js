@@ -130,7 +130,6 @@ export const createApp = () => {
   app.use('/api/admin/fares', fareOperationsRoutes);
   app.use('/api/admin', walkInTicketRoutes);
   app.use('/api/admin', passengerComplianceRoutes);
-  app.use('/api/bus-stops', busStopRoutes);
   app.use('/api/admin/fleet', fleetMonitoringRoutes);
   app.use('/api/admin/notifications', systemNotificationRoutes);
   app.use('/api/admin/vehicle-issues', vehicleIssueRoutes);
@@ -140,8 +139,8 @@ export const createApp = () => {
   app.use('/api/bus-assistant', busAssistantRoutes);
   app.use('/api/fleet-operations', fleetOperationsRoutes);
   app.use('/api/routes', routeRoutes);
-  app.use('/api/schedule-operations', scheduleOperationsRoutes);
-
+  // app.use('/api/schedule-operations', scheduleOperationsRoutes);
+  // app.use('/api/bus-stops', busStopRoutes);
   // 404 handler (must be after all routes)
   app.use(notFoundHandler);
 
