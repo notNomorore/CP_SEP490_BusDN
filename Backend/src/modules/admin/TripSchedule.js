@@ -84,6 +84,7 @@ const TripScheduleSchema = new mongoose.Schema(
     startLocation: { type: TripLocationSchema, default: () => ({}) },
     gpsSync: { type: GpsSyncSchema, default: () => ({}) },
     driverAcceptance: { type: DriverAcceptanceSchema, default: () => ({}) },
+    assistantAcceptance: { type: DriverAcceptanceSchema, default: () => ({}) },
     emergencyHistory: {
       type: [{
         reason: { type: String, trim: true, default: '' },

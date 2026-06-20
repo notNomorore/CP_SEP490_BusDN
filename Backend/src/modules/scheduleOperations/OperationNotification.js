@@ -71,6 +71,21 @@ const OperationNotificationSchema = new mongoose.Schema(
       default: 'ACTIVE',
       index: true,
     },
+    sourceType: {
+      type: String,
+      trim: true,
+      default: '',
+      index: true,
+    },
+    sourceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      index: true,
+    },
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -102,5 +117,15 @@ const OperationNotificationSchema = new mongoose.Schema(
 OperationNotificationSchema.index({ status: 1, activeFrom: -1, priority: 1 });
 OperationNotificationSchema.index({ trip: 1, status: 1, activeFrom: -1 });
 OperationNotificationSchema.index({ route: 1, status: 1, activeFrom: -1 });
+OperationNotificationSchema.index(
+  { sourceType: 1, sourceId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      sourceType: { $exists: true, $ne: '' },
+      sourceId: { $type: 'objectId' },
+    },
+  }
+);
 
 export default mongoose.model('OperationNotification', OperationNotificationSchema);

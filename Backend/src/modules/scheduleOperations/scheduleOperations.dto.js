@@ -173,10 +173,14 @@ export const OperationNotificationResponseDTO = {
     vehicle: notification.vehicle || null,
     activeFrom: notification.activeFrom,
     expiresAt: notification.expiresAt,
+    sourceType: notification.sourceType || '',
+    sourceId: notification.sourceId || null,
+    metadata: notification.metadata || {},
     isRead: (notification.readBy || []).some((item) => (
       String(item.user || item) === String(actorId)
     )),
     createdAt: notification.createdAt,
+    updatedAt: notification.updatedAt,
   }),
 };
 

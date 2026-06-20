@@ -177,10 +177,13 @@ const normalizeStartGpsPayload = (payload = {}, startedAt = new Date()) => {
 
 const buildTripScheduleAssignment = (schedule, role) => {
   if (!schedule) return null;
-  const acceptance = schedule.driverAcceptance || {};
-  const acceptanceStatus = ['IN_PROGRESS', 'COMPLETED'].includes(schedule.status)
+  const acceptance = role === 'BUS_ASSISTANT'
+    ? schedule.assistantAcceptance || {}
+    : schedule.driverAcceptance || {};
+  const rawAcceptanceStatus = acceptance.status || 'PENDING';
+  const acceptanceStatus = ['IN_PROGRESS', 'COMPLETED'].includes(schedule.status) && rawAcceptanceStatus !== 'REJECTED'
     ? 'ACCEPTED'
-    : acceptance.status || 'PENDING';
+    : rawAcceptanceStatus;
 
   return {
     _id: schedule._id,
@@ -497,13 +500,13 @@ export class ScheduleOperationsService {
   }
 
   static async acceptAssignedTrip(userId, role, assignmentId) {
-    if (role !== 'DRIVER') {
-      const error = new Error('Only drivers can accept assigned trips');
+    if (!['DRIVER', 'BUS_ASSISTANT'].includes(role)) {
+      const error = new Error('Only drivers or bus assistants can accept assigned trips');
       error.statusCode = 403;
       throw error;
     }
 
-    const assignment = await this.getDriverAssignment(userId, assignmentId);
+    const assignment = await this.getActorAssignment(userId, role, assignmentId);
     const trip = assignment.trip;
 
     if (['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(trip.status)) {
@@ -512,25 +515,148 @@ export class ScheduleOperationsService {
       throw error;
     }
 
+    const acceptancePath = role === 'BUS_ASSISTANT' ? 'assistantAcceptance' : 'driverAcceptance';
+
     await TripSchedule.updateOne(
       { _id: trip._id },
       {
         $set: {
-          'driverAcceptance.status': 'ACCEPTED',
-          'driverAcceptance.respondedAt': new Date(),
-          'driverAcceptance.rejectionReason': '',
+          [`${acceptancePath}.status`]: 'ACCEPTED',
+          [`${acceptancePath}.respondedAt`]: new Date(),
+          [`${acceptancePath}.rejectionReason`]: '',
         },
       }
     );
 
+    if (role === 'BUS_ASSISTANT') {
+      await this.resolveAssistantReassignmentIncident(trip._id, userId);
+    }
 
     const updatedSchedule = await TripSchedule.findById(trip._id).populate('routeId');
-    return buildTripScheduleAssignment(updatedSchedule, 'DRIVER');
+    return buildTripScheduleAssignment(updatedSchedule, role);
+  }
+
+  static async resolveAssistantReassignmentIncident(tripId, assistantId) {
+    const incident = await IncidentReport.findOne({
+      incidentType: 'TRIP_REJECTION',
+      reporterRole: 'BUS_ASSISTANT',
+      tripId,
+      status: 'IN_PROGRESS',
+      handlingAction: 'REASSIGN_TRIP',
+    }).sort({ updatedAt: -1 });
+
+    if (!incident) {
+      return;
+    }
+
+    const [assistant, schedule] = await Promise.all([
+      User.findById(assistantId).select('fullName role').lean(),
+      TripSchedule.findById(tripId).select('scheduleCode routeName routeCode vehicle routeId').lean(),
+    ]);
+
+    const previousStatus = incident.status;
+    const assistantName = assistant?.fullName || 'Phụ xe thay thế';
+    const resolutionSummary = `Phụ xe thay thế ${assistantName} đã tiếp nhận chuyến. Sự cố phân công đã được xử lý.`;
+
+    incident.status = 'RESOLVED';
+    incident.resolutionSummary = resolutionSummary;
+    incident.resolvedBy = assistantId;
+    incident.resolvedAt = new Date();
+    incident.statusHistory.push({
+      fromStatus: previousStatus,
+      toStatus: 'RESOLVED',
+      adminNote: incident.adminNote || 'Phụ xe thay thế đã tiếp nhận chuyến.',
+      resolutionSummary,
+      handlingAction: 'REASSIGN_TRIP',
+      responsibleUnit: incident.responsibleUnit || 'OPERATION_CENTER',
+      changedBy: assistantId,
+      changedAt: new Date(),
+    });
+    await incident.save();
+
+    if (incident.sourceModule === 'SCHEDULE_OPERATIONS' && incident.sourceId) {
+      await OperationIncident.findByIdAndUpdate(incident.sourceId, {
+        status: 'RESOLVED',
+        adminNote: resolutionSummary,
+        acknowledgedAt: new Date(),
+        resolvedAt: new Date(),
+      });
+    }
+
+    await OperationNotification.findOneAndUpdate(
+      {
+        sourceType: 'INCIDENT_REPORT_STATUS',
+        sourceId: incident._id,
+      },
+      {
+        $set: {
+          title: `Cập nhật báo cáo: ${incident.title}`,
+          message: [
+            'Trạng thái: Đang xử lý → Đã xử lý.',
+            'Hành động xử lý: Điều phối lại chuyến / nhân sự.',
+            incident.adminNote ? `Ghi chú điều hành: ${incident.adminNote}.` : '',
+            `Kết quả xử lý: ${resolutionSummary}`,
+          ].filter(Boolean).join('\n'),
+          category: 'GENERAL',
+          priority: 'NORMAL',
+          targetRoles: [incident.reporterRole],
+          targetUsers: [incident.reporterId],
+          route: incident.routeId || schedule?.routeId || null,
+          trip: incident.tripId || tripId,
+          vehicle: incident.vehicleId || schedule?.vehicle?.busId || null,
+          activeFrom: new Date(),
+          expiresAt: null,
+          status: 'ACTIVE',
+          createdBy: assistantId,
+          sourceType: 'INCIDENT_REPORT_STATUS',
+          sourceId: incident._id,
+          metadata: {
+            notificationKind: 'INCIDENT_RESPONSE',
+            incidentId: incident._id,
+            incidentType: incident.incidentType,
+            initialStatus: 'IN_PROGRESS',
+            currentStatus: 'RESOLVED',
+            currentStatusLabel: 'Đã xử lý',
+            initialStatusLabel: 'Đang xử lý',
+            handlingAction: 'REASSIGN_TRIP',
+            handlingActionLabel: 'Điều phối lại chuyến / nhân sự',
+            replacementAssistantId: assistantId,
+            replacementAssistantName: assistantName,
+            scheduleCode: schedule?.scheduleCode || '',
+            resolutionSummary,
+          },
+        },
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    await OperationNotification.findOneAndUpdate(
+      {
+        sourceType: 'ASSISTANT_REASSIGNMENT',
+        sourceId: incident._id,
+      },
+      {
+        $set: {
+          status: 'ARCHIVED',
+          metadata: {
+            notificationKind: 'ASSISTANT_REASSIGNMENT',
+            incidentId: incident._id,
+            tripId,
+            replacementAssistantId: assistantId,
+            acceptedAt: new Date(),
+          },
+        },
+      }
+    );
   }
 
   static async rejectAssignedTrip(userId, role, assignmentId, payload = {}) {
-    if (role !== 'DRIVER') {
-      const error = new Error('Only drivers can reject assigned trips');
+    if (!['DRIVER', 'BUS_ASSISTANT'].includes(role)) {
+      const error = new Error('Only drivers or bus assistants can reject assigned trips');
       error.statusCode = 403;
       throw error;
     }
@@ -542,7 +668,7 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    const assignment = await this.getDriverAssignment(userId, assignmentId);
+    const assignment = await this.getActorAssignment(userId, role, assignmentId);
     const trip = assignment.trip;
 
     if (['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(trip.status)) {
@@ -551,17 +677,33 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    await TripSchedule.updateOne(
-      { _id: trip._id },
-      {
+    const acceptancePath = role === 'BUS_ASSISTANT' ? 'assistantAcceptance' : 'driverAcceptance';
+
+    const scheduleUpdate = role === 'BUS_ASSISTANT'
+      ? {
         $set: {
-          'driverAcceptance.status': 'REJECTED',
-          'driverAcceptance.respondedAt': new Date(),
-          'driverAcceptance.rejectionReason': reason,
+          assistant: {},
+          assistantAcceptance: {
+            status: 'PENDING',
+            respondedAt: null,
+            rejectionReason: '',
+          },
         },
       }
+      : {
+        $set: {
+          [`${acceptancePath}.status`]: 'REJECTED',
+          [`${acceptancePath}.respondedAt`]: new Date(),
+          [`${acceptancePath}.rejectionReason`]: reason,
+        },
+      };
+
+    await TripSchedule.updateOne(
+      { _id: trip._id },
+      scheduleUpdate
     );
 
+    const reporterLabel = role === 'BUS_ASSISTANT' ? 'Phụ xe' : 'Tài xế';
     const incident = await OperationIncident.create({
       incidentCode: this.buildIncidentCode(assignment, 'TRIP_REJECTION'),
       type: 'TRIP_REJECTION',
@@ -576,28 +718,103 @@ export class ScheduleOperationsService {
       reportedAt: new Date(),
     });
 
-    await this.syncToAdminIncidentReport({
-      sourceType: 'OPERATION_TRIP_REJECTION',
-      sourceId: incident._id,
-      reporterId: userId,
-      reporterRole: role,
-      incidentType: 'TRIP_REJECTION',
-      title: `Tài xế từ chối chuyến ${trip.scheduleCode}`,
-      description: [
-        'Tài xế đã từ chối chuyến được phân công.',
-        `Tuyến: ${this.buildRouteLabel(trip)}.`,
-        `Xe: ${this.buildVehicleLabel(trip)}.`,
-        `Lý do: ${reason}`,
-      ].join('\n'),
-      routeId: getScheduleRouteId(trip),
-      tripId: trip._id,
-      vehicleId: getScheduleVehicleId(trip),
-      location: this.buildRouteLabel(trip),
-      severity: 'MEDIUM',
-    });
+    const title = `${reporterLabel} từ chối chuyến ${trip.scheduleCode}`;
+    const description = [
+      `${reporterLabel} đã từ chối chuyến được phân công.`,
+      `Tuyến: ${this.buildRouteLabel(trip)}.`,
+      `Xe: ${this.buildVehicleLabel(trip)}.`,
+      `Lý do: ${reason}`,
+    ].join('\n');
+
+    if (role === 'BUS_ASSISTANT') {
+      const existingReassignmentReport = await IncidentReport.findOne({
+        tripId: trip._id,
+        incidentType: 'TRIP_REJECTION',
+        reporterRole: 'BUS_ASSISTANT',
+        handlingAction: 'REASSIGN_TRIP',
+        status: 'IN_PROGRESS',
+      });
+
+      if (existingReassignmentReport) {
+        const previousStatus = existingReassignmentReport.status;
+        const rejectedAssistantName = assignment.busAssistant?.fullName || reporterLabel;
+        const resetNote = `Phụ xe thay thế ${rejectedAssistantName} đã từ chối chuyến. Lý do: ${reason}. Vui lòng phân công phụ xe khác.`;
+
+        existingReassignmentReport.reporterId = userId;
+        existingReassignmentReport.title = title;
+        existingReassignmentReport.description = description;
+        existingReassignmentReport.status = 'PENDING';
+        existingReassignmentReport.adminNote = resetNote;
+        existingReassignmentReport.resolutionSummary = '';
+        existingReassignmentReport.resolvedBy = null;
+        existingReassignmentReport.resolvedAt = null;
+        existingReassignmentReport.sourceType = 'OPERATION_TRIP_REJECTION';
+        existingReassignmentReport.sourceId = incident._id;
+        existingReassignmentReport.statusHistory.push({
+          fromStatus: previousStatus,
+          toStatus: 'PENDING',
+          adminNote: resetNote,
+          resolutionSummary: '',
+          handlingAction: 'REASSIGN_TRIP',
+          responsibleUnit: 'OPERATION_CENTER',
+          changedBy: userId,
+          changedAt: new Date(),
+        });
+        await existingReassignmentReport.save();
+
+        await OperationNotification.findOneAndUpdate(
+          {
+            sourceType: 'ASSISTANT_REASSIGNMENT',
+            sourceId: existingReassignmentReport._id,
+          },
+          {
+            $set: {
+              status: 'ARCHIVED',
+              expiresAt: new Date(),
+              metadata: {
+                notificationKind: 'ASSISTANT_REASSIGNMENT',
+                incidentId: existingReassignmentReport._id,
+                rejectedBy: userId,
+                rejectionReason: reason,
+              },
+            },
+          }
+        );
+      } else {
+        await this.syncToAdminIncidentReport({
+          sourceType: 'OPERATION_TRIP_REJECTION',
+          sourceId: incident._id,
+          reporterId: userId,
+          reporterRole: role,
+          incidentType: 'TRIP_REJECTION',
+          title,
+          description,
+          routeId: getScheduleRouteId(trip),
+          tripId: trip._id,
+          vehicleId: getScheduleVehicleId(trip),
+          location: this.buildRouteLabel(trip),
+          severity: 'MEDIUM',
+        });
+      }
+    } else {
+      await this.syncToAdminIncidentReport({
+        sourceType: 'OPERATION_TRIP_REJECTION',
+        sourceId: incident._id,
+        reporterId: userId,
+        reporterRole: role,
+        incidentType: 'TRIP_REJECTION',
+        title,
+        description,
+        routeId: getScheduleRouteId(trip),
+        tripId: trip._id,
+        vehicleId: getScheduleVehicleId(trip),
+        location: this.buildRouteLabel(trip),
+        severity: 'MEDIUM',
+      });
+    }
 
     const updatedSchedule = await TripSchedule.findById(trip._id).populate('routeId');
-    return buildTripScheduleAssignment(updatedSchedule, 'DRIVER');
+    return buildTripScheduleAssignment(updatedSchedule, role);
   }
 
   static buildInspectionCode(assignment) {
