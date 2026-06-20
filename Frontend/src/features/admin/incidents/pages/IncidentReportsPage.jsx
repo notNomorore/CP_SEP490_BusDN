@@ -19,6 +19,7 @@ import FileViewerModal, {
   resolveFileUrl,
 } from '../../../../shared/components/common/FileViewerModal.jsx';
 import incidentReportService from '../services/incidentReportService.js';
+import adminService from '../../services/adminService.js';
 
 const fieldClassName =
   'w-full rounded-2xl border border-outline-variant/50 bg-surface px-4 py-3 text-sm text-on-surface placeholder:text-outline/70 focus:border-on-tertiary-container focus:ring-2 focus:ring-on-tertiary-container/20';
@@ -105,11 +106,24 @@ const incidentTypeLabel = {
 };
 
 const statusLabel = {
-  PENDING: 'Chờ tiếp nhận',
+  PENDING: 'Chưa xử lý',
   IN_PROGRESS: 'Đang xử lý',
-  RESOLVED: 'Hoàn tất xử lý',
+  RESOLVED: 'Đã xử lý',
   REJECTED: 'Đã đóng',
 };
+
+const incidentTableColumns = [
+  { label: 'Incident ID', className: 'w-[96px]' },
+  { label: 'Type', className: 'w-[150px]' },
+  { label: 'Title', className: 'w-[250px]' },
+  { label: 'Reporter', className: 'w-[150px]' },
+  { label: 'Route', className: 'w-[220px]' },
+  { label: 'Vehicle', className: 'w-[150px]' },
+  { label: 'Severity', className: 'w-[112px] text-center' },
+  { label: 'Status', className: 'w-[130px] text-center' },
+  { label: 'Created', className: 'w-[150px]' },
+  { label: 'Xử lý', className: 'w-[100px] text-center' },
+];
 
 const getStatusActionHint = (status) => ({
   PENDING: 'Báo cáo mới cần được tiếp nhận, phân loại mức ảnh hưởng và giao cho bộ phận phù hợp.',
@@ -174,23 +188,80 @@ const IncidentDetailModal = ({
   isSaving,
   onClose,
   onUpdateStatus,
+  onReassignAssistant,
 }) => {
   const [status, setStatus] = useState(incident?.status || 'PENDING');
   const [adminNote, setAdminNote] = useState(incident?.adminNote || '');
   const [handlingAction, setHandlingAction] = useState(incident?.handlingAction || 'TRIAGE_ONLY');
   const [resolutionSummary, setResolutionSummary] = useState(incident?.resolutionSummary || '');
   const [viewerFile, setViewerFile] = useState(null);
+  const [assistantOptions, setAssistantOptions] = useState([]);
+  const [replacementAssistantId, setReplacementAssistantId] = useState('');
+  const [isLoadingAssistants, setIsLoadingAssistants] = useState(false);
   const isPendingIncident = incident?.status === 'PENDING';
   const isClosedIncident = ['RESOLVED', 'REJECTED'].includes(incident?.status);
+  const isAssistantTripRejection = (
+    incident?.incidentType === 'TRIP_REJECTION'
+    && incident?.reporterRole === 'BUS_ASSISTANT'
+  );
+  const isWaitingReplacementAssistant = (
+    isAssistantTripRejection
+    && incident?.status === 'IN_PROGRESS'
+    && incident?.handlingAction === 'REASSIGN_TRIP'
+    && !incident?.resolutionSummary
+  );
 
   useEffect(() => {
     setStatus(incident?.status || 'PENDING');
     setAdminNote(incident?.adminNote || '');
     setHandlingAction(incident?.handlingAction || 'TRIAGE_ONLY');
     setResolutionSummary(incident?.resolutionSummary || '');
+    setReplacementAssistantId('');
   }, [incident]);
 
+  useEffect(() => {
+    if (!isAssistantTripRejection || isClosedIncident) {
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoadingAssistants(true);
+    adminService.getDrivers()
+      .then((response) => {
+        if (!isMounted) return;
+        const assistants = (
+          response?.assistantStaff
+          || response?.data?.assistantStaff
+          || response?.data?.data?.assistantStaff
+          || []
+        );
+        const reporterId = String(incident?.reporterId || incident?.reporter?._id || '');
+        setAssistantOptions(
+          assistants.filter((assistant) => String(assistant._id || assistant.id) !== reporterId)
+        );
+      })
+      .catch((error) => {
+        if (isMounted) {
+          toast.error(error.message || 'Không tải được danh sách phụ xe');
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingAssistants(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [incident, isAssistantTripRejection, isClosedIncident]);
+
   const submitStatus = (nextStatus = status, overrides = {}) => {
+    if (isWaitingReplacementAssistant && nextStatus === 'RESOLVED') {
+      toast.error('Chỉ hoàn tất khi phụ xe thay thế tiếp nhận chuyến');
+      return;
+    }
+
     if (['RESOLVED', 'REJECTED'].includes(nextStatus) && !resolutionSummary.trim()) {
       toast.error('Cần nhập kết quả xử lý khi hoàn tất hoặc đóng báo cáo');
       return;
@@ -200,6 +271,18 @@ const IncidentDetailModal = ({
       adminNote: adminNote.trim(),
       handlingAction: overrides.handlingAction || handlingAction,
       resolutionSummary: resolutionSummary.trim(),
+    });
+  };
+
+  const submitReassignAssistant = () => {
+    if (!replacementAssistantId) {
+      toast.error('Vui lòng chọn phụ xe thay thế');
+      return;
+    }
+
+    onReassignAssistant({
+      assistantId: replacementAssistantId,
+      adminNote: adminNote.trim(),
     });
   };
 
@@ -363,6 +446,45 @@ const IncidentDetailModal = ({
                     </select>
                   </label>
 
+                  {isAssistantTripRejection && !isClosedIncident ? (
+                    <div className="mt-4 rounded-[20px] border border-outline-variant/40 bg-white p-4">
+                      <p className="text-sm font-bold text-primary">Phân công phụ xe thay thế</p>
+                      <p className="mt-1 text-xs leading-5 text-on-surface-variant">
+                        Sau khi phân công, báo cáo giữ trạng thái Đang xử lý. Khi phụ xe mới tiếp nhận chuyến, hệ thống tự chuyển báo cáo sang Đã xử lý.
+                      </p>
+                      <label className="mt-3 block space-y-2">
+                        <span className="text-xs font-bold uppercase tracking-[0.12em] text-outline">Phụ xe mới</span>
+                        <select
+                          value={replacementAssistantId}
+                          onChange={(event) => {
+                            setReplacementAssistantId(event.target.value);
+                            setHandlingAction('REASSIGN_TRIP');
+                          }}
+                          disabled={isSaving || isLoadingAssistants}
+                          className={fieldClassName}
+                        >
+                          <option value="">
+                            {isLoadingAssistants ? 'Đang tải phụ xe...' : 'Chọn phụ xe thay thế'}
+                          </option>
+                          {assistantOptions.map((assistant) => (
+                            <option key={assistant._id || assistant.id} value={assistant._id || assistant.id}>
+                              {assistant.fullName || assistant.email || 'Phụ xe'}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={submitReassignAssistant}
+                        disabled={isSaving || isLoadingAssistants || !replacementAssistantId}
+                        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full bg-blue-700 px-5 py-3 text-sm font-bold text-white disabled:opacity-60"
+                      >
+                        {isSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+                        Phân công phụ xe mới
+                      </button>
+                    </div>
+                  ) : null}
+
                   <label className="mt-4 block space-y-2">
                     <span className="text-sm font-semibold text-on-surface">Ghi chú tiếp nhận / điều phối</span>
                     <textarea
@@ -379,10 +501,15 @@ const IncidentDetailModal = ({
                     <textarea
                       value={resolutionSummary}
                       onChange={(event) => setResolutionSummary(event.target.value)}
-                      disabled={isClosedIncident}
+                      disabled={isClosedIncident || isWaitingReplacementAssistant}
                       className={`${fieldClassName} min-h-[110px] resize-none`}
                       placeholder="Bắt buộc khi hoàn tất báo cáo. Ghi rõ kết quả, hành động đã thực hiện và tình trạng cuối."
                     />
+                    {isWaitingReplacementAssistant ? (
+                      <span className="block text-xs leading-5 text-on-surface-variant">
+                        Kết quả xử lý sẽ được hệ thống tự ghi khi phụ xe thay thế tiếp nhận chuyến.
+                      </span>
+                    ) : null}
                   </label>
 
                   <div className="mt-5 grid gap-2">
@@ -399,7 +526,7 @@ const IncidentDetailModal = ({
                   <button
                     type="button"
                     onClick={() => submitStatus(handlingAction === 'MARK_INVALID' ? 'REJECTED' : 'RESOLVED')}
-                    disabled={isSaving || isClosedIncident}
+                    disabled={isSaving || isClosedIncident || isWaitingReplacementAssistant}
                     className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-green-700 px-5 py-3 text-sm font-bold text-white disabled:opacity-60"
                   >
                     {isSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
@@ -507,6 +634,20 @@ const IncidentReportsPage = () => {
     }
   };
 
+  const reassignAssistant = async (payload) => {
+    setIsSaving(true);
+    try {
+      const response = await incidentReportService.reassignAssistant(selectedId, payload);
+      setDetail(response.data);
+      toast.success('Đã phân công phụ xe thay thế. Chờ phụ xe mới tiếp nhận chuyến.');
+      await loadData();
+    } catch (error) {
+      toast.error(error.message || 'Không thể phân công phụ xe thay thế');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <AdminPromotionShell
       title="Handle Incident Reports"
@@ -555,11 +696,11 @@ const IncidentReportsPage = () => {
 
       <section className="mt-6 overflow-hidden rounded-[28px] border border-outline-variant/35 bg-white/85 shadow-sm">
         <div className="overflow-x-auto">
-          <table className="min-w-[1200px] divide-y divide-outline-variant/30 text-left text-sm">
+          <table className="min-w-[1508px] table-fixed divide-y divide-outline-variant/30 text-left text-sm">
             <thead className="bg-surface-container-low text-xs uppercase tracking-[0.12em] text-outline">
               <tr>
-                {['Incident ID', 'Type', 'Title', 'Reporter', 'Route', 'Vehicle', 'Severity', 'Status', 'Created', 'Xử lý'].map((heading) => (
-                  <th key={heading} className="px-4 py-4">{heading}</th>
+                {incidentTableColumns.map((column) => (
+                  <th key={column.label} className={`px-4 py-4 ${column.className}`}>{column.label}</th>
                 ))}
               </tr>
             </thead>
@@ -568,14 +709,18 @@ const IncidentReportsPage = () => {
                 <tr><td colSpan="10" className="px-5 py-12 text-center text-on-surface-variant">Loading incident reports...</td></tr>
               ) : incidents.length ? incidents.map((incident) => (
                 <tr key={incident._id} className={incident.severity === 'CRITICAL' ? 'bg-error-container/20' : 'hover:bg-surface-container-low/70'}>
-                  <td className="px-4 py-4 font-mono text-xs text-primary">{incident._id.slice(-8)}</td>
-                  <td className="px-4 py-4 font-semibold">{incidentTypeLabel[incident.incidentType] || incident.incidentType}</td>
-                  <td className="max-w-[260px] px-4 py-4">
+                  <td className="w-[96px] px-4 py-4 font-mono text-xs text-primary">{incident._id.slice(-8)}</td>
+                  <td className="w-[150px] px-4 py-4 font-semibold">
+                    <span className="line-clamp-2">{incidentTypeLabel[incident.incidentType] || incident.incidentType}</span>
+                  </td>
+                  <td className="w-[250px] px-4 py-4">
                     <p className="truncate font-bold text-primary">{incident.title}</p>
                     <p className="mt-1 truncate text-xs text-on-surface-variant">{incident.location || 'Location not provided'}</p>
                   </td>
-                  <td className="px-4 py-4">{incident.reporter?.fullName || 'Unknown'}</td>
-                  <td className="max-w-[220px] px-4 py-4">
+                  <td className="w-[150px] px-4 py-4">
+                    <p className="truncate">{incident.reporter?.fullName || 'Unknown'}</p>
+                  </td>
+                  <td className="w-[220px] px-4 py-4">
                     <p className="truncate font-semibold text-on-surface">
                       {incident.route?.name || incident.routeId || 'N/A'}
                     </p>
@@ -583,7 +728,7 @@ const IncidentReportsPage = () => {
                       <p className="mt-1 text-xs text-on-surface-variant">{incident.route.routeNumber}</p>
                     ) : null}
                   </td>
-                  <td className="max-w-[180px] px-4 py-4">
+                  <td className="w-[150px] px-4 py-4">
                     <p className="truncate font-semibold text-on-surface">
                       {incident.vehicle?.label || incident.vehicleId || 'N/A'}
                     </p>
@@ -591,10 +736,10 @@ const IncidentReportsPage = () => {
                       <p className="mt-1 text-xs text-on-surface-variant">{incident.vehicle.status}</p>
                     ) : null}
                   </td>
-                  <td className="px-4 py-4"><span className={`rounded-full px-3 py-1 text-xs font-bold ${severityClassName[incident.severity]}`}>{incident.severity}</span></td>
-                  <td className="px-4 py-4"><span className={`rounded-full px-3 py-1 text-xs font-bold ${statusClassName[incident.status]}`}>{statusLabel[incident.status] || incident.status}</span></td>
-                  <td className="px-4 py-4">{formatDateTime(incident.createdAt)}</td>
-                  <td className="px-4 py-4">
+                  <td className="w-[112px] px-4 py-4 text-center"><span className={`inline-flex justify-center rounded-full px-3 py-1 text-xs font-bold ${severityClassName[incident.severity]}`}>{incident.severity}</span></td>
+                  <td className="w-[130px] px-4 py-4 text-center"><span className={`inline-flex justify-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-bold ${statusClassName[incident.status]}`}>{statusLabel[incident.status] || incident.status}</span></td>
+                  <td className="w-[150px] px-4 py-4">{formatDateTime(incident.createdAt)}</td>
+                  <td className="w-[100px] px-4 py-4 text-center">
                     <button type="button" title="Xem và xử lý báo cáo" onClick={() => openDetail(incident._id)} className="inline-flex items-center gap-2 rounded-full bg-primary px-3 py-2 text-xs font-bold text-white hover:bg-primary-container">
                       <Eye className="h-4 w-4" />
                       Xử lý
@@ -639,6 +784,7 @@ const IncidentReportsPage = () => {
             setDetail(null);
           }}
           onUpdateStatus={updateStatus}
+          onReassignAssistant={reassignAssistant}
         />
       ) : null}
     </AdminPromotionShell>

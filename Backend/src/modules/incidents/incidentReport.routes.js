@@ -33,5 +33,10 @@ router.patch(
   validateRequest(validateIncidentStatusUpdate),
   asyncHandler(IncidentReportController.updateIncidentStatus)
 );
+router.patch(
+  '/:id/reassign-assistant',
+  validateRequest(validateIncidentIdParam, 'params'),
+  asyncHandler(IncidentReportController.reassignTripAssistant)
+);
 
 export default router;

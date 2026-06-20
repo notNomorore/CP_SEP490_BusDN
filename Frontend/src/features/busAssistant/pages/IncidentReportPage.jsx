@@ -202,7 +202,6 @@ const IncidentReportPage = () => {
     setForm((current) => ({
       ...current,
       type,
-      locationText: type === 'FOUND_ITEM' ? current.foundLocation || current.locationText : current.locationText,
     }));
   };
 
@@ -220,7 +219,6 @@ const IncidentReportPage = () => {
         ? 'Chuyến đã hoàn thành chỉ cho phép báo đồ tìm thấy.'
         : 'Chỉ có thể báo cáo khi chuyến đang vận hành.';
     }
-    if (form.locationText.trim().length < 3) return 'Vui lòng nhập vị trí xảy ra/tìm thấy.';
     if (form.description.trim().length < 10) return 'Vui lòng mô tả tình huống tối thiểu 10 ký tự.';
     if (form.type === 'PASSENGER_VIOLATION' && form.actionTaken.trim().length < 3) {
       return 'Vui lòng nhập hành động đã xử lý với hành khách vi phạm.';
@@ -250,16 +248,21 @@ const IncidentReportPage = () => {
 
     setIsSubmitting(true);
     try {
+      const reportLocation = form.type === 'FOUND_ITEM'
+        ? form.foundLocation
+        : getTripLabel(selectedAssignment);
+
       await scheduleOperationsService.reportOperationIncident(selectedAssignment.id, {
         ...form,
+        severity: form.type === 'FOUND_ITEM' ? 'LOW' : form.severity,
         foundLocation: form.type === 'FOUND_ITEM' ? form.foundLocation : '',
-        locationText: form.type === 'FOUND_ITEM' ? form.foundLocation : form.locationText,
+        locationText: reportLocation,
       });
       setSuccess('Đã gửi báo cáo cho điều hành. Bạn vẫn có thể gửi thêm báo cáo nếu phát sinh tình huống mới.');
       setForm((current) => ({
         ...initialForm,
         type: current.type,
-        severity: current.severity,
+        severity: current.type === 'FOUND_ITEM' ? 'LOW' : current.severity,
       }));
       await loadAssignments();
     } catch (requestError) {
@@ -398,18 +401,16 @@ const IncidentReportPage = () => {
               ) : null}
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-3">
-              <label>
-                <span className={`mb-1 block text-xs font-bold uppercase ${mutedText}`}>Mức độ</span>
-                <select className={inputClass} value={form.severity} onChange={updateForm('severity')}>
-                  {SEVERITIES.map((severity) => <option key={severity.value} value={severity.value}>{severity.label}</option>)}
-                </select>
-              </label>
-              <label className="lg:col-span-2">
-                <span className={`mb-1 block text-xs font-bold uppercase ${mutedText}`}>Vị trí trên chuyến</span>
-                <input className={inputClass} value={form.locationText} onChange={updateForm('locationText')} placeholder="Ví dụ: cửa sau, hàng ghế số 12, trạm Duy Tân..." />
-              </label>
-            </div>
+            {form.type !== 'FOUND_ITEM' ? (
+              <div className="grid gap-4 lg:grid-cols-3">
+                <label>
+                  <span className={`mb-1 block text-xs font-bold uppercase ${mutedText}`}>Mức độ</span>
+                  <select className={inputClass} value={form.severity} onChange={updateForm('severity')}>
+                    {SEVERITIES.map((severity) => <option key={severity.value} value={severity.value}>{severity.label}</option>)}
+                  </select>
+                </label>
+              </div>
+            ) : null}
 
             {form.type === 'PASSENGER_VIOLATION' ? (
               <div className="grid gap-4 lg:grid-cols-3">
@@ -459,7 +460,7 @@ const IncidentReportPage = () => {
                   <span className={`mb-1 block text-xs font-bold uppercase ${mutedText}`}>Vị trí tìm thấy</span>
                   <input className={inputClass} value={form.foundLocation} onChange={(event) => {
                     const value = event.target.value;
-                    setForm((current) => ({ ...current, foundLocation: value, locationText: value }));
+                    setForm((current) => ({ ...current, foundLocation: value }));
                   }} placeholder="Ví dụ: ghế số 12" />
                 </label>
                 <label>

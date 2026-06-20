@@ -4,7 +4,6 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock3,
-  MapPin,
   RefreshCw,
   Route,
   XCircle,
@@ -50,6 +49,17 @@ const formatTime = (value) => {
   });
 };
 
+const formatDateTime = (value) => {
+  if (!value) return 'Chưa có thời gian cập nhật';
+  return new Date(value).toLocaleString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+};
+
 const statusLabels = {
   PENDING: 'Chờ tiếp nhận',
   ASSIGNED: 'Đã phân công',
@@ -72,6 +82,20 @@ const statusClass = {
   REJECTED: 'bg-rose-100 text-rose-800',
   CANCELLED: 'bg-rose-100 text-rose-800',
   SCHEDULED: 'bg-slate-100 text-slate-700',
+};
+
+const incidentStatusLabels = {
+  PENDING: 'Chưa xử lý',
+  IN_PROGRESS: 'Đang xử lý',
+  RESOLVED: 'Đã xử lý',
+  REJECTED: 'Đã đóng',
+};
+
+const notificationCategoryLabels = {
+  ROUTE_UPDATE: 'Cập nhật tuyến',
+  SCHEDULE_CHANGE: 'Đổi lịch vận hành',
+  EMERGENCY_INSTRUCTION: 'Chỉ đạo khẩn',
+  GENERAL: 'Thông báo',
 };
 
 const getTripTitle = (assignment) => {
@@ -152,6 +176,11 @@ const TripCard = ({ assignment, onAccept, onReject, isProcessing }) => {
   const mutedText = isDarkMode ? 'text-slate-400' : 'text-slate-500';
   const status = assignment.acceptanceStatus || assignment.shiftStatus || assignment.tripStatus;
   const canDecide = ['PENDING', 'ASSIGNED'].includes(assignment.acceptanceStatus || assignment.shiftStatus);
+  const isAssistantAccepted = assignment.actorRole === 'BUS_ASSISTANT'
+    && assignment.acceptanceStatus === 'ACCEPTED'
+    && !['IN_PROGRESS', 'COMPLETED'].includes(assignment.tripStatus);
+  const isAssistantRejected = assignment.actorRole === 'BUS_ASSISTANT'
+    && assignment.acceptanceStatus === 'REJECTED';
 
   return (
     <article className={isDarkMode ? 'rounded border border-white/10 bg-slate-950 p-4' : 'rounded border border-slate-200 bg-white p-4'}>
@@ -187,6 +216,18 @@ const TripCard = ({ assignment, onAccept, onReject, isProcessing }) => {
         <p><span className={mutedText}>Tài xế:</span> <strong>{assignment.driver?.fullName || 'Chưa phân công'}</strong></p>
         <p className="mt-1"><span className={mutedText}>Ghi chú:</span> {assignment.notes || 'Không có ghi chú.'}</p>
       </div>
+
+      {isAssistantAccepted ? (
+        <div className="mt-4 rounded border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-300">
+          Phụ xe đã tiếp nhận chuyến. Vui lòng chờ tài xế bắt đầu vận hành.
+        </div>
+      ) : null}
+
+      {isAssistantRejected ? (
+        <div className="mt-4 rounded border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-300">
+          Phụ xe đã từ chối chuyến. Lý do đã được gửi về admin để xử lý phân công.
+        </div>
+      ) : null}
 
       {canDecide ? (
         <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
@@ -230,6 +271,67 @@ const EmptyState = ({ children }) => {
     <div className={isDarkMode ? 'rounded border border-dashed border-white/10 p-10 text-center text-slate-400' : 'rounded border border-dashed border-slate-300 p-10 text-center text-slate-500'}>
       {children}
     </div>
+  );
+};
+
+const OperationNotificationCard = ({ notification }) => {
+  const { isDarkMode } = useTheme();
+  const metadata = notification.metadata || {};
+  const isIncidentResponse = notification.sourceType === 'INCIDENT_REPORT_STATUS'
+    || metadata.notificationKind === 'INCIDENT_RESPONSE';
+  const status = metadata.currentStatus;
+  const statusLabel = metadata.currentStatusLabel || incidentStatusLabels[status] || status;
+  const categoryLabel = isIncidentResponse
+    ? 'Phản hồi báo cáo'
+    : notificationCategoryLabels[notification.category] || notification.category || 'Thông báo';
+  const messageLines = String(notification.message || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const cardClass = isDarkMode
+    ? 'rounded border border-white/10 bg-slate-950 p-4 text-slate-100'
+    : 'rounded border border-emerald-100 bg-white p-4 text-slate-950 shadow-sm';
+  const iconClass = isIncidentResponse
+    ? 'bg-emerald-100 text-emerald-800'
+    : 'bg-cyan-100 text-cyan-800';
+  const statusChipClass = {
+    PENDING: 'bg-amber-100 text-amber-900',
+    IN_PROGRESS: 'bg-blue-100 text-blue-800',
+    RESOLVED: 'bg-emerald-100 text-emerald-800',
+    REJECTED: 'bg-slate-100 text-slate-700',
+  }[status] || 'bg-slate-100 text-slate-700';
+
+  return (
+    <article className={cardClass}>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="flex min-w-0 gap-3">
+          <span className={`mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${iconClass}`}>
+            {isIncidentResponse ? <CheckCircle2 size={20} /> : <BellRing size={20} />}
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">
+                {categoryLabel}
+              </span>
+              {statusLabel ? (
+                <span className={`rounded-full px-3 py-1 text-xs font-black ${statusChipClass}`}>
+                  {statusLabel}
+                </span>
+              ) : null}
+            </div>
+            <h2 className="mt-2 text-lg font-black">{notification.title}</h2>
+            <div className={isDarkMode ? 'mt-2 space-y-1 text-sm text-slate-300' : 'mt-2 space-y-1 text-sm text-slate-600'}>
+              {messageLines.length ? messageLines.map((line) => (
+                <p key={line}>{line}</p>
+              )) : <p>Chưa có nội dung chi tiết.</p>}
+            </div>
+          </div>
+        </div>
+        <p className={isDarkMode ? 'shrink-0 text-xs font-semibold text-slate-400' : 'shrink-0 text-xs font-semibold text-slate-500'}>
+          {formatDateTime(notification.updatedAt || notification.createdAt || notification.activeFrom)}
+        </p>
+      </div>
+    </article>
   );
 };
 
@@ -388,16 +490,22 @@ export const OperationNotificationsPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const load = useCallback(async () => {
-    setIsLoading(true);
-    setError('');
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setIsLoading(true);
+      setError('');
+    }
     try {
       const payload = await scheduleOperationsService.getOperationNotifications(filters);
       setNotifications(payload.notifications || []);
     } catch (requestError) {
-      setError(getErrorMessage(requestError));
+      if (!silent) {
+        setError(getErrorMessage(requestError));
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }, [filters]);
 
@@ -405,10 +513,18 @@ export const OperationNotificationsPage = () => {
     load();
   }, [load]);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      load({ silent: true });
+    }, 10000);
+
+    return () => window.clearInterval(intervalId);
+  }, [load]);
+
   return (
     <PageShell
       title="UC49 - Thông báo vận hành"
-      subtitle="Nhận chỉ đạo từ trung tâm điều hành: cập nhật tuyến, đổi lịch, thông báo khẩn hoặc hướng dẫn phục vụ."
+      subtitle="Theo dõi phản hồi từ điều hành, thay đổi chuyến và cập nhật xử lý báo cáo đã gửi."
       icon={BellRing}
       filters={filters}
       setFilters={setFilters}
@@ -418,23 +534,7 @@ export const OperationNotificationsPage = () => {
     >
       <div className="space-y-3">
         {notifications.length ? notifications.map((notification) => (
-          <article key={notification.id} className="rounded border border-emerald-100 bg-white p-4 text-slate-950">
-            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <div>
-                <p className="text-xs font-black uppercase text-emerald-700">{notification.category || 'GENERAL'}</p>
-                <h2 className="mt-1 text-lg font-black">{notification.title}</h2>
-                <p className="mt-2 text-sm text-slate-600">{notification.message}</p>
-              </div>
-              <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-black text-cyan-800">
-                {notification.priority || 'NORMAL'}
-              </span>
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <InfoBox label="Hiệu lực từ" value={formatDate(notification.activeFrom)} icon={CalendarDays} />
-              <InfoBox label="Hết hạn" value={formatDate(notification.expiresAt)} icon={CalendarDays} />
-              <InfoBox label="Phạm vi" value={notification.route ? 'Theo tuyến/chuyến' : 'Thông báo chung'} icon={MapPin} />
-            </div>
-          </article>
+          <OperationNotificationCard key={notification.id} notification={notification} />
         )) : <EmptyState>Chưa có thông báo vận hành trong khoảng thời gian này.</EmptyState>}
       </div>
     </PageShell>
