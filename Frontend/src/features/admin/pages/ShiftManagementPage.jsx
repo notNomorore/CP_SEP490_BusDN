@@ -29,7 +29,7 @@ const emptyShiftForm = {
 const MAX_DRIVER_MINUTES_PER_DAY = 8 * 60;
 const autoShiftTemplates = [
   { key: 'MORNING', shiftName: 'Ca sáng tự động', startTime: '05:30', endTime: '13:30', shiftType: 'MORNING' },
-  { key: 'AFTERNOON', shiftName: 'Ca chiều tự động', startTime: '13:30', endTime: '17:30', shiftType: 'AFTERNOON' },
+  { key: 'AFTERNOON', shiftName: 'Ca chiều tự động', startTime: '13:30', endTime: '18:30', shiftType: 'AFTERNOON' },
 ];
 
 const dateToken = (value) => String(value || '').replace(/-/g, '');
@@ -360,6 +360,7 @@ const ShiftManagementPage = () => {
       updatedShifts: 0,
       archivedShifts: 0,
       assignedDrivers: 0,
+      assignedAssistants: 0,
       skippedShifts: [],
       shifts: [],
       dailySummaries: [],
@@ -371,9 +372,20 @@ const ShiftManagementPage = () => {
       const assignmentResponse = await adminService.getShiftAssignments({ workDate: scheduleDate });
       const currentShifts = (shiftResponse.shifts || []).filter((shift) => shift.status !== 'ARCHIVED');
       const driverAssignments = assignmentResponse.driverAssignments || [];
+      const assistantAssignments = assignmentResponse.assistantAssignments || [];
       const shiftsById = new Map(currentShifts.map((shift) => [getRecordId(shift), shift]));
-      const assignedShiftIds = new Set(driverAssignments.map((assignment) => getRecordId(assignment.shiftId)));
+      const driverAssignedShiftIds = new Set(
+        driverAssignments
+          .filter((assignment) => getRecordId(assignment.driverId))
+          .map((assignment) => getRecordId(assignment.shiftId))
+      );
+      const assistantAssignedShiftIds = new Set(
+        assistantAssignments
+          .filter((assignment) => getRecordId(assignment.assistantId))
+          .map((assignment) => getRecordId(assignment.shiftId))
+      );
       const driverMinutes = new Map();
+      const assistantMinutes = new Map();
       const dailySummary = {
         workDate: scheduleDate,
         createdShifts: 0,
@@ -381,15 +393,24 @@ const ShiftManagementPage = () => {
         updatedShifts: 0,
         archivedShifts: 0,
         assignedDrivers: 0,
+        assignedAssistants: 0,
         skippedShifts: [],
         shifts: [],
       };
 
       driverAssignments.forEach((assignment) => {
         const driverId = getRecordId(assignment.driverId);
+        if (!driverId) return;
         const shift = assignment.shiftId?.startTime ? assignment.shiftId : shiftsById.get(getRecordId(assignment.shiftId));
         const duration = getShiftDurationMinutes(shift);
         driverMinutes.set(driverId, (driverMinutes.get(driverId) || 0) + duration);
+      });
+      assistantAssignments.forEach((assignment) => {
+        const assistantId = getRecordId(assignment.assistantId);
+        if (!assistantId) return;
+        const shift = assignment.shiftId?.startTime ? assignment.shiftId : shiftsById.get(getRecordId(assignment.shiftId));
+        const duration = getShiftDurationMinutes(shift);
+        assistantMinutes.set(assistantId, (assistantMinutes.get(assistantId) || 0) + duration);
       });
 
       const obsoleteAutoShifts = currentShifts.filter((item) => (
@@ -450,47 +471,77 @@ const ShiftManagementPage = () => {
           startTime: shift.startTime,
           endTime: shift.endTime,
           driver: null,
-          status: 'UNASSIGNED',
-          reason: '',
+          assistant: null,
+          driverStatus: 'UNASSIGNED',
+          assistantStatus: 'UNASSIGNED',
+          reasons: [],
         };
 
-        if (assignedShiftIds.has(getRecordId(shift))) {
-          shiftResult.status = 'ALREADY_ASSIGNED';
-          summary.shifts.push(shiftResult);
-          dailySummary.shifts.push(shiftResult);
-          continue;
-        }
-
         const shiftDuration = getShiftDurationMinutes(shift);
-        let assigned = null;
-        let lastError = null;
-        for (const driver of drivers) {
-          const driverId = getRecordId(driver);
-          if ((driverMinutes.get(driverId) || 0) + shiftDuration > MAX_DRIVER_MINUTES_PER_DAY) {
-            continue;
+        if (driverAssignedShiftIds.has(getRecordId(shift))) {
+          shiftResult.driverStatus = 'ALREADY_ASSIGNED';
+        } else {
+          let assignedDriver = null;
+          let lastDriverError = null;
+          for (const driver of drivers) {
+            const driverId = getRecordId(driver);
+            if ((driverMinutes.get(driverId) || 0) + shiftDuration > MAX_DRIVER_MINUTES_PER_DAY) continue;
+            try {
+              const response = await adminService.assignDriverToSelectedShift(shift._id, { driverId });
+              assignedDriver = response.assignment;
+              driverMinutes.set(driverId, (driverMinutes.get(driverId) || 0) + shiftDuration);
+              driverAssignedShiftIds.add(getRecordId(shift));
+              break;
+            } catch (assignError) {
+              lastDriverError = assignError;
+            }
           }
-          try {
-            const response = await adminService.assignDriverToSelectedShift(shift._id, { driverId });
-            assigned = response.assignment;
-            driverMinutes.set(driverId, (driverMinutes.get(driverId) || 0) + shiftDuration);
-            assignedShiftIds.add(getRecordId(shift));
-            break;
-          } catch (assignError) {
-            lastError = assignError;
+          if (assignedDriver) {
+            shiftResult.driver = assignedDriver.driverId;
+            shiftResult.driverStatus = 'ASSIGNED';
+            summary.assignedDrivers += 1;
+            dailySummary.assignedDrivers += 1;
+          } else {
+            shiftResult.driverStatus = 'SKIPPED';
+            shiftResult.reasons.push(lastDriverError?.message || 'Không tìm được tài xế phù hợp.');
           }
         }
 
-        if (assigned) {
-          shiftResult.driver = assigned.driverId;
-          shiftResult.status = 'ASSIGNED';
-          summary.assignedDrivers += 1;
-          dailySummary.assignedDrivers += 1;
+        if (assistantAssignedShiftIds.has(getRecordId(shift))) {
+          shiftResult.assistantStatus = 'ALREADY_ASSIGNED';
         } else {
-          shiftResult.reason = lastError?.message || 'Khong tim duoc tai xe phu hop.';
+          let assignedAssistant = null;
+          let lastAssistantError = null;
+          for (const assistant of assistantStaff) {
+            const assistantId = getRecordId(assistant);
+            if ((assistantMinutes.get(assistantId) || 0) + shiftDuration > MAX_DRIVER_MINUTES_PER_DAY) continue;
+            try {
+              const response = await adminService.assignAssistantToSelectedShift(shift._id, { assistantId });
+              assignedAssistant = response.assignment;
+              assistantMinutes.set(assistantId, (assistantMinutes.get(assistantId) || 0) + shiftDuration);
+              assistantAssignedShiftIds.add(getRecordId(shift));
+              break;
+            } catch (assignError) {
+              lastAssistantError = assignError;
+            }
+          }
+          if (assignedAssistant) {
+            shiftResult.assistant = assignedAssistant.assistantId;
+            shiftResult.assistantStatus = 'ASSIGNED';
+            summary.assignedAssistants += 1;
+            dailySummary.assignedAssistants += 1;
+          } else {
+            shiftResult.assistantStatus = 'SKIPPED';
+            shiftResult.reasons.push(lastAssistantError?.message || 'Không tìm được phụ xe phù hợp.');
+          }
+        }
+
+        shiftResult.status = shiftResult.reasons.length ? 'PARTIAL' : 'ASSIGNED';
+        shiftResult.reason = shiftResult.reasons.join(' ');
+        if (shiftResult.reasons.length) {
           summary.skippedShifts.push(shiftResult);
           dailySummary.skippedShifts.push(shiftResult);
         }
-
         summary.shifts.push(shiftResult);
         dailySummary.shifts.push(shiftResult);
       }
@@ -517,7 +568,7 @@ const ShiftManagementPage = () => {
         response = await runClientAutoGenerateSchedule();
       }
       setGeneratedSummary(response);
-      const message = `Đã sinh lịch tuần: ${response.createdShifts || 0} ca mới, cập nhật ${response.updatedShifts || 0} ca, gán ${response.assignedDrivers || 0} tài xế.`;
+      const message = `Đã sinh lịch tuần: ${response.createdShifts || 0} ca mới, cập nhật ${response.updatedShifts || 0} ca, gán ${response.assignedDrivers || 0} tài xế và ${response.assignedAssistants || 0} phụ xe.`;
       setSuccess(message);
       toast.success(message);
       await loadData();

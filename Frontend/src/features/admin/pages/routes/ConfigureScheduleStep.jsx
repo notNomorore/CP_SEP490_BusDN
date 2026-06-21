@@ -1,5 +1,5 @@
 import React from 'react';
-import { operatingDayLabels, operatingDayOptions, validateRouteDraft } from './routeWorkflowUtils.js';
+import { FIRST_BUS_DEPARTURE_TIME, LAST_BUS_DEPARTURE_TIME, operatingDayLabels, operatingDayOptions, validateRouteDraft } from './routeWorkflowUtils.js';
 import { useRouteWorkflowStore } from './routeWorkflowStore.js';
 
 const ConfigureScheduleStep = ({ inputClassName, panelClassName }) => {
@@ -32,6 +32,7 @@ const ConfigureScheduleStep = ({ inputClassName, panelClassName }) => {
       <h2 className="mt-3 text-3xl font-black">Cấu hình lịch chạy</h2>
       <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
         Thiết lập ngày hoạt động, khung giờ khai thác, tần suất và nguồn lực tối thiểu cho tuyến.
+        Cao điểm áp dụng trong 06:30–08:30 và 16:30–18:30; ngoài các khung này dùng tần suất thấp điểm.
       </p>
 
       <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -53,11 +54,12 @@ const ConfigureScheduleStep = ({ inputClassName, panelClassName }) => {
           </div>
           <label>
             <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Giờ chuyến đầu</span>
-            <input type="time" className={inputClassName} value={draft.scheduleConfig.firstDepartureTime} onChange={(event) => updateSchedule({ firstDepartureTime: event.target.value })} />
+            <input type="time" className={`${inputClassName} cursor-not-allowed bg-slate-100`} value={FIRST_BUS_DEPARTURE_TIME} disabled />
           </label>
           <label>
             <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Giờ chuyến cuối</span>
-            <input type="time" className={inputClassName} value={draft.scheduleConfig.lastDepartureTime} onChange={(event) => updateSchedule({ lastDepartureTime: event.target.value })} />
+            <input type="time" className={`${inputClassName} cursor-not-allowed bg-slate-100`} value={LAST_BUS_DEPARTURE_TIME} disabled />
+            <span className="mt-1 block text-xs text-slate-500">Khung giờ vận hành chung, không thay đổi theo tuyến.</span>
           </label>
           <label>
             <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Tần suất cao điểm</span>
@@ -94,7 +96,7 @@ const ConfigureScheduleStep = ({ inputClassName, panelClassName }) => {
           </div>
           <div className="mt-6 grid gap-3 text-sm">
             <div className="rounded-xl bg-white p-4 text-slate-900">
-              <span className="text-slate-500">Số chuyến/ngày dự kiến</span>
+              <span className="text-slate-500">Tổng chuyến hai chiều/ngày</span>
               <strong className="mt-1 block text-2xl text-slate-950">{validation.dailyTrips}</strong>
             </div>
             <div className="rounded-xl bg-white p-4 text-slate-900">

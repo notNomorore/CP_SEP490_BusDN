@@ -16,7 +16,7 @@ const ACTIVE_TRIP_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS'];
 const MAX_DRIVER_MINUTES_PER_DAY = 8 * 60;
 const AUTO_SHIFT_TEMPLATES = [
   { key: 'MORNING', name: 'Ca sáng tự động', startTime: '05:30', endTime: '13:30', shiftType: 'MORNING' },
-  { key: 'AFTERNOON', name: 'Ca chiều tự động', startTime: '13:30', endTime: '17:30', shiftType: 'AFTERNOON' },
+  { key: 'AFTERNOON', name: 'Ca chiều tự động', startTime: '13:30', endTime: '18:30', shiftType: 'AFTERNOON' },
 ];
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
@@ -141,15 +141,29 @@ const findOverlappingAssignment = async ({ model, resourceField, resourceId, wor
   }) || null;
 };
 
-const getAssignedDriver = async (shiftId) => DriverShiftAssignment.findOne({
-  shiftId,
-  status: { $in: ['ASSIGNED', 'IN_PROGRESS'] },
-}).populate('driverId', 'fullName email phone role status').lean();
+const getAssignedDriver = async (shiftId) => {
+  const assignments = await DriverShiftAssignment.find({
+    shiftId,
+    status: { $in: ['ASSIGNED', 'IN_PROGRESS'] },
+  }).populate('driverId', 'fullName email phone role status').sort({ createdAt: 1 });
+  for (const assignment of assignments) {
+    if (assignment.driverId?.status === 'ACTIVE') return assignment.toObject();
+    await DriverShiftAssignment.deleteOne({ _id: assignment._id });
+  }
+  return null;
+};
 
-const getAssignedAssistant = async (shiftId) => AssistantShiftAssignment.findOne({
-  shiftId,
-  status: { $in: ['ASSIGNED', 'IN_PROGRESS'] },
-}).populate('assistantId', 'fullName email phone role status').lean();
+const getAssignedAssistant = async (shiftId) => {
+  const assignments = await AssistantShiftAssignment.find({
+    shiftId,
+    status: { $in: ['ASSIGNED', 'IN_PROGRESS'] },
+  }).populate('assistantId', 'fullName email phone role status').sort({ createdAt: 1 });
+  for (const assignment of assignments) {
+    if (assignment.assistantId?.status === 'ACTIVE') return assignment.toObject();
+    await AssistantShiftAssignment.deleteOne({ _id: assignment._id });
+  }
+  return null;
+};
 
 const getAssignedVehicle = async (shiftId) => VehicleShiftAssignment.findOne({
   shiftId,
@@ -606,11 +620,17 @@ export default class ShiftService {
       throw Object.assign(new Error('Ngay lam viec la bat buoc.'), { statusCode: 400 });
     }
 
-    const drivers = await User.find({ role: 'DRIVER', status: 'ACTIVE' })
-      .sort({ fullName: 1, createdAt: 1 })
-      .lean();
+    const [drivers, assistants] = await Promise.all([
+      User.find({ role: 'DRIVER', status: 'ACTIVE' }).sort({ fullName: 1, createdAt: 1 }).lean(),
+      User.find({ role: { $in: ['CONDUCTOR', 'BUS_ASSISTANT'] }, status: 'ACTIVE' })
+        .sort({ fullName: 1, createdAt: 1 })
+        .lean(),
+    ]);
     if (!drivers.length) {
       throw Object.assign(new Error('Khong co tai xe dang hoat dong de sinh lich.'), { statusCode: 409 });
+    }
+    if (!assistants.length) {
+      throw Object.assign(new Error('Khong co phu xe dang hoat dong de sinh lich.'), { statusCode: 409 });
     }
 
     const summary = {
@@ -621,6 +641,7 @@ export default class ShiftService {
       updatedShifts: 0,
       archivedShifts: 0,
       assignedDrivers: 0,
+      assignedAssistants: 0,
       skippedShifts: [],
       shifts: [],
     };
@@ -674,38 +695,65 @@ export default class ShiftService {
         startTime: shift?.startTime,
         endTime: shift?.endTime,
         driver: null,
-        status: 'UNASSIGNED',
-        reason: '',
+        assistant: null,
+        driverStatus: 'UNASSIGNED',
+        assistantStatus: 'UNASSIGNED',
+        reasons: [],
       };
 
       const existingDriver = await getAssignedDriver(shift._id);
       if (existingDriver) {
         shiftResult.driver = existingDriver.driverId;
-        shiftResult.status = 'ALREADY_ASSIGNED';
-        summary.shifts.push(shiftResult);
-        continue;
-      }
-
-      let assigned = null;
-      let lastError = null;
-      for (const driver of drivers) {
-        try {
-          assigned = await this.assignDriverToShift(shift._id, { driverId: driver._id, actorId });
-          break;
-        } catch (error) {
-          lastError = error;
+        shiftResult.driverStatus = 'ALREADY_ASSIGNED';
+      } else {
+        let assignedDriver = null;
+        let lastDriverError = null;
+        for (const driver of drivers) {
+          try {
+            assignedDriver = await this.assignDriverToShift(shift._id, { driverId: driver._id, actorId });
+            break;
+          } catch (error) {
+            lastDriverError = error;
+          }
+        }
+        if (assignedDriver) {
+          shiftResult.driver = assignedDriver.driverId;
+          shiftResult.driverStatus = 'ASSIGNED';
+          summary.assignedDrivers += 1;
+        } else {
+          shiftResult.driverStatus = 'SKIPPED';
+          shiftResult.reasons.push(lastDriverError?.message || 'Khong tim duoc tai xe phu hop.');
         }
       }
 
-      if (assigned) {
-        shiftResult.driver = assigned.driverId;
-        shiftResult.status = 'ASSIGNED';
-        summary.assignedDrivers += 1;
+      const existingAssistant = await getAssignedAssistant(shift._id);
+      if (existingAssistant) {
+        shiftResult.assistant = existingAssistant.assistantId;
+        shiftResult.assistantStatus = 'ALREADY_ASSIGNED';
       } else {
-        shiftResult.reason = lastError?.message || 'Khong tim duoc tai xe phu hop.';
-        summary.skippedShifts.push(shiftResult);
+        let assignedAssistant = null;
+        let lastAssistantError = null;
+        for (const assistant of assistants) {
+          try {
+            assignedAssistant = await this.assignAssistantToShift(shift._id, { assistantId: assistant._id, actorId });
+            break;
+          } catch (error) {
+            lastAssistantError = error;
+          }
+        }
+        if (assignedAssistant) {
+          shiftResult.assistant = assignedAssistant.assistantId;
+          shiftResult.assistantStatus = 'ASSIGNED';
+          summary.assignedAssistants += 1;
+        } else {
+          shiftResult.assistantStatus = 'SKIPPED';
+          shiftResult.reasons.push(lastAssistantError?.message || 'Khong tim duoc phu xe phu hop.');
+        }
       }
 
+      shiftResult.status = shiftResult.reasons.length ? 'PARTIAL' : 'ASSIGNED';
+      shiftResult.reason = shiftResult.reasons.join(' ');
+      if (shiftResult.reasons.length) summary.skippedShifts.push(shiftResult);
       summary.shifts.push(shiftResult);
     }
 
@@ -728,6 +776,7 @@ export default class ShiftService {
       updatedShifts: 0,
       archivedShifts: 0,
       assignedDrivers: 0,
+      assignedAssistants: 0,
       skippedShifts: [],
       shifts: [],
       dailySummaries: [],
@@ -743,6 +792,7 @@ export default class ShiftService {
       summary.updatedShifts += daySummary.updatedShifts || 0;
       summary.archivedShifts += daySummary.archivedShifts || 0;
       summary.assignedDrivers += daySummary.assignedDrivers || 0;
+      summary.assignedAssistants += daySummary.assignedAssistants || 0;
       summary.skippedShifts.push(...(daySummary.skippedShifts || []));
       summary.shifts.push(...(daySummary.shifts || []));
       summary.dailySummaries.push(daySummary);

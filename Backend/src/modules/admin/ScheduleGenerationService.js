@@ -60,7 +60,10 @@ const isInsideShift = (range, shift) => {
 
 const hasConflict = (resourceId, rows, field, range) => rows.some((row) => (
   getId(row[field]?.userId || row[field]?.busId) === getId(resourceId)
-  && overlaps(range, { start: toMinutes(row.departureTime), end: toMinutes(row.expectedArrivalTime) })
+  && overlaps(range, {
+    start: toMinutes(row.departureTime),
+    end: toMinutes(row.turnaroundEndTime || row.expectedArrivalTime),
+  })
 ));
 
 const chooseResource = (resources, existingSchedules, previewRows, field, range) => resources.find((resource) => {
@@ -68,11 +71,27 @@ const chooseResource = (resources, existingSchedules, previewRows, field, range)
   if (hasConflict(id, previewRows, field, range)) return false;
   return !existingSchedules.some((schedule) => (
     getId(schedule[field]?.userId || schedule[field]?.busId) === getId(id)
-    && overlaps(range, { start: toMinutes(schedule.departureTime), end: toMinutes(schedule.expectedArrivalTime || schedule.departureTime) })
+    && overlaps(range, {
+      start: toMinutes(schedule.departureTime),
+      end: toMinutes(schedule.turnaroundEndTime || schedule.expectedArrivalTime || schedule.departureTime),
+    })
   ));
 });
 
 const weekdayToken = (date) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()];
+const AFTERNOON_SHIFT_START = 13 * 60 + 30;
+const FIRST_BUS_DEPARTURE_MINUTES = 5 * 60 + 30;
+const LAST_BUS_DEPARTURE_MINUTES = 18 * 60 + 30;
+const PEAK_WINDOWS = [
+  { start: 6 * 60 + 30, end: 8 * 60 + 30 },
+  { start: 16 * 60 + 30, end: 18 * 60 + 30 },
+];
+const getShiftLabel = (departureMinutes) => (
+  departureMinutes < AFTERNOON_SHIFT_START ? 'MORNING' : 'AFTERNOON'
+);
+const isPeakDeparture = (departureMinutes) => PEAK_WINDOWS.some((window) => (
+  departureMinutes >= window.start && departureMinutes <= window.end
+));
 
 const getOperationalDurationMinutes = (direction) => {
   const configuredDuration = Math.max(0, Number(direction?.estimatedDurationMinutes || 0));
@@ -95,11 +114,23 @@ export default class ScheduleGenerationService {
 
     const route = await BusRoute.findById(routeId).lean();
     if (!route) throw Object.assign(new Error('Không tìm thấy tuyến.'), { statusCode: 404 });
-    const first = toMinutes(body.firstDepartureTime || route.scheduleConfig?.firstDepartureTime);
-    const last = toMinutes(body.lastDepartureTime || route.scheduleConfig?.lastDepartureTime);
-    const frequency = Number(body.frequencyMinutes || route.scheduleConfig?.frequencyMinutes || route.scheduleConfig?.peakFrequencyMinutes || 0);
-    const layover = Math.max(0, Number(body.layoverMinutes ?? 0));
-    if (first === null || last === null || first >= last || !Number.isFinite(frequency) || frequency < 1) {
+    if (route.status !== 'PUBLISHED') {
+      throw Object.assign(new Error('Chỉ có thể sinh lịch cho tuyến đã công bố.'), { statusCode: 409 });
+    }
+    const first = FIRST_BUS_DEPARTURE_MINUTES;
+    const last = LAST_BUS_DEPARTURE_MINUTES;
+    const peakFrequency = Number(route.scheduleConfig?.peakFrequencyMinutes || route.scheduleConfig?.frequencyMinutes || 0);
+    const offPeakFrequency = Number(route.scheduleConfig?.offPeakFrequencyMinutes || peakFrequency);
+    const layover = Math.max(0, Number(route.scheduleConfig?.layoverMinutes || 0));
+    if (
+      first === null
+      || last === null
+      || first >= last
+      || !Number.isFinite(peakFrequency)
+      || peakFrequency < 1
+      || !Number.isFinite(offPeakFrequency)
+      || offPeakFrequency < 1
+    ) {
       throw Object.assign(new Error('Giờ hoạt động hoặc tần suất tuyến không hợp lệ.'), { statusCode: 400 });
     }
 
@@ -123,9 +154,13 @@ export default class ScheduleGenerationService {
       for (const direction of ['OUTBOUND', 'INBOUND']) {
         const routeDirection = direction === 'OUTBOUND' ? route.outboundRoute : route.inboundRoute;
         const duration = getOperationalDurationMinutes(routeDirection);
-        for (let departure = first; departure <= last; departure += frequency) {
+        for (let departure = first; departure <= last;) {
+          const frequency = isPeakDeparture(departure) ? peakFrequency : offPeakFrequency;
           const arrival = departure + duration;
-          if (arrival > 1439) continue;
+          if (arrival > 1439 || arrival + layover > 1439) {
+            departure += frequency;
+            continue;
+          }
           const range = { start: departure, end: arrival + layover };
           const eligibleDrivers = drivers.filter((driver) => driverAssignments.some((assignment) => (
             getId(assignment.driverId) === getId(driver) && assignment.shiftId?.status === 'ACTIVE' && isInsideShift(range, assignment.shiftId)
@@ -151,59 +186,149 @@ export default class ScheduleGenerationService {
             direction,
             departureTime: toClock(departure),
             expectedArrivalTime: toClock(arrival),
+            turnaroundEndTime: toClock(arrival + layover),
+            shiftLabel: getShiftLabel(departure),
             vehicle: publicVehicle(vehicle),
             driver: publicPerson(driver),
             assistant: publicPerson(assistant),
             status: vehicle && driver && assistant ? 'ASSIGNED' : 'PLANNED',
             warnings,
           });
+          departure += frequency;
         }
       }
     }
-    return { route: { _id: route._id, routeCode: route.routeCode, routeName: route.routeName }, rows: previewRows };
+    return {
+      route: {
+        _id: route._id,
+        routeCode: route.routeCode,
+        routeName: route.routeName,
+        scheduleConfig: route.scheduleConfig,
+      },
+      rows: previewRows,
+    };
   }
 
   static async confirm(rows, actorId, replaceScheduled = false) {
     if (!Array.isArray(rows) || !rows.length) throw Object.assign(new Error('Không có lịch để lưu.'), { statusCode: 400 });
-    if (replaceScheduled) {
-      const routeIds = [...new Set(rows.map((row) => getId(row.routeId)).filter(Boolean))];
-      const dates = rows.map((row) => normalizeDate(row.serviceDate)).filter(Boolean);
-      const start = new Date(Math.min(...dates.map((date) => date.getTime())));
-      const end = addDays(new Date(Math.max(...dates.map((date) => date.getTime()))), 1);
-      await TripSchedule.deleteMany({ routeId: { $in: routeIds }, serviceDate: { $gte: start, $lt: end }, status: 'PLANNED' });
+    const scheduleCodes = rows.map((row) => String(row.scheduleCode || '').trim().toUpperCase());
+    if (scheduleCodes.some((code) => !code)) {
+      throw Object.assign(new Error('Mỗi lịch phải có mã lịch.'), { statusCode: 400 });
     }
+    if (new Set(scheduleCodes).size !== scheduleCodes.length) {
+      throw Object.assign(new Error('Bản xem trước có mã lịch bị trùng.'), { statusCode: 409 });
+    }
+
+    const normalizedRows = rows.map((row) => {
+      const serviceDate = normalizeDate(row.serviceDate);
+      const departure = toMinutes(row.departureTime);
+      const arrival = toMinutes(row.expectedArrivalTime);
+      const turnaroundEnd = toMinutes(row.turnaroundEndTime || row.expectedArrivalTime);
+      if (!serviceDate || !mongoose.Types.ObjectId.isValid(row.routeId)) {
+        throw Object.assign(new Error(`Lịch ${row.scheduleCode || ''} có ngày hoặc tuyến không hợp lệ.`), { statusCode: 400 });
+      }
+      if (departure === null || arrival === null || turnaroundEnd === null || arrival <= departure || turnaroundEnd < arrival) {
+        throw Object.assign(new Error(`Lịch ${row.scheduleCode || ''} có khung giờ không hợp lệ.`), { statusCode: 400 });
+      }
+      return {
+        ...row,
+        scheduleCode: String(row.scheduleCode).trim().toUpperCase(),
+        serviceDate,
+        range: { start: departure, end: turnaroundEnd },
+      };
+    });
+
+    const routeIds = [...new Set(normalizedRows.map((row) => getId(row.routeId)).filter(Boolean))];
+    const routes = await BusRoute.find({ _id: { $in: routeIds } }).select('scheduleConfig routeCode').lean();
+    const routesById = new Map(routes.map((route) => [getId(route), route]));
+    for (const row of normalizedRows) {
+      const route = routesById.get(getId(row.routeId));
+      if (!route) {
+        throw Object.assign(new Error(`Không tìm thấy tuyến của lịch ${row.scheduleCode}.`), { statusCode: 404 });
+      }
+      const first = FIRST_BUS_DEPARTURE_MINUTES;
+      const last = LAST_BUS_DEPARTURE_MINUTES;
+      const operatingDays = route.scheduleConfig?.operatingDays || [];
+      if (operatingDays.length && !operatingDays.includes(weekdayToken(row.serviceDate))) {
+        throw Object.assign(new Error(`Lịch ${row.scheduleCode} không thuộc ngày hoạt động của tuyến.`), { statusCode: 400 });
+      }
+      if (first === null || last === null || row.range.start < first || row.range.start > last) {
+        throw Object.assign(new Error(`Lịch ${row.scheduleCode} nằm ngoài khung giờ cấu hình tuyến.`), { statusCode: 400 });
+      }
+    }
+    const dates = normalizedRows.map((row) => row.serviceDate);
+    const start = new Date(Math.min(...dates.map((date) => date.getTime())));
+    const end = addDays(new Date(Math.max(...dates.map((date) => date.getTime()))), 1);
+    const replaceFilter = {
+      routeId: { $in: routeIds },
+      serviceDate: { $gte: start, $lt: end },
+      status: 'PLANNED',
+    };
+    const ignoredReplacementIds = replaceScheduled
+      ? (await TripSchedule.find(replaceFilter).select('_id').lean()).map((schedule) => schedule._id)
+      : [];
+    const existingCode = await TripSchedule.findOne({
+      scheduleCode: { $in: scheduleCodes },
+      ...(ignoredReplacementIds.length ? { _id: { $nin: ignoredReplacementIds } } : {}),
+    }).select('scheduleCode').lean();
+    if (existingCode) {
+      throw Object.assign(new Error(`Mã lịch ${existingCode.scheduleCode} đã tồn tại.`), { statusCode: 409 });
+    }
+
+    for (const row of normalizedRows) {
+      const internalConflict = normalizedRows.find((other) => (
+        other !== row
+        && dateKey(other.serviceDate) === dateKey(row.serviceDate)
+        && overlaps(row.range, other.range)
+        && (
+          (row.vehicle?.busId && getId(row.vehicle.busId) === getId(other.vehicle?.busId))
+          || (row.driver?.userId && getId(row.driver.userId) === getId(other.driver?.userId))
+          || (row.assistant?.userId && getId(row.assistant.userId) === getId(other.assistant?.userId))
+        )
+      ));
+      if (internalConflict) {
+        throw Object.assign(new Error(`Lịch ${row.scheduleCode} bị trùng xe hoặc nhân sự với ${internalConflict.scheduleCode}.`), { statusCode: 409 });
+      }
+
+      const dayEnd = addDays(row.serviceDate, 1);
+      const resourceConditions = [
+        ...(row.vehicle?.busId ? [{ 'vehicle.busId': row.vehicle.busId }] : []),
+        ...(row.driver?.userId ? [{ 'driver.userId': row.driver.userId }] : []),
+        ...(row.assistant?.userId ? [{ 'assistant.userId': row.assistant.userId }] : []),
+      ];
+      if (!resourceConditions.length) continue;
+      const conflicts = await TripSchedule.find({
+        serviceDate: { $gte: row.serviceDate, $lt: dayEnd },
+        status: { $in: ACTIVE_TRIP_STATUSES },
+        ...(ignoredReplacementIds.length ? { _id: { $nin: ignoredReplacementIds } } : {}),
+        $or: resourceConditions,
+      }).lean();
+      if (conflicts.some((schedule) => overlaps(row.range, {
+        start: toMinutes(schedule.departureTime),
+        end: toMinutes(schedule.turnaroundEndTime || schedule.expectedArrivalTime || schedule.departureTime),
+      }))) {
+        throw Object.assign(new Error(`Lịch ${row.scheduleCode} bị trùng xe hoặc nhân sự.`), { statusCode: 409 });
+      }
+    }
+
+    const replacedSchedules = replaceScheduled
+      ? await TripSchedule.find(replaceFilter).lean()
+      : [];
     const created = [];
     try {
-      for (const row of rows) {
-        const duplicate = await TripSchedule.findOne({ scheduleCode: row.scheduleCode }).lean();
-        if (duplicate) throw Object.assign(new Error(`Mã lịch ${row.scheduleCode} đã tồn tại.`), { statusCode: 409 });
-        const dayStart = normalizeDate(row.serviceDate);
-        const dayEnd = addDays(dayStart, 1);
-        const range = { start: toMinutes(row.departureTime), end: toMinutes(row.expectedArrivalTime || row.departureTime) };
-        const resourceConditions = [
-          ...(row.vehicle?.busId ? [{ 'vehicle.busId': row.vehicle.busId }] : []),
-          ...(row.driver?.userId ? [{ 'driver.userId': row.driver.userId }] : []),
-          ...(row.assistant?.userId ? [{ 'assistant.userId': row.assistant.userId }] : []),
-        ];
-        if (resourceConditions.length) {
-          const conflicts = await TripSchedule.find({
-            serviceDate: { $gte: dayStart, $lt: dayEnd },
-            status: { $in: ACTIVE_TRIP_STATUSES },
-            $or: resourceConditions,
-          }).lean();
-          if (conflicts.some((schedule) => overlaps(range, { start: toMinutes(schedule.departureTime), end: toMinutes(schedule.expectedArrivalTime || schedule.departureTime) }))) {
-            throw Object.assign(new Error(`Lịch ${row.scheduleCode} bị trùng xe hoặc nhân sự.`), { statusCode: 409 });
-          }
-        }
+      if (replaceScheduled) await TripSchedule.deleteMany(replaceFilter);
+      for (const row of normalizedRows) {
         const schedule = await TripSchedule.create({
           scheduleCode: row.scheduleCode,
-          serviceDate: normalizeDate(row.serviceDate),
+          serviceDate: row.serviceDate,
           routeId: row.routeId,
           routeCode: row.routeCode,
           routeName: row.routeName,
           direction: row.direction,
           departureTime: row.departureTime,
           expectedArrivalTime: row.expectedArrivalTime,
+          turnaroundEndTime: row.turnaroundEndTime || row.expectedArrivalTime,
+          shiftLabel: row.shiftLabel || getShiftLabel(toMinutes(row.departureTime)),
           status: row.vehicle?.busId && row.driver?.userId && row.assistant?.userId ? 'ASSIGNED' : 'PLANNED',
           vehicle: row.vehicle || {},
           driver: row.driver || {},
@@ -217,6 +342,7 @@ export default class ScheduleGenerationService {
       return created.map((schedule) => schedule.toObject());
     } catch (error) {
       await TripSchedule.deleteMany({ _id: { $in: created.map((schedule) => schedule._id) } });
+      if (replacedSchedules.length) await TripSchedule.insertMany(replacedSchedules, { ordered: false });
       throw error;
     }
   }

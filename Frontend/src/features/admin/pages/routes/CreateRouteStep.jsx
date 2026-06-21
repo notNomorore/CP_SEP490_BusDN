@@ -148,10 +148,6 @@ const CreateRouteStep = ({ inputClassName, panelClassName, routes, stations }) =
           <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Tên tuyến</span>
           <input className={inputClassName} value={draft.routeName} onChange={(event) => updateDraft({ routeName: event.target.value })} placeholder={defaultRouteName || 'Bến đầu - Bến cuối'} />
         </label>
-        <label>
-          <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Đơn vị vận hành</span>
-          <input className={inputClassName} value={draft.operator} onChange={(event) => updateDraft({ operator: event.target.value })} />
-        </label>
         <TerminalPicker
           label="Bến đầu"
           placeholder="Chọn bến đầu"

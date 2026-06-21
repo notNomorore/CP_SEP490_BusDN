@@ -42,6 +42,8 @@ const rolePillToneLight = {
   BUS_ASSISTANT: 'bg-fuchsia-50 text-fuchsia-700 ring-1 ring-fuchsia-100',
 };
 
+const STAFF_PAGE_SIZE = 8;
+
 const formatRelativeTime = (value) => {
   if (!value) {
     return 'Chưa có hoạt động gần đây';
@@ -64,7 +66,19 @@ const formatCompactValue = (value) => {
   return String(value);
 };
 
-const formatRating = (score) => `${(Math.max(0, Math.min(score || 0, 100)) / 20).toFixed(1)}`;
+const hasPerformanceData = (member) => Number(member?.staffMetrics?.completedTrips || 0) > 0;
+
+const formatRating = (member) => (
+  hasPerformanceData(member)
+    ? `${(Math.max(0, Math.min(member.staffMetrics?.performanceScore || 0, 100)) / 20).toFixed(1)}`
+    : 'N/A'
+);
+
+const formatPerformancePercent = (member, metricKey) => (
+  hasPerformanceData(member)
+    ? `${Math.max(0, Math.min(Number(member.staffMetrics?.[metricKey] || 0), 100))}%`
+    : 'N/A'
+);
 
 const getOperationalStatus = (member) => {
   if (member.status === 'LOCKED') {
@@ -100,6 +114,7 @@ const StaffPerformancePage = () => {
   const [selectedMemberId, setSelectedMemberId] = useState('');
   const [staffSearch, setStaffSearch] = useState('');
   const [staffRoleFilter, setStaffRoleFilter] = useState('ALL');
+  const [staffPage, setStaffPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -168,11 +183,19 @@ const StaffPerformancePage = () => {
     });
   }, [staffPerformance.staffMembers, staffRoleFilter, staffSearch]);
 
+  const staffTotalPages = Math.max(1, Math.ceil(filteredStaffMembers.length / STAFF_PAGE_SIZE));
+  const paginatedStaffMembers = useMemo(() => {
+    const startIndex = (staffPage - 1) * STAFF_PAGE_SIZE;
+    return filteredStaffMembers.slice(startIndex, startIndex + STAFF_PAGE_SIZE);
+  }, [filteredStaffMembers, staffPage]);
+  const staffPageStart = filteredStaffMembers.length === 0
+    ? 0
+    : (staffPage - 1) * STAFF_PAGE_SIZE + 1;
+  const staffPageEnd = Math.min(staffPage * STAFF_PAGE_SIZE, filteredStaffMembers.length);
+
   const selectedMember = useMemo(() => {
     return filteredStaffMembers.find((member) => member._id === selectedMemberId)
       || staffPerformance.staffMembers.find((member) => member._id === selectedMemberId)
-      || filteredStaffMembers[0]
-      || staffPerformance.staffMembers[0]
       || null;
   }, [filteredStaffMembers, selectedMemberId, staffPerformance.staffMembers]);
 
@@ -180,9 +203,8 @@ const StaffPerformancePage = () => {
     const staffCount = staffPerformance.summary.staffCount || 0;
     const totalCompletedTrips = staffPerformance.summary.totalCompletedTrips || 0;
     const totalIncidents = staffPerformance.summary.totalIncidents || 0;
-    const averageOnTimeRate = staffPerformance.summary.averageOnTimeRate || 0;
     const staffWithScoredPerformance = staffPerformance.staffMembers.filter(
-      (member) => (member.staffMetrics?.performanceScore || 0) > 0
+      (member) => hasPerformanceData(member)
     );
     const productivityScore = staffWithScoredPerformance.length > 0
       ? Math.round(
@@ -194,6 +216,12 @@ const StaffPerformancePage = () => {
       : 0;
     const hasTripData = totalCompletedTrips > 0;
     const hasScoredPerformance = staffWithScoredPerformance.length > 0;
+    const averageOnTimeRate = hasScoredPerformance
+      ? staffWithScoredPerformance.reduce(
+        (sum, member) => sum + Number(member.staffMetrics?.onTimeRate || 0),
+        0
+      ) / staffWithScoredPerformance.length
+      : 0;
 
     return {
       staffCount,
@@ -242,7 +270,7 @@ const StaffPerformancePage = () => {
 
   const topPerformers = useMemo(() => {
     return [...staffPerformance.staffMembers]
-      .filter((member) => (member.staffMetrics?.performanceScore || 0) > 0)
+      .filter((member) => hasPerformanceData(member))
       .sort((a, b) => (b.staffMetrics?.performanceScore || 0) - (a.staffMetrics?.performanceScore || 0))
       .slice(0, 3);
   }, [staffPerformance.staffMembers]);
@@ -257,6 +285,24 @@ const StaffPerformancePage = () => {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' });
   }, []);
+
+  useEffect(() => {
+    setStaffPage((currentPage) => Math.min(currentPage, staffTotalPages));
+  }, [staffTotalPages]);
+
+  useEffect(() => {
+    if (!selectedMember) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setSelectedMemberId('');
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [selectedMember]);
 
   useEffect(() => {
     let ignore = false;
@@ -282,7 +328,9 @@ const StaffPerformancePage = () => {
         };
 
         setStaffPerformance(nextState);
-        setSelectedMemberId((current) => current || nextState.staffMembers[0]?._id || '');
+        setSelectedMemberId((current) => (
+          nextState.staffMembers.some((member) => member._id === current) ? current : ''
+        ));
       } catch (loadError) {
         if (!ignore) {
           setError(loadError.message || 'Không thể tải hiệu suất nhân sự vận hành');
@@ -381,14 +429,20 @@ const StaffPerformancePage = () => {
                   <input
                     type="text"
                     value={staffSearch}
-                    onChange={(event) => setStaffSearch(event.target.value)}
+                    onChange={(event) => {
+                      setStaffSearch(event.target.value);
+                      setStaffPage(1);
+                    }}
                     placeholder="Tìm tên hoặc email..."
                     className={`h-10 w-full rounded-2xl border pl-11 pr-4 text-sm ${inputClassName}`}
                   />
                 </label>
                 <select
                   value={staffRoleFilter}
-                  onChange={(event) => setStaffRoleFilter(event.target.value)}
+                  onChange={(event) => {
+                    setStaffRoleFilter(event.target.value);
+                    setStaffPage(1);
+                  }}
                   className={`h-10 rounded-2xl border px-4 text-sm ${inputClassName}`}
                 >
                   <option value="ALL" style={{ color: '#0f172a', backgroundColor: '#ffffff' }}>{roleLabels.ALL}</option>
@@ -417,7 +471,7 @@ const StaffPerformancePage = () => {
                 ) : filteredStaffMembers.length === 0 ? (
                   <div className="px-4 py-12 text-center text-sm text-slate-400">Không có nhân sự phù hợp với bộ lọc hiện tại.</div>
                 ) : (
-                  filteredStaffMembers.map((member) => {
+                  paginatedStaffMembers.map((member) => {
                     const operationalStatus = getOperationalStatus(member);
 
                     return (
@@ -451,7 +505,7 @@ const StaffPerformancePage = () => {
                           {member.staffMetrics?.completedTrips || 0}
                         </div>
                         <div className={`flex items-center text-sm font-semibold ${isDarkMode ? 'text-emerald-300' : 'text-cyan-700'}`}>
-                          {formatRating(member.staffMetrics?.performanceScore)}
+                          {formatRating(member)}
                         </div>
                         <div className={`flex items-center text-sm font-semibold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>
                           {member.staffMetrics?.incidents || 0}
@@ -467,10 +521,50 @@ const StaffPerformancePage = () => {
                   })
                 )}
               </div>
+              {!isLoading && !error && filteredStaffMembers.length > 0 && (
+                <div className={`flex flex-col gap-3 border-t px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between ${
+                  isDarkMode ? 'border-white/6 text-slate-400' : 'border-slate-200 text-slate-500'
+                }`}>
+                  <span>
+                    Hiển thị {staffPageStart}-{staffPageEnd} trong {filteredStaffMembers.length} nhân sự
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      aria-label="Trang trước"
+                      disabled={staffPage <= 1}
+                      onClick={() => setStaffPage((currentPage) => Math.max(1, currentPage - 1))}
+                      className={`flex h-8 w-8 items-center justify-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                        isDarkMode
+                          ? 'border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]'
+                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-base">chevron_left</span>
+                    </button>
+                    <span className={`min-w-16 text-center font-semibold ${textPrimaryClassName}`}>
+                      {staffPage}/{staffTotalPages}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Trang sau"
+                      disabled={staffPage >= staffTotalPages}
+                      onClick={() => setStaffPage((currentPage) => Math.min(staffTotalPages, currentPage + 1))}
+                      className={`flex h-8 w-8 items-center justify-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                        isDarkMode
+                          ? 'border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]'
+                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-base">chevron_right</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
 
-          <aside className="space-y-4">
+          <aside className="min-w-0 space-y-4">
             <section className={`rounded-[26px] border p-4 ${panelClassName}`}>
               <div className="flex items-center justify-between">
                 <div>
@@ -480,7 +574,7 @@ const StaffPerformancePage = () => {
                 <span className={`material-symbols-outlined ${isDarkMode ? 'text-emerald-300' : 'text-cyan-600'}`}>trending_up</span>
               </div>
 
-              <div className={`mt-5 rounded-[22px] border px-4 py-4 ${chartSurfaceClassName}`}>
+              <div className={`mt-5 overflow-hidden rounded-[22px] border px-4 py-4 ${chartSurfaceClassName}`}>
                 {efficiencyBars.length === 0 ? (
                   <div className={`flex h-32 items-center justify-center text-sm ${textMutedClassName}`}>
                     Chưa có dữ liệu chuyến hoàn thành.
@@ -488,7 +582,7 @@ const StaffPerformancePage = () => {
                 ) : hasMeaningfulEfficiencyData ? (
                   <div className="flex h-40 items-end justify-between gap-3 pt-2">
                     {efficiencyBars.map((bar) => (
-                      <div key={bar.id} className="flex flex-1 flex-col items-center justify-end gap-2">
+                      <div key={bar.id} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-2">
                         <span className={`text-xs font-bold ${textPrimaryClassName}`}>{bar.trips}</span>
                         <div
                           className={`w-full rounded-t-2xl ${
@@ -499,7 +593,7 @@ const StaffPerformancePage = () => {
                           style={{ height: `${bar.height}px` }}
                           title={`${bar.label}: ${bar.trips} chuyến`}
                         />
-                        <span className={`max-w-[72px] truncate text-center text-[10px] ${textSecondaryClassName}`} title={bar.label}>{bar.label}</span>
+                        <span className={`w-full truncate text-center text-[10px] ${textSecondaryClassName}`} title={bar.label}>{bar.label}</span>
                       </div>
                     ))}
                   </div>
@@ -507,13 +601,13 @@ const StaffPerformancePage = () => {
                   <div className="flex h-32 flex-col justify-center">
                     <div className="flex items-end gap-3">
                       {efficiencyBars.map((bar) => (
-                        <div key={bar.id} className="flex flex-1 flex-col items-center gap-2">
+                        <div key={bar.id} className="flex min-w-0 flex-1 flex-col items-center gap-2">
                           <div className={`h-3 w-full rounded-full ${
                             isDarkMode
                               ? 'bg-gradient-to-r from-emerald-400/60 to-emerald-300'
                               : 'bg-gradient-to-r from-cyan-500 to-emerald-300'
                           }`} />
-                          <span className={`max-w-[72px] truncate text-center text-[10px] ${textSecondaryClassName}`} title={bar.label}>{bar.label}</span>
+                          <span className={`w-full truncate text-center text-[10px] ${textSecondaryClassName}`} title={bar.label}>{bar.label}</span>
                         </div>
                       ))}
                     </div>
@@ -577,100 +671,69 @@ const StaffPerformancePage = () => {
           </aside>
         </section>
 
-        <section className="mt-6 grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <aside className={`rounded-[26px] border p-4 shadow-[0_20px_60px_rgba(0,0,0,0.18)] backdrop-blur ${panelClassName}`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className={`text-sm font-bold ${titleClassName}`}>Chi tiết nhân sự đã chọn</p>
-                <p className={`mt-1 text-xs ${subtitleClassName}`}>Chỉ số chi tiết và trạng thái báo cáo hiện tại.</p>
-              </div>
-              <span className={`material-symbols-outlined rounded-lg p-2 ${isDarkMode ? 'bg-white/6 text-cyan-300' : 'bg-cyan-50 text-cyan-600'}`}>insights</span>
-            </div>
-
-            {!selectedMember ? (
-              <div className={`mt-4 rounded-[22px] border px-4 py-10 text-center text-sm ${textMutedClassName} ${tilePanelClassName}`}>
-                Chọn một nhân sự vận hành để xem hiệu suất.
-              </div>
-            ) : (
-              <div className={`mt-4 rounded-[22px] border p-4 ${tilePanelClassName}`}>
-                <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-emerald-300 to-cyan-400 text-sm font-black text-slate-950">
-                    {(selectedMember.fullName || selectedMember.email || '?').charAt(0).toUpperCase()}
-                  </div>
-                  <div className="min-w-0">
-                    <p className={`truncate text-sm font-semibold ${textPrimaryClassName}`}>{selectedMember.fullName || 'Nhân sự chưa rõ'}</p>
-                    <p className={`truncate text-xs ${isDarkMode ? 'text-emerald-300' : 'text-cyan-700'}`}>{roleLabels[selectedMember.role] || selectedMember.role}</p>
-                    <p className={`truncate text-[11px] ${textSecondaryClassName}`}>{selectedMember.email || selectedMember.phone || selectedMember.phoneNumber || 'Chưa có thông tin liên hệ'}</p>
-                  </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <PerformanceTile label="Chuyến hoàn thành" value={selectedMember.staffMetrics?.completedTrips ?? 0} tone={isDarkMode ? 'text-emerald-300' : 'text-cyan-700'} isDarkMode={isDarkMode} />
-                  <PerformanceTile label="Sự cố" value={selectedMember.staffMetrics?.incidents ?? 0} tone={isDarkMode ? 'text-rose-300' : 'text-rose-600'} isDarkMode={isDarkMode} />
-                  <PerformanceTile label="Tỷ lệ đúng giờ" value={`${selectedMember.staffMetrics?.onTimeRate ?? 0}%`} tone={isDarkMode ? 'text-cyan-300' : 'text-cyan-700'} isDarkMode={isDarkMode} />
-                  <PerformanceTile label="Điểm hiệu suất" value={`${selectedMember.staffMetrics?.performanceScore ?? 0}%`} tone={isDarkMode ? 'text-white' : 'text-slate-900'} isDarkMode={isDarkMode} />
-                </div>
-              </div>
-            )}
-
-            <div className="mt-5">
-              <p className={`text-[11px] font-bold uppercase tracking-[0.24em] ${textSecondaryClassName}`}>Báo cáo hoạt động gần đây</p>
-              <div className="mt-3 space-y-3">
-                {recentActivity.length > 0 ? recentActivity.map((report, index) => (
-                  <div key={`${report.type}-${index}`} className={`rounded-2xl border p-3 ${isDarkMode ? 'border-white/6 bg-white/[0.03]' : 'border-slate-200 bg-white'}`}>
-                    <p className={`text-xs font-semibold ${textPrimaryClassName}`}>{report.message}</p>
-                    <p className={`mt-2 text-[11px] uppercase tracking-[0.18em] ${textSecondaryClassName}`}>{report.type}</p>
-                    <p className={`mt-1 text-[11px] ${textSecondaryClassName}`}>{formatRelativeTime(report.createdAt)}</p>
-                  </div>
-                )) : (
-                  <div className={`rounded-2xl border p-4 text-sm ${textMutedClassName} ${isDarkMode ? 'border-white/6 bg-white/[0.03]' : 'border-slate-200 bg-white'}`}>
-                    Chưa có báo cáo hoạt động nào cho nhân sự này.
-                  </div>
-                )}
-              </div>
-            </div>
-          </aside>
-
-          <section className={`rounded-[26px] border p-4 shadow-[0_20px_60px_rgba(0,0,0,0.18)] backdrop-blur ${panelClassName}`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className={`text-sm font-bold ${titleClassName}`}>Phân công và vận hành</p>
-                <p className={`mt-1 text-xs ${subtitleClassName}`}>Dữ liệu được tổng hợp từ lịch chuyến và báo cáo hiện có.</p>
-              </div>
-              <span className={`material-symbols-outlined rounded-lg p-2 ${isDarkMode ? 'bg-white/6 text-emerald-300' : 'bg-emerald-50 text-emerald-600'}`}>assignment</span>
-            </div>
-
-            {!selectedMember ? (
-              <div className={`mt-4 rounded-[22px] border px-4 py-10 text-center text-sm ${textMutedClassName} ${tilePanelClassName}`}>
-                Chọn một nhân sự vận hành để xem phân công và hiệu suất.
-              </div>
-            ) : (
-              <div className={`mt-4 rounded-[22px] border p-4 ${tilePanelClassName}`}>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <PerformanceTile label="Chuyến đang phân công" value={selectedMember.staffMetrics?.assignedTrips ?? 0} tone={isDarkMode ? 'text-cyan-300' : 'text-cyan-700'} isDarkMode={isDarkMode} />
-                  <PerformanceTile label="Chuyến trễ" value={selectedMember.staffMetrics?.delayedTrips ?? 0} tone={isDarkMode ? 'text-amber-300' : 'text-amber-600'} isDarkMode={isDarkMode} />
-                </div>
-
-                <div className="mt-4">
-                  <p className={`text-[11px] font-bold uppercase tracking-[0.24em] ${textSecondaryClassName}`}>Tuyến được phân công</p>
-                  <div className="mt-3 space-y-3">
-                    {selectedMember.assignedRoutes?.length ? selectedMember.assignedRoutes.map((route) => (
-                      <div key={`${route.routeId}-${route.routeCode}`} className={`rounded-2xl border p-4 ${isDarkMode ? 'border-white/6 bg-white/[0.03]' : 'border-slate-200 bg-white'}`}>
-                        <p className={`text-sm font-bold ${textPrimaryClassName}`}>{route.routeCode || 'Tuyến chưa có mã'}</p>
-                        <p className={`mt-1 text-xs ${textSecondaryClassName}`}>{route.routeName || 'Chưa có tên tuyến'}</p>
-                      </div>
-                    )) : (
-                      <div className={`rounded-2xl border p-4 text-sm ${textMutedClassName} ${isDarkMode ? 'border-white/6 bg-white/[0.03]' : 'border-slate-200 bg-white'}`}>
-                        Chưa có lịch chuyến đang phân công cho nhân sự này.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>
-        </section>
       </main>
+      {selectedMember ? (
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <button type="button" aria-label="Đóng chi tiết nhân sự" onClick={() => setSelectedMemberId('')} className="absolute inset-0 cursor-default" />
+          <div className={`relative max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-[28px] border p-5 shadow-[0_28px_90px_rgba(0,0,0,0.45)] sm:p-6 ${isDarkMode ? 'border-white/10 bg-[#111d20] text-white' : 'border-slate-200 bg-white text-slate-900'}`}>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-300 to-cyan-400 text-lg font-black text-slate-950">
+                  {(selectedMember.fullName || selectedMember.email || '?').charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className={`text-xs font-black uppercase tracking-[0.2em] ${isDarkMode ? 'text-emerald-300' : 'text-cyan-700'}`}>Chi tiết nhân sự</p>
+                  <h2 className={`mt-1 truncate text-2xl font-black ${textPrimaryClassName}`}>{selectedMember.fullName || 'Nhân sự chưa rõ'}</h2>
+                  <p className={`mt-1 text-sm ${textSecondaryClassName}`}>{roleLabels[selectedMember.role] || selectedMember.role} · {selectedMember.email || selectedMember.phone || selectedMember.phoneNumber || 'Chưa có thông tin liên hệ'}</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setSelectedMemberId('')} aria-label="Đóng" className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${isDarkMode ? 'border-white/10 bg-white/[0.04] text-slate-200' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <PerformanceTile label="Chuyến hoàn thành" value={selectedMember.staffMetrics?.completedTrips ?? 0} tone={isDarkMode ? 'text-emerald-300' : 'text-cyan-700'} isDarkMode={isDarkMode} />
+              <PerformanceTile label="Chuyến đang phân công" value={selectedMember.staffMetrics?.assignedTrips ?? 0} tone={isDarkMode ? 'text-cyan-300' : 'text-cyan-700'} isDarkMode={isDarkMode} />
+              <PerformanceTile label="Chuyến trễ" value={selectedMember.staffMetrics?.delayedTrips ?? 0} tone={isDarkMode ? 'text-amber-300' : 'text-amber-600'} isDarkMode={isDarkMode} />
+              <PerformanceTile label="Sự cố" value={selectedMember.staffMetrics?.incidents ?? 0} tone={isDarkMode ? 'text-rose-300' : 'text-rose-600'} isDarkMode={isDarkMode} />
+              <PerformanceTile label="Tỷ lệ đúng giờ" value={formatPerformancePercent(selectedMember, 'onTimeRate')} tone={isDarkMode ? 'text-cyan-300' : 'text-cyan-700'} isDarkMode={isDarkMode} />
+              <PerformanceTile label="Điểm hiệu suất" value={formatPerformancePercent(selectedMember, 'performanceScore')} tone={textPrimaryClassName} isDarkMode={isDarkMode} />
+            </div>
+
+            <div className="mt-6 grid gap-5 lg:grid-cols-2">
+              <section className={`rounded-[22px] border p-4 ${tilePanelClassName}`}>
+                <h3 className={`text-sm font-black ${textPrimaryClassName}`}>Tuyến được phân công</h3>
+                <div className="mt-3 max-h-64 space-y-3 overflow-y-auto">
+                  {selectedMember.assignedRoutes?.length ? selectedMember.assignedRoutes.map((route) => (
+                    <div key={`${route.routeId}-${route.routeCode}`} className={`rounded-2xl border p-4 ${isDarkMode ? 'border-white/6 bg-white/[0.03]' : 'border-slate-200 bg-white'}`}>
+                      <p className={`text-sm font-bold ${textPrimaryClassName}`}>{route.routeCode || 'Tuyến chưa có mã'}</p>
+                      <p className={`mt-1 text-xs ${textSecondaryClassName}`}>{route.routeName || 'Chưa có tên tuyến'}</p>
+                    </div>
+                  )) : (
+                    <p className={`rounded-2xl border p-4 text-sm ${textMutedClassName} ${isDarkMode ? 'border-white/6' : 'border-slate-200 bg-white'}`}>Chưa có lịch chuyến đang phân công.</p>
+                  )}
+                </div>
+              </section>
+
+              <section className={`rounded-[22px] border p-4 ${tilePanelClassName}`}>
+                <h3 className={`text-sm font-black ${textPrimaryClassName}`}>Hoạt động gần đây</h3>
+                <div className="mt-3 max-h-64 space-y-3 overflow-y-auto">
+                  {recentActivity.length ? recentActivity.map((report, index) => (
+                    <div key={`${report.type}-${index}`} className={`rounded-2xl border p-3 ${isDarkMode ? 'border-white/6 bg-white/[0.03]' : 'border-slate-200 bg-white'}`}>
+                      <p className={`text-xs font-semibold ${textPrimaryClassName}`}>{report.message}</p>
+                      <p className={`mt-2 text-[11px] uppercase tracking-[0.18em] ${textSecondaryClassName}`}>{report.type}</p>
+                      <p className={`mt-1 text-[11px] ${textSecondaryClassName}`}>{formatRelativeTime(report.createdAt)}</p>
+                    </div>
+                  )) : (
+                    <p className={`rounded-2xl border p-4 text-sm ${textMutedClassName} ${isDarkMode ? 'border-white/6' : 'border-slate-200 bg-white'}`}>Chưa có báo cáo hoạt động.</p>
+                  )}
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

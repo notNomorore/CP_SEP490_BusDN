@@ -16,8 +16,18 @@ const ALLOWED_OPERATION_NOTIFICATION_CATEGORIES = new Set(['ROUTE_UPDATE', 'SCHE
 const ALLOWED_OPERATION_NOTIFICATION_PRIORITIES = new Set(['LOW', 'NORMAL', 'HIGH', 'CRITICAL']);
 const ALLOWED_OPERATION_NOTIFICATION_ROLES = new Set(['DRIVER', 'BUS_ASSISTANT']);
 const REQUIRED_IMPORT_COLUMNS = ['fullName', 'role'];
+const BUS_CAPACITY_MIN = 15;
+const BUS_CAPACITY_MAX = 25;
 const EMAIL_REGEX = /^[^\s@.]+(?:\.[^\s@.]+)*@[^\s@.]+(?:\.[^\s@.]+)+$/;
 const normalizeEmail = (value) => value?.trim().toLowerCase().replace(/\.+$/, '');
+const toMinutes = (value) => {
+  const match = String(value || '').match(/^(\d{2}):(\d{2})$/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return (hours * 60) + minutes;
+};
 
 const validateManagedUserPayload = (payload) => {
   const errors = {};
@@ -66,7 +76,9 @@ const validateBusPayload = (payload) => {
   if (!payload.busCode) errors.push('Bus code is required');
   if (!payload.plateNumber) errors.push('License plate is required');
   if (!payload.busType) errors.push('Bus type is required');
-  if (!Number.isFinite(payload.capacity) || payload.capacity < 1) errors.push('Capacity must be greater than 0');
+  if (!Number.isFinite(payload.capacity) || payload.capacity < BUS_CAPACITY_MIN || payload.capacity > BUS_CAPACITY_MAX) {
+    errors.push(`Capacity must be between ${BUS_CAPACITY_MIN} and ${BUS_CAPACITY_MAX}`);
+  }
   if (payload.year !== undefined && (!Number.isFinite(payload.year) || payload.year < 1980 || payload.year > 2100)) {
     errors.push('Vehicle year is invalid');
   }
@@ -94,6 +106,31 @@ const normalizeAssignedPerson = (person = {}) => ({
   phone: String(person.phone || person.phoneNumber || '').trim(),
 });
 
+const FIRST_BUS_DEPARTURE_TIME = '05:30';
+const LAST_BUS_DEPARTURE_TIME = '18:30';
+const FIRST_BUS_DEPARTURE_MINUTES = 5 * 60 + 30;
+const LAST_BUS_DEPARTURE_MINUTES = 18 * 60 + 30;
+
+const scheduleWeekdayToken = (date) => (
+  ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getUTCDay()]
+);
+
+const getRouteScheduleMismatch = (route, serviceDate, departureTime) => {
+  if (!route || !serviceDate || Number.isNaN(serviceDate.getTime())) return '';
+  const config = route.scheduleConfig || {};
+  const operatingDays = Array.isArray(config.operatingDays) ? config.operatingDays : [];
+  if (operatingDays.length && !operatingDays.includes(scheduleWeekdayToken(serviceDate))) {
+    return 'Ngày phục vụ không nằm trong ngày hoạt động của tuyến.';
+  }
+  const departure = toMinutes(departureTime);
+  const first = FIRST_BUS_DEPARTURE_MINUTES;
+  const last = LAST_BUS_DEPARTURE_MINUTES;
+  if (departure !== null && first !== null && last !== null && (departure < first || departure > last)) {
+    return `Giờ xuất bến phải nằm trong khung ${FIRST_BUS_DEPARTURE_TIME}-${LAST_BUS_DEPARTURE_TIME}.`;
+  }
+  return '';
+};
+
 const normalizeTripSchedulePayload = async (body = {}, userId) => {
   const route = body.routeId && isValidObjectId(body.routeId)
     ? await AdminModel.findRouteById(body.routeId)
@@ -102,7 +139,9 @@ const normalizeTripSchedulePayload = async (body = {}, userId) => {
   const driver = normalizeAssignedPerson(body.driver);
   const assistant = normalizeAssignedPerson(body.assistant);
   const serviceDate = body.serviceDate ? new Date(body.serviceDate) : null;
-  const hasAssignments = Boolean(vehicle.busId || driver.userId || assistant.userId);
+  const hasCompleteAssignment = Boolean(vehicle.busId && driver.userId && assistant.userId);
+  const requestedStatus = ALLOWED_SCHEDULE_STATUS.has(body.status) ? body.status : null;
+  const routeScheduleMismatch = getRouteScheduleMismatch(route, serviceDate, body.departureTime);
 
   return {
     scheduleCode: String(body.scheduleCode || '').trim().toUpperCase(),
@@ -114,22 +153,51 @@ const normalizeTripSchedulePayload = async (body = {}, userId) => {
     departureTime: String(body.departureTime || '').trim(),
     expectedArrivalTime: String(body.expectedArrivalTime || '').trim(),
     shiftLabel: String(body.shiftLabel || '').trim(),
-    status: ALLOWED_SCHEDULE_STATUS.has(body.status) ? body.status : hasAssignments ? 'ASSIGNED' : 'PLANNED',
+    status: requestedStatus === 'ASSIGNED' && !hasCompleteAssignment
+      ? 'PLANNED'
+      : requestedStatus || (hasCompleteAssignment ? 'ASSIGNED' : 'PLANNED'),
     vehicle,
     driver,
     assistant,
     notes: String(body.notes || '').trim(),
+    isScheduleException: Boolean(routeScheduleMismatch && (body.isScheduleException || body.emergencyReason)),
+    exceptionReason: routeScheduleMismatch ? String(body.exceptionReason || body.emergencyReason || '').trim() : '',
+    routeScheduleMismatch,
+    routeUnavailable: route && route.status !== 'PUBLISHED'
+      ? 'Chỉ có thể tạo lịch cho tuyến đã công bố.'
+      : '',
     updatedBy: userId,
   };
 };
 
 const validateTripSchedulePayload = (payload) => {
   const errors = [];
+  const departureMinutes = toMinutes(payload.departureTime);
+  const arrivalMinutes = toMinutes(payload.expectedArrivalTime);
+  const hasCompleteAssignment = Boolean(payload.vehicle?.busId && payload.driver?.userId && payload.assistant?.userId);
   if (!payload.scheduleCode) errors.push('Schedule code is required');
   if (!payload.routeId || !isValidObjectId(payload.routeId)) errors.push('Route is required');
   if (!payload.serviceDate || Number.isNaN(payload.serviceDate.getTime())) errors.push('Service date is invalid');
-  if (!/^\d{2}:\d{2}$/.test(payload.departureTime)) errors.push('Departure time is required in HH:mm format');
-  if (payload.expectedArrivalTime && !/^\d{2}:\d{2}$/.test(payload.expectedArrivalTime)) errors.push('Expected arrival time must use HH:mm format');
+  if (departureMinutes === null) errors.push('Departure time is required in valid HH:mm format');
+  if (departureMinutes !== null && departureMinutes < FIRST_BUS_DEPARTURE_MINUTES) {
+    errors.push('Bus departures are not allowed before 05:30');
+  }
+  if (departureMinutes !== null && departureMinutes > LAST_BUS_DEPARTURE_MINUTES) {
+    errors.push('Bus departures are not allowed after 18:30');
+  }
+  if (arrivalMinutes === null) errors.push('Expected arrival time is required in valid HH:mm format');
+  if (departureMinutes !== null && arrivalMinutes !== null && arrivalMinutes <= departureMinutes) {
+    errors.push('Expected arrival time must be later than departure time');
+  }
+  if (!hasCompleteAssignment && ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'].includes(payload.status)) {
+    errors.push('Vehicle, driver, and assistant are all required for an assigned schedule');
+  }
+  if (payload.routeScheduleMismatch && !payload.isScheduleException) {
+    errors.push(payload.routeScheduleMismatch);
+  }
+  if (payload.routeScheduleMismatch && payload.isScheduleException && !payload.exceptionReason) {
+    errors.push('Exception reason is required for a trip outside the route schedule');
+  }
   return errors;
 };
 
@@ -274,7 +342,11 @@ const normalizeRoutePayload = (body = {}, userId) => {
     description: String(body.description || '').trim(),
     outboundRoute,
     inboundRoute,
-    scheduleConfig: body.scheduleConfig || {},
+    scheduleConfig: {
+      ...(body.scheduleConfig || {}),
+      firstDepartureTime: FIRST_BUS_DEPARTURE_TIME,
+      lastDepartureTime: LAST_BUS_DEPARTURE_TIME,
+    },
     fareConfig: body.fareConfig || {},
     vehicleAssignment: body.vehicleAssignment || {},
     updatedBy: userId,
@@ -955,6 +1027,9 @@ export class AdminController {
     try {
       const payload = await normalizeTripSchedulePayload(req.body, req.user?.userId);
       payload.createdBy = req.user?.userId;
+      if (payload.routeUnavailable) {
+        return res.status(409).json({ success: false, message: payload.routeUnavailable });
+      }
       const validationErrors = validateTripSchedulePayload(payload);
       if (validationErrors.length) {
         return res.status(400).json({ success: false, message: 'Trip schedule validation failed', errors: validationErrors });
@@ -970,7 +1045,14 @@ export class AdminController {
       if (payload.driver?.userId) {
         const assignment = await AdminModel.findEligibleDriverShiftAssignment(payload);
         if (!assignment) {
-          return res.status(409).json({ success: false, message: 'Tai xe khong co ca lam phu hop voi thoi gian chuyen' });
+          return res.status(409).json({ success: false, message: 'Tài xế không có ca làm phù hợp với thời gian chuyến.' });
+        }
+      }
+
+      if (payload.assistant?.userId) {
+        const assignment = await AdminModel.findEligibleAssistantShiftAssignment(payload);
+        if (!assignment) {
+          return res.status(409).json({ success: false, message: 'Phụ xe không có ca làm phù hợp với thời gian chuyến.' });
         }
       }
 
@@ -1011,7 +1093,14 @@ export class AdminController {
       if (payload.driver?.userId) {
         const assignment = await AdminModel.findEligibleDriverShiftAssignment(payload);
         if (!assignment) {
-          return res.status(409).json({ success: false, message: 'Tai xe khong co ca lam phu hop voi thoi gian chuyen' });
+          return res.status(409).json({ success: false, message: 'Tài xế không có ca làm phù hợp với thời gian chuyến.' });
+        }
+      }
+
+      if (payload.assistant?.userId) {
+        const assignment = await AdminModel.findEligibleAssistantShiftAssignment(payload);
+        if (!assignment) {
+          return res.status(409).json({ success: false, message: 'Phụ xe không có ca làm phù hợp với thời gian chuyến.' });
         }
       }
 
