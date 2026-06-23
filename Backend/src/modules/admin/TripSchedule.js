@@ -69,7 +69,10 @@ const TripScheduleSchema = new mongoose.Schema(
     direction: { type: String, enum: ['OUTBOUND', 'INBOUND'], default: 'OUTBOUND' },
     departureTime: { type: String, required: true, trim: true },
     expectedArrivalTime: { type: String, trim: true, default: '' },
+    turnaroundEndTime: { type: String, trim: true, default: '' },
     shiftLabel: { type: String, trim: true, default: '' },
+    isScheduleException: { type: Boolean, default: false },
+    exceptionReason: { type: String, trim: true, default: '' },
     status: {
       type: String,
       enum: ['PLANNED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'],

@@ -7,7 +7,13 @@ import {
 export const routeTypeOptions = ['URBAN', 'EXPRESS', 'AIRPORT', 'INTERCITY', 'CIRCULAR', 'SHUTTLE'];
 export const routeStatusOptions = ['DRAFT', 'PENDING_APPROVAL', 'PUBLISHED', 'SUSPENDED'];
 export const operatingDayOptions = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-export { DA_NANG_BOUNDS, DA_NANG_CENTER, isInsideDaNang };
+export const FIRST_BUS_DEPARTURE_TIME = '05:30';
+export const LAST_BUS_DEPARTURE_TIME = '18:30';
+export const DA_NANG_CENTER = [16.0471, 108.2068];
+export const DA_NANG_BOUNDS = [
+  [15.85, 107.95],
+  [16.25, 108.35],
+];
 export const OSRM_BASE_URL = import.meta.env.VITE_OSRM_BASE_URL || 'https://router.project-osrm.org';
 
 export const routeTypeLabels = {
@@ -50,7 +56,7 @@ export const emptyRouteDraft = () => ({
   routeCode: '',
   routeName: '',
   routeType: 'URBAN',
-  operator: 'Veridian Transit',
+  operator: 'BusDN',
   status: 'DRAFT',
   routeColor: '#10b981',
   description: '',
@@ -58,8 +64,8 @@ export const emptyRouteDraft = () => ({
   inboundRoute: emptyDirection(),
   scheduleConfig: {
     operatingDays: [...operatingDayOptions],
-    firstDepartureTime: '05:30',
-    lastDepartureTime: '22:00',
+    firstDepartureTime: FIRST_BUS_DEPARTURE_TIME,
+    lastDepartureTime: LAST_BUS_DEPARTURE_TIME,
     frequencyMinutes: 12,
     peakFrequencyMinutes: 8,
     offPeakFrequencyMinutes: 15,
@@ -485,6 +491,8 @@ export const prepareRoutePayload = (draft, status = draft.status) => {
     inboundRoute,
     scheduleConfig: {
       ...draft.scheduleConfig,
+      firstDepartureTime: FIRST_BUS_DEPARTURE_TIME,
+      lastDepartureTime: LAST_BUS_DEPARTURE_TIME,
       holidaySchedule: '',
       frequencyMinutes: Number(draft.scheduleConfig.peakFrequencyMinutes || draft.scheduleConfig.frequencyMinutes || 0),
     },
@@ -503,6 +511,27 @@ const parseClock = (value) => {
   const minutes = Number(match[2]);
   if (hours > 23 || minutes > 59) return null;
   return hours * 60 + minutes;
+};
+
+const isPeakScheduleMinute = (minute) => (
+  (minute >= 390 && minute <= 510)
+  || (minute >= 990 && minute <= 1110)
+);
+
+const estimateDailyTrips = (firstTrip, lastTrip, peakFrequency, offPeakFrequency) => {
+  if (
+    firstTrip === null
+    || lastTrip === null
+    || firstTrip >= lastTrip
+    || peakFrequency <= 0
+    || offPeakFrequency <= 0
+  ) return 0;
+  let departuresPerDirection = 0;
+  for (let departure = firstTrip; departure <= lastTrip;) {
+    departuresPerDirection += 1;
+    departure += isPeakScheduleMinute(departure) ? peakFrequency : offPeakFrequency;
+  }
+  return departuresPerDirection * 2;
 };
 
 const sameStopLocation = (left, right) => {
@@ -536,7 +565,9 @@ export const validateRouteDraft = (draft) => {
   }
   if (firstTrip === null || lastTrip === null) errors.push('L\u1ecbch ch\u1ea1y thi\u1ebfu gi\u1edd chuy\u1ebfn \u0111\u1ea7u ho\u1eb7c chuy\u1ebfn cu\u1ed1i.');
   if (firstTrip !== null && lastTrip !== null && firstTrip >= lastTrip) errors.push('Chuy\u1ebfn \u0111\u1ea7u ph\u1ea3i s\u1edbm h\u01a1n chuy\u1ebfn cu\u1ed1i.');
+  if (lastTrip !== null && lastTrip > parseClock(LAST_BUS_DEPARTURE_TIME)) errors.push('Chuy\u1ebfn cu\u1ed1i kh\u00f4ng \u0111\u01b0\u1ee3c mu\u1ed9n h\u01a1n 18:30.');
   if (Number(draft.scheduleConfig.peakFrequencyMinutes || 0) <= 0) errors.push('T\u1ea7n su\u1ea5t cao \u0111i\u1ec3m ph\u1ea3i l\u1edbn h\u01a1n 0.');
+  if (Number(draft.scheduleConfig.offPeakFrequencyMinutes || 0) <= 0) errors.push('T\u1ea7n su\u1ea5t th\u1ea5p \u0111i\u1ec3m ph\u1ea3i l\u1edbn h\u01a1n 0.');
   if (!draft.scheduleConfig.operatingDays.length) errors.push('C\u1ea7n ch\u1ecdn \u00edt nh\u1ea5t m\u1ed9t ng\u00e0y ho\u1ea1t \u0111\u1ed9ng.');
 
   [outbound, inbound].forEach((direction, directionIndex) => {
@@ -570,9 +601,12 @@ export const validateRouteDraft = (draft) => {
     totalStops,
     totalDistance,
     totalDuration,
-    dailyTrips: firstTrip !== null && lastTrip !== null && Number(draft.scheduleConfig.peakFrequencyMinutes) > 0
-      ? Math.floor((lastTrip - firstTrip) / Number(draft.scheduleConfig.peakFrequencyMinutes)) + 1
-      : 0,
+    dailyTrips: estimateDailyTrips(
+      firstTrip,
+      lastTrip,
+      Number(draft.scheduleConfig.peakFrequencyMinutes || 0),
+      Number(draft.scheduleConfig.offPeakFrequencyMinutes || 0)
+    ),
   };
 };
 
@@ -583,6 +617,8 @@ export const normalizeRouteFromApi = (route) => ({
   scheduleConfig: {
     ...emptyRouteDraft().scheduleConfig,
     ...(route.scheduleConfig || {}),
+    firstDepartureTime: FIRST_BUS_DEPARTURE_TIME,
+    lastDepartureTime: LAST_BUS_DEPARTURE_TIME,
     peakFrequencyMinutes: route.scheduleConfig?.peakFrequencyMinutes || route.scheduleConfig?.frequencyMinutes || 12,
     offPeakFrequencyMinutes: route.scheduleConfig?.offPeakFrequencyMinutes || 18,
     layoverMinutes: route.scheduleConfig?.layoverMinutes || 8,

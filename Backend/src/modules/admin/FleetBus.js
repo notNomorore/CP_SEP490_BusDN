@@ -40,7 +40,8 @@ const FleetBusSchema = new mongoose.Schema(
     capacity: {
       type: Number,
       required: true,
-      min: 1,
+      min: 15,
+      max: 25,
     },
     operator: {
       type: String,

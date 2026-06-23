@@ -2,7 +2,97 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../../auth/stores/authStore.js';
 import useAdminI18n, { getAdminMessage } from '../../../shared/i18n/adminI18n.js';
-import { adminNavigation } from '../../../shared/i18n/adminMessages.js';
+import { adminNavGroups, adminNavigation } from '../../../shared/i18n/adminMessages.js';
+
+const isNavigationItemActive = (pathname, item) => (
+  pathname === item.path
+  || pathname.startsWith(`${item.path}/`)
+  || item.aliases?.some((alias) => pathname === alias || pathname.startsWith(`${alias}/`))
+);
+
+const SidebarItem = ({ item, isActive, label, onNavigate }) => (
+  <NavLink
+    to={item.path}
+    onClick={onNavigate}
+    aria-current={isActive ? 'page' : undefined}
+    className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs font-semibold leading-tight transition-colors ${
+      isActive
+        ? 'bg-on-tertiary-container text-on-primary shadow-md shadow-black/10'
+        : 'text-primary-fixed-dim hover:bg-on-primary-fixed-variant/20 hover:text-primary-fixed'
+    }`}
+  >
+    <span className="material-symbols-outlined shrink-0 text-[18px]" aria-hidden="true">
+      {item.icon}
+    </span>
+    <span>{label}</span>
+  </NavLink>
+);
+
+const SidebarGroup = ({
+  group,
+  isExpanded,
+  isGroupActive,
+  activeItemPath,
+  t,
+  onToggle,
+  onNavigate,
+}) => {
+  const groupLabel = t(group.key);
+  const toggleLabel = t(
+    isExpanded ? 'admin.navigation.collapseGroup' : 'admin.navigation.expandGroup',
+  ).replace('{group}', groupLabel);
+
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={isExpanded}
+        aria-controls={`admin-nav-group-${group.id}`}
+        aria-label={toggleLabel}
+        className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[13px] font-bold leading-tight transition-colors ${
+          isGroupActive
+            ? 'bg-on-primary-fixed-variant/25 text-primary-fixed'
+            : 'text-primary-fixed-dim hover:bg-on-primary-fixed-variant/20 hover:text-primary-fixed'
+        }`}
+      >
+        <span className="material-symbols-outlined shrink-0 text-[20px]" aria-hidden="true">
+          {group.icon}
+        </span>
+        <span className="min-w-0 flex-1">{groupLabel}</span>
+        <span
+          className={`material-symbols-outlined shrink-0 text-[18px] transition-transform duration-200 ${
+            isExpanded ? 'rotate-180' : ''
+          }`}
+          aria-hidden="true"
+        >
+          expand_more
+        </span>
+      </button>
+
+      <div
+        id={`admin-nav-group-${group.id}`}
+        className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out ${
+          isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="ml-5 mt-1 space-y-1 border-l border-primary-fixed/15 pb-1 pl-2">
+            {group.children.map((item) => (
+              <SidebarItem
+                key={item.path}
+                item={item}
+                isActive={activeItemPath === item.path}
+                label={t(item.key)}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+};
 
 const AdminCommandLayout = () => {
   const navigate = useNavigate();
@@ -17,17 +107,38 @@ const AdminCommandLayout = () => {
   const activeItem = useMemo(() => {
     return [...adminNavigation]
       .sort((left, right) => right.path.length - left.path.length)
-      .find((item) => location.pathname === item.path || location.pathname.startsWith(`${item.path}/`))
+      .find((item) => isNavigationItemActive(location.pathname, item))
       || adminNavigation[0];
   }, [location.pathname]);
 
-  const visibleNavigation = useMemo(() => {
+  const activeGroup = useMemo(() => (
+    adminNavGroups.find((group) => (
+      group.children.some((item) => item.path === activeItem.path)
+    )) || adminNavGroups[0]
+  ), [activeItem.path]);
+
+  const [openGroupId, setOpenGroupId] = useState(() => activeGroup.id);
+
+  const visibleGroups = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return adminNavigation;
-    return adminNavigation.filter((item) => (
-      getAdminMessage('vi', item.key).toLowerCase().includes(keyword)
-      || getAdminMessage('en', item.key).toLowerCase().includes(keyword)
-    ));
+    if (!keyword) return adminNavGroups;
+
+    return adminNavGroups.reduce((groups, group) => {
+      const groupMatches = (
+        getAdminMessage('vi', group.key).toLowerCase().includes(keyword)
+        || getAdminMessage('en', group.key).toLowerCase().includes(keyword)
+      );
+      const matchingChildren = groupMatches
+        ? group.children
+        : group.children.filter((item) => (
+          getAdminMessage('vi', item.key).toLowerCase().includes(keyword)
+          || getAdminMessage('en', item.key).toLowerCase().includes(keyword)
+        ));
+
+      return matchingChildren.length
+        ? [...groups, { ...group, children: matchingChildren }]
+        : groups;
+    }, []);
   }, [search]);
 
   const handleLogout = async () => {
@@ -37,7 +148,8 @@ const AdminCommandLayout = () => {
 
   useEffect(() => {
     setMobileOpen(false);
-  }, [location.pathname]);
+    setOpenGroupId(activeGroup.id);
+  }, [activeGroup.id, location.pathname]);
 
   useEffect(() => {
     if (!mobileOpen) return undefined;
@@ -60,22 +172,23 @@ const AdminCommandLayout = () => {
       </div>
 
       <nav aria-label={t('admin.navigation.label')} className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
-        {visibleNavigation.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            end={item.path !== '/admin/system-monitoring'}
-            onClick={() => setMobileOpen(false)}
-            className={({ isActive }) => `flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[13px] font-semibold leading-tight transition-all ${
-              isActive
-                ? 'bg-on-tertiary-container text-on-primary shadow-lg shadow-black/10'
-                : 'text-primary-fixed-dim hover:bg-on-primary-fixed-variant/20'
-            }`}
-          >
-            <span className="material-symbols-outlined shrink-0 text-[20px]">{item.icon}</span>
-            <span>{t(item.key)}</span>
-          </NavLink>
+        {visibleGroups.map((group) => (
+          <SidebarGroup
+            key={group.id}
+            group={group}
+            isExpanded={search.trim() ? true : openGroupId === group.id}
+            isGroupActive={group.id === activeGroup.id}
+            activeItemPath={activeItem.path}
+            t={t}
+            onToggle={() => setOpenGroupId((current) => (current === group.id ? '' : group.id))}
+            onNavigate={() => setMobileOpen(false)}
+          />
         ))}
+        {!visibleGroups.length ? (
+          <p className="px-3 py-4 text-center text-xs text-on-primary-container">
+            {t('admin.common.noData')}
+          </p>
+        ) : null}
       </nav>
 
       <div className="mt-3 space-y-2 px-1">

@@ -4,6 +4,7 @@ import FleetBus from './FleetBus.js';
 import RouteStation from './RouteStation.js';
 import TripSchedule from './TripSchedule.js';
 import DriverShiftAssignment from '../shifts/DriverShiftAssignment.js';
+import AssistantShiftAssignment from '../shifts/AssistantShiftAssignment.js';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
@@ -565,7 +566,14 @@ export default class AdminModel {
     const limit = Math.min(normalizePositiveInt(query.limit, 50), 100);
     const sortBy = SCHEDULE_SORT_FIELDS.has(query.sortBy) ? query.sortBy : 'serviceDate';
     const sortOrder = query.sortOrder === 'desc' ? -1 : 1;
-    const filters = {};
+    const filters = {
+      $and: [
+        { scheduleCode: { $type: 'string', $ne: '' } },
+        { serviceDate: { $type: 'date' } },
+        { routeId: { $type: 'objectId' } },
+        { departureTime: { $regex: /^\d{2}:\d{2}$/ } },
+      ],
+    };
 
     if (query.routeId) filters.routeId = query.routeId;
     if (query.status && query.status !== 'ALL') filters.status = query.status;
@@ -674,6 +682,25 @@ export default class AdminModel {
     const dateBounds = getDateBounds(payload.serviceDate);
     const assignments = await DriverShiftAssignment.find({
       driverId,
+      workDate: dateBounds ? { $gte: dateBounds.start, $lt: dateBounds.end } : payload.serviceDate,
+      status: { $in: ['ASSIGNED', 'IN_PROGRESS'] },
+    })
+      .populate('shiftId')
+      .lean();
+
+    return assignments.find((assignment) => (
+      assignment.shiftId
+      && assignment.shiftId.status === 'ACTIVE'
+      && isTimeRangeInsideShift(payload, assignment.shiftId)
+    )) || null;
+  }
+
+  static async findEligibleAssistantShiftAssignment(payload) {
+    const assistantId = payload.assistant?.userId;
+    if (!assistantId || !payload.serviceDate || !payload.departureTime || !payload.expectedArrivalTime) return null;
+    const dateBounds = getDateBounds(payload.serviceDate);
+    const assignments = await AssistantShiftAssignment.find({
+      assistantId,
       workDate: dateBounds ? { $gte: dateBounds.start, $lt: dateBounds.end } : payload.serviceDate,
       status: { $in: ['ASSIGNED', 'IN_PROGRESS'] },
     })

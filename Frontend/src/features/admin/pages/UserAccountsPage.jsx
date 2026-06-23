@@ -314,14 +314,14 @@ const UserAccountsPage = () => {
         }
 
         const nextUsers = response.users || [];
-        const nextSelectedUserId = nextUsers.some((user) => user._id === selectedUserId)
-          ? selectedUserId
-          : nextUsers[0]?._id || '';
-
         setUsers(nextUsers);
         setPagination(response.pagination || defaultPagination);
         setSummary(response.summary || defaultSummary);
-        setSelectedUserId(nextSelectedUserId);
+        setSelectedUserId((currentSelectedUserId) => (
+          nextUsers.some((user) => user._id === currentSelectedUserId)
+            ? currentSelectedUserId
+            : nextUsers[0]?._id || ''
+        ));
       } catch (loadError) {
         if (!ignore) {
           setUsers([]);
@@ -342,7 +342,7 @@ const UserAccountsPage = () => {
     return () => {
       ignore = true;
     };
-  }, [filters, selectedUserId]);
+  }, [filters]);
 
   useEffect(() => {
     let ignore = false;
@@ -425,7 +425,7 @@ const UserAccountsPage = () => {
     setFilters((current) => ({
       ...current,
       [key]: value,
-      page: 1,
+      page: key === 'page' ? value : 1,
     }));
   };
 
