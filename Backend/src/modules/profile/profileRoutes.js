@@ -14,6 +14,7 @@ const router = express.Router();
 router.use(authMiddleware);
 
 router.get('/me', asyncHandler(ProfileController.getMe));
+router.get('/travel-history', asyncHandler(ProfileController.getTravelHistory));
 router.put(
   '/update',
   validateRequest(validateProfileUpdate),

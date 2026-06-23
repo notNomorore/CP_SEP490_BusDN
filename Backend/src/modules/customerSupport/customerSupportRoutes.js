@@ -1,12 +1,20 @@
 import express from 'express';
 import CustomerSupportController from './CustomerSupportController.js';
 import { authMiddleware, authorizeRole } from '../../middleware/authMiddleware.js';
+import { feedbackUpload } from '../../middleware/uploadMiddleware.js';
 
 const router = express.Router();
 
 router.use(authMiddleware);
 
-router.post('/cases', authorizeRole('PASSENGER'), CustomerSupportController.createCase);
+router.post(
+  '/cases',
+  authorizeRole('PASSENGER'),
+  feedbackUpload.array('attachments', 5),
+  CustomerSupportController.createCase
+);
+router.get('/lost-items/me', authorizeRole('PASSENGER'), CustomerSupportController.listMyLostItemCases);
+router.get('/lost-items/:caseId', authorizeRole('PASSENGER'), CustomerSupportController.getMyLostItemCase);
 
 router.get('/admin/cases', authorizeRole('ADMIN'), CustomerSupportController.listCases);
 router.get('/admin/cases/:caseId', authorizeRole('ADMIN'), CustomerSupportController.getCaseDetail);

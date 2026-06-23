@@ -3,8 +3,16 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import AppInitializer from './shared/components/AppInitializer';
 import { HomePage } from './features/home';
 import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/priorityProfile';
-import { AdminCustomerSupportPage, AdminLostItemCasesPage } from './features/customerSupport';
+import {
+  AdminCustomerSupportPage,
+  AdminLostItemCasesPage,
+  LostItemCaseStatusPage,
+  ReportLostItemPage,
+  SubmitFeedbackPage,
+} from './features/customerSupport';
 import { SearchRoutesPage } from './features/routes';
+import { ETicketPage, MyTicketsPage } from './features/tickets';
+import { TravelHistoryPage } from './features/travelHistory';
 import {
   AdminCommandLayout,
   AdminActiveTripsPage,
@@ -130,6 +138,12 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="/my-tickets" element={<ProtectedRoute><MyTicketsPage /></ProtectedRoute>} />
+          <Route path="/tickets/:ticketId" element={<ProtectedRoute><ETicketPage /></ProtectedRoute>} />
+          <Route path="/travel-history" element={<ProtectedRoute><TravelHistoryPage /></ProtectedRoute>} />
+          <Route path="/submit-feedback" element={<ProtectedRoute><SubmitFeedbackPage /></ProtectedRoute>} />
+          <Route path="/report-lost-item" element={<ProtectedRoute><ReportLostItemPage /></ProtectedRoute>} />
+          <Route path="/lost-item-cases" element={<ProtectedRoute><LostItemCaseStatusPage /></ProtectedRoute>} />
 
           {/* Ticket Feature */}
           {/* <Route path="/booking" element={<ProtectedRoute><BookingPage /></ProtectedRoute>} />

@@ -1,6 +1,11 @@
 import apiClient from '../../../shared/services/apiClient.js';
 
 export const routeService = {
+  purchaseOneWayTicket: async (payload) => {
+    const response = await apiClient.post('/tickets/one-way', payload);
+    return response.data;
+  },
+
   searchRoutes: async ({ q = '', from = '', to = '' } = {}) => {
     const response = await apiClient.get('/routes/search', {
       params: { q, from, to },

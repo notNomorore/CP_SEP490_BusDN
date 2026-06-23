@@ -249,6 +249,21 @@ const TravelHistorySchema = new mongoose.Schema(
       trim: true,
       required: true,
     },
+    tripId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    ticketCode: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    ticketType: {
+      type: String,
+      trim: true,
+      default: 'ONE_WAY',
+    },
     fromStop: {
       type: String,
       trim: true,
@@ -262,6 +277,12 @@ const TravelHistorySchema = new mongoose.Schema(
     boardedAt: {
       type: Date,
       required: true,
+    },
+    arrivedAt: Date,
+    durationMinutes: {
+      type: Number,
+      min: 0,
+      default: 0,
     },
     fare: {
       type: Number,
@@ -280,7 +301,7 @@ const TravelHistorySchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['COMPLETED', 'CANCELLED', 'IN_PROGRESS'],
+      enum: ['COMPLETED', 'CANCELLED', 'IN_PROGRESS', 'INTERRUPTED', 'MISSED_TRIP'],
       default: 'COMPLETED',
     },
   },

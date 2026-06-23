@@ -6,6 +6,11 @@ export class ProfileController {
     return res.success(profile, 'Profile retrieved successfully');
   }
 
+  static async getTravelHistory(req, res) {
+    const history = await ProfileService.getTravelHistory(req.user.userId);
+    return res.success(history, 'Travel history retrieved successfully');
+  }
+
   static async updateProfile(req, res) {
     const profile = await ProfileService.updateProfile(req.user.userId, req.body);
     return res.success(profile, 'Profile updated successfully');

@@ -39,6 +39,10 @@ const Header = ({ forceDarkMode = false }) => {
     { key: 'passenger.nav.monitoring', path: '/admin/system-monitoring', requiresAuth: true, adminOnly: true },
     { key: 'passenger.nav.partner', href: '/#partners', hideForAdmin: true },
     { key: 'passenger.nav.routes', path: '/search', hideForAdmin: true },
+    { key: 'passenger.nav.tickets', label: 'My Tickets', path: '/my-tickets', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.history', label: 'Travel History', path: '/travel-history', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.feedback', label: 'Feedback', path: '/submit-feedback', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.lostItems', label: 'Lost Items', path: '/lost-item-cases', requiresAuth: true, hideForAdmin: true },
     { key: 'passenger.nav.help', href: '/#support', hideForAdmin: true }
   ].filter((link) => (!link.adminOnly || isAdmin()) && (!link.hideForAdmin || !isAdmin()));
 
@@ -195,7 +199,7 @@ const Header = ({ forceDarkMode = false }) => {
                       : `${secondaryTextClass} rounded-lg px-2 py-1 hover:bg-surface-container-low/80 hover:text-primary`
                   }`}
                 >
-                  {t(link.key)}
+                  {link.label || t(link.key)}
                 </a>
               );
             })}
@@ -496,11 +500,11 @@ const Header = ({ forceDarkMode = false }) => {
                   onClick={(event) => handleNavClick(event, link)}
                   className={`${itemClassName} w-full text-left`}
                 >
-                  {t(link.key)}
+                  {link.label || t(link.key)}
                 </button>
               ) : (
                 <a key={link.key} href={link.href} className={itemClassName}>
-                  {t(link.key)}
+                  {link.label || t(link.key)}
                 </a>
               );
             })}

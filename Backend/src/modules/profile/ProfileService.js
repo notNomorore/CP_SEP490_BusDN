@@ -15,6 +15,65 @@ export class ProfileService {
     return ProfileResponseDTO.format(user);
   }
 
+  static async getTravelHistory(userId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const records = (user.travelHistory || [])
+      .map((record, index) => {
+        const item = record.toObject ? record.toObject() : record;
+        const boardedAt = item.boardedAt ? new Date(item.boardedAt) : null;
+        const arrivedAt = item.arrivedAt
+          ? new Date(item.arrivedAt)
+          : boardedAt && item.durationMinutes
+            ? new Date(boardedAt.getTime() + item.durationMinutes * 60000)
+            : null;
+
+        return {
+          id: `${userId}-${item.ticketCode || item.tripId || index}`,
+          travelHistoryId: `${userId}-${item.ticketCode || item.tripId || index}`,
+          tripId: item.tripId || '',
+          routeNumber: item.routeNumber,
+          routeName: item.routeNumber,
+          boardingStop: item.fromStop,
+          destinationStop: item.toStop,
+          travelDate: boardedAt,
+          boardingTime: boardedAt,
+          arrivalTime: arrivedAt,
+          travelDurationMinutes: item.durationMinutes || 0,
+          ticketType: item.ticketType || 'ONE_WAY',
+          ticketId: item.ticketCode || '',
+          fareAmount: item.fare || 0,
+          paymentMethod: item.paymentMethod || '',
+          travelStatus: item.status || 'COMPLETED',
+          vehicleLabel: item.vehicleLabel || '',
+          hasTicketReference: Boolean(item.ticketCode),
+          detailStatus: item.ticketCode ? 'AVAILABLE' : 'PARTIAL_TICKET_REFERENCE',
+        };
+      })
+      .sort((first, second) => new Date(second.boardingTime || 0) - new Date(first.boardingTime || 0));
+
+    const summary = records.reduce((result, record) => {
+      result.totalTrips += 1;
+      result.totalFare += record.fareAmount;
+      result.totalDurationMinutes += record.travelDurationMinutes;
+      result.statusCounts[record.travelStatus] = (result.statusCounts[record.travelStatus] || 0) + 1;
+      result.routeCounts[record.routeNumber] = (result.routeCounts[record.routeNumber] || 0) + 1;
+      return result;
+    }, {
+      totalTrips: 0,
+      totalFare: 0,
+      totalDurationMinutes: 0,
+      statusCounts: {},
+      routeCounts: {},
+    });
+
+    return { records, count: records.length, summary };
+  }
+
   static async updateProfile(userId, payload) {
     const existingUser = await ProfileRepository.findById(userId);
 
