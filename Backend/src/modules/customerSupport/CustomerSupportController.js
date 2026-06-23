@@ -10,7 +10,13 @@ import logger from '../../utils/logger.js';
 export class CustomerSupportController {
   static async createCase(req, res, next) {
     try {
-      const validationErrors = CreateSupportCaseDTO.validate(req.body);
+      const body = {
+        ...req.body,
+        lostItem: typeof req.body.lostItem === 'string'
+          ? JSON.parse(req.body.lostItem || '{}')
+          : req.body.lostItem,
+      };
+      const validationErrors = CreateSupportCaseDTO.validate(body);
 
       if (validationErrors) {
         return res.status(400).json({
@@ -20,11 +26,13 @@ export class CustomerSupportController {
         });
       }
 
-      const supportCase = await CustomerSupportService.createCase(req.user.userId, req.body);
+      const supportCase = await CustomerSupportService.createCase(req.user.userId, body, req.files || []);
 
       return res.status(201).json({
         success: true,
-        message: 'Support case submitted successfully',
+        message: supportCase.type === 'SERVICE_FEEDBACK'
+          ? `Feedback submitted successfully. Reference number: ${supportCase.referenceNumber}`
+          : 'Support case submitted successfully',
         data: SupportCaseResponseDTO.format(supportCase),
       });
     } catch (error) {
@@ -44,6 +52,48 @@ export class CustomerSupportController {
       });
     } catch (error) {
       logger.error('List support cases error:', error);
+      next(error);
+    }
+  }
+
+  static async listMyLostItemCases(req, res, next) {
+    try {
+      const cases = await CustomerSupportService.listMyLostItemCases(req.user.userId);
+
+      return res.json({
+        success: true,
+        data: cases,
+        meta: {
+          total: cases.length,
+        },
+      });
+    } catch (error) {
+      logger.error('List passenger lost item cases error:', error);
+      next(error);
+    }
+  }
+
+  static async getMyLostItemCase(req, res, next) {
+    try {
+      const supportCase = await CustomerSupportService.getMyLostItemCase(
+        req.user.userId,
+        req.params.caseId
+      );
+
+      return res.json({
+        success: true,
+        data: supportCase,
+      });
+    } catch (error) {
+      logger.error('Get passenger lost item case error:', error);
+
+      if (error.statusCode === 404 || error.message.includes('not found')) {
+        return res.status(404).json({
+          success: false,
+          message: 'Lost item case not found',
+        });
+      }
+
       next(error);
     }
   }

@@ -11,7 +11,7 @@ import {
   useMap,
   ZoomControl,
 } from 'react-leaflet';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import routeService from '../services/routeService';
 import useAuthStore from '../../auth/stores/authStore';
 import Header from '../../../shared/components/navigation/Header';
@@ -559,6 +559,7 @@ const RouteDetailsPanel = ({
   onToggleDelayNotification,
   onToggleRouteChangeNotification,
   onToggleLiveLocation,
+  onPurchaseTicket,
   onClose,
 }) => {
   const [directionTab, setDirectionTab] = useState('outbound');
@@ -717,6 +718,28 @@ const RouteDetailsPanel = ({
               <div className="mb-1 text-[11px] font-black uppercase text-emerald-700">Route Description</div>
               Optimized route from {directionOrigin} to {directionDestination}, including key stops,
               operating hours, estimated minimum trip duration, fare, and nearby stop support.
+            </div>
+
+            <div className="rounded-lg border border-emerald-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-black text-slate-950">One-way ticket</div>
+                  <p className="mt-1 text-sm leading-5 text-slate-600">
+                    Book a single trip from {directionOrigin} to {directionDestination}.
+                  </p>
+                </div>
+                <span className="shrink-0 rounded bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase text-emerald-700">
+                  {formatFare(route.fare)}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onPurchaseTicket?.(route)}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-black text-white hover:bg-emerald-700"
+              >
+                <span className="material-symbols-outlined text-[19px]">confirmation_number</span>
+                Purchase Ticket
+              </button>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white">
@@ -1259,6 +1282,258 @@ const FavoriteStopsPanel = ({ favoriteStops, onRemove }) => (
   </section>
 );
 
+const RouteChangeNotificationCenter = ({ notifications, onMarkRead, onDismiss }) => {
+  const unreadCount = notifications.filter((notification) => (
+    notification.notificationStatus === 'UNREAD'
+  )).length;
+
+  return (
+    <section className="mt-5 border-t border-slate-200 pt-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">
+            Notification Center
+          </div>
+          <p className="mt-1 text-xs text-slate-500">Route change alerts from subscribed routes.</p>
+        </div>
+        <span className={`rounded px-2 py-0.5 text-[10px] font-black uppercase ${
+          unreadCount ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500'
+        }`}>
+          {unreadCount} unread
+        </span>
+      </div>
+
+      {notifications.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
+          No route change notifications.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {notifications.slice(0, 5).map((notification) => {
+            const deliveredDate = notification.deliveredAt
+              ? new Date(notification.deliveredAt).toLocaleString('en-GB', {
+                day: '2-digit',
+                month: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+              : 'Just now';
+            const isUnread = notification.notificationStatus === 'UNREAD';
+
+            return (
+              <article
+                key={notification.notificationId}
+                className={`rounded-lg border p-3 shadow-sm ${
+                  isUnread ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-black text-white">
+                        {notification.routeNumber}
+                      </span>
+                      <span className="truncate text-sm font-black text-slate-950">
+                        Route changed
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs font-semibold leading-5 text-slate-700">
+                      {notification.reasonForChange || 'Route information has changed.'}
+                    </p>
+                    {notification.updatedRoutePath && (
+                      <p className="mt-1 text-xs leading-5 text-slate-600">
+                        {notification.updatedRoutePath}
+                      </p>
+                    )}
+                    {notification.changedStops?.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {notification.changedStops.map((stop) => (
+                          <span
+                            key={`${notification.notificationId}-${stop.stopName}-${stop.changeType}`}
+                            className="rounded border border-amber-200 bg-white px-2 py-0.5 text-[10px] font-bold text-amber-700"
+                          >
+                            {stop.stopName}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {notification.alternativeSuggestion && (
+                      <p className="mt-2 text-xs font-semibold leading-5 text-emerald-700">
+                        {notification.alternativeSuggestion}
+                      </p>
+                    )}
+                    <p className="mt-2 text-[11px] font-semibold text-slate-400">{deliveredDate}</p>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    {isUnread && (
+                      <button
+                        type="button"
+                        onClick={() => onMarkRead(notification.notificationId)}
+                        className="rounded p-1 text-emerald-700 hover:bg-white"
+                        aria-label="Mark route change notification as read"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">done</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onDismiss(notification.notificationId)}
+                      className="rounded p-1 text-slate-500 hover:bg-white hover:text-slate-800"
+                      aria-label="Dismiss route change notification"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">close</span>
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+};
+
+const todayInputValue = () => new Date().toISOString().slice(0, 10);
+
+const PurchaseTicketModal = ({ route, ticket, error, isSubmitting, onClose, onSubmit, onViewTicket }) => {
+  const stops = route?.stops || [];
+  const [form, setForm] = useState(() => ({
+    departureLocation: stops[0]?.name || route?.origin || '',
+    destinationLocation: stops[stops.length - 1]?.name || route?.destination || '',
+    serviceDate: todayInputValue(),
+    departureTime: route?.operatingHours?.firstDeparture || '05:30',
+    seatNumber: 'A1',
+    paymentMethod: 'E_WALLET',
+  }));
+
+  if (!route) {
+    return null;
+  }
+
+  const updateForm = (updates) => setForm((current) => ({ ...current, ...updates }));
+
+  return (
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-slate-950/50 px-4">
+      <section className="w-full max-w-xl rounded-xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+          <div>
+            <div className="text-xs font-black uppercase tracking-wide text-emerald-700">Purchase one-way ticket</div>
+            <h2 className="mt-1 text-xl font-black text-slate-950">{route.routeNumber} - {route.name}</h2>
+          </div>
+          <button type="button" onClick={onClose} className="rounded p-2 text-slate-400 hover:bg-slate-100">
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmit?.(form);
+          }}
+          className="space-y-4 px-5 py-4"
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1 text-sm font-bold text-slate-700">
+              Departure
+              <select
+                value={form.departureLocation}
+                onChange={(event) => updateForm({ departureLocation: event.target.value })}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 font-medium"
+              >
+                {stops.map((stop) => <option key={`from-${stop.order}`} value={stop.name}>{stop.name}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm font-bold text-slate-700">
+              Destination
+              <select
+                value={form.destinationLocation}
+                onChange={(event) => updateForm({ destinationLocation: event.target.value })}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 font-medium"
+              >
+                {stops.map((stop) => <option key={`to-${stop.order}`} value={stop.name}>{stop.name}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm font-bold text-slate-700">
+              Service date
+              <input
+                type="date"
+                value={form.serviceDate}
+                onChange={(event) => updateForm({ serviceDate: event.target.value })}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 font-medium"
+              />
+            </label>
+            <label className="space-y-1 text-sm font-bold text-slate-700">
+              Departure time
+              <input
+                type="time"
+                value={form.departureTime}
+                onChange={(event) => updateForm({ departureTime: event.target.value })}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 font-medium"
+              />
+            </label>
+            <label className="space-y-1 text-sm font-bold text-slate-700">
+              Seat number
+              <input
+                value={form.seatNumber}
+                onChange={(event) => updateForm({ seatNumber: event.target.value.toUpperCase() })}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 font-medium"
+                placeholder="A1"
+              />
+            </label>
+            <label className="space-y-1 text-sm font-bold text-slate-700">
+              Payment method
+              <select
+                value={form.paymentMethod}
+                onChange={(event) => updateForm({ paymentMethod: event.target.value })}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 font-medium"
+              >
+                <option value="E_WALLET">E-wallet</option>
+                <option value="CREDIT_CARD">Credit card</option>
+                <option value="CASHLESS">Cashless payment</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+            Estimated price: <strong>{formatFare(route.fare)}</strong>. Final price is calculated from selected stop span.
+          </div>
+
+          {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+
+          {ticket && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              <div className="font-black">Ticket purchased successfully</div>
+              <div className="mt-1">Code: {ticket.ticketCode} - Seat {ticket.seatNumber}</div>
+              <div>Booking status: {ticket.bookingStatus} - Payment: {ticket.paymentStatus}</div>
+              <button
+                type="button"
+                onClick={() => onViewTicket?.(ticket)}
+                className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-black text-white hover:bg-emerald-800"
+              >
+                View E-Ticket
+              </button>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600">
+              Close
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white hover:bg-emerald-700 disabled:opacity-60"
+            >
+              {isSubmitting ? 'Processing...' : 'Confirm purchase'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+};
+
 const PlannerResultCard = ({ result, isRecommended = false, isSelected = false, onSelect }) => (
   <button
     type="button"
@@ -1352,6 +1627,7 @@ const NearbyStopCard = ({ stop, onSelect }) => {
 };
 
 const SearchRoutesPage = () => {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('lookup');
@@ -1376,6 +1652,7 @@ const SearchRoutesPage = () => {
   const [arrivalNotifications, setArrivalNotifications] = useState([]);
   const [delayNotifications, setDelayNotifications] = useState([]);
   const [routeChangeNotifications, setRouteChangeNotifications] = useState([]);
+  const [routeChangeAlerts, setRouteChangeAlerts] = useState([]);
   const [arrivalAlerts, setArrivalAlerts] = useState([]);
   const [delayAlerts, setDelayAlerts] = useState([]);
   const [notifiedArrivalKeys, setNotifiedArrivalKeys] = useState(new Set());
@@ -1385,6 +1662,10 @@ const SearchRoutesPage = () => {
   const [liveBusData, setLiveBusData] = useState(null);
   const [isLiveLoading, setIsLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState('');
+  const [ticketRoute, setTicketRoute] = useState(null);
+  const [purchasedTicket, setPurchasedTicket] = useState(null);
+  const [ticketError, setTicketError] = useState('');
+  const [isPurchasingTicket, setIsPurchasingTicket] = useState(false);
 
   const activeFilters = useMemo(() => ({
     q: searchParams.get('q') || '',
@@ -1461,6 +1742,9 @@ const SearchRoutesPage = () => {
   const isLiveTrackingSelectedRoute = Boolean(
     selectedRoute?.id && isSameRouteId(liveRouteId, selectedRoute.id)
   );
+  const canReceiveNotificationType = (type) => (
+    user?.notificationEnabled !== false && user?.notificationTypes?.[type] !== false
+  );
 
   const mapStops = useMemo(() => {
     const seen = new Set();
@@ -1534,6 +1818,7 @@ const SearchRoutesPage = () => {
         setArrivalNotifications([]);
         setDelayNotifications([]);
         setRouteChangeNotifications([]);
+        setRouteChangeAlerts([]);
         return;
       }
 
@@ -1544,12 +1829,14 @@ const SearchRoutesPage = () => {
           arrivalNotificationResult,
           delayNotificationResult,
           routeChangeNotificationResult,
+          routeChangeAlertResult,
         ] = await Promise.all([
           routeService.getFavoriteRoutes(),
           routeService.getFavoriteStops(),
           routeService.getArrivalNotifications(),
           routeService.getDelayNotifications(),
           routeService.getRouteChangeNotifications(),
+          routeService.getRouteChangeAlerts(),
         ]);
 
         if (isMounted) {
@@ -1558,6 +1845,7 @@ const SearchRoutesPage = () => {
           setArrivalNotifications(arrivalNotificationResult || []);
           setDelayNotifications(delayNotificationResult || []);
           setRouteChangeNotifications(routeChangeNotificationResult || []);
+          setRouteChangeAlerts(routeChangeAlertResult?.notifications || []);
         }
       } catch (err) {
         if (isMounted && err.statusCode !== 403) {
@@ -1614,7 +1902,11 @@ const SearchRoutesPage = () => {
   }, [liveRouteId]);
 
   useEffect(() => {
-    if (!liveBusData?.stopEtaSummary?.length || !arrivalNotifications.length) {
+    if (
+      !canReceiveNotificationType('arrivalAlerts')
+      || !liveBusData?.stopEtaSummary?.length
+      || !arrivalNotifications.length
+    ) {
       return;
     }
 
@@ -1667,10 +1959,14 @@ const SearchRoutesPage = () => {
         });
       });
     }
-  }, [arrivalNotifications, liveBusData, notifiedArrivalKeys]);
+  }, [arrivalNotifications, liveBusData, notifiedArrivalKeys, user]);
 
   useEffect(() => {
-    if (!liveBusData?.buses?.length || !delayNotifications.length) {
+    if (
+      !canReceiveNotificationType('delayAlerts')
+      || !liveBusData?.buses?.length
+      || !delayNotifications.length
+    ) {
       return;
     }
 
@@ -1725,10 +2021,14 @@ const SearchRoutesPage = () => {
         });
       });
     }
-  }, [delayNotifications, liveBusData, notifiedDelayKeys]);
+  }, [delayNotifications, liveBusData, notifiedDelayKeys, user]);
 
   useEffect(() => {
-    if (!liveBusData?.routeChange || !routeChangeNotifications.length) {
+    if (
+      !canReceiveNotificationType('routeChangeAlerts')
+      || !liveBusData?.routeChange
+      || !routeChangeNotifications.length
+    ) {
       return;
     }
 
@@ -1770,6 +2070,9 @@ const SearchRoutesPage = () => {
 
     setNotifiedRouteChangeKeys(nextNotifiedKeys);
     setDelayAlerts((current) => [...nextAlerts, ...current].slice(0, 4));
+    routeService.getRouteChangeAlerts()
+      .then((result) => setRouteChangeAlerts(result?.notifications || []))
+      .catch(() => {});
 
     if ('Notification' in window && Notification.permission === 'granted') {
       nextAlerts.forEach((alert) => {
@@ -1778,7 +2081,41 @@ const SearchRoutesPage = () => {
         });
       });
     }
-  }, [liveBusData, notifiedRouteChangeKeys, routeChangeNotifications]);
+  }, [liveBusData, notifiedRouteChangeKeys, routeChangeNotifications, user]);
+
+  const refreshRouteChangeAlerts = async () => {
+    if (!user) {
+      setRouteChangeAlerts([]);
+      return [];
+    }
+
+    const result = await routeService.getRouteChangeAlerts();
+    const notifications = result?.notifications || [];
+    setRouteChangeAlerts(notifications);
+    return notifications;
+  };
+
+  const handleMarkRouteChangeAlertRead = async (notificationId) => {
+    try {
+      const notification = await routeService.markRouteChangeAlertRead(notificationId);
+      setRouteChangeAlerts((current) => current.map((item) => (
+        item.notificationId === notification.notificationId ? notification : item
+      )));
+    } catch (err) {
+      setError(err.message || 'Unable to update route change notification.');
+    }
+  };
+
+  const handleDismissRouteChangeAlert = async (notificationId) => {
+    try {
+      await routeService.dismissRouteChangeAlert(notificationId);
+      setRouteChangeAlerts((current) => (
+        current.filter((item) => item.notificationId !== notificationId)
+      ));
+    } catch (err) {
+      setError(err.message || 'Unable to dismiss route change notification.');
+    }
+  };
 
   const clearError = () => {
     if (error) {
@@ -2167,6 +2504,9 @@ const SearchRoutesPage = () => {
         setRouteChangeNotifications((current) => (
           current.filter((subscription) => subscription.subscriptionId !== existingSubscription.subscriptionId)
         ));
+        setRouteChangeAlerts((current) => (
+          current.filter((notification) => notification.subscriptionId !== existingSubscription.subscriptionId)
+        ));
         setFavoriteMessage('Route change notification disabled.');
         return;
       }
@@ -2185,6 +2525,7 @@ const SearchRoutesPage = () => {
         ...current.filter((item) => item.subscriptionId !== subscription.subscriptionId),
       ]);
       setFavoriteMessage('Route change notification enabled for this route.');
+      await refreshRouteChangeAlerts();
 
       if ('Notification' in window && Notification.permission === 'denied') {
         setError('Browser notification permission is disabled. In-app route change alerts will still appear.');
@@ -2193,6 +2534,7 @@ const SearchRoutesPage = () => {
       if (err.message === 'Route change notification already enabled') {
         const subscriptions = await routeService.getRouteChangeNotifications();
         setRouteChangeNotifications(subscriptions || []);
+        await refreshRouteChangeAlerts();
         setFavoriteMessage('Route change notification already enabled.');
         return;
       }
@@ -2225,6 +2567,54 @@ const SearchRoutesPage = () => {
   const handleDismissArrivalAlert = (alertId) => {
     setArrivalAlerts((current) => current.filter((alert) => alert.id !== alertId));
     setDelayAlerts((current) => current.filter((alert) => alert.id !== alertId));
+  };
+
+  const handleOpenPurchaseTicket = (route) => {
+    setTicketRoute(route);
+    setPurchasedTicket(null);
+    setTicketError('');
+  };
+
+  const handleClosePurchaseTicket = () => {
+    setTicketRoute(null);
+    setPurchasedTicket(null);
+    setTicketError('');
+  };
+
+  const handlePurchaseTicket = async (form) => {
+    if (!ticketRoute) {
+      return;
+    }
+
+    setIsPurchasingTicket(true);
+    setTicketError('');
+
+    try {
+      const ticket = await routeService.purchaseOneWayTicket({
+        routeId: ticketRoute.id,
+        tripId: `${ticketRoute.routeNumber}-${form.serviceDate}-${form.departureTime}`,
+        departureLocation: form.departureLocation,
+        destinationLocation: form.destinationLocation,
+        seatNumber: form.seatNumber,
+        serviceDate: form.serviceDate,
+        departureTime: form.departureTime,
+        paymentMethod: form.paymentMethod,
+      });
+
+      setPurchasedTicket(ticket);
+      setFavoriteMessage('One-way ticket purchased successfully.');
+    } catch (err) {
+      setTicketError(err.message || 'Unable to purchase ticket.');
+    } finally {
+      setIsPurchasingTicket(false);
+    }
+  };
+
+  const handleViewPurchasedTicket = (ticket) => {
+    const ticketId = ticket?.id || ticket?._id;
+    if (ticketId) {
+      navigate(`/tickets/${ticketId}`);
+    }
   };
 
   const handleFindBestRoute = async (event) => {
@@ -2419,6 +2809,11 @@ const SearchRoutesPage = () => {
                   favoriteStops={favoriteStops}
                   onRemove={handleRemoveFavoriteStop}
                 />
+                <RouteChangeNotificationCenter
+                  notifications={routeChangeAlerts}
+                  onMarkRead={handleMarkRouteChangeAlertRead}
+                  onDismiss={handleDismissRouteChangeAlert}
+                />
               </>
             ) : (
               <form onSubmit={handleFindBestRoute} className="space-y-3">
@@ -2602,9 +2997,19 @@ const SearchRoutesPage = () => {
             onToggleDelayNotification={handleToggleDelayNotification}
             onToggleRouteChangeNotification={handleToggleRouteChangeNotification}
             onToggleLiveLocation={handleToggleLiveLocation}
+            onPurchaseTicket={handleOpenPurchaseTicket}
             onClose={() => setSelectedRoute(null)}
           />
         )}
+        <PurchaseTicketModal
+          route={ticketRoute}
+          ticket={purchasedTicket}
+          error={ticketError}
+          isSubmitting={isPurchasingTicket}
+          onClose={handleClosePurchaseTicket}
+          onSubmit={handlePurchaseTicket}
+          onViewTicket={handleViewPurchasedTicket}
+        />
       </main>
     </div>
   );

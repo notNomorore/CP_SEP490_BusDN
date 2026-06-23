@@ -86,14 +86,185 @@ const formatDateValue = (value) => {
   }
 };
 
+const notificationTypeOptions = [
+  {
+    name: 'arrivalAlerts',
+    title: 'Bus arrival alerts',
+    description: 'Notify when a subscribed bus is approaching or arriving at your selected stop.',
+  },
+  {
+    name: 'delayAlerts',
+    title: 'Delay alerts',
+    description: 'Notify when a subscribed route has buses delayed beyond the expected schedule.',
+  },
+  {
+    name: 'routeChangeAlerts',
+    title: 'Route change alerts',
+    description: 'Notify when subscribed routes have detours, stop changes, or temporary path updates.',
+  },
+  {
+    name: 'tripUpdates',
+    title: 'Trip updates',
+    description: 'Notify about travel status, trip progress, and important passenger journey updates.',
+  },
+  {
+    name: 'accountUpdates',
+    title: 'Account updates',
+    description: 'Notify about monthly pass, profile, security, and account-related changes.',
+  },
+];
+
+const monthlyPassOptions = [
+  { value: 'STANDARD', label: 'Standard monthly pass', price: 250000 },
+  { value: 'STUDENT', label: 'Student monthly pass', price: 120000 },
+  { value: 'PRIORITY', label: 'Priority monthly pass', price: 0 },
+];
+
+const formatCurrency = (value) => new Intl.NumberFormat('vi-VN', {
+  style: 'currency',
+  currency: 'VND',
+  maximumFractionDigits: 0,
+}).format(value || 0);
+
+const todayInputValue = () => new Date().toISOString().slice(0, 10);
+
+const formatPassType = (value) => String(value || 'STANDARD')
+  .toLowerCase()
+  .replace(/_/g, ' ')
+  .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const MonthlyPassPurchaseModal = ({ pass, error, isSubmitting, onClose, onSubmit }) => {
+  const [form, setForm] = useState({
+    passType: 'STANDARD',
+    startDate: todayInputValue(),
+    validityMonths: 1,
+    paymentMethod: 'E_WALLET',
+  });
+  const selectedOption = monthlyPassOptions.find((option) => option.value === form.passType) || monthlyPassOptions[0];
+  const totalPrice = selectedOption.price * Number(form.validityMonths || 1);
+
+  return (
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-primary/40 px-4">
+      <section className="w-full max-w-xl rounded-[28px] bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-outline-variant/40 px-6 py-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-on-tertiary-container">Purchase Monthly Pass</p>
+            <h2 className="mt-2 text-2xl font-headline font-extrabold text-primary">Monthly transportation pass</h2>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full p-2 text-outline hover:bg-surface-container">
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmit(form);
+          }}
+          className="space-y-4 px-6 py-5"
+        >
+          <label className="space-y-2">
+            <span className="text-sm font-bold text-primary">Pass type</span>
+            <select
+              value={form.passType}
+              onChange={(event) => setForm((current) => ({ ...current, passType: event.target.value }))}
+              className={fieldClassName}
+            >
+              {monthlyPassOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label} - {formatCurrency(option.price)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-sm font-bold text-primary">Start date</span>
+              <input
+                type="date"
+                value={form.startDate}
+                onChange={(event) => setForm((current) => ({ ...current, startDate: event.target.value }))}
+                className={fieldClassName}
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="text-sm font-bold text-primary">Validity period</span>
+              <select
+                value={form.validityMonths}
+                onChange={(event) => setForm((current) => ({ ...current, validityMonths: Number(event.target.value) }))}
+                className={fieldClassName}
+              >
+                <option value={1}>1 month</option>
+                <option value={3}>3 months</option>
+                <option value={6}>6 months</option>
+              </select>
+            </label>
+          </div>
+
+          <label className="space-y-2">
+            <span className="text-sm font-bold text-primary">Payment method</span>
+            <select
+              value={form.paymentMethod}
+              onChange={(event) => setForm((current) => ({ ...current, paymentMethod: event.target.value }))}
+              className={fieldClassName}
+            >
+              <option value="E_WALLET">E-wallet</option>
+              <option value="CREDIT_CARD">Credit card</option>
+              <option value="ONLINE_BANKING">Online banking</option>
+            </select>
+          </label>
+
+          <div className="rounded-[22px] bg-primary-fixed px-5 py-4 text-sm text-on-primary-fixed">
+            Pass price: <strong>{formatCurrency(totalPrice)}</strong>. The digital pass will be linked to your account after successful payment.
+          </div>
+
+          {error ? (
+            <div className="rounded-[20px] border border-error/20 bg-error-container px-4 py-3 text-sm text-on-error-container">
+              {error}
+            </div>
+          ) : null}
+
+          {pass ? (
+            <div className="rounded-[20px] border border-on-tertiary-container/20 bg-tertiary-container px-4 py-3 text-sm text-on-tertiary-container">
+              <p className="font-black">Monthly pass purchased successfully</p>
+              <p className="mt-1">Code: {pass.passCode} - {pass.passType}</p>
+              <p>Status: {pass.passStatus} - Payment: {pass.paymentStatus}</p>
+            </div>
+          ) : null}
+
+          <div className="flex justify-end gap-3 border-t border-outline-variant/30 pt-4">
+            <button type="button" onClick={onClose} className="rounded-full border border-outline-variant px-5 py-3 text-sm font-bold text-primary">
+              Close
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="rounded-full bg-primary px-5 py-3 text-sm font-bold text-white hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSubmitting ? 'Processing...' : 'Confirm purchase'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+};
+
 const ProfilePage = () => {
   const navigate = useNavigate();
   const { user, syncUser, logout } = useAuthStore();
   const [profile, setProfile] = useState(null);
   const [favoriteRoutes, setFavoriteRoutes] = useState([]);
   const [favoriteStops, setFavoriteStops] = useState([]);
+  const [monthlyPasses, setMonthlyPasses] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isNotificationSaving, setIsNotificationSaving] = useState(false);
+  const [isMonthlyPassModalOpen, setIsMonthlyPassModalOpen] = useState(false);
+  const [isMonthlyPassSaving, setIsMonthlyPassSaving] = useState(false);
+  const [monthlyPassPurchase, setMonthlyPassPurchase] = useState(null);
+  const [monthlyPassError, setMonthlyPassError] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isPasswordSaving, setIsPasswordSaving] = useState(false);
   const [avatarPreview, setAvatarPreview] = useState('');
@@ -131,27 +302,33 @@ const ProfilePage = () => {
   });
 
   const notificationEnabled = watch('notificationEnabled');
+  const notificationTypes = watch('notificationTypes');
 
   const loadProfile = async () => {
     setIsLoading(true);
     setErrorMessage('');
 
     try {
-      const [profilePayload, routesPayload, stopsPayload] = await Promise.all([
+      const [profilePayload, routesPayload, stopsPayload, monthlyPassPayload] = await Promise.all([
         profileService.getMyProfile(),
         profileService.getFavoriteRoutes(),
         profileService.getFavoriteStops(),
+        profileService.getMyMonthlyPasses(),
       ]);
 
       setProfile(profilePayload);
       setFavoriteRoutes(routesPayload);
       setFavoriteStops(stopsPayload);
+      setMonthlyPasses(monthlyPassPayload?.passes || []);
       syncUser({
         ...(user || {}),
         fullName: profilePayload.fullName,
         email: profilePayload.email,
         avatar: profilePayload.avatar,
         role: profilePayload.role,
+        notificationEnabled: profilePayload.notificationEnabled,
+        notificationTypes: profilePayload.notificationTypes,
+        notificationDevice: profilePayload.notificationDevice,
       });
       reset({
         fullName: profilePayload.fullName || '',
@@ -163,6 +340,13 @@ const ProfilePage = () => {
           : '',
         address: profilePayload.address || '',
         notificationEnabled: profilePayload.notificationEnabled ?? true,
+        notificationTypes: {
+          arrivalAlerts: profilePayload.notificationTypes?.arrivalAlerts ?? true,
+          delayAlerts: profilePayload.notificationTypes?.delayAlerts ?? true,
+          routeChangeAlerts: profilePayload.notificationTypes?.routeChangeAlerts ?? true,
+          tripUpdates: profilePayload.notificationTypes?.tripUpdates ?? true,
+          accountUpdates: profilePayload.notificationTypes?.accountUpdates ?? true,
+        },
       });
       setAvatarPreview(getAvatarSource(profilePayload.avatar));
     } catch (error) {
@@ -208,6 +392,9 @@ const ProfilePage = () => {
         email: updatedProfile.email,
         avatar: updatedProfile.avatar,
         role: updatedProfile.role,
+        notificationEnabled: updatedProfile.notificationEnabled,
+        notificationTypes: updatedProfile.notificationTypes,
+        notificationDevice: updatedProfile.notificationDevice,
       });
       toast.success('Profile updated successfully');
       reset({
@@ -273,6 +460,103 @@ const ProfilePage = () => {
       throw error;
     } finally {
       setIsPasswordSaving(false);
+    }
+  };
+
+  const getNotificationPermissionStatus = async (shouldEnable) => {
+    if (!('Notification' in window)) {
+      return 'UNSUPPORTED';
+    }
+
+    if (!shouldEnable) {
+      return Notification.permission.toUpperCase();
+    }
+
+    if (Notification.permission === 'default') {
+      const permission = await Notification.requestPermission();
+      return permission.toUpperCase();
+    }
+
+    return Notification.permission.toUpperCase();
+  };
+
+  const handleNotificationSettingsSave = async () => {
+    setIsNotificationSaving(true);
+
+    try {
+      const permissionStatus = await getNotificationPermissionStatus(notificationEnabled);
+      const updatedProfile = await profileService.updateNotificationSettings({
+        notificationEnabled,
+        notificationTypes,
+        permissionStatus,
+        deviceToken: window.localStorage.getItem('busdnDeviceToken') || '',
+      });
+
+      setProfile(updatedProfile);
+      syncUser({
+        ...(user || {}),
+        fullName: updatedProfile.fullName,
+        email: updatedProfile.email,
+        avatar: updatedProfile.avatar,
+        role: updatedProfile.role,
+        notificationEnabled: updatedProfile.notificationEnabled,
+        notificationTypes: updatedProfile.notificationTypes,
+        notificationDevice: updatedProfile.notificationDevice,
+      });
+      reset({
+        fullName: updatedProfile.fullName || '',
+        email: updatedProfile.email || '',
+        phoneNumber: updatedProfile.phoneNumber || '',
+        gender: updatedProfile.gender || 'PREFER_NOT_TO_SAY',
+        dateOfBirth: updatedProfile.dateOfBirth
+          ? format(new Date(updatedProfile.dateOfBirth), 'yyyy-MM-dd')
+          : '',
+        address: updatedProfile.address || '',
+        notificationEnabled: updatedProfile.notificationEnabled ?? true,
+        notificationTypes: {
+          arrivalAlerts: updatedProfile.notificationTypes?.arrivalAlerts ?? true,
+          delayAlerts: updatedProfile.notificationTypes?.delayAlerts ?? true,
+          routeChangeAlerts: updatedProfile.notificationTypes?.routeChangeAlerts ?? true,
+          tripUpdates: updatedProfile.notificationTypes?.tripUpdates ?? true,
+          accountUpdates: updatedProfile.notificationTypes?.accountUpdates ?? true,
+        },
+      });
+
+      if (notificationEnabled && permissionStatus === 'DENIED') {
+        toast.error('Browser notification permission is blocked. Please allow notifications in your browser settings.');
+      } else if (notificationEnabled && permissionStatus === 'UNSUPPORTED') {
+        toast.error('This browser does not support push notifications.');
+      } else {
+        toast.success('Notification settings updated successfully');
+      }
+    } catch (error) {
+      toast.error(error.message || 'Notification settings update failed');
+    } finally {
+      setIsNotificationSaving(false);
+    }
+  };
+
+  const handleMonthlyPassModalOpen = () => {
+    setMonthlyPassPurchase(null);
+    setMonthlyPassError('');
+    setIsMonthlyPassModalOpen(true);
+  };
+
+  const handleMonthlyPassPurchase = async (values) => {
+    setIsMonthlyPassSaving(true);
+    setMonthlyPassError('');
+
+    try {
+      const monthlyPass = await profileService.purchaseMonthlyPass(values);
+      setMonthlyPassPurchase(monthlyPass);
+      toast.success('Monthly pass purchased successfully');
+      await loadProfile();
+    } catch (error) {
+      const message = error.message || 'Monthly pass purchase failed';
+      setMonthlyPassError(message);
+      toast.error(message);
+    } finally {
+      setIsMonthlyPassSaving(false);
     }
   };
 
@@ -530,6 +814,16 @@ const ProfilePage = () => {
             ref={passRef}
             title="Monthly Pass"
             description="Passenger pass validity, current status, and this month's usage at a glance."
+            action={(
+              <button
+                type="button"
+                onClick={handleMonthlyPassModalOpen}
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-bold text-white hover:bg-primary-container"
+              >
+                <CreditCard className="h-4 w-4" />
+                Purchase monthly pass
+              </button>
+            )}
           >
             <div className="rounded-[28px] bg-primary p-6 text-white">
               <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
@@ -564,6 +858,76 @@ const ProfilePage = () => {
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div className="mt-6">
+              <div className="flex flex-col gap-2 border-b border-outline-variant/40 pb-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-primary">Purchased monthly passes</h3>
+                  <p className="mt-1 text-sm text-on-surface-variant">
+                    Digital monthly passes linked to this passenger account.
+                  </p>
+                </div>
+                <span className="inline-flex w-fit rounded-full bg-primary-fixed px-3 py-1 text-xs font-black uppercase tracking-wide text-on-primary-fixed">
+                  {monthlyPasses.length} passes
+                </span>
+              </div>
+
+              {monthlyPasses.length ? (
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  {monthlyPasses.map((pass) => (
+                    <article
+                      key={pass._id || pass.passCode}
+                      className="rounded-[24px] border border-outline-variant/40 bg-surface-container-low px-5 py-4"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-full bg-primary px-3 py-1 text-xs font-black text-white">
+                              {formatPassType(pass.passType)}
+                            </span>
+                            <span className="rounded-full bg-tertiary-container px-3 py-1 text-xs font-bold text-on-tertiary-container">
+                              {pass.passStatus}
+                            </span>
+                            <span className="rounded-full bg-surface px-3 py-1 text-xs font-bold text-primary">
+                              {pass.paymentStatus}
+                            </span>
+                          </div>
+                          <p className="mt-3 font-mono text-sm font-bold text-primary">
+                            {pass.passCode}
+                          </p>
+                        </div>
+                        <p className="text-lg font-extrabold text-primary">
+                          {formatCurrency(pass.passPrice)}
+                        </p>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 text-sm text-on-surface-variant sm:grid-cols-2">
+                        <div className="rounded-2xl bg-white px-4 py-3">
+                          <p className="text-xs font-bold uppercase tracking-wide text-outline">Start date</p>
+                          <p className="mt-1 font-bold text-primary">{formatDateValue(pass.startDate)}</p>
+                        </div>
+                        <div className="rounded-2xl bg-white px-4 py-3">
+                          <p className="text-xs font-bold uppercase tracking-wide text-outline">Expiry date</p>
+                          <p className="mt-1 font-bold text-primary">{formatDateValue(pass.expiryDate)}</p>
+                        </div>
+                        <div className="rounded-2xl bg-white px-4 py-3">
+                          <p className="text-xs font-bold uppercase tracking-wide text-outline">Payment</p>
+                          <p className="mt-1 font-bold text-primary">{formatPassType(pass.paymentMethod)}</p>
+                        </div>
+                        <div className="rounded-2xl bg-white px-4 py-3">
+                          <p className="text-xs font-bold uppercase tracking-wide text-outline">Purchased</p>
+                          <p className="mt-1 font-bold text-primary">{formatDateValue(pass.purchasedAt)}</p>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-[24px] border border-dashed border-outline-variant bg-surface-container-low px-5 py-8 text-center text-on-surface-variant">
+                  No monthly passes purchased yet.
+                </div>
+              )}
             </div>
           </SectionCard>
 
@@ -651,19 +1015,65 @@ const ProfilePage = () => {
               </div>
             )}
           >
-            <label className="flex cursor-pointer items-center justify-between gap-4 rounded-[26px] border border-outline-variant/35 bg-surface px-5 py-4">
-              <div>
-                <p className="text-base font-bold text-primary">Passenger push notifications</p>
-                <p className="mt-1 text-sm text-on-surface-variant">
-                  Receive route reminders, smart boarding prompts, and monthly pass updates.
-                </p>
+            <div className="space-y-4">
+              <label className="flex cursor-pointer items-center justify-between gap-4 rounded-[26px] border border-outline-variant/35 bg-surface px-5 py-4">
+                <div>
+                  <p className="text-base font-bold text-primary">Passenger push notifications</p>
+                  <p className="mt-1 text-sm text-on-surface-variant">
+                    Master switch for all route, bus, trip, and account notifications.
+                  </p>
+                </div>
+                <div className="relative">
+                  <input type="checkbox" {...register('notificationEnabled')} className="peer sr-only" />
+                  <div className="h-7 w-12 rounded-full bg-surface-variant transition peer-checked:bg-on-tertiary-container" />
+                  <div className="absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+                </div>
+              </label>
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                {notificationTypeOptions.map((option) => (
+                  <label
+                    key={option.name}
+                    className={`flex cursor-pointer items-center justify-between gap-4 rounded-[22px] border border-outline-variant/35 bg-surface px-5 py-4 ${
+                      notificationEnabled ? '' : 'opacity-60'
+                    }`}
+                  >
+                    <div>
+                      <p className="text-sm font-bold text-primary">{option.title}</p>
+                      <p className="mt-1 text-sm text-on-surface-variant">{option.description}</p>
+                    </div>
+                    <div className="relative shrink-0">
+                      <input
+                        type="checkbox"
+                        {...register(`notificationTypes.${option.name}`)}
+                        disabled={!notificationEnabled}
+                        className="peer sr-only"
+                      />
+                      <div className="h-7 w-12 rounded-full bg-surface-variant transition peer-checked:bg-on-tertiary-container peer-disabled:opacity-70" />
+                      <div className="absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+                    </div>
+                  </label>
+                ))}
               </div>
-              <div className="relative">
-                <input type="checkbox" {...register('notificationEnabled')} className="peer sr-only" />
-                <div className="h-7 w-12 rounded-full bg-surface-variant transition peer-checked:bg-on-tertiary-container" />
-                <div className="absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+
+              <div className="flex flex-col gap-3 rounded-[22px] bg-surface-container-low px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-bold text-primary">Browser permission</p>
+                  <p className="mt-1 text-sm text-on-surface-variant">
+                    Current status: {profile?.notificationDevice?.permissionStatus || 'DEFAULT'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleNotificationSettingsSave}
+                  disabled={isNotificationSaving}
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-bold text-white hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isNotificationSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  {isNotificationSaving ? 'Saving...' : 'Save notification settings'}
+                </button>
               </div>
-            </label>
+            </div>
           </SectionCard>
 
           <SectionCard
@@ -718,6 +1128,16 @@ const ProfilePage = () => {
       </main>
 
       <Footer />
+
+      {isMonthlyPassModalOpen ? (
+        <MonthlyPassPurchaseModal
+          pass={monthlyPassPurchase}
+          error={monthlyPassError}
+          isSubmitting={isMonthlyPassSaving}
+          onClose={() => setIsMonthlyPassModalOpen(false)}
+          onSubmit={handleMonthlyPassPurchase}
+        />
+      ) : null}
     </div>
   );
 };

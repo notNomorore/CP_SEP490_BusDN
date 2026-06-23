@@ -1,4 +1,5 @@
 import Route from './Route.js';
+import RouteChangeNotificationService from '../notifications/RouteChangeNotificationService.js';
 
 const sampleRoutes = [
   {
@@ -974,6 +975,10 @@ export class RouteService {
       };
     });
     const routeChange = this.getRouteChangeNotice(route);
+
+    if (routeChange) {
+      await RouteChangeNotificationService.dispatch(routeChange);
+    }
 
     return {
       route: this.formatRoute(route),

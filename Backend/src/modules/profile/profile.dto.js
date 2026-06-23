@@ -63,6 +63,18 @@ export const ProfileResponseDTO = {
     favoriteRoutes: user.favoriteRoutes || [],
     favoriteStops: user.favoriteStops || [],
     notificationEnabled: Boolean(user.notificationEnabled),
+    notificationDevice: {
+      deviceToken: user.notificationDevice?.deviceToken || '',
+      permissionStatus: user.notificationDevice?.permissionStatus || 'DEFAULT',
+      updatedAt: user.notificationDevice?.updatedAt || null,
+    },
+    notificationTypes: {
+      arrivalAlerts: user.notificationTypes?.arrivalAlerts ?? true,
+      delayAlerts: user.notificationTypes?.delayAlerts ?? true,
+      routeChangeAlerts: user.notificationTypes?.routeChangeAlerts ?? true,
+      tripUpdates: user.notificationTypes?.tripUpdates ?? true,
+      accountUpdates: user.notificationTypes?.accountUpdates ?? true,
+    },
     monthlyPassStatus: user.monthlyPassStatus,
     monthlyPassExpireDate: user.monthlyPassExpireDate,
     monthlyPass: buildMonthlyPass(user),

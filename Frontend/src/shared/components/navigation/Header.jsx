@@ -18,7 +18,11 @@ const Header = () => {
   }, []);
 
   const navLinks = [
-    { label: 'Manage Booking', href: '#' },
+    { label: 'Ticket History', href: '/my-tickets' },
+    { label: 'Travel History', href: '/travel-history' },
+    { label: 'Submit Feedback', href: '/submit-feedback' },
+    { label: 'Report Lost Item', href: '/report-lost-item' },
+    { label: 'Lost Item Status', href: '/lost-item-cases' },
     { label: 'Become a Partner', href: '#' },
     { label: 'Routes', href: '/search' },
     { label: 'Help', href: '#' }

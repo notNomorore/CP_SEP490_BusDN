@@ -2,6 +2,7 @@ import { CustomError } from '../../middleware/errorHandler.js';
 import { HTTP_STATUS } from '../../constants/index.js';
 import Route from '../routes/Route.js';
 import RouteService from '../routes/RouteService.js';
+import Ticket from '../tickets/Ticket.js';
 import ProfileRepository from './ProfileRepository.js';
 import { ProfileResponseDTO } from './profile.dto.js';
 
@@ -40,6 +41,158 @@ export class ProfileService {
       favoriteStops: Array.isArray(payload.favoriteStops)
         ? payload.favoriteStops
         : existingUser.favoriteStops,
+    });
+
+    return ProfileResponseDTO.format(user);
+  }
+
+  static calculateArrivalTime(record, route) {
+    if (record.arrivedAt) {
+      return record.arrivedAt;
+    }
+
+    const boardedAt = record.boardedAt ? new Date(record.boardedAt) : null;
+    if (!boardedAt || Number.isNaN(boardedAt.getTime())) {
+      return null;
+    }
+
+    const durationMinutes = record.durationMinutes || route?.estimatedDurationMinutes || 0;
+    return new Date(boardedAt.getTime() + durationMinutes * 60 * 1000);
+  }
+
+  static async findTicketForTravel(userId, record) {
+    if (record.ticketCode) {
+      const ticket = await Ticket.findOne({ passenger: userId, ticketCode: record.ticketCode }).lean();
+      if (ticket) {
+        return ticket;
+      }
+    }
+
+    if (!record.boardedAt) {
+      return null;
+    }
+
+    const boardedAt = new Date(record.boardedAt);
+    const dayStart = new Date(boardedAt);
+    dayStart.setUTCHours(0, 0, 0, 0);
+    const dayEnd = new Date(boardedAt);
+    dayEnd.setUTCHours(23, 59, 59, 999);
+
+    return Ticket.findOne({
+      passenger: userId,
+      routeNumber: record.routeNumber,
+      departureLocation: record.fromStop,
+      destinationLocation: record.toStop,
+      serviceDate: { $gte: dayStart, $lte: dayEnd },
+      ticketPrice: record.fare,
+    }).lean();
+  }
+
+  static async formatTravelRecord(userId, record, index) {
+    const plainRecord = record.toObject ? record.toObject() : record;
+    const route = await Route.findOne({ routeNumber: plainRecord.routeNumber }).lean();
+    const ticket = await this.findTicketForTravel(userId, plainRecord);
+    const boardedAt = plainRecord.boardedAt ? new Date(plainRecord.boardedAt) : null;
+    const arrivedAt = this.calculateArrivalTime(plainRecord, route);
+    const durationMinutes = plainRecord.durationMinutes || route?.estimatedDurationMinutes || (
+      boardedAt && arrivedAt ? Math.max(Math.round((arrivedAt - boardedAt) / 60000), 0) : 0
+    );
+    const travelStatus = plainRecord.status || 'COMPLETED';
+    const travelHistoryId = `${userId}-${plainRecord.ticketCode || ticket?.ticketCode || index}`;
+
+    return {
+      id: travelHistoryId,
+      travelHistoryId,
+      tripId: plainRecord.tripId || ticket?.tripId || `${plainRecord.routeNumber}-${boardedAt?.toISOString().slice(0, 10) || index}`,
+      routeNumber: plainRecord.routeNumber,
+      routeName: route?.name || `${plainRecord.routeNumber} route`,
+      boardingStop: plainRecord.fromStop,
+      destinationStop: plainRecord.toStop,
+      travelDate: boardedAt,
+      boardingTime: boardedAt,
+      arrivalTime: arrivedAt,
+      travelDurationMinutes: durationMinutes,
+      ticketType: plainRecord.ticketType || ticket?.ticketType || 'ONE_WAY',
+      ticketId: plainRecord.ticketCode || ticket?.ticketCode || '',
+      ticketObjectId: ticket?._id || null,
+      fareAmount: plainRecord.fare || ticket?.ticketPrice || 0,
+      paymentMethod: plainRecord.paymentMethod || ticket?.paymentMethod || '',
+      travelStatus,
+      vehicleLabel: plainRecord.vehicleLabel || '',
+      hasTicketReference: Boolean(ticket || plainRecord.ticketCode),
+      detailStatus: ticket || plainRecord.ticketCode
+        ? 'AVAILABLE'
+        : 'PARTIAL_TICKET_REFERENCE',
+    };
+  }
+
+  static async getTravelHistory(userId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    await RouteService.ensureSampleRoutes();
+
+    const history = await Promise.all((user.travelHistory || []).map((record, index) => (
+      this.formatTravelRecord(userId, record, index)
+    )));
+
+    const sortedHistory = history.sort((first, second) => (
+      new Date(second.boardingTime || 0) - new Date(first.boardingTime || 0)
+    ));
+
+    const summary = sortedHistory.reduce((result, record) => {
+      result.totalTrips += 1;
+      result.totalFare += record.fareAmount || 0;
+      result.statusCounts[record.travelStatus] = (result.statusCounts[record.travelStatus] || 0) + 1;
+      result.routeCounts[record.routeNumber] = (result.routeCounts[record.routeNumber] || 0) + 1;
+      result.totalDurationMinutes += record.travelDurationMinutes || 0;
+      return result;
+    }, {
+      totalTrips: 0,
+      totalFare: 0,
+      totalDurationMinutes: 0,
+      statusCounts: {},
+      routeCounts: {},
+    });
+
+    return {
+      records: sortedHistory,
+      count: sortedHistory.length,
+      summary,
+    };
+  }
+
+  static async updateNotificationSettings(userId, payload) {
+    const existingUser = await ProfileRepository.findById(userId);
+
+    if (!existingUser) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const permissionStatus = payload.permissionStatus || existingUser.notificationDevice?.permissionStatus || 'DEFAULT';
+    const existingTypes = existingUser.notificationTypes || {};
+    const nextNotificationTypes = {
+      arrivalAlerts: payload.notificationTypes?.arrivalAlerts ?? existingTypes.arrivalAlerts ?? true,
+      delayAlerts: payload.notificationTypes?.delayAlerts ?? existingTypes.delayAlerts ?? true,
+      routeChangeAlerts: payload.notificationTypes?.routeChangeAlerts ?? existingTypes.routeChangeAlerts ?? true,
+      tripUpdates: payload.notificationTypes?.tripUpdates ?? existingTypes.tripUpdates ?? true,
+      accountUpdates: payload.notificationTypes?.accountUpdates ?? existingTypes.accountUpdates ?? true,
+    };
+    const user = await ProfileRepository.updateById(userId, {
+      notificationEnabled: payload.notificationEnabled,
+      notificationDevice: {
+        deviceToken: payload.deviceToken?.trim() || existingUser.notificationDevice?.deviceToken || '',
+        permissionStatus,
+        updatedAt: new Date(),
+      },
+      notificationTypes: nextNotificationTypes,
+      preferences: {
+        ...existingUser.preferences,
+        notifications: payload.notificationEnabled,
+      },
     });
 
     return ProfileResponseDTO.format(user);
@@ -425,6 +578,93 @@ export class ProfileService {
     return `${route.routeNumber}-route-change`;
   }
 
+  static buildRouteChangeAlertId(subscription, routeChange) {
+    return `${subscription.subscriptionId}-${routeChange.changeId}`;
+  }
+
+  static formatRouteChangeAlert(alert) {
+    const plainAlert = alert.toObject ? alert.toObject() : alert;
+
+    return {
+      notificationId: plainAlert.notificationId,
+      subscriptionId: plainAlert.subscriptionId,
+      routeId: plainAlert.routeId,
+      routeNumber: plainAlert.routeNumber,
+      tripId: plainAlert.tripId || '',
+      changedStops: plainAlert.changedStops || [],
+      updatedRoutePath: plainAlert.updatedRoutePath || '',
+      alternativeSuggestion: plainAlert.alternativeSuggestion || '',
+      reasonForChange: plainAlert.reasonForChange || '',
+      notificationStatus: plainAlert.notificationStatus || 'UNREAD',
+      detectedAt: plainAlert.detectedAt,
+      deliveredAt: plainAlert.deliveredAt,
+      readAt: plainAlert.readAt || null,
+    };
+  }
+
+  static async materializeRouteChangeAlerts(user) {
+    const subscriptions = (user.routeChangeNotifications || []).filter((subscription) => (
+      subscription.notificationStatus !== 'DISABLED'
+    ));
+
+    if (!subscriptions.length || user.notificationEnabled === false) {
+      return false;
+    }
+
+    let hasNewAlerts = false;
+    const existingAlertIds = new Set(
+      (user.routeChangeAlerts || []).map((alert) => alert.notificationId)
+    );
+
+    for (const subscription of subscriptions) {
+      const route = await this.findRouteForNotification(subscription);
+
+      if (!route) {
+        continue;
+      }
+
+      const routeChange = RouteService.getRouteChangeNotice(route);
+
+      if (!routeChange || routeChange.status !== 'ACTIVE') {
+        continue;
+      }
+
+      if (subscription.tripId && routeChange.tripId && subscription.tripId !== routeChange.tripId) {
+        continue;
+      }
+
+      const notificationId = this.buildRouteChangeAlertId(subscription, routeChange);
+
+      if (existingAlertIds.has(notificationId)) {
+        continue;
+      }
+
+      user.routeChangeAlerts.push({
+        notificationId,
+        subscriptionId: subscription.subscriptionId,
+        routeId: String(route._id),
+        routeNumber: route.routeNumber,
+        tripId: routeChange.tripId || subscription.tripId || '',
+        changedStops: routeChange.changedStops || [],
+        updatedRoutePath: routeChange.updatedRoutePath || '',
+        alternativeSuggestion: routeChange.alternativeSuggestion || '',
+        reasonForChange: routeChange.reasonForChange || '',
+        notificationStatus: 'UNREAD',
+        detectedAt: routeChange.detectedAt ? new Date(routeChange.detectedAt) : new Date(),
+        deliveredAt: new Date(),
+      });
+
+      existingAlertIds.add(notificationId);
+      hasNewAlerts = true;
+    }
+
+    if (hasNewAlerts) {
+      await ProfileRepository.save(user);
+    }
+
+    return hasNewAlerts;
+  }
+
   static async getRouteChangeNotifications(userId) {
     const user = await ProfileRepository.findById(userId);
 
@@ -435,6 +675,61 @@ export class ProfileService {
     return (user.routeChangeNotifications || []).filter((subscription) => (
       subscription.notificationStatus !== 'DISABLED'
     ));
+  }
+
+  static async getRouteChangeAlerts(userId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    await this.materializeRouteChangeAlerts(user);
+
+    return (user.routeChangeAlerts || [])
+      .filter((alert) => alert.notificationStatus !== 'DISMISSED')
+      .map((alert) => this.formatRouteChangeAlert(alert))
+      .sort((first, second) => new Date(second.deliveredAt) - new Date(first.deliveredAt));
+  }
+
+  static async markRouteChangeAlertRead(userId, notificationId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const alert = (user.routeChangeAlerts || []).find((item) => item.notificationId === notificationId);
+
+    if (!alert || alert.notificationStatus === 'DISMISSED') {
+      throw new CustomError('Route change notification not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    alert.notificationStatus = 'READ';
+    alert.readAt = new Date();
+    await ProfileRepository.save(user);
+
+    return this.formatRouteChangeAlert(alert);
+  }
+
+  static async dismissRouteChangeAlert(userId, notificationId) {
+    const user = await ProfileRepository.findById(userId);
+
+    if (!user) {
+      throw new CustomError('User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const alert = (user.routeChangeAlerts || []).find((item) => item.notificationId === notificationId);
+
+    if (!alert) {
+      throw new CustomError('Route change notification not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    alert.notificationStatus = 'DISMISSED';
+    alert.readAt = alert.readAt || new Date();
+    await ProfileRepository.save(user);
+
+    return this.formatRouteChangeAlert(alert);
   }
 
   static async subscribeRouteChangeNotification(userId, payload) {

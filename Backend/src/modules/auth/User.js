@@ -242,12 +242,102 @@ const RouteChangeNotificationSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const RouteChangeAlertSchema = new mongoose.Schema(
+  {
+    notificationId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    subscriptionId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeId: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    routeNumber: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    tripId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    changedStops: {
+      type: [{
+        stopName: {
+          type: String,
+          trim: true,
+          required: true,
+        },
+        changeType: {
+          type: String,
+          trim: true,
+          required: true,
+        },
+      }],
+      default: [],
+    },
+    updatedRoutePath: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    alternativeSuggestion: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    reasonForChange: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    notificationStatus: {
+      type: String,
+      enum: ['UNREAD', 'READ', 'DISMISSED'],
+      default: 'UNREAD',
+    },
+    detectedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    deliveredAt: {
+      type: Date,
+      default: Date.now,
+    },
+    readAt: Date,
+  },
+  { _id: false }
+);
+
 const TravelHistorySchema = new mongoose.Schema(
   {
     routeNumber: {
       type: String,
       trim: true,
       required: true,
+    },
+    tripId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    ticketCode: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    ticketType: {
+      type: String,
+      trim: true,
+      default: 'ONE_WAY',
     },
     fromStop: {
       type: String,
@@ -262,6 +352,14 @@ const TravelHistorySchema = new mongoose.Schema(
     boardedAt: {
       type: Date,
       required: true,
+    },
+    arrivedAt: {
+      type: Date,
+    },
+    durationMinutes: {
+      type: Number,
+      min: 0,
+      default: 0,
     },
     fare: {
       type: Number,
@@ -280,7 +378,7 @@ const TravelHistorySchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['COMPLETED', 'CANCELLED', 'IN_PROGRESS'],
+      enum: ['COMPLETED', 'CANCELLED', 'IN_PROGRESS', 'INTERRUPTED', 'MISSED_TRIP'],
       default: 'COMPLETED',
     },
   },
@@ -359,9 +457,48 @@ const UserSchema = new mongoose.Schema(
       type: [RouteChangeNotificationSchema],
       default: [],
     },
+    routeChangeAlerts: {
+      type: [RouteChangeAlertSchema],
+      default: [],
+    },
     notificationEnabled: {
       type: Boolean,
       default: true,
+    },
+    notificationDevice: {
+      deviceToken: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      permissionStatus: {
+        type: String,
+        enum: ['DEFAULT', 'GRANTED', 'DENIED', 'UNSUPPORTED'],
+        default: 'DEFAULT',
+      },
+      updatedAt: Date,
+    },
+    notificationTypes: {
+      arrivalAlerts: {
+        type: Boolean,
+        default: true,
+      },
+      delayAlerts: {
+        type: Boolean,
+        default: true,
+      },
+      routeChangeAlerts: {
+        type: Boolean,
+        default: true,
+      },
+      tripUpdates: {
+        type: Boolean,
+        default: true,
+      },
+      accountUpdates: {
+        type: Boolean,
+        default: true,
+      },
     },
     monthlyPassStatus: {
       type: String,

@@ -4,8 +4,15 @@ const SupportCaseSchema = new mongoose.Schema(
   {
     type: {
       type: String,
-      enum: ['COMPLAINT', 'LOST_ITEM'],
+      enum: ['COMPLAINT', 'LOST_ITEM', 'SERVICE_FEEDBACK'],
       required: true,
+      index: true,
+    },
+    referenceNumber: {
+      type: String,
+      trim: true,
+      unique: true,
+      sparse: true,
       index: true,
     },
     passenger: {
@@ -26,8 +33,26 @@ const SupportCaseSchema = new mongoose.Schema(
     },
     category: {
       type: String,
-      enum: ['SERVICE_QUALITY', 'DELAY', 'DRIVER_BEHAVIOR', 'SAFETY', 'PAYMENT', 'LOST_ITEM', 'OTHER'],
+      enum: [
+        'SERVICE_QUALITY',
+        'DELAY',
+        'DRIVER_BEHAVIOR',
+        'BUS_ASSISTANT_SERVICE',
+        'ROUTE_EXPERIENCE',
+        'MOBILE_APPLICATION',
+        'SUGGESTION',
+        'COMPLAINT',
+        'SAFETY',
+        'PAYMENT',
+        'LOST_ITEM',
+        'OTHER',
+      ],
       default: 'OTHER',
+    },
+    ratingScore: {
+      type: Number,
+      min: 1,
+      max: 5,
     },
     priority: {
       type: String,
@@ -37,9 +62,14 @@ const SupportCaseSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'REJECTED', 'CLOSED'],
+      enum: ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'SUBMITTED', 'UNDER_REVIEW', 'RESPONDED', 'REJECTED', 'CLOSED'],
       default: 'OPEN',
       index: true,
+    },
+    relatedTripId: {
+      type: String,
+      trim: true,
+      default: '',
     },
     routeName: String,
     tripCode: String,
@@ -47,8 +77,26 @@ const SupportCaseSchema = new mongoose.Schema(
     incidentAt: Date,
     contactPhone: String,
     contactEmail: String,
+    attachments: [
+      {
+        originalName: String,
+        fileName: String,
+        path: String,
+        mimeType: String,
+        size: Number,
+        uploadedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
     lostItem: {
       itemName: String,
+      itemCategory: {
+        type: String,
+        enum: ['PERSONAL_BELONGINGS', 'ELECTRONICS', 'WALLET_DOCUMENTS', 'CLOTHING', 'BAGS_LUGGAGE', 'OTHER_ITEMS'],
+        default: 'OTHER_ITEMS',
+      },
       itemDescription: String,
       lastSeenLocation: String,
       lostAt: Date,

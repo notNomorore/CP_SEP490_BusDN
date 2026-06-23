@@ -17,7 +17,10 @@ const PRIORITY_FILTERS = [
 
 const STATUS_BADGE = {
   OPEN: 'bg-blue-100 text-blue-800',
+  SUBMITTED: 'bg-blue-100 text-blue-800',
+  UNDER_REVIEW: 'bg-amber-100 text-amber-900',
   IN_PROGRESS: 'bg-amber-100 text-amber-900',
+  RESPONDED: 'bg-green-100 text-green-800',
   RESOLVED: 'bg-green-100 text-green-800',
   REJECTED: 'bg-error-container text-on-error-container',
   CLOSED: 'bg-surface-container-high text-on-surface-variant',
@@ -26,6 +29,7 @@ const STATUS_BADGE = {
 const TYPE_BADGE = {
   COMPLAINT: 'bg-purple-100 text-purple-800',
   LOST_ITEM: 'bg-orange-100 text-orange-900',
+  SERVICE_FEEDBACK: 'bg-emerald-100 text-emerald-800',
 };
 
 const formatDateTime = (value) => {

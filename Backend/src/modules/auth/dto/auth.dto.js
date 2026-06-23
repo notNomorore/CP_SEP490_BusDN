@@ -209,6 +209,18 @@ export const UserResponseDTO = {
     isFirstLogin: user.isFirstLogin,
     walletBalance: user.walletBalance,
     notificationEnabled: user.notificationEnabled,
+    notificationTypes: {
+      arrivalAlerts: user.notificationTypes?.arrivalAlerts ?? true,
+      delayAlerts: user.notificationTypes?.delayAlerts ?? true,
+      routeChangeAlerts: user.notificationTypes?.routeChangeAlerts ?? true,
+      tripUpdates: user.notificationTypes?.tripUpdates ?? true,
+      accountUpdates: user.notificationTypes?.accountUpdates ?? true,
+    },
+    notificationDevice: {
+      deviceToken: user.notificationDevice?.deviceToken || '',
+      permissionStatus: user.notificationDevice?.permissionStatus || 'DEFAULT',
+      updatedAt: user.notificationDevice?.updatedAt || null,
+    },
     monthlyPassStatus: user.monthlyPassStatus,
     monthlyPassExpireDate: user.monthlyPassExpireDate,
     favoriteRoutes: user.favoriteRoutes,

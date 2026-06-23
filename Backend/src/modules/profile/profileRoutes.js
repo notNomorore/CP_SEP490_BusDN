@@ -5,6 +5,7 @@ import validateRequest from '../../middleware/validateRequest.js';
 import { avatarUpload } from '../../middleware/uploadMiddleware.js';
 import ProfileController from './ProfileController.js';
 import {
+  validateNotificationSettings,
   validatePasswordChange,
   validateProfileUpdate,
 } from './profileValidators.js';
@@ -14,10 +15,16 @@ const router = express.Router();
 router.use(authMiddleware, authorizeRole('PASSENGER'));
 
 router.get('/me', asyncHandler(ProfileController.getMe));
+router.get('/travel-history', asyncHandler(ProfileController.getTravelHistory));
 router.put(
   '/update',
   validateRequest(validateProfileUpdate),
   asyncHandler(ProfileController.updateProfile)
+);
+router.put(
+  '/notifications/settings',
+  validateRequest(validateNotificationSettings),
+  asyncHandler(ProfileController.updateNotificationSettings)
 );
 router.put(
   '/change-password',
@@ -46,6 +53,15 @@ router.post('/notifications/delay', asyncHandler(ProfileController.subscribeDela
 router.delete(
   '/notifications/delay/:subscriptionId',
   asyncHandler(ProfileController.removeDelayNotification)
+);
+router.get('/notifications/route-change/alerts', asyncHandler(ProfileController.getRouteChangeAlerts));
+router.patch(
+  '/notifications/route-change/alerts/:notificationId/read',
+  asyncHandler(ProfileController.markRouteChangeAlertRead)
+);
+router.delete(
+  '/notifications/route-change/alerts/:notificationId',
+  asyncHandler(ProfileController.dismissRouteChangeAlert)
 );
 router.get('/notifications/route-change', asyncHandler(ProfileController.getRouteChangeNotifications));
 router.post('/notifications/route-change', asyncHandler(ProfileController.subscribeRouteChangeNotification));

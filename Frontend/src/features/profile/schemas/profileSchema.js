@@ -18,6 +18,13 @@ export const profileFormSchema = z.object({
   dateOfBirth: z.string().optional(),
   address: z.string().trim().max(250, 'Address must be less than 250 characters'),
   notificationEnabled: z.boolean(),
+  notificationTypes: z.object({
+    arrivalAlerts: z.boolean(),
+    delayAlerts: z.boolean(),
+    routeChangeAlerts: z.boolean(),
+    tripUpdates: z.boolean(),
+    accountUpdates: z.boolean(),
+  }),
 });
 
 export const passwordFormSchema = z
@@ -45,4 +52,11 @@ export const defaultProfileValues = {
   dateOfBirth: '',
   address: '',
   notificationEnabled: true,
+  notificationTypes: {
+    arrivalAlerts: true,
+    delayAlerts: true,
+    routeChangeAlerts: true,
+    tripUpdates: true,
+    accountUpdates: true,
+  },
 };

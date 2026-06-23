@@ -6,9 +6,19 @@ export class ProfileController {
     return res.success(profile, 'Profile retrieved successfully');
   }
 
+  static async getTravelHistory(req, res) {
+    const history = await ProfileService.getTravelHistory(req.user.userId);
+    return res.success(history, 'Travel history retrieved successfully');
+  }
+
   static async updateProfile(req, res) {
     const profile = await ProfileService.updateProfile(req.user.userId, req.body);
     return res.success(profile, 'Profile updated successfully');
+  }
+
+  static async updateNotificationSettings(req, res) {
+    const profile = await ProfileService.updateNotificationSettings(req.user.userId, req.body);
+    return res.success(profile, 'Notification settings updated successfully');
   }
 
   static async changePassword(req, res) {
@@ -100,6 +110,33 @@ export class ProfileController {
   static async getRouteChangeNotifications(req, res) {
     const subscriptions = await ProfileService.getRouteChangeNotifications(req.user.userId);
     return res.success(subscriptions, 'Route change notifications retrieved successfully');
+  }
+
+  static async getRouteChangeAlerts(req, res) {
+    const notifications = await ProfileService.getRouteChangeAlerts(req.user.userId);
+    return res.success(
+      {
+        notifications,
+        unreadCount: notifications.filter((item) => item.notificationStatus === 'UNREAD').length,
+      },
+      'Route change notification center retrieved successfully'
+    );
+  }
+
+  static async markRouteChangeAlertRead(req, res) {
+    const notification = await ProfileService.markRouteChangeAlertRead(
+      req.user.userId,
+      req.params.notificationId
+    );
+    return res.success(notification, 'Route change notification marked as read');
+  }
+
+  static async dismissRouteChangeAlert(req, res) {
+    const notification = await ProfileService.dismissRouteChangeAlert(
+      req.user.userId,
+      req.params.notificationId
+    );
+    return res.success(notification, 'Route change notification dismissed');
   }
 
   static async subscribeRouteChangeNotification(req, res) {

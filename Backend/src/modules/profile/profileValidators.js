@@ -86,6 +86,50 @@ export const validatePasswordChange = (body) => {
   return errors;
 };
 
+export const validateNotificationSettings = (body) => {
+  const errors = {};
+  const allowedPermissionStatuses = ['DEFAULT', 'GRANTED', 'DENIED', 'UNSUPPORTED'];
+  const allowedTypes = [
+    'arrivalAlerts',
+    'delayAlerts',
+    'routeChangeAlerts',
+    'tripUpdates',
+    'accountUpdates',
+  ];
+
+  if (typeof body.notificationEnabled !== 'boolean') {
+    errors.notificationEnabled = 'Notification setting must be a boolean';
+  }
+
+  if (
+    body.permissionStatus !== undefined
+    && !allowedPermissionStatuses.includes(body.permissionStatus)
+  ) {
+    errors.permissionStatus = 'Invalid notification permission status';
+  }
+
+  if (body.deviceToken !== undefined && String(body.deviceToken).length > 256) {
+    errors.deviceToken = 'Device token must be less than 256 characters';
+  }
+
+  if (body.notificationTypes !== undefined) {
+    if (!body.notificationTypes || typeof body.notificationTypes !== 'object' || Array.isArray(body.notificationTypes)) {
+      errors.notificationTypes = 'Notification types must be an object';
+    } else {
+      allowedTypes.forEach((type) => {
+        if (
+          body.notificationTypes[type] !== undefined
+          && typeof body.notificationTypes[type] !== 'boolean'
+        ) {
+          errors[`notificationTypes.${type}`] = `${type} must be a boolean`;
+        }
+      });
+    }
+  }
+
+  return errors;
+};
+
 export const validateObjectIdParam = (params) => {
   const errors = {};
 
@@ -99,5 +143,6 @@ export const validateObjectIdParam = (params) => {
 export default {
   validateProfileUpdate,
   validatePasswordChange,
+  validateNotificationSettings,
   validateObjectIdParam,
 };

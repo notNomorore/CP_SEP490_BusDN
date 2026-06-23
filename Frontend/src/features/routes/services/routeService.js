@@ -138,6 +138,21 @@ export const routeService = {
     return response.data;
   },
 
+  getRouteChangeAlerts: async () => {
+    const response = await apiClient.get('/profile/notifications/route-change/alerts');
+    return response.data;
+  },
+
+  markRouteChangeAlertRead: async (notificationId) => {
+    const response = await apiClient.patch(`/profile/notifications/route-change/alerts/${encodeURIComponent(notificationId)}/read`);
+    return response.data;
+  },
+
+  dismissRouteChangeAlert: async (notificationId) => {
+    const response = await apiClient.delete(`/profile/notifications/route-change/alerts/${encodeURIComponent(notificationId)}`);
+    return response.data;
+  },
+
   subscribeRouteChangeNotification: async (payload) => {
     const response = await apiClient.post('/profile/notifications/route-change', payload);
     return response.data;
@@ -145,6 +160,16 @@ export const routeService = {
 
   removeRouteChangeNotification: async (subscriptionId) => {
     const response = await apiClient.delete(`/profile/notifications/route-change/${encodeURIComponent(subscriptionId)}`);
+    return response.data;
+  },
+
+  purchaseOneWayTicket: async (payload) => {
+    const response = await apiClient.post('/tickets/one-way', payload);
+    return response.data;
+  },
+
+  getMyTickets: async () => {
+    const response = await apiClient.get('/tickets/me');
     return response.data;
   },
 };
