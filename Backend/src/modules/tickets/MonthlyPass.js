@@ -40,4 +40,5 @@ const MonthlyPassSchema = new mongoose.Schema(
 
 MonthlyPassSchema.index({ passenger: 1, passType: 1, passStatus: 1 });
 
-export default mongoose.model('MonthlyPass', MonthlyPassSchema);
+export default mongoose.models.MonthlyPass
+  || mongoose.model('MonthlyPass', MonthlyPassSchema);

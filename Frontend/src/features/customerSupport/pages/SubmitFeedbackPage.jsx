@@ -9,7 +9,6 @@ import {
   RotateCcw,
   Send,
   Star,
-  X,
 } from 'lucide-react';
 import Header from '../../../shared/components/navigation/Header.jsx';
 import customerSupportService, { FEEDBACK_CATEGORIES } from '../services/customerSupportService.js';

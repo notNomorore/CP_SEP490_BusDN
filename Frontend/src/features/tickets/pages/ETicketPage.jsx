@@ -131,17 +131,26 @@ const ETicketPage = () => {
   };
 
   const handleShare = async () => {
-    const shareUrl = window.location.href;
-    if (navigator.share) {
-      await navigator.share({
-        title: `E-Ticket ${ticket.ticketCode}`,
-        text: `Route ${ticket.routeNumber}: ${ticket.departureLocation} to ${ticket.destinationLocation}`,
-        url: shareUrl,
-      });
-      return;
+    try {
+      const shareUrl = window.location.href;
+      if (navigator.share) {
+        await navigator.share({
+          title: `E-Ticket ${ticket.ticketCode}`,
+          text: `Route ${ticket.routeNumber}: ${ticket.departureLocation} to ${ticket.destinationLocation}`,
+          url: shareUrl,
+        });
+        return;
+      }
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Sharing is unavailable in this browser');
+      }
+      await navigator.clipboard.writeText(shareUrl);
+      toast.success('Ticket link copied');
+    } catch (error) {
+      if (error?.name !== 'AbortError') {
+        toast.error(error?.message || 'Unable to share ticket');
+      }
     }
-    await navigator.clipboard.writeText(shareUrl);
-    toast.success('Ticket link copied');
   };
 
   const handleAddToCalendar = () => {

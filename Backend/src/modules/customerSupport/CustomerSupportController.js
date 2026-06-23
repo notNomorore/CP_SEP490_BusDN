@@ -11,11 +11,21 @@ import logger from '../../utils/logger.js';
 export class CustomerSupportController {
   static async createCase(req, res, next) {
     try {
+      let lostItem = req.body.lostItem;
+      if (typeof lostItem === 'string') {
+        try {
+          lostItem = JSON.parse(lostItem || '{}');
+        } catch {
+          return res.status(400).json({
+            success: false,
+            message: 'Lost item details must be valid JSON',
+          });
+        }
+      }
+
       const body = {
         ...req.body,
-        lostItem: typeof req.body.lostItem === 'string'
-          ? JSON.parse(req.body.lostItem || '{}')
-          : req.body.lostItem,
+        lostItem,
       };
       const validationErrors = CreateSupportCaseDTO.validate(body);
 

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import mongoose from 'mongoose';
 import { CustomError } from '../../middleware/errorHandler.js';
 import { HTTP_STATUS } from '../../constants/index.js';
 import User from '../auth/User.js';
@@ -16,20 +17,33 @@ const MONTHLY_PASS_PRICES = {
 };
 
 const normalizeDate = (value) => {
-  const date = value ? new Date(value) : new Date();
-  date.setHours(0, 0, 0, 0);
+  const rawValue = String(value || '').trim();
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(rawValue)
+    ? new Date(`${rawValue}T00:00:00.000Z`)
+    : value
+      ? new Date(value)
+      : new Date();
+  if (Number.isNaN(date.getTime())) {
+    throw new CustomError('Service date is invalid', HTTP_STATUS.BAD_REQUEST);
+  }
+  date.setUTCHours(0, 0, 0, 0);
   return date;
 };
 
 const buildTicketCode = () => `TKT-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`.toUpperCase();
 const buildPassCode = () => `MP-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`.toUpperCase();
 
-const getTicketExpiryDate = (ticket) => {
-  const serviceDate = new Date(ticket.serviceDate);
-  const [hours = 23, minutes = 59] = String(ticket.departureTime || '23:59').split(':').map(Number);
-  serviceDate.setUTCHours(hours + 3, minutes, 0, 0);
-  return serviceDate;
+const buildServiceDateTime = (serviceDate, time = '23:59') => {
+  const date = new Date(serviceDate);
+  const datePart = date.toISOString().slice(0, 10);
+  const normalizedTime = /^\d{2}:\d{2}$/.test(String(time)) ? time : '23:59';
+  return new Date(`${datePart}T${normalizedTime}:00+07:00`);
 };
+
+const getTicketExpiryDate = (ticket) => new Date(
+  buildServiceDateTime(ticket.serviceDate, ticket.departureTime || '23:59').getTime()
+  + 3 * 60 * 60 * 1000
+);
 
 export class TicketService {
   static async findRoute(routeId) {
@@ -88,6 +102,9 @@ export class TicketService {
 
     const serviceDate = normalizeDate(payload.serviceDate);
     const departureTime = payload.departureTime || route.operatingHours?.firstDeparture || '05:30';
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(departureTime)) {
+      throw new CustomError('Departure time is invalid', HTTP_STATUS.BAD_REQUEST);
+    }
     const tripId = payload.tripId?.trim() || `${route.routeNumber}-${serviceDate.toISOString().slice(0, 10)}-${departureTime}`;
 
     const existingSeat = await Ticket.findOne({
@@ -134,6 +151,7 @@ export class TicketService {
       },
     });
 
+    const boardedAt = buildServiceDateTime(serviceDate, departureTime);
     user.travelHistory.push({
       routeNumber: route.routeNumber,
       tripId,
@@ -141,8 +159,8 @@ export class TicketService {
       ticketType: 'ONE_WAY',
       fromStop: startStop.name,
       toStop: endStop.name,
-      boardedAt: new Date(`${serviceDate.toISOString().slice(0, 10)}T${departureTime}:00.000Z`),
-      arrivedAt: new Date(new Date(`${serviceDate.toISOString().slice(0, 10)}T${departureTime}:00.000Z`).getTime() + (route.estimatedDurationMinutes || 0) * 60 * 1000),
+      boardedAt,
+      arrivedAt: new Date(boardedAt.getTime() + (route.estimatedDurationMinutes || 0) * 60 * 1000),
       durationMinutes: route.estimatedDurationMinutes || 0,
       fare: ticketPrice,
       vehicleLabel: payload.vehicleLabel || '',
@@ -261,6 +279,10 @@ export class TicketService {
   }
 
   static async getMyTicketById(userId, ticketId) {
+    if (!mongoose.isValidObjectId(ticketId)) {
+      throw new CustomError('Ticket information is unavailable.', HTTP_STATUS.NOT_FOUND);
+    }
+
     const ticket = await Ticket.findOne({
       _id: ticketId,
       passenger: userId,
@@ -284,6 +306,10 @@ export class TicketService {
   }
 
   static async cancelMyTicket(userId, ticketId) {
+    if (!mongoose.isValidObjectId(ticketId)) {
+      throw new CustomError('Ticket information is unavailable.', HTTP_STATUS.NOT_FOUND);
+    }
+
     const ticket = await Ticket.findOne({ _id: ticketId, passenger: userId });
     if (!ticket) {
       throw new CustomError('Ticket information is unavailable.', HTTP_STATUS.NOT_FOUND);
