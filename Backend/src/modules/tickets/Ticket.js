@@ -48,4 +48,5 @@ const TicketSchema = new mongoose.Schema(
 
 TicketSchema.index({ routeId: 1, tripId: 1, serviceDate: 1, seatNumber: 1, bookingStatus: 1 });
 
-export default mongoose.model('Ticket', TicketSchema);
+export default mongoose.models.PassengerTicket
+  || mongoose.model('PassengerTicket', TicketSchema);

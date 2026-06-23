@@ -9,11 +9,7 @@ export const routeStatusOptions = ['DRAFT', 'PENDING_APPROVAL', 'PUBLISHED', 'SU
 export const operatingDayOptions = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export const FIRST_BUS_DEPARTURE_TIME = '05:30';
 export const LAST_BUS_DEPARTURE_TIME = '18:30';
-export const DA_NANG_CENTER = [16.0471, 108.2068];
-export const DA_NANG_BOUNDS = [
-  [15.85, 107.95],
-  [16.25, 108.35],
-];
+export { DA_NANG_BOUNDS, DA_NANG_CENTER, isInsideDaNang };
 export const OSRM_BASE_URL = import.meta.env.VITE_OSRM_BASE_URL || 'https://router.project-osrm.org';
 
 export const routeTypeLabels = {
