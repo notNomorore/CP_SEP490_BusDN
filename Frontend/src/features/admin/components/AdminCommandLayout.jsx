@@ -4,12 +4,29 @@ import useAuthStore from '../../auth/stores/authStore.js';
 import useAdminI18n, { getAdminMessage } from '../../../shared/i18n/adminI18n.js';
 import { adminNavGroups, adminNavigation } from '../../../shared/i18n/adminMessages.js';
 
-const isNavigationItemActive = (pathname, item) => (
-  pathname === item.path
-  || pathname.startsWith(`${item.path}/`)
-  || item.aliases?.some((alias) => pathname === alias || pathname.startsWith(`${alias}/`))
-);
+const getNavigationTarget = (item) => {
+  const [pathname, rawSearch = ''] = item.path.split('?');
+  return {
+    pathname,
+    search: rawSearch ? `?${rawSearch}` : '',
+  };
+};
 
+const isNavigationItemActive = (location, item) => {
+  const target = getNavigationTarget(item);
+  const pathnameMatches = location.pathname === target.pathname
+    || location.pathname.startsWith(`${target.pathname}/`)
+    || item.aliases?.some((alias) => location.pathname === alias || location.pathname.startsWith(`${alias}/`));
+
+  if (!pathnameMatches) return false;
+  if (target.search) return location.search === target.search;
+
+  return !adminNavigation.some((candidate) => {
+    if (candidate.path === item.path || !candidate.path.includes('?')) return false;
+    const candidateTarget = getNavigationTarget(candidate);
+    return candidateTarget.pathname === location.pathname && candidateTarget.search === location.search;
+  });
+};
 const SidebarItem = ({ item, isActive, label, onNavigate }) => (
   <NavLink
     to={item.path}
@@ -107,9 +124,9 @@ const AdminCommandLayout = () => {
   const activeItem = useMemo(() => {
     return [...adminNavigation]
       .sort((left, right) => right.path.length - left.path.length)
-      .find((item) => isNavigationItemActive(location.pathname, item))
+      .find((item) => isNavigationItemActive(location, item))
       || adminNavigation[0];
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
 
   const activeGroup = useMemo(() => (
     adminNavGroups.find((group) => (

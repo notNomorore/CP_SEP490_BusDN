@@ -15,6 +15,8 @@ import {
   BusFront,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ClipboardCheck,
   Clock3,
   ListChecks,
@@ -26,8 +28,6 @@ import {
   UserRound,
   Wrench,
 } from 'lucide-react';
-import Header from '../../../shared/components/navigation/Header.jsx';
-import Footer from '../../../shared/components/common/Footer.jsx';
 import useAuthStore from '../../auth/stores/authStore.js';
 import scheduleOperationsService from '../services/scheduleOperationsService.js';
 
@@ -268,13 +268,21 @@ const getInitialFilters = () => {
   const from = new Date();
   const to = new Date();
   to.setDate(to.getDate() + 13);
-
-  return {
-    from: getDateInputValue(from),
-    to: getDateInputValue(to),
-  };
+  return { from: getDateInputValue(from), to: getDateInputValue(to) };
 };
 
+const addInputDays = (value, days) => {
+  const date = new Date(`${value}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return getDateInputValue(date);
+};
+
+const getWeekRange = (anchor = new Date()) => {
+  const date = new Date(`${getDateInputValue(new Date(anchor))}T00:00:00`);
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+  const from = getDateInputValue(date);
+  return { from, to: addInputDays(from, 6) };
+};
 const getErrorMessage = (error) => (
   error?.message || 'Không thể tải lịch vận hành. Vui lòng thử lại.'
 );
@@ -1795,10 +1803,7 @@ const ShiftScheduleCard = ({ shift }) => {
   );
 };
 
-const OperationNotificationsPanel = ({ notifications = [] }) => {
-  if (!notifications.length) return null;
-
-  return (
+const OperationNotificationsPanel = ({ notifications = [] }) => (
     <section className="mt-6 rounded-lg border border-cyan-200 bg-cyan-50/70 p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -1816,7 +1821,7 @@ const OperationNotificationsPanel = ({ notifications = [] }) => {
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        {notifications.map((notification) => (
+        {notifications.length ? notifications.map((notification) => (
           <article key={notification.id} className="rounded-lg border border-cyan-100 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-center gap-2">
               <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${NOTIFICATION_PRIORITY_META[notification.priority] || NOTIFICATION_PRIORITY_META.NORMAL}`}>
@@ -1834,11 +1839,14 @@ const OperationNotificationsPanel = ({ notifications = [] }) => {
               </p>
             ) : null}
           </article>
-        ))}
+        )) : (
+          <div className="rounded-lg border border-dashed border-cyan-200/50 bg-white/70 p-8 text-center text-sm font-semibold text-slate-500 lg:col-span-2">
+            Chưa có thông báo vận hành trong khoảng thời gian này.
+          </div>
+        )}
       </div>
     </section>
   );
-};
 
 const EmptyState = ({ message }) => (
   <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">
@@ -1852,6 +1860,7 @@ const ScheduleOperationsPage = () => {
   const [filters, setFilters] = useState(getInitialFilters);
   const [assignedTrips, setAssignedTrips] = useState([]);
   const [shiftSchedule, setShiftSchedule] = useState([]);
+  const [operationNotifications, setOperationNotifications] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [processingAssignmentId, setProcessingAssignmentId] = useState('');
   const [error, setError] = useState('');
@@ -1862,9 +1871,14 @@ const ScheduleOperationsPage = () => {
     setError('');
 
     try {
-      const tripsPayload = await scheduleOperationsService.getAssignedTrips(filters);
+      const [tripsPayload, shiftsPayload, notificationsPayload] = await Promise.all([
+        scheduleOperationsService.getAssignedTrips(filters),
+        scheduleOperationsService.getShiftSchedule(filters),
+        scheduleOperationsService.getOperationNotifications(filters),
+      ]);
       setAssignedTrips(tripsPayload.trips || []);
-      setShiftSchedule([]);
+      setShiftSchedule(shiftsPayload.shifts || []);
+      setOperationNotifications(notificationsPayload.notifications || []);
     } catch (requestError) {
       setError(getErrorMessage(requestError));
     } finally {
@@ -1875,6 +1889,19 @@ const ScheduleOperationsPage = () => {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(async () => {
+      try {
+        const payload = await scheduleOperationsService.getOperationNotifications(filters);
+        setOperationNotifications(payload.notifications || []);
+      } catch {
+        // Giữ dữ liệu thông báo gần nhất nếu refresh nền lỗi tạm thời.
+      }
+    }, 10000);
+
+    return () => window.clearInterval(intervalId);
+  }, [filters]);
 
   const runVehicleAction = async (assignmentId, action, successText) => {
     setProcessingAssignmentId(assignmentId);
@@ -1959,41 +1986,113 @@ const ScheduleOperationsPage = () => {
 
   const scheduleByDate = useMemo(() => (
     shiftSchedule.reduce((groups, shift) => {
-      const key = new Date(shift.scheduledStart).toISOString().slice(0, 10);
+      const key = getDateInputValue(new Date(shift.workDate));
       groups[key] = [...(groups[key] || []), shift];
       return groups;
     }, {})
   ), [shiftSchedule]);
+  const weekDays = useMemo(() => (
+    Array.from({ length: 7 }, (_, index) => addInputDays(filters.from, index))
+  ), [filters.from]);
+
+  const openShiftWeek = (anchor) => {
+    setFilters(getWeekRange(anchor));
+    setActiveTab('shifts');
+  };
 
   const actorLabel = user?.role === 'DRIVER' ? 'Tài xế' : 'Phụ xe';
   const canOperateVehicle = user?.role === 'DRIVER';
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
+    <div className="driver-dark-shell min-h-screen bg-[#020617] text-slate-100">
+      <header className="border-b border-white/10 bg-slate-950/95">
+        <div className="flex w-full flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between xl:px-10">
+          <button
+            type="button"
+            onClick={() => setActiveTab('trips')}
+            className="flex items-center gap-3 text-left"
+          >
+            <span className="grid h-10 w-10 place-items-center rounded bg-emerald-400 text-slate-950">
+              <BusFront size={22} />
+            </span>
+            <span>
+              <span className="block text-lg font-semibold text-white">Driver BusDN</span>
+              <span className="block text-xs text-slate-400">Vận hành xe buýt Đà Nẵng</span>
+            </span>
+          </button>
 
-      <main className="pt-20">
-        <section className="border-b border-emerald-900/20 bg-emerald-950 text-white">
-          <div className="mx-auto max-w-7xl px-6 py-10">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase text-emerald-200">
-                  Vận hành lịch trình
-                </span>
-                <h1 className="mt-4 text-3xl font-black md:text-4xl">Lịch vận hành cá nhân</h1>
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-emerald-100/80">
-                  Theo dõi chuyến được phân công, lịch ca làm việc và tình trạng kiểm tra xe trước khi xuất bến.
-                </p>
-              </div>
-              <div className="rounded-lg border border-white/10 bg-white/10 px-4 py-3">
-                <p className="text-xs font-semibold uppercase text-emerald-200">Đang đăng nhập</p>
-                <p className="mt-1 font-bold">{user?.fullName || 'Nhân viên vận hành'} - {actorLabel}</p>
+          <div className="flex items-center gap-3">
+            <span className="rounded border border-white/10 bg-white/5 px-3 py-2 text-sm font-bold text-slate-200">VN</span>
+            <div className="flex items-center gap-2 rounded border border-white/10 bg-white/[0.04] px-2 py-1.5">
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800">
+                {(user?.fullName || 'D').charAt(0).toUpperCase()}
+              </span>
+              <div className="hidden min-w-0 sm:block">
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Đã đăng nhập</p>
+                <p className="max-w-[180px] truncate text-sm font-semibold text-white">{user?.fullName || 'Tài xế'}</p>
+                <p className="text-xs font-semibold text-emerald-400">{actorLabel}</p>
               </div>
             </div>
           </div>
-        </section>
+        </div>
+      </header>
 
-        <section className="mx-auto max-w-7xl px-6 py-8">
+      <main className="grid w-full gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[215px_minmax(0,1fr)] xl:px-10">
+        <nav className="flex h-fit flex-col gap-2 rounded border border-white/10 bg-white/[0.04] p-3 lg:sticky lg:top-6">
+          <button
+            type="button"
+            onClick={() => setActiveTab('trips')}
+            className={`inline-flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium transition ${
+              activeTab === 'trips'
+                ? 'bg-emerald-400 text-slate-950'
+                : 'bg-white/5 text-slate-300 hover:bg-white/10'
+            }`}
+          >
+            <Route size={16} /> Chuyến được phân công
+          </button>
+          <button
+            type="button"
+            onClick={() => openShiftWeek(filters.from)}
+            className={`inline-flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium transition ${
+              activeTab === 'shifts'
+                ? 'bg-emerald-400 text-slate-950'
+                : 'bg-white/5 text-slate-300 hover:bg-white/10'
+            }`}
+          >
+            <CalendarDays size={16} /> Lịch ca làm việc
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('notifications')}
+            className={`inline-flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium transition ${
+              activeTab === 'notifications'
+                ? 'bg-emerald-400 text-slate-950'
+                : 'bg-white/5 text-slate-300 hover:bg-white/10'
+            }`}
+          >
+            <BellRing size={16} /> Thông báo vận hành
+          </button>
+          <div className="mt-2 border-t border-white/10 pt-3 text-xs leading-5 text-slate-400">
+            Theo dõi chuyến được phân công, kiểm tra xe và lịch ca làm việc cá nhân.
+          </div>
+        </nav>
+
+        <section className="min-w-0">
+          <section className="mb-5 rounded border border-white/10 bg-white/[0.04] px-4 py-4">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-400">Driver Operations</p>
+            <h1 className="mt-1 text-2xl font-black text-white">
+              {activeTab === 'trips' ? 'Chuyến được phân công' : activeTab === 'shifts' ? 'Lịch ca làm việc' : 'Thông báo vận hành'}
+            </h1>
+            <p className="mt-1 text-sm text-slate-400">
+              {activeTab === 'trips'
+                ? 'Tiếp nhận chuyến, kiểm tra xe và vận hành theo phân công.'
+                : activeTab === 'shifts'
+                  ? 'Theo dõi ca làm việc của bạn theo tuần.'
+                  : 'Theo dõi phản hồi từ điều hành và cập nhật xử lý báo cáo đã gửi.'}
+            </p>
+          </section>
+
+          <section className="space-y-6">
           <div className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-end md:justify-between">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1">
@@ -2024,30 +2123,6 @@ const ScheduleOperationsPage = () => {
             >
               <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
               Làm mới lịch
-            </button>
-          </div>
-
-          <div className="mt-6 grid grid-cols-2 border-b border-slate-200">
-            <button
-              type="button"
-              onClick={() => setActiveTab('trips')}
-              className={`flex items-center justify-center gap-2 border-b-2 px-4 py-4 text-sm font-bold ${
-                activeTab === 'trips'
-                  ? 'border-emerald-700 text-emerald-800'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <Route className="h-4 w-4" />
-              Chuyến được phân công ({assignedTrips.length})
-            </button>
-            <button
-              type="button"
-              disabled
-              title="UC40 sẽ làm sau khi có màn admin phân công ca làm việc riêng."
-              className="flex cursor-not-allowed items-center justify-center gap-2 border-b-2 border-transparent px-4 py-4 text-sm font-bold text-slate-400"
-            >
-              <CalendarDays className="h-4 w-4" />
-              Lịch ca làm việc (làm sau)
             </button>
           </div>
 
@@ -2089,29 +2164,57 @@ const ScheduleOperationsPage = () => {
                 <EmptyState message="Không có chuyến xe nào được phân công trong khoảng thời gian này." />
               )}
             </div>
+          ) : activeTab === 'shifts' ? (
+            <section className="mt-6 overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
+              <div className="flex flex-col gap-4 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">UC40 - Lịch ca làm việc</p>
+                  <h2 className="mt-1 text-xl font-black text-slate-950">Lịch làm việc theo tuần</h2>
+                  <p className="mt-1 text-sm text-slate-500">Chỉ hiển thị các ca admin đã phân công cho bạn.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => openShiftWeek(addInputDays(filters.from, -7))} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-200 text-emerald-700" title="Tuần trước"><ChevronLeft size={18} /></button>
+                  <button type="button" onClick={() => openShiftWeek(new Date())} className="h-10 rounded-lg border border-emerald-200 px-3 text-sm font-bold text-emerald-700">Tuần này</button>
+                  <button type="button" onClick={() => openShiftWeek(addInputDays(filters.from, 7))} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-200 text-emerald-700" title="Tuần sau"><ChevronRight size={18} /></button>
+                </div>
+              </div>
+              <div className="overflow-x-auto p-4">
+                <div className="grid min-w-[980px] grid-cols-7 gap-3">
+                  {weekDays.map((date) => {
+                    const dayShifts = scheduleByDate[date] || [];
+                    const today = getDateInputValue(new Date()) === date;
+                    return (
+                      <div key={date} className={`min-h-[260px] overflow-hidden rounded-xl border ${today ? 'border-emerald-400 ring-1 ring-emerald-200' : 'border-slate-200'}`}>
+                        <div className={today ? 'border-b border-emerald-200 bg-emerald-50 px-3 py-3 text-emerald-800' : 'border-b border-slate-200 bg-slate-50 px-3 py-3 text-slate-700'}>
+                          <p className="text-xs font-black uppercase tracking-[0.12em]">{new Date(`${date}T00:00:00`).toLocaleDateString('vi-VN', { weekday: 'short' })}</p>
+                          <p className="mt-1 text-lg font-black">{date.slice(8, 10)}/{date.slice(5, 7)}</p>
+                        </div>
+                        <div className="space-y-2 p-2">
+                          {dayShifts.length ? dayShifts.map((shift) => (
+                            <article key={shift.id} className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-sm font-black text-slate-950">{shift.startTime} - {shift.endTime}</p>
+                                <StatusBadge status={shift.assignmentStatus} />
+                              </div>
+                              <p className="mt-2 text-sm font-bold text-slate-950">{shift.shiftName}</p>
+                              <p className="mt-1 text-xs font-semibold text-slate-600">{shift.shiftCode}</p>
+                              {shift.route?.routeName ? <p className="mt-2 text-xs text-emerald-800">{shift.route.routeCode} · {shift.route.routeName}</p> : null}
+                              {shift.description ? <p className="mt-2 line-clamp-3 text-xs text-slate-500">{shift.description}</p> : null}
+                            </article>
+                          )) : <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-center text-xs text-slate-400">Không có ca</div>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
           ) : (
-            <div className="mt-6 space-y-6">
-              {Object.entries(scheduleByDate).length ? Object.entries(scheduleByDate).map(([date, shifts]) => (
-                <section key={date}>
-                  <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase text-slate-700">
-                    <MapPin className="h-4 w-4 text-emerald-700" />
-                    {formatDate(shifts[0].scheduledStart)}
-                  </div>
-                  <div className="space-y-4">
-                    {shifts.map((shift) => (
-                      <ShiftScheduleCard key={shift.id} shift={shift} />
-                    ))}
-                  </div>
-                </section>
-              )) : (
-                <EmptyState message="Không có ca làm việc nào trong khoảng thời gian này." />
-              )}
-            </div>
+            <OperationNotificationsPanel notifications={operationNotifications} />
           )}
+          </section>
         </section>
       </main>
-
-      <Footer />
     </div>
   );
 };

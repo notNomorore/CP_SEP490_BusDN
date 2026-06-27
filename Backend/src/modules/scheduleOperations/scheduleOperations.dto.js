@@ -241,6 +241,32 @@ export const ShiftAssignmentResponseDTO = {
   },
 };
 
+export const StaffShiftScheduleResponseDTO = {
+  format: (assignment) => {
+    const shift = assignment.shift || assignment.shiftId || {};
+    const route = shift.routeId || {};
+
+    return {
+      id: assignment._id,
+      assignmentStatus: assignment.status || 'ASSIGNED',
+      workDate: assignment.workDate || shift.workDate,
+      shiftCode: shift.shiftCode || '',
+      shiftName: shift.shiftName || 'Ca làm việc',
+      shiftType: shift.shiftType || 'CUSTOM',
+      startTime: shift.startTime || '',
+      endTime: shift.endTime || '',
+      description: shift.description || '',
+      route: route && route._id
+        ? {
+          id: route._id,
+          routeCode: route.routeCode || '',
+          routeName: route.routeName || '',
+        }
+        : null,
+    };
+  },
+};
+
 export const VehicleInspectionResponseDTO = {
   format: formatInspection,
 };

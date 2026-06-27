@@ -2,6 +2,7 @@ import ScheduleOperationsService from './ScheduleOperationsService.js';
 import {
   OperationIncidentResponseDTO,
   OperationNotificationResponseDTO,
+  StaffShiftScheduleResponseDTO,
   ShiftAssignmentResponseDTO,
   VehicleInspectionResponseDTO,
 } from './scheduleOperations.dto.js';
@@ -41,9 +42,7 @@ export class ScheduleOperationsController {
 
       return res.success(
         {
-          shifts: assignments.map((assignment) => (
-            ShiftAssignmentResponseDTO.format(assignment, req.user.userId, req.user.role)
-          )),
+          shifts: assignments.map((assignment) => StaffShiftScheduleResponseDTO.format(assignment)),
           count: assignments.length,
         },
         'Shift schedule retrieved successfully'

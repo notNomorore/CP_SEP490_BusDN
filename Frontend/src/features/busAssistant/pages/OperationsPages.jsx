@@ -1,8 +1,10 @@
-﻿import React, { useCallback, useEffect, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BellRing,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   RefreshCw,
   Route,
@@ -12,6 +14,34 @@ import useTheme from '../../../shared/hooks/useTheme.js';
 import scheduleOperationsService from '../../scheduleOperations/services/scheduleOperationsService.js';
 
 const toInputDate = (date) => date.toISOString().slice(0, 10);
+
+const toLocalInputDate = (date) => {
+  const value = new Date(date);
+  return [
+    value.getFullYear(),
+    String(value.getMonth() + 1).padStart(2, '0'),
+    String(value.getDate()).padStart(2, '0'),
+  ].join('-');
+};
+
+const addCalendarDays = (value, days) => {
+  const date = new Date(`${value}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return toLocalInputDate(date);
+};
+
+const getWeekRange = (anchor = new Date()) => {
+  const date = new Date(`${toLocalInputDate(anchor)}T00:00:00`);
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+  const from = toLocalInputDate(date);
+  return { from, to: addCalendarDays(from, 6) };
+};
+
+const formatShiftDate = (value) => new Date(`${value}T00:00:00`).toLocaleDateString('vi-VN', {
+  weekday: 'short',
+  day: '2-digit',
+  month: '2-digit',
+});
 
 const getDefaultRange = () => {
   const from = new Date();
@@ -417,10 +447,11 @@ export const AssignedTripsPage = () => {
 };
 
 export const ShiftSchedulePage = () => {
-  const [filters, setFilters] = useState(getDefaultRange);
+  const [filters, setFilters] = useState(() => getWeekRange());
   const [shifts, setShifts] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const { isDarkMode } = useTheme();
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -439,10 +470,38 @@ export const ShiftSchedulePage = () => {
     load();
   }, [load]);
 
+  const weekDays = useMemo(() => (
+    Array.from({ length: 7 }, (_, index) => addCalendarDays(filters.from, index))
+  ), [filters.from]);
+
+  const shiftsByDate = useMemo(() => shifts.reduce((result, shift) => {
+    const key = toLocalInputDate(shift.workDate);
+    result[key] = [...(result[key] || []), shift];
+    return result;
+  }, {}), [shifts]);
+
+  const changeWeek = (offset) => {
+    setFilters(getWeekRange(addCalendarDays(filters.from, offset * 7)));
+  };
+
+  const selectWeek = (value) => {
+    if (value) setFilters(getWeekRange(value));
+  };
+
+  const panelClass = isDarkMode
+    ? 'border-white/10 bg-slate-950/35 text-slate-100'
+    : 'border-emerald-100 bg-white text-slate-950';
+  const dayHeaderClass = isDarkMode
+    ? 'border-white/10 bg-white/[0.05] text-slate-200'
+    : 'border-slate-200 bg-slate-50 text-slate-700';
+  const emptyClass = isDarkMode
+    ? 'border-white/10 bg-white/[0.03] text-slate-500'
+    : 'border-slate-200 bg-slate-50 text-slate-400';
+
   return (
     <PageShell
       title="Lịch ca làm việc"
-      subtitle="Theo dõi giờ nhận ca, hạn có mặt, giờ kết thúc và hướng dẫn làm việc của phụ xe."
+      subtitle="Theo dõi các ca được phân công theo tuần. Chỉ các ca của bạn mới hiển thị tại đây."
       icon={CalendarDays}
       filters={filters}
       setFilters={setFilters}
@@ -450,40 +509,73 @@ export const ShiftSchedulePage = () => {
       isLoading={isLoading}
       error={error}
     >
-      <div className="grid gap-4 xl:grid-cols-2">
-        {shifts.length ? shifts.map((shift) => (
-          <article key={shift.id} className="rounded border border-emerald-100 bg-white p-4 text-slate-950">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-black uppercase text-emerald-700">{shift.shiftCode}</p>
-                <h2 className="mt-1 text-lg font-black">{getTripTitle(shift)}</h2>
-                <p className="mt-1 text-sm text-slate-500">{shift.route?.name || 'Chưa có tên tuyến'}</p>
-              </div>
-              <span className={`rounded-full px-3 py-1 text-xs font-black ${statusClass[shift.shiftStatus] || statusClass.SCHEDULED}`}>
-                {statusLabels[shift.shiftStatus] || shift.shiftStatus}
-              </span>
-            </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <InfoBox label="Nhận ca" value={formatTime(shift.dutyStart)} icon={Clock3} />
-              <InfoBox label="Hạn có mặt" value={formatTime(shift.checkInDeadline)} icon={Clock3} />
-              <InfoBox label="Chuyến chạy" value={`${formatTime(shift.scheduledStart)} - ${formatTime(shift.scheduledEnd)}`} icon={CalendarDays} />
-              <InfoBox label="Kết thúc ca" value={formatTime(shift.dutyEnd)} icon={Clock3} />
-            </div>
-            <div className="mt-4 rounded bg-slate-50 p-3">
-              <p className="text-xs font-black uppercase text-slate-500">Hướng dẫn ca</p>
-              <ul className="mt-2 space-y-1 text-sm text-slate-700">
-                {(shift.dutyInstructions || []).map((instruction) => (
-                  <li key={instruction}>- {instruction}</li>
-                ))}
-              </ul>
-            </div>
-          </article>
-        )) : <EmptyState>Không có lịch ca trong khoảng thời gian này.</EmptyState>}
-      </div>
+      <section className={`overflow-hidden rounded-2xl border ${panelClass}`}>
+        <div className="flex flex-col gap-4 border-b border-inherit p-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-500">UC40 - Lịch ca làm việc</p>
+            <h2 className="mt-1 text-lg font-black">Lịch làm việc theo tuần</h2>
+            <p className={isDarkMode ? 'mt-1 text-sm text-slate-400' : 'mt-1 text-sm text-slate-500'}>
+              {filters.from.split('-').reverse().join('/')} - {filters.to.split('-').reverse().join('/')} · {shifts.length} ca được phân công
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => changeWeek(-1)} className="inline-flex h-10 w-10 items-center justify-center rounded border border-emerald-300 text-emerald-600" title="Tuần trước">
+              <ChevronLeft size={18} />
+            </button>
+            <input
+              type="date"
+              value={filters.from}
+              onChange={(event) => selectWeek(event.target.value)}
+              className={isDarkMode ? 'h-10 rounded border border-white/10 bg-slate-950 px-3 text-sm text-slate-100' : 'h-10 rounded border border-slate-200 bg-white px-3 text-sm text-slate-900'}
+              aria-label="Chọn một ngày trong tuần cần xem"
+            />
+            <button type="button" onClick={() => setFilters(getWeekRange())} className="h-10 rounded border border-emerald-300 px-3 text-sm font-bold text-emerald-600">
+              Tuần này
+            </button>
+            <button type="button" onClick={() => changeWeek(1)} className="inline-flex h-10 w-10 items-center justify-center rounded border border-emerald-300 text-emerald-600" title="Tuần sau">
+              <ChevronRight size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto p-4">
+          <div className="grid min-w-[980px] grid-cols-7 gap-3">
+            {weekDays.map((date) => {
+              const dayShifts = shiftsByDate[date] || [];
+              const isToday = date === toLocalInputDate(new Date());
+              return (
+                <div key={date} className={`min-h-[280px] overflow-hidden rounded-xl border ${isToday ? 'border-emerald-400 ring-1 ring-emerald-300/60' : dayHeaderClass}`}>
+                  <div className={`border-b px-3 py-3 ${isToday ? 'border-emerald-300 bg-emerald-500/10 text-emerald-600' : dayHeaderClass}`}>
+                    <p className="text-xs font-black uppercase tracking-[0.12em]">{formatShiftDate(date)}</p>
+                    <p className="mt-1 text-base font-black">{date.slice(8, 10)}/{date.slice(5, 7)}</p>
+                  </div>
+                  <div className="space-y-2 p-2">
+                    {dayShifts.length ? dayShifts.map((shift) => (
+                      <article key={shift.id} className={isDarkMode ? 'rounded-lg border border-emerald-400/25 bg-emerald-400/10 p-3' : 'rounded-lg border border-emerald-100 bg-emerald-50 p-3'}>
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-black leading-5">{shift.startTime} - {shift.endTime}</p>
+                          <span className={`rounded-full px-2 py-1 text-[10px] font-black ${statusClass[shift.assignmentStatus] || statusClass.SCHEDULED}`}>
+                            {statusLabels[shift.assignmentStatus] || shift.assignmentStatus}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm font-bold">{shift.shiftName}</p>
+                        <p className={isDarkMode ? 'mt-1 text-xs text-slate-300' : 'mt-1 text-xs text-slate-600'}>{shift.shiftCode}</p>
+                        {shift.route?.routeName ? <p className={isDarkMode ? 'mt-2 text-xs text-emerald-200' : 'mt-2 text-xs text-emerald-800'}>{shift.route.routeCode} · {shift.route.routeName}</p> : null}
+                        {shift.description ? <p className={isDarkMode ? 'mt-2 line-clamp-3 text-xs text-slate-400' : 'mt-2 line-clamp-3 text-xs text-slate-500'}>{shift.description}</p> : null}
+                      </article>
+                    )) : (
+                      <div className={`mt-2 rounded-lg border border-dashed p-3 text-center text-xs ${emptyClass}`}>Không có ca</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
     </PageShell>
   );
 };
-
 export const OperationNotificationsPage = () => {
   const [filters, setFilters] = useState(getDefaultRange);
   const [notifications, setNotifications] = useState([]);
