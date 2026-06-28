@@ -16,6 +16,7 @@ export const useAuthStore = create((set, get) => ({
   isAdmin: () => get().user?.role === 'ADMIN',
   isDriver: () => get().user?.role === 'DRIVER',
   isBusAssistant: () => get().user?.role === 'BUS_ASSISTANT',
+  isConductor: () => ['CONDUCTOR', 'BUS_ASSISTANT', 'BUS ASSISTANT'].includes(get().user?.role),
   isPassenger: () => get().user?.role === 'PASSENGER',
 
   // Actions

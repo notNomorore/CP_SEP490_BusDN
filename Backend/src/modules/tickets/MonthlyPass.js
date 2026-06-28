@@ -1,9 +1,22 @@
 import mongoose from 'mongoose';
 
+const ValidationLogSchema = new mongoose.Schema(
+  {
+    validatedAt: { type: Date, default: Date.now },
+    validatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    result: { type: String, trim: true, default: '' },
+    routeCode: { type: String, trim: true, default: '' },
+    message: { type: String, trim: true, default: '' },
+  },
+  { _id: false }
+);
+
 const MonthlyPassSchema = new mongoose.Schema(
   {
     passCode: { type: String, required: true, unique: true, trim: true, uppercase: true },
     passenger: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', index: true },
+    routeCode: { type: String, trim: true, default: 'ALL', index: true },
     passType: {
       type: String,
       enum: ['STANDARD', 'STUDENT', 'PRIORITY'],
@@ -12,6 +25,8 @@ const MonthlyPassSchema = new mongoose.Schema(
     },
     startDate: { type: Date, required: true },
     expiryDate: { type: Date, required: true },
+    validFrom: { type: Date, index: true },
+    validUntil: { type: Date, index: true },
     passPrice: { type: Number, required: true, min: 0 },
     paymentMethod: {
       type: String,
@@ -25,14 +40,19 @@ const MonthlyPassSchema = new mongoose.Schema(
     },
     passStatus: {
       type: String,
-      enum: ['ACTIVE', 'EXPIRED', 'PENDING', 'CANCELLED'],
+      enum: ['ACTIVE', 'EXPIRED', 'PENDING', 'CANCELLED', 'REFUNDED'],
       default: 'PENDING',
       index: true,
     },
     digitalPass: {
       qrPayload: { type: String, trim: true, default: '' },
+      qrCodeData: { type: String, trim: true, default: '' },
+      qrCodeImage: { type: String, default: '' },
+      qrSignature: { type: String, trim: true, default: '' },
       issuedAt: Date,
+      expiresAt: Date,
     },
+    validationLogs: { type: [ValidationLogSchema], default: [] },
     purchasedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }

@@ -7,11 +7,12 @@ import {
   AdminCustomerSupportPage,
   AdminLostItemCasesPage,
   LostItemCaseStatusPage,
+  MyFeedbackPage,
   ReportLostItemPage,
   SubmitFeedbackPage,
 } from './features/customerSupport';
 import { SearchRoutesPage } from './features/routes';
-import { ETicketPage, MyTicketsPage } from './features/tickets';
+import { ETicketPage, MyTicketsPage, ValidateTicketPage } from './features/tickets';
 import { TravelHistoryPage } from './features/travelHistory';
 import {
   AdminCommandLayout,
@@ -139,9 +140,12 @@ function App() {
             }
           />
           <Route path="/my-tickets" element={<ProtectedRoute><MyTicketsPage /></ProtectedRoute>} />
+          <Route path="/buy-tickets" element={<ProtectedRoute><MyTicketsPage /></ProtectedRoute>} />
           <Route path="/tickets/:ticketId" element={<ProtectedRoute><ETicketPage /></ProtectedRoute>} />
+          <Route path="/conductor/validate-qr" element={<ProtectedRoute><ValidateTicketPage /></ProtectedRoute>} />
           <Route path="/travel-history" element={<ProtectedRoute><TravelHistoryPage /></ProtectedRoute>} />
           <Route path="/submit-feedback" element={<ProtectedRoute><SubmitFeedbackPage /></ProtectedRoute>} />
+          <Route path="/my-feedback" element={<ProtectedRoute><MyFeedbackPage /></ProtectedRoute>} />
           <Route path="/report-lost-item" element={<ProtectedRoute><ReportLostItemPage /></ProtectedRoute>} />
           <Route path="/lost-item-cases" element={<ProtectedRoute><LostItemCaseStatusPage /></ProtectedRoute>} />
 

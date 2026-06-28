@@ -41,7 +41,9 @@ const Header = ({ forceDarkMode = false }) => {
     { key: 'passenger.nav.routes', path: '/search', hideForAdmin: true },
     { key: 'passenger.nav.tickets', label: 'My Tickets', path: '/my-tickets', requiresAuth: true, hideForAdmin: true },
     { key: 'passenger.nav.history', label: 'Travel History', path: '/travel-history', requiresAuth: true, hideForAdmin: true },
-    { key: 'passenger.nav.feedback', label: 'Feedback', path: '/submit-feedback', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.feedback', label: 'Submit Feedback', path: '/submit-feedback', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.myFeedback', label: 'My Feedback', path: '/my-feedback', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.reportLostItem', label: 'Report Lost Item', path: '/report-lost-item', requiresAuth: true, hideForAdmin: true },
     { key: 'passenger.nav.lostItems', label: 'Lost Items', path: '/lost-item-cases', requiresAuth: true, hideForAdmin: true },
     { key: 'passenger.nav.help', href: '/#support', hideForAdmin: true }
   ].filter((link) => (!link.adminOnly || isAdmin()) && (!link.hideForAdmin || !isAdmin()));
