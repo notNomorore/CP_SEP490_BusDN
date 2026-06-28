@@ -30,6 +30,11 @@ export class TicketController {
     const passes = await TicketService.listMyMonthlyPasses(req.user.userId);
     return res.success({ passes, count: passes.length }, 'Monthly passes retrieved successfully');
   }
+
+  static async validateQRCode(req, res) {
+    const result = await TicketService.validateQRCode(req.user.userId, req.body);
+    return res.success(result, result.message || 'Ticket validated successfully');
+  }
 }
 
 export default TicketController;

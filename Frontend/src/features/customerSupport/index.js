@@ -4,9 +4,12 @@ export {
   CASE_STATUSES,
   CASE_TYPES,
   FEEDBACK_CATEGORIES,
+  FEEDBACK_STATUSES,
   LOST_ITEM_CATEGORIES,
+  PRIORITIES,
   RECOVERY_STATUSES,
 } from './services/customerSupportService.js';
 export { default as SubmitFeedbackPage } from './pages/SubmitFeedbackPage.jsx';
+export { default as MyFeedbackPage } from './pages/MyFeedbackPage.jsx';
 export { default as ReportLostItemPage } from './pages/ReportLostItemPage.jsx';
 export { default as LostItemCaseStatusPage } from './pages/LostItemCaseStatusPage.jsx';

@@ -51,6 +51,11 @@ export const config = {
     refreshExpire: getEnv('JWT_REFRESH_EXPIRE', '30d'),
   },
 
+  // QR e-ticket signing
+  qr: {
+    secret: getEnv('QR_SECRET', getEnv('JWT_SECRET', 'dev_qr_secret_do_not_use_in_production')),
+  },
+
   // Session
   session: {
     secret: getEnv('SESSION_SECRET', 'dev_session_secret'),

@@ -15,6 +15,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import routeService from '../services/routeService';
 import useAuthStore from '../../auth/stores/authStore';
 import Header from '../../../shared/components/navigation/Header';
+import customerSupportService, { FEEDBACK_CATEGORIES } from '../../customerSupport/services/customerSupportService';
 
 const INITIAL_MAP_ZOOM = 13;
 const MIN_MAP_ZOOM = 11;
@@ -22,21 +23,38 @@ const MAX_MAP_ZOOM = 19;
 const DEFAULT_CENTER = { latitude: 16.0614, longitude: 108.2272 };
 const DA_NANG_CENTRAL = { name: 'Da Nang Central', latitude: 16.0667, longitude: 108.1690 };
 const ROUTE_PREFERENCES = [
-  { id: 'fastest', label: 'Fastest Route', icon: 'bolt' },
-  { id: 'shortest', label: 'Shortest', icon: 'straighten' },
-  { id: 'lowest-cost', label: 'Lowest Cost', icon: 'payments' },
-  { id: 'least-traffic', label: 'Least Traffic', icon: 'traffic' },
+  { id: 'fastest', label: 'Nhanh nhất', icon: 'bolt' },
+  { id: 'shortest', label: 'Ngắn nhất', icon: 'straighten' },
+  { id: 'lowest-cost', label: 'Tiết kiệm nhất', icon: 'payments' },
+  { id: 'least-traffic', label: 'Ít kẹt xe nhất', icon: 'traffic' },
 ];
+
+const STATUS_LABELS = {
+  ACTIVE: 'Đang hoạt động',
+  INACTIVE: 'Tạm ngưng',
+  Delayed: 'Trễ chuyến',
+  OnTime: 'Đúng giờ',
+  'On Time': 'Đúng giờ',
+  Completed: 'Hoàn thành',
+  InProgress: 'Đang chạy',
+  'In Progress': 'Đang chạy',
+  Scheduled: 'Theo lịch',
+  Unavailable: 'Không khả dụng',
+  Live: 'Trực tiếp',
+  Off: 'Tắt',
+};
+
+const translateStatus = (status) => STATUS_LABELS[status] || status;
 
 const formatDuration = (minutes) => {
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
 
   if (!hours) {
-    return `${remainder} min`;
+    return `${remainder} phút`;
   }
 
-  return `${hours}h ${remainder}m`;
+  return `${hours} giờ ${remainder} phút`;
 };
 
 const formatFare = (fare) => new Intl.NumberFormat('vi-VN', {
@@ -319,7 +337,7 @@ const MapCanvas = ({
           <Marker
             position={toLatLng(currentLocation)}
             icon={currentLocationIcon}
-            title="Current location"
+            title="Vị trí hiện tại"
             interactive={false}
           />
         )}
@@ -341,33 +359,33 @@ const MapCanvas = ({
         className="absolute right-5 top-5 z-[1000] flex items-center gap-3 rounded-lg bg-white px-4 py-3 text-sm font-semibold shadow-lg hover:bg-emerald-50"
       >
         <span className="material-symbols-outlined text-emerald-600">location_on</span>
-        Nearby places
+        Trạm gần đây
       </button>
 
       {currentLocation && (
         <div className="absolute right-5 top-24 z-[1000] w-56 rounded-lg bg-white px-4 py-3 text-xs shadow-lg">
           <div className="flex items-center gap-2 font-black uppercase tracking-wide text-slate-950">
             <span className="h-2 w-2 rounded-full bg-red-500" />
-            Traffic status
+            Tình trạng giao thông
           </div>
           <p className="mt-2 leading-5 text-slate-500">
-            Nearby routes are being checked from your current GPS position.
+            Đang kiểm tra các tuyến gần vị trí GPS hiện tại của bạn.
           </p>
         </div>
       )}
 
       <div className="pointer-events-none absolute bottom-5 right-5 z-[1000] rounded-lg bg-white px-3 py-2 text-xs text-slate-500 shadow">
-        Leaflet map © OpenStreetMap
+        Bản đồ Leaflet © OpenStreetMap
       </div>
 
       {(liveBusData || liveError) && (
         <div className="absolute right-5 top-24 z-[1000] w-72 rounded-xl bg-white p-4 shadow-xl">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-xs font-black uppercase tracking-wide text-slate-500">Live Bus Location</div>
+            <div className="text-xs font-black uppercase tracking-wide text-slate-500">Vị trí xe buýt trực tiếp</div>
             <span className={`rounded px-2 py-0.5 text-[10px] font-black uppercase ${
               liveError ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-700'
             }`}>
-              {liveError ? 'Unavailable' : 'Live'}
+              {liveError ? 'Không khả dụng' : 'Trực tiếp'}
             </span>
           </div>
           {liveError ? (
@@ -379,16 +397,16 @@ const MapCanvas = ({
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-black text-slate-950">{bus.busId}</span>
                     <span className={bus.status === 'Delayed' ? 'font-bold text-amber-600' : 'font-bold text-emerald-700'}>
-                      {bus.status}
+                      {translateStatus(bus.status)}
                     </span>
                   </div>
                   <div className="mt-1 text-xs text-slate-500">
-                    Next stop: {bus.nextStop} • ETA {bus.estimatedArrivalTime}
+                    Trạm tiếp theo: {bus.nextStop} • ETA {bus.estimatedArrivalTime}
                   </div>
                   {bus.tripProgress && (
                     <div className="mt-2">
                       <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
-                        <span>Trip progress</span>
+                        <span>Tiến độ chuyến</span>
                         <span>{bus.tripProgress.progressPercent}%</span>
                       </div>
                       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-200">
@@ -398,7 +416,7 @@ const MapCanvas = ({
                         />
                       </div>
                       <div className="mt-1 text-[11px] text-slate-500">
-                        {bus.tripProgress.completedStops.length} completed • {bus.tripProgress.remainingStops.length} remaining • {bus.tripProgress.estimatedRemainingTime} left
+                        {bus.tripProgress.completedStops.length} đã qua • {bus.tripProgress.remainingStops.length} còn lại • {bus.tripProgress.estimatedRemainingTime}
                       </div>
                     </div>
                   )}
@@ -425,7 +443,7 @@ const MapCanvas = ({
                   type="button"
                   onClick={() => onDismissArrivalAlert?.(alert.id)}
                   className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                  aria-label="Dismiss arrival notification"
+                  aria-label="Đóng thông báo xe đến"
                 >
                   <span className="material-symbols-outlined text-[18px]">close</span>
                 </button>
@@ -485,7 +503,7 @@ const RouteCard = ({
           ? 'border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100'
           : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
       }`}
-      aria-label={isFavorite ? 'Remove favorite route' : 'Save to favorites'}
+      aria-label={isFavorite ? 'Bỏ lưu tuyến yêu thích' : 'Lưu tuyến yêu thích'}
     >
       <span className="material-symbols-outlined text-[20px] leading-none">{isFavorite ? 'star' : 'star_border'}</span>
     </button>
@@ -509,22 +527,22 @@ const RouteCard = ({
 
     <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
       <div className="rounded-lg bg-slate-50 px-2 py-2">
-        <div className="text-[11px] font-semibold uppercase text-slate-500">Trip duration</div>
+        <div className="text-[11px] font-semibold uppercase text-slate-500">Thời gian</div>
         <div className="font-semibold text-slate-950">{formatDuration(route.estimatedDurationMinutes)}</div>
       </div>
       <div className="rounded-lg bg-slate-50 px-2 py-2">
-        <div className="text-[11px] font-semibold uppercase text-slate-500">Fare</div>
+        <div className="text-[11px] font-semibold uppercase text-slate-500">Giá vé</div>
         <div className="font-semibold text-slate-950">{formatFare(route.fare)}</div>
       </div>
       <div className="rounded-lg bg-slate-50 px-2 py-2">
-        <div className="text-[11px] font-semibold uppercase text-slate-500">Distance</div>
+        <div className="text-[11px] font-semibold uppercase text-slate-500">Quãng đường</div>
         <div className="font-semibold text-slate-950">{route.distanceKm} km</div>
       </div>
     </div>
 
     {!compact && (
       <div className="mt-3">
-        <div className="mb-2 text-xs font-bold uppercase text-slate-500">Stops</div>
+        <div className="mb-2 text-xs font-bold uppercase text-slate-500">Trạm dừng</div>
         <div className="flex flex-wrap gap-1.5">
           {route.stops.map((stop) => (
             <span
@@ -539,6 +557,173 @@ const RouteCard = ({
     )}
   </article>
 );
+
+const RouteFeedbackForm = ({ route }) => {
+  const [form, setForm] = useState({
+    category: 'ROUTE_EXPERIENCE',
+    title: '',
+    description: '',
+    ratingScore: '',
+  });
+  const [errors, setErrors] = useState({});
+  const [successMessage, setSuccessMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const updateForm = (updates) => {
+    setForm((current) => ({ ...current, ...updates }));
+    setErrors({});
+    setSuccessMessage('');
+  };
+
+  const validate = () => {
+    const nextErrors = {};
+
+    if (!form.title.trim()) {
+      nextErrors.title = 'Vui lòng nhập tiêu đề góp ý.';
+    }
+    if (!form.description.trim()) {
+      nextErrors.description = 'Vui lòng nhập nội dung góp ý.';
+    } else if (form.description.trim().length < 20) {
+      nextErrors.description = 'Nội dung góp ý cần có ít nhất 20 ký tự.';
+    }
+    if (!form.ratingScore) {
+      nextErrors.ratingScore = 'Vui lòng chọn mức đánh giá.';
+    }
+
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!validate()) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSuccessMessage('');
+
+    try {
+      const response = await customerSupportService.submitFeedback({
+        type: 'SERVICE_FEEDBACK',
+        category: form.category,
+        title: form.title.trim(),
+        description: form.description.trim(),
+        routeName: `${route.routeNumber} - ${route.name}`,
+        ratingScore: form.ratingScore,
+        priority: form.category === 'COMPLAINT' ? 'HIGH' : 'NORMAL',
+      });
+
+      const referenceNumber = response?.data?.referenceNumber;
+      setSuccessMessage(referenceNumber
+        ? `Đã gửi góp ý thành công. Mã tham chiếu: ${referenceNumber}`
+        : 'Đã gửi góp ý thành công.');
+      setForm({
+        category: 'ROUTE_EXPERIENCE',
+        title: '',
+        description: '',
+        ratingScore: '',
+      });
+    } catch (error) {
+      setErrors({
+        submit: error?.message || 'Không thể gửi góp ý. Vui lòng thử lại sau.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3">
+        <div className="text-sm font-black text-slate-950">Gửi góp ý cho tuyến này</div>
+        <p className="mt-1 text-xs leading-5 text-slate-600">
+          Góp ý của bạn sẽ được gắn với tuyến {route.routeNumber} - {route.name} và chuyển đến bộ phận quản trị.
+        </p>
+      </div>
+
+      {successMessage ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold leading-5 text-emerald-800">
+          {successMessage}
+        </div>
+      ) : null}
+
+      <label className="block space-y-1">
+        <span className="text-xs font-black text-slate-700">Danh mục góp ý</span>
+        <select
+          value={form.category}
+          onChange={(event) => updateForm({ category: event.target.value })}
+          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+        >
+          {FEEDBACK_CATEGORIES.map((category) => (
+            <option key={category.value} value={category.value}>{category.label}</option>
+          ))}
+        </select>
+      </label>
+
+      <div>
+        <div className="mb-2 text-xs font-black text-slate-700">Đánh giá dịch vụ</div>
+        <div className="grid grid-cols-5 gap-2">
+          {[1, 2, 3, 4, 5].map((score) => (
+            <button
+              key={score}
+              type="button"
+              onClick={() => updateForm({ ratingScore: String(score) })}
+              className={`rounded-lg border px-2 py-2 text-sm font-black ${
+                Number(form.ratingScore) === score
+                  ? 'border-emerald-600 bg-emerald-600 text-white'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:bg-emerald-50'
+              }`}
+            >
+              {score}
+            </button>
+          ))}
+        </div>
+        {errors.ratingScore ? <p className="mt-1 text-xs font-semibold text-red-600">{errors.ratingScore}</p> : null}
+      </div>
+
+      <label className="block space-y-1">
+        <span className="text-xs font-black text-slate-700">Tiêu đề</span>
+        <input
+          value={form.title}
+          onChange={(event) => updateForm({ title: event.target.value })}
+          placeholder="Nhập tiêu đề ngắn cho góp ý"
+          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+        />
+        {errors.title ? <p className="text-xs font-semibold text-red-600">{errors.title}</p> : null}
+      </label>
+
+      <label className="block space-y-1">
+        <span className="text-xs font-black text-slate-700">Nội dung góp ý</span>
+        <textarea
+          value={form.description}
+          onChange={(event) => updateForm({ description: event.target.value })}
+          placeholder="Mô tả trải nghiệm của bạn, điểm tốt hoặc điều cần cải thiện..."
+          className="min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+        />
+        {errors.description ? <p className="text-xs font-semibold text-red-600">{errors.description}</p> : null}
+      </label>
+
+      {errors.submit ? (
+        <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+          {errors.submit}
+        </div>
+      ) : null}
+
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-black text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <span className="material-symbols-outlined text-[18px]">
+          {isSubmitting ? 'progress_activity' : 'send'}
+        </span>
+        {isSubmitting ? 'Đang gửi...' : 'Gửi góp ý'}
+      </button>
+    </form>
+  );
+};
 
 const RouteDetailsPanel = ({
   route,
@@ -599,7 +784,7 @@ const RouteDetailsPanel = ({
     { id: 'stops', label: 'Trạm' },
     { id: 'arrival', label: 'Lịch chạy' },
     { id: 'progress', label: 'Tiến độ' },
-    { id: 'feedback', label: 'Feedback' },
+    { id: 'feedback', label: 'Góp ý' },
   ];
   const stopEtaSummary = liveBusData?.stopEtaSummary || [];
   const getStopEta = (stop) => (
@@ -616,7 +801,7 @@ const RouteDetailsPanel = ({
                 {route.routeNumber}
               </span>
               <span className="rounded bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase text-emerald-700">
-                {route.status || 'ACTIVE'}
+                {translateStatus(route.status || 'ACTIVE')}
               </span>
             </div>
             <h2 className="mt-2 truncate text-xl font-black text-slate-950">{route.name}</h2>
@@ -628,7 +813,7 @@ const RouteDetailsPanel = ({
             type="button"
             onClick={onClose}
             className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-            aria-label="Close route details"
+            aria-label="Đóng chi tiết tuyến"
           >
             <span className="material-symbols-outlined text-[22px]">close</span>
           </button>
@@ -684,15 +869,15 @@ const RouteDetailsPanel = ({
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-lg bg-slate-50 px-3 py-3">
-                <div className="text-[11px] font-black uppercase text-slate-400">Fare</div>
+                <div className="text-[11px] font-black uppercase text-slate-400">Giá vé</div>
                 <div className="mt-1 font-black text-slate-950">{formatFare(route.fare)}</div>
               </div>
               <div className="rounded-lg bg-slate-50 px-3 py-3">
-                <div className="text-[11px] font-black uppercase text-slate-400">Trip duration</div>
+                <div className="text-[11px] font-black uppercase text-slate-400">Thời gian</div>
                 <div className="mt-1 font-black text-slate-950">{formatDuration(route.estimatedDurationMinutes)}</div>
               </div>
               <div className="rounded-lg bg-slate-50 px-3 py-3">
-                <div className="text-[11px] font-black uppercase text-slate-400">Distance</div>
+                <div className="text-[11px] font-black uppercase text-slate-400">Quãng đường</div>
                 <div className="mt-1 font-black text-slate-950">{route.distanceKm} km</div>
               </div>
             </div>
@@ -700,32 +885,32 @@ const RouteDetailsPanel = ({
             <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <div className="text-[11px] font-black uppercase text-slate-400">Operating hours</div>
+                  <div className="text-[11px] font-black uppercase text-slate-400">Giờ hoạt động</div>
                   <div className="font-semibold text-slate-700">{firstDeparture} - {lastDeparture}</div>
                 </div>
                 <div>
-                  <div className="text-[11px] font-black uppercase text-slate-400">Departure</div>
+                  <div className="text-[11px] font-black uppercase text-slate-400">Điểm đi</div>
                   <div className="font-semibold text-slate-950">{directionOrigin}</div>
                 </div>
                 <div>
-                  <div className="text-[11px] font-black uppercase text-slate-400">Destination</div>
+                  <div className="text-[11px] font-black uppercase text-slate-400">Điểm đến</div>
                   <div className="font-semibold text-slate-950">{directionDestination}</div>
                 </div>
               </div>
             </div>
 
             <div className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-slate-700">
-              <div className="mb-1 text-[11px] font-black uppercase text-emerald-700">Route Description</div>
-              Optimized route from {directionOrigin} to {directionDestination}, including key stops,
-              operating hours, estimated minimum trip duration, fare, and nearby stop support.
+              <div className="mb-1 text-[11px] font-black uppercase text-emerald-700">Mô tả tuyến</div>
+              Tuyến tối ưu từ {directionOrigin} đến {directionDestination}, bao gồm các trạm chính,
+              giờ hoạt động, thời gian di chuyển dự kiến, giá vé và hỗ trợ tìm trạm gần đây.
             </div>
 
             <div className="rounded-lg border border-emerald-200 bg-white p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm font-black text-slate-950">One-way ticket</div>
+                  <div className="text-sm font-black text-slate-950">Vé xe buýt</div>
                   <p className="mt-1 text-sm leading-5 text-slate-600">
-                    Book a single trip from {directionOrigin} to {directionDestination}.
+                    Mua vé một lượt hoặc vé tháng cho hành trình của bạn.
                   </p>
                 </div>
                 <span className="shrink-0 rounded bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase text-emerald-700">
@@ -738,7 +923,7 @@ const RouteDetailsPanel = ({
                 className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-black text-white hover:bg-emerald-700"
               >
                 <span className="material-symbols-outlined text-[19px]">confirmation_number</span>
-                Purchase Ticket
+                Mua vé
               </button>
             </div>
 
@@ -746,26 +931,26 @@ const RouteDetailsPanel = ({
               <div className="border-b border-slate-100 px-4 py-3">
                 <div className="flex items-center gap-2 text-sm font-black text-slate-950">
                   <span className="material-symbols-outlined text-[18px] text-emerald-600">notifications</span>
-                  Trip notification settings
+                  Cài đặt thông báo chuyến đi
                 </div>
               </div>
               <div className="divide-y divide-slate-100">
                 <div className="flex items-center justify-between gap-3 px-4 py-3">
                   <div>
-                    <div className="text-sm font-black text-slate-900">Bus arrival alerts</div>
+                    <div className="text-sm font-black text-slate-900">Thông báo xe đến trạm</div>
                     <p className="mt-1 text-xs leading-5 text-slate-500">
-                      Enable the bell beside a stop to receive approaching and arriving alerts.
+                      Bật chuông cạnh trạm để nhận thông báo khi xe sắp đến và đã đến.
                     </p>
                   </div>
                   <span className="rounded bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase text-emerald-700">
-                    Stops
+                    Trạm
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3 px-4 py-3">
                   <div>
-                    <div className="text-sm font-black text-slate-900">Delay alerts</div>
+                    <div className="text-sm font-black text-slate-900">Thông báo trễ chuyến</div>
                     <p className="mt-1 text-xs leading-5 text-slate-500">
-                      Notify when a bus on this route is delayed beyond the expected schedule.
+                      Thông báo khi xe trên tuyến này trễ so với lịch dự kiến.
                     </p>
                   </div>
                   <button
@@ -774,7 +959,7 @@ const RouteDetailsPanel = ({
                     className={`relative h-7 w-12 shrink-0 rounded-full transition ${
                       isDelayNotificationEnabled?.(route) ? 'bg-emerald-600' : 'bg-slate-200'
                     }`}
-                    aria-label={isDelayNotificationEnabled?.(route) ? 'Disable delay alerts' : 'Enable delay alerts'}
+                    aria-label={isDelayNotificationEnabled?.(route) ? 'Tắt thông báo trễ chuyến' : 'Bật thông báo trễ chuyến'}
                   >
                     <span
                       className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${
@@ -785,9 +970,9 @@ const RouteDetailsPanel = ({
                 </div>
                 <div className="flex items-center justify-between gap-3 px-4 py-3">
                   <div>
-                    <div className="text-sm font-black text-slate-900">Route change alerts</div>
+                    <div className="text-sm font-black text-slate-900">Thông báo đổi tuyến</div>
                     <p className="mt-1 text-xs leading-5 text-slate-500">
-                      Notify when this route has detours, stop changes, or temporary path updates.
+                      Thông báo khi tuyến có đổi lộ trình, đổi trạm hoặc cập nhật tạm thời.
                     </p>
                   </div>
                   <button
@@ -796,7 +981,7 @@ const RouteDetailsPanel = ({
                     className={`relative h-7 w-12 shrink-0 rounded-full transition ${
                       isRouteChangeNotificationEnabled?.(route) ? 'bg-emerald-600' : 'bg-slate-200'
                     }`}
-                    aria-label={isRouteChangeNotificationEnabled?.(route) ? 'Disable route change alerts' : 'Enable route change alerts'}
+                    aria-label={isRouteChangeNotificationEnabled?.(route) ? 'Tắt thông báo đổi tuyến' : 'Bật thông báo đổi tuyến'}
                   >
                     <span
                       className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${
@@ -812,16 +997,16 @@ const RouteDetailsPanel = ({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">
-                    Live Bus Location
+                    Vị trí xe buýt trực tiếp
                   </div>
                   <p className="mt-1 text-sm text-slate-600">
-                    Track active buses on this route with GPS position, status, and next-stop ETA.
+                    Theo dõi xe đang hoạt động trên tuyến bằng vị trí GPS, trạng thái và giờ đến trạm tiếp theo.
                   </p>
                 </div>
                 <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-black uppercase ${
                   isLiveTracking ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
                 }`}>
-                  {isLiveTracking ? 'Live' : 'Off'}
+                  {isLiveTracking ? 'Trực tiếp' : 'Tắt'}
                 </span>
               </div>
               <button
@@ -837,7 +1022,7 @@ const RouteDetailsPanel = ({
                 <span className="material-symbols-outlined text-[20px]">
                   {isLiveLoading ? 'progress_activity' : 'gps_fixed'}
                 </span>
-                {isLiveTracking ? 'Stop live location' : 'View live location'}
+                {isLiveTracking ? 'Tắt theo dõi trực tiếp' : 'Xem vị trí trực tiếp'}
               </button>
               {liveError && (
                 <div className="mt-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -851,15 +1036,15 @@ const RouteDetailsPanel = ({
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-black text-slate-950">{bus.busId}</span>
                         <span className={bus.status === 'Delayed' ? 'font-bold text-amber-600' : 'font-bold text-emerald-700'}>
-                          {bus.status}
+                          {translateStatus(bus.status)}
                         </span>
                       </div>
                       <div className="mt-1 text-xs text-slate-500">
-                        Next stop: {bus.nextStop} - ETA {bus.estimatedArrivalTime}
+                        Trạm tiếp theo: {bus.nextStop} - ETA {bus.estimatedArrivalTime}
                       </div>
                       {bus.delay && (
                         <div className="mt-2 rounded border border-amber-100 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
-                          Delayed {bus.delay.delayDurationMinutes} min • {bus.delay.delayReason}
+                          Trễ {bus.delay.delayDurationMinutes} phút • {bus.delay.delayReason}
                         </div>
                       )}
                     </div>
@@ -869,18 +1054,18 @@ const RouteDetailsPanel = ({
               {isLiveTracking && stopEtaSummary.length > 0 && (
                 <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3">
                   <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-emerald-700">
-                    Estimated Arrival Time (ETA)
+                    Thời gian xe đến dự kiến (ETA)
                   </div>
                   <div className="space-y-2">
                     {stopEtaSummary.slice(0, 4).map((eta) => (
                       <div key={eta.stopId} className="flex items-center justify-between gap-3 rounded bg-white px-3 py-2 text-xs">
                         <div className="min-w-0">
                           <div className="truncate font-black text-slate-900">{eta.stopName}</div>
-                          <div className="text-slate-500">{eta.nextBusId || 'No active bus'}</div>
+                          <div className="text-slate-500">{eta.nextBusId || 'Chưa có xe hoạt động'}</div>
                         </div>
                         <div className="shrink-0 text-right">
                           <div className="font-black text-emerald-700">{eta.estimatedArrivalTime}</div>
-                          <div className="text-[10px] font-bold uppercase text-slate-400">{eta.status}</div>
+                          <div className="text-[10px] font-bold uppercase text-slate-400">{translateStatus(eta.status)}</div>
                         </div>
                       </div>
                     ))}
@@ -891,7 +1076,7 @@ const RouteDetailsPanel = ({
                 <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm text-amber-900">
                   <div className="mb-1 flex items-center gap-2 text-[11px] font-black uppercase tracking-wide text-amber-700">
                     <span className="material-symbols-outlined text-[16px]">route</span>
-                    Route change
+                    Thay đổi tuyến
                   </div>
                   <div className="font-semibold">{liveBusData.routeChange.reasonForChange}</div>
                   <p className="mt-1 text-xs leading-5">{liveBusData.routeChange.updatedRoutePath}</p>
@@ -901,21 +1086,21 @@ const RouteDetailsPanel = ({
 
             <div>
               <div className="mb-2 flex items-center justify-between">
-                <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Nearby Stop</div>
+                <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Trạm gần nhất</div>
                 <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-700">
-                  Live
+                  Trực tiếp
                 </span>
               </div>
               {nearestStop ? (
                 <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
                   <div className="font-black text-slate-950">{nearestStop.name}</div>
                   <div className="mt-1 text-xs font-semibold text-slate-500">
-                    {nearestStop.distanceKm.toFixed(2)} km from your current location
+                    {nearestStop.distanceKm.toFixed(2)} km từ vị trí hiện tại của bạn
                   </div>
                 </div>
               ) : (
                 <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
-                  Use current location to show the nearest stop for this route.
+                  Dùng vị trí hiện tại để hiển thị trạm gần nhất của tuyến này.
                 </div>
               )}
             </div>
@@ -931,7 +1116,7 @@ const RouteDetailsPanel = ({
                 className="flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700 hover:bg-emerald-100"
               >
                 <span className="material-symbols-outlined text-[18px]">schedule</span>
-                View realtime ETA
+                Xem ETA thời gian thực
               </button>
             )}
             {directionStops.map((stop) => {
@@ -945,12 +1130,12 @@ const RouteDetailsPanel = ({
                   <div className="min-w-0 flex-1">
                     <div className="font-black text-slate-900">{stop.name}</div>
                     <div className="text-xs text-slate-500">
-                      Minimum arrival: {addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}
+                      Giờ đến sớm nhất: {addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}
                     </div>
                     <div className={`mt-1 text-xs font-black ${
                       stopEta?.etaMinutes ? 'text-emerald-700' : 'text-slate-400'
                     }`}>
-                      ETA: {stopEta?.estimatedArrivalTime || 'ETA unavailable'}
+                      ETA: {stopEta?.estimatedArrivalTime || 'Chưa có ETA'}
                       {stopEta?.nextBusId ? ` • ${stopEta.nextBusId}` : ''}
                     </div>
                   </div>
@@ -963,8 +1148,8 @@ const RouteDetailsPanel = ({
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                           : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
                       }`}
-                      aria-label={isArrivalNotificationEnabled?.(route, stop) ? 'Disable arrival notification' : 'Enable arrival notification'}
-                      title={isArrivalNotificationEnabled?.(route, stop) ? 'Disable arrival notification' : 'Enable arrival notification'}
+                      aria-label={isArrivalNotificationEnabled?.(route, stop) ? 'Tắt thông báo xe đến' : 'Bật thông báo xe đến'}
+                      title={isArrivalNotificationEnabled?.(route, stop) ? 'Tắt thông báo xe đến' : 'Bật thông báo xe đến'}
                     >
                       <span className="material-symbols-outlined text-[18px] leading-none">
                         {isArrivalNotificationEnabled?.(route, stop) ? 'notifications_active' : 'notifications'}
@@ -978,8 +1163,8 @@ const RouteDetailsPanel = ({
                           ? 'border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100'
                           : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
                       }`}
-                      aria-label={isStopFavorite?.(route, stop) ? 'Remove favorite stop' : 'Save stop to favorites'}
-                      title={isStopFavorite?.(route, stop) ? 'Remove favorite stop' : 'Save stop to favorites'}
+                      aria-label={isStopFavorite?.(route, stop) ? 'Bỏ lưu trạm yêu thích' : 'Lưu trạm yêu thích'}
+                      title={isStopFavorite?.(route, stop) ? 'Bỏ lưu trạm yêu thích' : 'Lưu trạm yêu thích'}
                     >
                       <span className="material-symbols-outlined text-[18px] leading-none">
                         {isStopFavorite?.(route, stop) ? 'star' : 'star_border'}
@@ -996,10 +1181,10 @@ const RouteDetailsPanel = ({
           <div>
             <div className="rounded-lg border border-slate-200 bg-white">
               <div className="grid grid-cols-4 border-b border-slate-100 px-3 py-2 text-xs font-black uppercase text-slate-400">
-                <span>Stop</span>
-                <span>Minimum arrival</span>
-                <span>Live ETA</span>
-                <span>Frequency</span>
+                <span>Trạm</span>
+                <span>Giờ đến sớm nhất</span>
+                <span>ETA trực tiếp</span>
+                <span>Tần suất</span>
               </div>
               {directionStops.map((stop) => {
                 const stopEta = getStopEta(stop);
@@ -1012,16 +1197,16 @@ const RouteDetailsPanel = ({
                     <span className="font-semibold text-slate-800">{stop.name}</span>
                     <span className="text-slate-600">{addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}</span>
                     <span className={stopEta?.etaMinutes ? 'font-black text-emerald-700' : 'text-slate-400'}>
-                      {stopEta?.estimatedArrivalTime || 'Unavailable'}
+                      {stopEta?.estimatedArrivalTime || 'Không khả dụng'}
                     </span>
-                    <span className="text-slate-600">Every {frequencyMinutes} min</span>
+                    <span className="text-slate-600">Mỗi {frequencyMinutes} phút</span>
                   </div>
                 );
               })}
             </div>
             <div className="mt-2 text-xs font-semibold text-slate-500">
-              Minimum arrival time is calculated from the first departure at {firstDeparture}.
-              Live ETA updates automatically when live tracking is enabled.
+              Giờ đến sớm nhất được tính từ chuyến đầu lúc {firstDeparture}.
+              ETA trực tiếp sẽ tự cập nhật khi bật theo dõi vị trí.
             </div>
           </div>
         )}
@@ -1030,10 +1215,10 @@ const RouteDetailsPanel = ({
           <div className="space-y-3">
             {!isLiveTracking && (
               <div className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="text-sm font-black text-slate-950">Trip progress unavailable</div>
+                <div className="text-sm font-black text-slate-950">Chưa có tiến độ chuyến đi</div>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Start live location tracking to view completed stops, remaining stops, current bus position,
-                  trip status, and estimated remaining travel time.
+                  Bật theo dõi vị trí trực tiếp để xem trạm đã qua, trạm còn lại, vị trí xe hiện tại,
+                  trạng thái chuyến và thời gian còn lại dự kiến.
                 </p>
                 <button
                   type="button"
@@ -1041,7 +1226,7 @@ const RouteDetailsPanel = ({
                   className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white hover:bg-slate-800"
                 >
                   <span className="material-symbols-outlined text-[18px]">route</span>
-                  View trip progress
+                  Xem tiến độ chuyến
                 </button>
               </div>
             )}
@@ -1065,13 +1250,13 @@ const RouteDetailsPanel = ({
                         ? 'bg-amber-50 text-amber-700'
                         : 'bg-emerald-50 text-emerald-700'
                     }`}>
-                      {progress.tripStatus}
+                      {translateStatus(progress.tripStatus)}
                     </span>
                   </div>
 
                   <div className="mt-4">
                     <div className="flex items-center justify-between text-xs font-black text-slate-500">
-                      <span>Progress toward destination</span>
+                      <span>Tiến độ đến điểm cuối</span>
                       <span>{progress.progressPercent}%</span>
                     </div>
                     <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
@@ -1084,25 +1269,25 @@ const RouteDetailsPanel = ({
 
                   <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
                     <div className="rounded-lg bg-slate-50 p-3">
-                      <div className="font-black uppercase text-slate-400">Current stop</div>
+                      <div className="font-black uppercase text-slate-400">Trạm hiện tại</div>
                       <div className="mt-1 font-semibold text-slate-900">{progress.currentStop}</div>
                     </div>
                     <div className="rounded-lg bg-slate-50 p-3">
-                      <div className="font-black uppercase text-slate-400">Next stop</div>
+                      <div className="font-black uppercase text-slate-400">Trạm tiếp theo</div>
                       <div className="mt-1 font-semibold text-slate-900">{progress.nextStop}</div>
                     </div>
                     <div className="rounded-lg bg-slate-50 p-3">
-                      <div className="font-black uppercase text-slate-400">Completed</div>
-                      <div className="mt-1 font-semibold text-slate-900">{progress.completedStops.length} stops</div>
+                      <div className="font-black uppercase text-slate-400">Đã qua</div>
+                      <div className="mt-1 font-semibold text-slate-900">{progress.completedStops.length} trạm</div>
                     </div>
                     <div className="rounded-lg bg-slate-50 p-3">
-                      <div className="font-black uppercase text-slate-400">Remaining time</div>
+                      <div className="font-black uppercase text-slate-400">Thời gian còn lại</div>
                       <div className="mt-1 font-semibold text-slate-900">{progress.estimatedRemainingTime}</div>
                     </div>
                   </div>
 
                   <div className="mt-4">
-                    <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Completed stops</div>
+                    <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Trạm đã qua</div>
                     <div className="space-y-1">
                       {progress.completedStops.length ? progress.completedStops.map((stop) => (
                         <div key={stop.stopId} className="flex items-center gap-2 text-xs text-slate-600">
@@ -1110,13 +1295,13 @@ const RouteDetailsPanel = ({
                           <span>{stop.stopName}</span>
                         </div>
                       )) : (
-                        <div className="text-xs text-slate-400">No stops completed yet.</div>
+                        <div className="text-xs text-slate-400">Chưa qua trạm nào.</div>
                       )}
                     </div>
                   </div>
 
                   <div className="mt-4">
-                    <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Remaining stops</div>
+                    <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Trạm còn lại</div>
                     <div className="space-y-1">
                       {progress.remainingStops.length ? progress.remainingStops.map((stop) => (
                         <div key={stop.stopId} className="flex items-center gap-2 text-xs text-slate-600">
@@ -1124,7 +1309,7 @@ const RouteDetailsPanel = ({
                           <span>{stop.stopName}</span>
                         </div>
                       )) : (
-                        <div className="text-xs text-emerald-700">Trip is near completion.</div>
+                        <div className="text-xs text-emerald-700">Chuyến đi sắp hoàn thành.</div>
                       )}
                     </div>
                   </div>
@@ -1136,16 +1321,7 @@ const RouteDetailsPanel = ({
 
         {detailTab === 'feedback' && (
           <div className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="text-sm font-black text-slate-950">Passenger Feedback</div>
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              Feedback for this route will appear here after passengers submit reviews for schedule,
-              stop quality, and travel experience.
-            </p>
-            <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs font-black text-slate-500">
-              <div className="rounded-lg bg-slate-50 px-2 py-3">Schedule</div>
-              <div className="rounded-lg bg-slate-50 px-2 py-3">Stops</div>
-              <div className="rounded-lg bg-slate-50 px-2 py-3">Service</div>
-            </div>
+            <RouteFeedbackForm route={route} />
           </div>
         )}
       </div>
@@ -1157,17 +1333,17 @@ const FavoriteRoutesPanel = ({ favoriteRoutes, routes, onSelect, onRemove }) => 
   <section className="mt-5 border-t border-slate-200 pt-4">
     <div className="mb-3 flex items-center justify-between">
       <div>
-        <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Favorite Routes</div>
-        <p className="mt-1 text-xs text-slate-500">Manage your frequently used routes.</p>
+        <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Tuyến yêu thích</div>
+        <p className="mt-1 text-xs text-slate-500">Quản lý các tuyến bạn thường sử dụng.</p>
       </div>
       <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-700">
-        Passenger
+        Hành khách
       </span>
     </div>
 
     {favoriteRoutes.length === 0 ? (
       <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
-        No favorite routes saved yet.
+        Chưa có tuyến yêu thích nào.
       </div>
     ) : (
       <div className="space-y-3">
@@ -1178,7 +1354,7 @@ const FavoriteRoutesPanel = ({ favoriteRoutes, routes, onSelect, onRemove }) => 
           ));
           const savedDate = favoriteRoute.savedAt
             ? new Date(favoriteRoute.savedAt).toLocaleDateString('en-GB')
-            : 'Recently saved';
+            : 'Vừa lưu';
 
           return (
             <article
@@ -1195,13 +1371,13 @@ const FavoriteRoutesPanel = ({ favoriteRoutes, routes, onSelect, onRemove }) => 
                       {route?.name || favoriteRoute.destination}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">Saved: {savedDate}</p>
+                  <p className="mt-1 text-xs text-slate-500">Đã lưu: {savedDate}</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => onRemove(favoriteRoute)}
                   className="rounded p-1 text-amber-600 hover:bg-amber-50"
-                  aria-label="Remove favorite route"
+                  aria-label="Bỏ lưu tuyến yêu thích"
                 >
                   <span className="material-symbols-outlined text-[18px]">star</span>
                 </button>
@@ -1211,7 +1387,7 @@ const FavoriteRoutesPanel = ({ favoriteRoutes, routes, onSelect, onRemove }) => 
                 onClick={() => onSelect(favoriteRoute)}
                 className="mt-3 flex w-full items-center justify-center gap-2 rounded bg-slate-950 px-3 py-2 text-xs font-black text-white hover:bg-emerald-700"
               >
-                View Details
+                Xem chi tiết
                 <span className="material-symbols-outlined text-[16px]">chevron_right</span>
               </button>
             </article>
@@ -1226,24 +1402,24 @@ const FavoriteStopsPanel = ({ favoriteStops, onRemove }) => (
   <section className="mt-5 border-t border-slate-200 pt-4">
     <div className="mb-3 flex items-center justify-between">
       <div>
-        <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Favorite Stops</div>
-        <p className="mt-1 text-xs text-slate-500">Quick access to frequently used bus stops.</p>
+        <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Trạm yêu thích</div>
+        <p className="mt-1 text-xs text-slate-500">Truy cập nhanh các trạm xe buýt thường dùng.</p>
       </div>
       <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-700">
-        Passenger
+        Hành khách
       </span>
     </div>
 
     {favoriteStops.length === 0 ? (
       <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
-        No favorite stops saved yet.
+        Chưa có trạm yêu thích nào.
       </div>
     ) : (
       <div className="space-y-3">
         {favoriteStops.map((favoriteStop) => {
           const savedDate = favoriteStop.savedAt
             ? new Date(favoriteStop.savedAt).toLocaleDateString('en-GB')
-            : 'Recently saved';
+            : 'Vừa lưu';
 
           return (
             <article
@@ -1259,7 +1435,7 @@ const FavoriteStopsPanel = ({ favoriteStops, onRemove }) => (
                     <span className="truncate text-sm font-black text-slate-950">{favoriteStop.stopName}</span>
                   </div>
                   <p className="mt-1 text-xs text-slate-500">
-                    {favoriteStop.routeNumber || 'Route'} • Saved: {savedDate}
+                    {favoriteStop.routeNumber || 'Tuyến'} • Đã lưu: {savedDate}
                   </p>
                   {favoriteStop.nearbyArrivalText ? (
                     <p className="mt-1 text-xs font-semibold text-slate-500">{favoriteStop.nearbyArrivalText}</p>
@@ -1269,7 +1445,7 @@ const FavoriteStopsPanel = ({ favoriteStops, onRemove }) => (
                   type="button"
                   onClick={() => onRemove(favoriteStop)}
                   className="rounded p-1 text-amber-600 hover:bg-amber-50"
-                  aria-label="Remove favorite stop"
+                  aria-label="Bỏ lưu trạm yêu thích"
                 >
                   <span className="material-symbols-outlined text-[18px]">star</span>
                 </button>
@@ -1292,20 +1468,20 @@ const RouteChangeNotificationCenter = ({ notifications, onMarkRead, onDismiss })
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">
-            Notification Center
+            Trung tâm thông báo
           </div>
-          <p className="mt-1 text-xs text-slate-500">Route change alerts from subscribed routes.</p>
+          <p className="mt-1 text-xs text-slate-500">Thông báo thay đổi từ các tuyến đã đăng ký.</p>
         </div>
         <span className={`rounded px-2 py-0.5 text-[10px] font-black uppercase ${
           unreadCount ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500'
         }`}>
-          {unreadCount} unread
+          {unreadCount} chưa đọc
         </span>
       </div>
 
       {notifications.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
-          No route change notifications.
+          Chưa có thông báo thay đổi tuyến.
         </div>
       ) : (
         <div className="space-y-3">
@@ -1317,7 +1493,7 @@ const RouteChangeNotificationCenter = ({ notifications, onMarkRead, onDismiss })
                 hour: '2-digit',
                 minute: '2-digit',
               })
-              : 'Just now';
+              : 'Vừa xong';
             const isUnread = notification.notificationStatus === 'UNREAD';
 
             return (
@@ -1334,11 +1510,11 @@ const RouteChangeNotificationCenter = ({ notifications, onMarkRead, onDismiss })
                         {notification.routeNumber}
                       </span>
                       <span className="truncate text-sm font-black text-slate-950">
-                        Route changed
+                        Tuyến đã thay đổi
                       </span>
                     </div>
                     <p className="mt-1 text-xs font-semibold leading-5 text-slate-700">
-                      {notification.reasonForChange || 'Route information has changed.'}
+                      {notification.reasonForChange || 'Thông tin tuyến đã thay đổi.'}
                     </p>
                     {notification.updatedRoutePath && (
                       <p className="mt-1 text-xs leading-5 text-slate-600">
@@ -1370,7 +1546,7 @@ const RouteChangeNotificationCenter = ({ notifications, onMarkRead, onDismiss })
                         type="button"
                         onClick={() => onMarkRead(notification.notificationId)}
                         className="rounded p-1 text-emerald-700 hover:bg-white"
-                        aria-label="Mark route change notification as read"
+                        aria-label="Đánh dấu thông báo đổi tuyến là đã đọc"
                       >
                         <span className="material-symbols-outlined text-[18px]">done</span>
                       </button>
@@ -1379,7 +1555,7 @@ const RouteChangeNotificationCenter = ({ notifications, onMarkRead, onDismiss })
                       type="button"
                       onClick={() => onDismiss(notification.notificationId)}
                       className="rounded p-1 text-slate-500 hover:bg-white hover:text-slate-800"
-                      aria-label="Dismiss route change notification"
+                      aria-label="Đóng thông báo đổi tuyến"
                     >
                       <span className="material-symbols-outlined text-[18px]">close</span>
                     </button>
@@ -1394,146 +1570,6 @@ const RouteChangeNotificationCenter = ({ notifications, onMarkRead, onDismiss })
   );
 };
 
-const todayInputValue = () => new Date().toISOString().slice(0, 10);
-
-const PurchaseTicketModal = ({ route, ticket, error, isSubmitting, onClose, onSubmit, onViewTicket }) => {
-  const stops = route?.stops || [];
-  const [form, setForm] = useState(() => ({
-    departureLocation: stops[0]?.name || route?.origin || '',
-    destinationLocation: stops[stops.length - 1]?.name || route?.destination || '',
-    serviceDate: todayInputValue(),
-    departureTime: route?.operatingHours?.firstDeparture || '05:30',
-    seatNumber: 'A1',
-    paymentMethod: 'E_WALLET',
-  }));
-
-  if (!route) {
-    return null;
-  }
-
-  const updateForm = (updates) => setForm((current) => ({ ...current, ...updates }));
-
-  return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-slate-950/50 px-4">
-      <section className="w-full max-w-xl rounded-xl bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
-          <div>
-            <div className="text-xs font-black uppercase tracking-wide text-emerald-700">Purchase one-way ticket</div>
-            <h2 className="mt-1 text-xl font-black text-slate-950">{route.routeNumber} - {route.name}</h2>
-          </div>
-          <button type="button" onClick={onClose} className="rounded p-2 text-slate-400 hover:bg-slate-100">
-            <span className="material-symbols-outlined">close</span>
-          </button>
-        </div>
-
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            onSubmit?.(form);
-          }}
-          className="space-y-4 px-5 py-4"
-        >
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1 text-sm font-bold text-slate-700">
-              Departure
-              <select
-                value={form.departureLocation}
-                onChange={(event) => updateForm({ departureLocation: event.target.value })}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 font-medium"
-              >
-                {stops.map((stop) => <option key={`from-${stop.order}`} value={stop.name}>{stop.name}</option>)}
-              </select>
-            </label>
-            <label className="space-y-1 text-sm font-bold text-slate-700">
-              Destination
-              <select
-                value={form.destinationLocation}
-                onChange={(event) => updateForm({ destinationLocation: event.target.value })}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 font-medium"
-              >
-                {stops.map((stop) => <option key={`to-${stop.order}`} value={stop.name}>{stop.name}</option>)}
-              </select>
-            </label>
-            <label className="space-y-1 text-sm font-bold text-slate-700">
-              Service date
-              <input
-                type="date"
-                value={form.serviceDate}
-                onChange={(event) => updateForm({ serviceDate: event.target.value })}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 font-medium"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-bold text-slate-700">
-              Departure time
-              <input
-                type="time"
-                value={form.departureTime}
-                onChange={(event) => updateForm({ departureTime: event.target.value })}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 font-medium"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-bold text-slate-700">
-              Seat number
-              <input
-                value={form.seatNumber}
-                onChange={(event) => updateForm({ seatNumber: event.target.value.toUpperCase() })}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 font-medium"
-                placeholder="A1"
-              />
-            </label>
-            <label className="space-y-1 text-sm font-bold text-slate-700">
-              Payment method
-              <select
-                value={form.paymentMethod}
-                onChange={(event) => updateForm({ paymentMethod: event.target.value })}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 font-medium"
-              >
-                <option value="E_WALLET">E-wallet</option>
-                <option value="CREDIT_CARD">Credit card</option>
-                <option value="CASHLESS">Cashless payment</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-            Estimated price: <strong>{formatFare(route.fare)}</strong>. Final price is calculated from selected stop span.
-          </div>
-
-          {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-
-          {ticket && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-              <div className="font-black">Ticket purchased successfully</div>
-              <div className="mt-1">Code: {ticket.ticketCode} - Seat {ticket.seatNumber}</div>
-              <div>Booking status: {ticket.bookingStatus} - Payment: {ticket.paymentStatus}</div>
-              <button
-                type="button"
-                onClick={() => onViewTicket?.(ticket)}
-                className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-black text-white hover:bg-emerald-800"
-              >
-                View E-Ticket
-              </button>
-            </div>
-          )}
-
-          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-            <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600">
-              Close
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white hover:bg-emerald-700 disabled:opacity-60"
-            >
-              {isSubmitting ? 'Processing...' : 'Confirm purchase'}
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
-  );
-};
-
 const PlannerResultCard = ({ result, isRecommended = false, isSelected = false, onSelect }) => (
   <button
     type="button"
@@ -1544,7 +1580,7 @@ const PlannerResultCard = ({ result, isRecommended = false, isSelected = false, 
   >
     {isRecommended && (
       <span className="-mt-5 mb-2 inline-flex rounded bg-slate-950 px-2 py-0.5 text-[10px] font-black uppercase text-white">
-        Recommended
+        Đề xuất
       </span>
     )}
     <div className="flex items-start justify-between gap-3">
@@ -1562,7 +1598,7 @@ const PlannerResultCard = ({ result, isRecommended = false, isSelected = false, 
       <div className="shrink-0 text-right">
         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-black uppercase text-emerald-700">
           <span className="material-symbols-outlined text-[14px]">directions_bus</span>
-          Bus
+          Xe buýt
         </span>
         <div className="mt-1 text-sm font-black text-slate-950">
           {formatFare(result.estimatedFare || result.route.fare)}
@@ -1571,21 +1607,21 @@ const PlannerResultCard = ({ result, isRecommended = false, isSelected = false, 
     </div>
     <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
       <div className="rounded bg-slate-50 px-2 py-1.5">
-        <div className="font-bold uppercase text-slate-400">Board</div>
+        <div className="font-bold uppercase text-slate-400">Lên xe</div>
         <div className="truncate font-semibold text-slate-700">{result.startStop.name}</div>
       </div>
       <div className="rounded bg-slate-50 px-2 py-1.5">
-        <div className="font-bold uppercase text-slate-400">Get off</div>
+        <div className="font-bold uppercase text-slate-400">Xuống xe</div>
         <div className="truncate font-semibold text-slate-700">{result.endStop.name}</div>
       </div>
     </div>
     <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
       <div className="rounded bg-slate-50 px-2 py-1.5">
-        <div className="font-bold uppercase text-slate-400">Trip duration</div>
+        <div className="font-bold uppercase text-slate-400">Thời gian</div>
         <div className="font-semibold text-slate-700">{formatDuration(result.estimatedDurationMinutes)}</div>
       </div>
       <div className="rounded bg-slate-50 px-2 py-1.5">
-        <div className="font-bold uppercase text-slate-400">Distance</div>
+        <div className="font-bold uppercase text-slate-400">Quãng đường</div>
         <div className="font-semibold text-slate-700">{result.estimatedDistanceKm} km</div>
       </div>
     </div>
@@ -1619,7 +1655,7 @@ const NearbyStopCard = ({ stop, onSelect }) => {
           </div>
         </div>
         <div className="mt-2 text-[11px] font-semibold text-slate-400">
-          Nearest stop: {stop.distanceKm} km away
+          Trạm gần nhất: {stop.distanceKm} km
         </div>
       </div>
     </button>
@@ -1662,10 +1698,6 @@ const SearchRoutesPage = () => {
   const [liveBusData, setLiveBusData] = useState(null);
   const [isLiveLoading, setIsLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState('');
-  const [ticketRoute, setTicketRoute] = useState(null);
-  const [purchasedTicket, setPurchasedTicket] = useState(null);
-  const [ticketError, setTicketError] = useState('');
-  const [isPurchasingTicket, setIsPurchasingTicket] = useState(false);
 
   const activeFilters = useMemo(() => ({
     q: searchParams.get('q') || '',
@@ -1791,7 +1823,7 @@ const SearchRoutesPage = () => {
         }
       } catch (err) {
         if (isMounted) {
-          setError(err.message || 'Unable to search routes.');
+          setError(err.message || 'Không thể tìm tuyến xe.');
           setRoutes([]);
         }
       } finally {
@@ -1849,7 +1881,7 @@ const SearchRoutesPage = () => {
         }
       } catch (err) {
         if (isMounted && err.statusCode !== 403) {
-          setError(err.message || 'Unable to load favorites.');
+          setError(err.message || 'Không thể tải danh sách yêu thích.');
         }
       }
     };
@@ -1878,12 +1910,12 @@ const SearchRoutesPage = () => {
 
         if (isMounted) {
           setLiveBusData(result);
-          setLiveError(result.buses?.length ? '' : (result.message || 'Live location unavailable.'));
+          setLiveError(result.buses?.length ? '' : (result.message || 'Chưa có dữ liệu vị trí trực tiếp.'));
         }
       } catch (err) {
         if (isMounted) {
           setLiveBusData(null);
-          setLiveError(err.message || 'Live location unavailable.');
+          setLiveError(err.message || 'Chưa có dữ liệu vị trí trực tiếp.');
         }
       } finally {
         if (isMounted) {
@@ -1939,8 +1971,8 @@ const SearchRoutesPage = () => {
       nextNotifiedKeys.add(notificationKey);
       nextAlerts.push({
         id: `${notificationKey}-${Date.now()}`,
-        title: notificationType === 'arriving' ? 'Bus arriving now' : 'Bus approaching',
-        message: `${subscription.routeNumber} to ${subscription.stopName}: ${eta.estimatedArrivalTime}. ${eta.nextBusId || 'Tracked bus'} is ${eta.status.toLowerCase()}.`,
+        title: notificationType === 'arriving' ? 'Xe đang đến trạm' : 'Xe sắp đến',
+        message: `${subscription.routeNumber} đến ${subscription.stopName}: ${eta.estimatedArrivalTime}. ${eta.nextBusId || 'Xe đang theo dõi'} đang ${translateStatus(eta.status).toLowerCase()}.`,
         status: eta.status,
       });
     });
@@ -2000,9 +2032,9 @@ const SearchRoutesPage = () => {
         nextNotifiedKeys.add(notificationKey);
         nextAlerts.push({
           id: `${notificationKey}-${Date.now()}`,
-          title: 'Bus delayed',
-          message: `${subscription.routeNumber} ${bus.busId} is delayed ${delayMinutes} min. Reason: ${bus.delay.delayReason}. Updated ETA: ${bus.delay.updatedEta}.`,
-          status: 'Delayed',
+          title: 'Xe bị trễ chuyến',
+          message: `${subscription.routeNumber} ${bus.busId} trễ ${delayMinutes} phút. Lý do: ${bus.delay.delayReason}. ETA cập nhật: ${bus.delay.updatedEta}.`,
+          status: 'Trễ chuyến',
         });
       });
     });
@@ -2058,9 +2090,9 @@ const SearchRoutesPage = () => {
       nextNotifiedKeys.add(notificationKey);
       nextAlerts.push({
         id: `${notificationKey}-${Date.now()}`,
-        title: 'Route change detected',
+        title: 'Phát hiện thay đổi tuyến',
         message: `${routeChange.routeNumber}: ${routeChange.reasonForChange}. ${routeChange.updatedRoutePath}`,
-        status: 'Route changed',
+        status: 'Tuyến đã thay đổi',
       });
     });
 
@@ -2102,7 +2134,7 @@ const SearchRoutesPage = () => {
         item.notificationId === notification.notificationId ? notification : item
       )));
     } catch (err) {
-      setError(err.message || 'Unable to update route change notification.');
+      setError(err.message || 'Không thể cập nhật thông báo đổi tuyến.');
     }
   };
 
@@ -2113,7 +2145,7 @@ const SearchRoutesPage = () => {
         current.filter((item) => item.notificationId !== notificationId)
       ));
     } catch (err) {
-      setError(err.message || 'Unable to dismiss route change notification.');
+      setError(err.message || 'Không thể đóng thông báo đổi tuyến.');
     }
   };
 
@@ -2130,7 +2162,7 @@ const SearchRoutesPage = () => {
     event.preventDefault();
 
     if (!query.trim() && !from.trim() && !to.trim()) {
-      setError('Please enter a route number, stop, origin, or destination.');
+      setError('Vui lòng nhập mã tuyến, trạm, điểm đi hoặc điểm đến.');
       setRoutes([]);
       return;
     }
@@ -2173,7 +2205,7 @@ const SearchRoutesPage = () => {
     setError('');
 
     if (!navigator.geolocation) {
-      setError('Current location is not supported by this browser.');
+      setError('Trình duyệt này không hỗ trợ lấy vị trí hiện tại.');
       return;
     }
 
@@ -2196,7 +2228,7 @@ const SearchRoutesPage = () => {
           setNearbyStops(result.nearbyStops || []);
           setActiveTab('lookup');
         } catch (err) {
-          setError(err.message || 'Unable to find nearby routes.');
+          setError(err.message || 'Không thể tìm tuyến gần đây.');
           setRoutes([]);
           setNearbyStops([]);
           setCurrentLocation(null);
@@ -2206,12 +2238,12 @@ const SearchRoutesPage = () => {
       },
       (geoError) => {
         const messages = {
-          1: 'Location permission was denied.',
-          2: 'Current location is unavailable.',
-          3: 'Location request timed out.',
+          1: 'Bạn đã từ chối quyền truy cập vị trí.',
+          2: 'Không thể xác định vị trí hiện tại.',
+          3: 'Yêu cầu lấy vị trí đã hết thời gian.',
         };
 
-        setError(messages[geoError.code] || 'Unable to read current location.');
+        setError(messages[geoError.code] || 'Không thể đọc vị trí hiện tại.');
         setIsLocating(false);
       },
       {
@@ -2237,7 +2269,7 @@ const SearchRoutesPage = () => {
     setFavoriteMessage('');
 
     if (!user) {
-      setError('Please log in before saving a favorite route.');
+      setError('Vui lòng đăng nhập trước khi lưu tuyến yêu thích.');
       return;
     }
 
@@ -2248,7 +2280,7 @@ const SearchRoutesPage = () => {
           !isSameRouteId(favoriteRoute.routeId, route.id)
           && favoriteRoute.routeNumber !== route.routeNumber
         )));
-        setFavoriteMessage('Route removed from favorites.');
+        setFavoriteMessage('Đã bỏ lưu tuyến yêu thích.');
         return;
       }
 
@@ -2260,14 +2292,14 @@ const SearchRoutesPage = () => {
           && item.routeNumber !== favoriteRoute.routeNumber
         )),
       ]);
-      setFavoriteMessage('Route saved to favorites.');
+      setFavoriteMessage('Đã lưu tuyến yêu thích.');
     } catch (err) {
       if (err.message === 'Route already exists in favorites') {
-        setFavoriteMessage('Route already exists in favorites.');
+        setFavoriteMessage('Tuyến này đã có trong danh sách yêu thích.');
         return;
       }
 
-      setError(err.message || 'Unable to update favorite route.');
+      setError(err.message || 'Không thể cập nhật tuyến yêu thích.');
     }
   };
 
@@ -2289,7 +2321,7 @@ const SearchRoutesPage = () => {
       setSelectedRoute(nextRoutes.find((route) => route.routeNumber === favoriteRoute.routeNumber) || nextRoutes[0] || null);
       setActiveTab('lookup');
     } catch (err) {
-      setError(err.message || 'Unable to open favorite route.');
+      setError(err.message || 'Không thể mở tuyến yêu thích.');
     }
   };
 
@@ -2298,7 +2330,7 @@ const SearchRoutesPage = () => {
       || routes.find((route) => route.routeNumber === favoriteRoute.routeNumber)?.id;
 
     if (!routeId) {
-      setError('Route not found.');
+      setError('Không tìm thấy tuyến.');
       return;
     }
 
@@ -2308,9 +2340,9 @@ const SearchRoutesPage = () => {
         !isSameRouteId(item.routeId, routeId)
         && item.routeNumber !== favoriteRoute.routeNumber
       )));
-      setFavoriteMessage('Route removed from favorites.');
+      setFavoriteMessage('Đã bỏ lưu tuyến yêu thích.');
     } catch (err) {
-      setError(err.message || 'Unable to remove favorite route.');
+      setError(err.message || 'Không thể bỏ lưu tuyến yêu thích.');
     }
   };
 
@@ -2319,7 +2351,7 @@ const SearchRoutesPage = () => {
     setFavoriteMessage('');
 
     if (!user) {
-      setError('Please log in before saving a favorite stop.');
+      setError('Vui lòng đăng nhập trước khi lưu trạm yêu thích.');
       return;
     }
 
@@ -2329,7 +2361,7 @@ const SearchRoutesPage = () => {
       if (favoriteStopIds.has(stopId)) {
         await routeService.removeFavoriteStop(stopId);
         setFavoriteStops((current) => current.filter((favoriteStop) => favoriteStop.stopId !== stopId));
-        setFavoriteMessage('Stop removed from favorites.');
+        setFavoriteMessage('Đã bỏ lưu trạm yêu thích.');
         return;
       }
 
@@ -2349,29 +2381,29 @@ const SearchRoutesPage = () => {
         favoriteStop,
         ...current.filter((item) => item.stopId !== favoriteStop.stopId),
       ]);
-      setFavoriteMessage('Stop saved to favorites.');
+      setFavoriteMessage('Đã lưu trạm yêu thích.');
     } catch (err) {
       if (err.message === 'Stop already exists in favorites') {
-        setFavoriteMessage('Stop already exists in favorites.');
+        setFavoriteMessage('Trạm này đã có trong danh sách yêu thích.');
         return;
       }
 
-      setError(err.message || 'Unable to update favorite stop.');
+      setError(err.message || 'Không thể cập nhật trạm yêu thích.');
     }
   };
 
   const handleRemoveFavoriteStop = async (favoriteStop) => {
     if (!favoriteStop.stopId) {
-      setError('Stop not found.');
+      setError('Không tìm thấy trạm.');
       return;
     }
 
     try {
       await routeService.removeFavoriteStop(favoriteStop.stopId);
       setFavoriteStops((current) => current.filter((item) => item.stopId !== favoriteStop.stopId));
-      setFavoriteMessage('Stop removed from favorites.');
+      setFavoriteMessage('Đã bỏ lưu trạm yêu thích.');
     } catch (err) {
-      setError(err.message || 'Unable to remove favorite stop.');
+      setError(err.message || 'Không thể bỏ lưu trạm yêu thích.');
     }
   };
 
@@ -2380,7 +2412,7 @@ const SearchRoutesPage = () => {
     setFavoriteMessage('');
 
     if (!user) {
-      setError('Please log in before enabling arrival notifications.');
+      setError('Vui lòng đăng nhập trước khi bật thông báo xe đến.');
       return;
     }
 
@@ -2392,7 +2424,7 @@ const SearchRoutesPage = () => {
         setArrivalNotifications((current) => (
           current.filter((subscription) => subscription.subscriptionId !== subscriptionId)
         ));
-        setFavoriteMessage('Arrival notification disabled.');
+        setFavoriteMessage('Đã tắt thông báo xe đến.');
         return;
       }
 
@@ -2413,19 +2445,19 @@ const SearchRoutesPage = () => {
         ...current.filter((item) => item.subscriptionId !== subscription.subscriptionId),
       ]);
       setFavoriteMessage(
-        'Arrival notification enabled. You will be alerted when a bus is within 5 minutes of this stop.'
+        'Đã bật thông báo xe đến. Bạn sẽ được báo khi xe còn cách trạm trong khoảng 5 phút.'
       );
 
       if ('Notification' in window && Notification.permission === 'denied') {
-        setError('Browser notification permission is disabled. In-app alerts will still appear.');
+        setError('Quyền thông báo của trình duyệt đang tắt. Thông báo trong ứng dụng vẫn sẽ hiển thị.');
       }
     } catch (err) {
       if (err.message === 'Arrival notification already enabled') {
-        setFavoriteMessage('Arrival notification already enabled.');
+        setFavoriteMessage('Thông báo xe đến đã được bật.');
         return;
       }
 
-      setError(err.message || 'Unable to update arrival notification.');
+      setError(err.message || 'Không thể cập nhật thông báo xe đến.');
     }
   };
 
@@ -2434,7 +2466,7 @@ const SearchRoutesPage = () => {
     setFavoriteMessage('');
 
     if (!user) {
-      setError('Please log in before enabling delay notifications.');
+      setError('Vui lòng đăng nhập trước khi bật thông báo trễ chuyến.');
       return;
     }
 
@@ -2446,7 +2478,7 @@ const SearchRoutesPage = () => {
         setDelayNotifications((current) => (
           current.filter((subscription) => subscription.subscriptionId !== subscriptionId)
         ));
-        setFavoriteMessage('Delay notification disabled.');
+        setFavoriteMessage('Đã tắt thông báo trễ chuyến.');
         return;
       }
 
@@ -2464,18 +2496,18 @@ const SearchRoutesPage = () => {
         subscription,
         ...current.filter((item) => item.subscriptionId !== subscription.subscriptionId),
       ]);
-      setFavoriteMessage('Delay notification enabled for this route.');
+      setFavoriteMessage('Đã bật thông báo trễ chuyến cho tuyến này.');
 
       if ('Notification' in window && Notification.permission === 'denied') {
-        setError('Browser notification permission is disabled. In-app delay alerts will still appear.');
+        setError('Quyền thông báo của trình duyệt đang tắt. Thông báo trễ chuyến trong ứng dụng vẫn sẽ hiển thị.');
       }
     } catch (err) {
       if (err.message === 'Delay notification already enabled') {
-        setFavoriteMessage('Delay notification already enabled.');
+        setFavoriteMessage('Thông báo trễ chuyến đã được bật.');
         return;
       }
 
-      setError(err.message || 'Unable to update delay notification.');
+      setError(err.message || 'Không thể cập nhật thông báo trễ chuyến.');
     }
   };
 
@@ -2484,7 +2516,7 @@ const SearchRoutesPage = () => {
     setFavoriteMessage('');
 
     if (!user) {
-      setError('Please log in before enabling route change notifications.');
+      setError('Vui lòng đăng nhập trước khi bật thông báo đổi tuyến.');
       return;
     }
 
@@ -2507,7 +2539,7 @@ const SearchRoutesPage = () => {
         setRouteChangeAlerts((current) => (
           current.filter((notification) => notification.subscriptionId !== existingSubscription.subscriptionId)
         ));
-        setFavoriteMessage('Route change notification disabled.');
+        setFavoriteMessage('Đã tắt thông báo đổi tuyến.');
         return;
       }
 
@@ -2524,22 +2556,22 @@ const SearchRoutesPage = () => {
         subscription,
         ...current.filter((item) => item.subscriptionId !== subscription.subscriptionId),
       ]);
-      setFavoriteMessage('Route change notification enabled for this route.');
+      setFavoriteMessage('Đã bật thông báo đổi tuyến cho tuyến này.');
       await refreshRouteChangeAlerts();
 
       if ('Notification' in window && Notification.permission === 'denied') {
-        setError('Browser notification permission is disabled. In-app route change alerts will still appear.');
+        setError('Quyền thông báo của trình duyệt đang tắt. Thông báo đổi tuyến trong ứng dụng vẫn sẽ hiển thị.');
       }
     } catch (err) {
       if (err.message === 'Route change notification already enabled') {
         const subscriptions = await routeService.getRouteChangeNotifications();
         setRouteChangeNotifications(subscriptions || []);
         await refreshRouteChangeAlerts();
-        setFavoriteMessage('Route change notification already enabled.');
+        setFavoriteMessage('Thông báo đổi tuyến đã được bật.');
         return;
       }
 
-      setError(err.message || 'Unable to update route change notification.');
+      setError(err.message || 'Không thể cập nhật thông báo đổi tuyến.');
     }
   };
 
@@ -2547,7 +2579,7 @@ const SearchRoutesPage = () => {
     clearError();
 
     if (!route?.id) {
-      setLiveError('Bus not found.');
+      setLiveError('Không tìm thấy xe buýt.');
       return;
     }
 
@@ -2570,51 +2602,8 @@ const SearchRoutesPage = () => {
   };
 
   const handleOpenPurchaseTicket = (route) => {
-    setTicketRoute(route);
-    setPurchasedTicket(null);
-    setTicketError('');
-  };
-
-  const handleClosePurchaseTicket = () => {
-    setTicketRoute(null);
-    setPurchasedTicket(null);
-    setTicketError('');
-  };
-
-  const handlePurchaseTicket = async (form) => {
-    if (!ticketRoute) {
-      return;
-    }
-
-    setIsPurchasingTicket(true);
-    setTicketError('');
-
-    try {
-      const ticket = await routeService.purchaseOneWayTicket({
-        routeId: ticketRoute.id,
-        tripId: `${ticketRoute.routeNumber}-${form.serviceDate}-${form.departureTime}`,
-        departureLocation: form.departureLocation,
-        destinationLocation: form.destinationLocation,
-        seatNumber: form.seatNumber,
-        serviceDate: form.serviceDate,
-        departureTime: form.departureTime,
-        paymentMethod: form.paymentMethod,
-      });
-
-      setPurchasedTicket(ticket);
-      setFavoriteMessage('One-way ticket purchased successfully.');
-    } catch (err) {
-      setTicketError(err.message || 'Unable to purchase ticket.');
-    } finally {
-      setIsPurchasingTicket(false);
-    }
-  };
-
-  const handleViewPurchasedTicket = (ticket) => {
-    const ticketId = ticket?.id || ticket?._id;
-    if (ticketId) {
-      navigate(`/tickets/${ticketId}`);
-    }
+    const params = route?.routeNumber ? `?route=${encodeURIComponent(route.routeNumber)}` : '';
+    navigate(`/buy-tickets${params}`, { state: { route } });
   };
 
   const handleFindBestRoute = async (event) => {
@@ -2623,7 +2612,7 @@ const SearchRoutesPage = () => {
     setBestRouteResult(null);
 
     if (!bestFrom.trim() || !bestTo.trim()) {
-      setError('Please enter both departure and destination.');
+      setError('Vui lòng nhập đầy đủ điểm đi và điểm đến.');
       return;
     }
 
@@ -2653,7 +2642,7 @@ const SearchRoutesPage = () => {
         setSelectedRoute(null);
       }
     } catch (err) {
-      setError(err.message || 'Unable to suggest route options.');
+      setError(err.message || 'Không thể gợi ý tuyến phù hợp.');
     } finally {
       setIsFindingBest(false);
     }
@@ -2664,67 +2653,67 @@ const SearchRoutesPage = () => {
       <Header />
 
       <main className="mt-[80px] flex h-[calc(100vh-80px)]">
-        <aside className="z-10 flex w-[420px] shrink-0 flex-col border-r border-slate-200 bg-white shadow-xl">
-          <div className="grid grid-cols-2 border-b border-slate-200">
+        <aside className="z-10 flex w-[420px] shrink-0 flex-col overflow-y-auto border-r border-emerald-100 bg-emerald-50/40 shadow-xl">
+          <div className="m-4 mb-0 grid grid-cols-2 gap-2 rounded-2xl border border-emerald-100 bg-white p-1 shadow-sm">
             <button
               type="button"
               onClick={() => setActiveTab('lookup')}
-              className={`flex items-center justify-center gap-2 px-4 py-4 text-sm font-bold ${
+              className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition ${
                 activeTab === 'lookup'
-                  ? 'border-b-2 border-emerald-600 text-emerald-700'
-                  : 'text-slate-500 hover:bg-slate-50'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-500 hover:bg-emerald-50 hover:text-emerald-700'
               }`}
             >
               <span className="material-symbols-outlined">search</span>
-              LOOKUP
+              Tra cứu
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('directions')}
-              className={`flex items-center justify-center gap-2 px-4 py-4 text-sm font-bold ${
+              className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition ${
                 activeTab === 'directions'
-                  ? 'border-b-2 border-emerald-600 text-emerald-700'
-                  : 'text-slate-500 hover:bg-slate-50'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-500 hover:bg-emerald-50 hover:text-emerald-700'
               }`}
             >
               <span className="material-symbols-outlined">conversion_path</span>
-              DIRECTIONS
+              Chỉ đường
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="p-4">
             {activeTab === 'lookup' ? (
               <>
-                <div>
-                  <div className="text-sm font-black uppercase tracking-wide text-slate-950">Route Planner</div>
+                <div className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
+                  <div className="text-sm font-black uppercase tracking-wide text-slate-950">Tìm tuyến xe</div>
                   <p className="mt-1 text-xs leading-5 text-slate-500">
-                    Manage your transit and discover local routes based on your precise current location.
+                    Tra cứu tuyến xe và tìm các trạm gần vị trí hiện tại của bạn.
                   </p>
 
                   <button
                     type="button"
                     onClick={handleUseCurrentLocation}
                     disabled={isLocating}
-                    className="mt-4 flex w-full items-center justify-center gap-2 rounded bg-slate-950 px-4 py-3 text-xs font-black uppercase text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-xs font-black uppercase text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
                   >
                     <span className="material-symbols-outlined text-[18px]">
                       {isLocating ? 'progress_activity' : 'my_location'}
                     </span>
-                    {isLocating ? 'Detecting location...' : 'Use current location'}
+                    {isLocating ? 'Đang xác định vị trí...' : 'Dùng vị trí hiện tại'}
                   </button>
                 </div>
 
-                <div className="mt-5 border-t border-slate-200 pt-4">
+                <div className="mt-4 rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex items-center justify-between">
-                    <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Nearby stops</div>
+                    <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Trạm gần đây</div>
                     <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-700">
-                      Live
+                      Trực tiếp
                     </span>
                   </div>
 
                   {currentLocation && (
                     <div className="mb-3 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-slate-600">
-                      <div className="font-bold text-slate-950">Current location detected</div>
+                      <div className="font-bold text-slate-950">Đã xác định vị trí hiện tại</div>
                       <div>
                         {currentLocation.latitude.toFixed(5)}, {currentLocation.longitude.toFixed(5)}
                       </div>
@@ -2733,13 +2722,13 @@ const SearchRoutesPage = () => {
 
                   {isLocating && (
                     <div className="rounded-lg bg-slate-100 px-4 py-4 text-sm font-semibold text-slate-600">
-                      Detecting your GPS location...
+                      Đang xác định vị trí GPS của bạn...
                     </div>
                   )}
 
                   {!isLocating && currentLocation && nearbyStops.length === 0 && (
                     <div className="rounded-lg border border-slate-200 bg-white px-4 py-5 text-sm text-slate-600">
-                      No nearby results found. Please try again later or check location permission.
+                      Không tìm thấy kết quả gần đây. Vui lòng thử lại hoặc kiểm tra quyền truy cập vị trí.
                     </div>
                   )}
 
@@ -2756,8 +2745,8 @@ const SearchRoutesPage = () => {
                   )}
                 </div>
 
-                <form onSubmit={handleSearch} className="mt-5 space-y-3 border-t border-slate-200 pt-4">
-                  <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Manual search</div>
+                <form onSubmit={handleSearch} className="mt-4 space-y-3 rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
+                  <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Tìm kiếm thủ công</div>
                   <input
                     type="text"
                     value={query}
@@ -2765,7 +2754,7 @@ const SearchRoutesPage = () => {
                       setQuery(event.target.value);
                       clearError();
                     }}
-                    placeholder="Search routes or stops..."
+                    placeholder="Tìm tuyến hoặc trạm..."
                     className="w-full rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
                   />
                   <div className="grid grid-cols-2 gap-2">
@@ -2776,7 +2765,7 @@ const SearchRoutesPage = () => {
                         setFrom(event.target.value);
                         clearError();
                       }}
-                      placeholder="From"
+                      placeholder="Điểm đi"
                       className="w-full rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
                     />
                     <input
@@ -2786,7 +2775,7 @@ const SearchRoutesPage = () => {
                         setTo(event.target.value);
                         clearError();
                       }}
-                      placeholder="To"
+                      placeholder="Điểm đến"
                       className="w-full rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
@@ -2795,7 +2784,7 @@ const SearchRoutesPage = () => {
                     className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 font-bold text-white hover:bg-emerald-700"
                   >
                     <span className="material-symbols-outlined">search</span>
-                    Search routes
+                    Tìm tuyến
                   </button>
                 </form>
 
@@ -2824,7 +2813,7 @@ const SearchRoutesPage = () => {
                     setBestFrom(event.target.value);
                     clearError();
                   }}
-                  placeholder="Enter departure"
+                  placeholder="Nhập điểm đi"
                   className="w-full rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
                 />
                 <input
@@ -2834,11 +2823,11 @@ const SearchRoutesPage = () => {
                     setBestTo(event.target.value);
                     clearError();
                   }}
-                  placeholder="Enter destination"
+                  placeholder="Nhập điểm đến"
                   className="w-full rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
                 />
                 <div className="space-y-2">
-                  <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Route preference</div>
+                  <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Ưu tiên tuyến</div>
                   <div className="grid grid-cols-2 gap-2">
                     {ROUTE_PREFERENCES.map((preference) => {
                       const isActive = routePreference === preference.id;
@@ -2872,20 +2861,20 @@ const SearchRoutesPage = () => {
                   <span className="material-symbols-outlined">
                     {isFindingBest ? 'progress_activity' : 'route'}
                   </span>
-                  {isFindingBest ? 'Calculating...' : 'Find best route'}
+                  {isFindingBest ? 'Đang tính toán...' : 'Tìm tuyến phù hợp'}
                 </button>
 
                 {bestRouteResult && (
                   <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-sm font-black text-emerald-900">Suggested route options</div>
+                        <div className="text-sm font-black text-emerald-900">Gợi ý tuyến phù hợp</div>
                         <p className="mt-1 text-xs text-emerald-800">
-                          Compare bus routes by trip duration, distance, fare, and selected preference.
+                          So sánh các tuyến theo thời gian, quãng đường, giá vé và ưu tiên đã chọn.
                         </p>
                       </div>
                       <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[11px] font-black text-emerald-700">
-                        {suggestedRouteOptions.length} found
+                        {suggestedRouteOptions.length} kết quả
                       </span>
                     </div>
 
@@ -2903,7 +2892,7 @@ const SearchRoutesPage = () => {
                       </div>
                     ) : (
                       <div className="mt-3 rounded-lg bg-white p-3 text-sm text-slate-700">
-                        No route options found. Try another departure, destination, or route preference.
+                        Không tìm thấy tuyến phù hợp. Hãy thử điểm đi, điểm đến hoặc ưu tiên khác.
                       </div>
                     )}
                   </div>
@@ -2925,7 +2914,7 @@ const SearchRoutesPage = () => {
 
             {isLoading && (
               <div className="mt-4 rounded-lg bg-slate-100 px-4 py-3 text-sm text-slate-600">
-                Loading routes...
+                Đang tải tuyến xe...
               </div>
             )}
 
@@ -2933,7 +2922,7 @@ const SearchRoutesPage = () => {
               <div className="mt-5 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-bold text-slate-700">
-                    {routes.length} route{routes.length === 1 ? '' : 's'} found
+                    {routes.length} tuyến được tìm thấy
                   </div>
                   {(activeFilters.q || activeFilters.from || activeFilters.to || selectedRoute || nearbyStops.length > 0 || bestRouteResult) && (
                     <button
@@ -2942,7 +2931,7 @@ const SearchRoutesPage = () => {
                       className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-black text-slate-600 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
                     >
                       <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-                      Back
+                      Quay lại
                     </button>
                   )}
                 </div>
@@ -3001,15 +2990,6 @@ const SearchRoutesPage = () => {
             onClose={() => setSelectedRoute(null)}
           />
         )}
-        <PurchaseTicketModal
-          route={ticketRoute}
-          ticket={purchasedTicket}
-          error={ticketError}
-          isSubmitting={isPurchasingTicket}
-          onClose={handleClosePurchaseTicket}
-          onSubmit={handlePurchaseTicket}
-          onViewTicket={handleViewPurchasedTicket}
-        />
       </main>
     </div>
   );

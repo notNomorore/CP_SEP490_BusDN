@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../../../features/auth/stores/authStore.js';
 
@@ -18,24 +18,24 @@ const Header = () => {
   }, []);
 
   const navLinks = [
-    { label: 'Ticket History', href: '/my-tickets' },
-    { label: 'Travel History', href: '/travel-history' },
-    { label: 'Submit Feedback', href: '/submit-feedback' },
-    { label: 'Report Lost Item', href: '/report-lost-item' },
-    { label: 'Lost Item Status', href: '/lost-item-cases' },
-    { label: 'Become a Partner', href: '#' },
-    { label: 'Routes', href: '/search' },
-    { label: 'Help', href: '#' }
+    { label: 'Mua vé', href: '/buy-tickets' },
+    { label: 'Lịch sử', href: '/travel-history' },
+    { label: 'Góp ý của tôi', href: '/my-feedback' },
+    { label: 'Báo mất đồ', href: '/report-lost-item' },
+    { label: 'Đồ thất lạc', href: '/lost-item-cases' },
+    { label: 'Đối tác', href: '#' },
+    { label: 'Tuyến xe', href: '/search' },
+    { label: 'Trợ giúp', href: '#' },
   ];
 
   const authCta =
     location.pathname === '/auth/register'
-      ? { label: 'Sign In', path: '/auth/login' }
+      ? { label: 'Đăng nhập', path: '/auth/login' }
       : location.pathname === '/auth/login'
-        ? { label: 'Create Account', path: '/auth/register' }
-        : { label: 'Sign In', path: '/auth/login' };
+        ? { label: 'Tạo tài khoản', path: '/auth/register' }
+        : { label: 'Đăng nhập', path: '/auth/login' };
 
-  const displayName = user?.fullName?.trim() || 'Passenger';
+  const displayName = user?.fullName?.trim() || 'Hành khách';
   const profileInitial = displayName.charAt(0).toUpperCase();
 
   const handleLogout = async () => {
@@ -45,109 +45,108 @@ const Header = () => {
 
   return (
     <header
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
+      className={`fixed left-0 right-0 top-0 z-50 h-20 transition-all duration-300 ${
         isScrolled
           ? 'glass-nav shadow-2xl shadow-primary/20'
           : 'bg-primary shadow-2xl shadow-primary/20'
       }`}
     >
-      <div className="flex justify-between items-center w-full px-6 py-4 max-w-screen-2xl mx-auto">
-        {/* Logo */}
-        <div className="flex items-center gap-8">
+      <div className="mx-auto flex h-full w-full max-w-screen-2xl items-center justify-between gap-4 px-6">
+        <div className="flex min-w-0 items-center gap-5">
           <button
+            type="button"
             onClick={() => navigate('/')}
-            className="text-2xl font-display font-black tracking-tight text-surface-bright hover:opacity-90 transition-opacity"
+            className="shrink-0 whitespace-nowrap text-xl font-display font-black leading-none tracking-tight text-surface-bright transition-opacity hover:opacity-90 xl:text-2xl"
           >
             Veridian Transit
           </button>
 
-          {/* Navigation - Hidden on mobile */}
-          <nav className="hidden lg:flex items-center gap-6">
-            {navLinks.map((link, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => {
-                  if (link.href !== '#') {
-                    navigate(link.href);
-                  }
-                }}
-                className={`text-label-md font-body transition-all ${
-                  location.pathname === link.href
-                    ? 'text-tertiary-fixed font-bold border-b-2 border-tertiary-fixed pb-1'
-                    : 'text-surface-variant/80 hover:text-surface-bright hover:bg-primary-container/50 px-2 py-1 rounded'
-                }`}
-              >
-                {link.label}
-              </button>
-            ))}
+          <nav className="hidden min-w-0 items-center gap-2 lg:flex xl:gap-3">
+            {navLinks.map((link) => {
+              const isActive = location.pathname === link.href;
+
+              return (
+                <button
+                  key={link.href}
+                  type="button"
+                  onClick={() => {
+                    if (link.href !== '#') {
+                      navigate(link.href);
+                    }
+                  }}
+                  className={`whitespace-nowrap rounded-lg px-2 py-2 text-xs font-bold leading-tight transition-all xl:text-[13px] ${
+                    isActive
+                      ? 'text-tertiary-fixed'
+                      : 'text-surface-variant/80 hover:bg-primary-container/50 hover:text-surface-bright'
+                  }`}
+                >
+                  <span className={isActive ? 'border-b-2 border-tertiary-fixed pb-1' : ''}>
+                    {link.label}
+                  </span>
+                </button>
+              );
+            })}
           </nav>
         </div>
 
-        {/* Right Section */}
-        <div className="flex items-center gap-4 text-on-primary">
-          {/* Support Info - Hidden on mobile */}
-          <div className="hidden md:flex items-center gap-4 mr-4">
-            <span className="text-label-md font-body opacity-80">Hotline 24/7</span>
-            <span className="material-symbols-outlined text-surface-bright">
-              language
-            </span>
-            <span className="material-symbols-outlined text-surface-bright">
-              help_outline
-            </span>
+        <div className="flex shrink-0 items-center gap-2 text-on-primary xl:gap-3">
+          <div className="hidden items-center gap-3 xl:flex">
+            <span className="whitespace-nowrap text-xs font-bold opacity-80">Hotline 24/7</span>
+            <span className="material-symbols-outlined text-surface-bright">language</span>
+            <span className="material-symbols-outlined text-surface-bright">help_outline</span>
           </div>
 
           {isAuthenticated ? (
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 xl:gap-3">
               {isAdmin() ? (
                 <>
                   <button
                     type="button"
                     onClick={() => navigate('/admin/priority-verification')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                    className="hidden whitespace-nowrap rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
                   >
-                    Verify Profiles
+                    Duyệt hồ sơ
                   </button>
                   <button
                     type="button"
                     onClick={() => navigate('/admin/customer-support')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                    className="hidden whitespace-nowrap rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
                   >
-                    Customer Support
+                    Hỗ trợ khách hàng
                   </button>
                 </>
               ) : (
                 <button
                   type="button"
                   onClick={() => navigate('/priority-profile')}
-                  className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 lg:inline-flex"
+                  className="hidden whitespace-nowrap rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
                 >
-                  Priority Profile
+                  Hồ sơ ưu tiên
                 </button>
               )}
 
               <button
                 type="button"
                 onClick={() => navigate('/profile')}
-                className="flex items-center gap-3 rounded-full border border-white/10 bg-white/10 px-3 py-2 text-left text-surface-bright backdrop-blur-md hover:bg-white/15"
-                aria-label="Current user profile"
+                className="flex max-w-[210px] items-center gap-2 rounded-full border border-white/10 bg-white/10 px-2.5 py-2 text-left text-surface-bright backdrop-blur-md hover:bg-white/15"
+                aria-label="Hồ sơ người dùng hiện tại"
               >
                 {user?.avatar ? (
                   <img
                     src={user.avatar}
                     alt={displayName}
-                    className="h-10 w-10 rounded-full object-cover border border-white/20"
+                    className="h-9 w-9 shrink-0 rounded-full border border-white/20 object-cover"
                   />
                 ) : (
-                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-on-tertiary-container font-bold text-primary">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-on-tertiary-container font-bold text-primary">
                     {profileInitial}
                   </span>
                 )}
-                <span className="hidden md:flex flex-col">
-                  <span className="text-xs uppercase tracking-[0.2em] text-surface-variant/70">
-                    Signed in
+                <span className="hidden min-w-0 flex-col md:flex">
+                  <span className="truncate text-[10px] uppercase tracking-[0.16em] text-surface-variant/70">
+                    Đã đăng nhập
                   </span>
-                  <span className="text-sm font-semibold text-surface-bright">
+                  <span className="truncate text-sm font-semibold text-surface-bright">
                     {displayName}
                   </span>
                 </span>
@@ -156,15 +155,16 @@ const Header = () => {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10"
+                className="whitespace-nowrap rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10"
               >
-                Logout
+                Đăng xuất
               </button>
             </div>
           ) : (
             <button
+              type="button"
               onClick={() => navigate(authCta.path)}
-              className="bg-on-tertiary-container text-primary font-bold px-6 py-2 rounded-full active:scale-95 transition-transform hover:shadow-lg"
+              className="whitespace-nowrap rounded-full bg-on-tertiary-container px-6 py-2 font-bold text-primary transition-transform hover:shadow-lg active:scale-95"
             >
               {authCta.label}
             </button>

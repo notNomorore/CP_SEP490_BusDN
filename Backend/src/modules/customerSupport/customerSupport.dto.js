@@ -1,15 +1,29 @@
 const CASE_TYPES = ['COMPLAINT', 'LOST_ITEM', 'SERVICE_FEEDBACK'];
-const CASE_STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'SUBMITTED', 'UNDER_REVIEW', 'RESPONDED', 'REJECTED', 'CLOSED'];
-const CASE_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
+const CASE_STATUSES = [
+  'PENDING',
+  'IN_PROGRESS',
+  'WAITING_FOR_PASSENGER',
+  'RESOLVED',
+  'REJECTED',
+  'CLOSED',
+  'OPEN',
+  'SUBMITTED',
+  'UNDER_REVIEW',
+  'RESPONDED',
+];
+const FEEDBACK_STATUSES = ['PENDING', 'IN_PROGRESS', 'WAITING_FOR_PASSENGER', 'RESOLVED', 'REJECTED', 'CLOSED'];
+const CASE_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'NORMAL', 'URGENT'];
 const RECOVERY_STATUSES = ['REPORTED', 'SEARCHING', 'FOUND', 'RETURNED', 'UNRECOVERED'];
 const FEEDBACK_CATEGORIES = [
   'SERVICE_QUALITY',
   'DRIVER_BEHAVIOR',
-  'BUS_ASSISTANT_SERVICE',
-  'ROUTE_EXPERIENCE',
-  'MOBILE_APPLICATION',
-  'SUGGESTION',
-  'COMPLAINT',
+  'BUS_ASSISTANT_BEHAVIOR',
+  'BUS_CLEANLINESS',
+  'ROUTE_DELAY',
+  'SAFETY',
+  'APP_ISSUE',
+  'PAYMENT_ISSUE',
+  'OTHER',
 ];
 const LOST_ITEM_CATEGORIES = [
   'PERSONAL_BELONGINGS',
@@ -34,8 +48,6 @@ export const CreateSupportCaseDTO = {
 
     if (!body.description?.trim()) {
       errors.description = 'Description is required';
-    } else if (body.type === 'SERVICE_FEEDBACK' && body.description.trim().length < 20) {
-      errors.description = 'Feedback description must contain at least 20 characters';
     }
 
     if (body.priority && !CASE_PRIORITIES.includes(body.priority)) {
@@ -46,7 +58,9 @@ export const CreateSupportCaseDTO = {
       errors.category = 'Feedback category is invalid';
     }
 
-    if (
+    if (body.type === 'SERVICE_FEEDBACK' && (body.ratingScore === undefined || body.ratingScore === '')) {
+      errors.ratingScore = 'Rating score is required';
+    } else if (
       body.ratingScore !== undefined
       && body.ratingScore !== ''
       && (Number(body.ratingScore) < 1 || Number(body.ratingScore) > 5)
@@ -75,11 +89,45 @@ export const CreateSupportCaseDTO = {
         errors.lostAt = 'Estimated lost date and time is required';
       } else if (Number.isNaN(new Date(body.lostItem.lostAt).getTime())) {
         errors.lostAt = 'Estimated lost date and time is invalid';
+      } else if (new Date(body.lostItem.lostAt).getTime() > Date.now()) {
+        errors.lostAt = 'Estimated lost date and time cannot be later than the report submission time';
       }
 
       if (!body.contactPhone?.trim() && !body.contactEmail?.trim()) {
         errors.contact = 'Contact phone or contact email is required';
       }
+    }
+
+    return Object.keys(errors).length === 0 ? null : errors;
+  },
+};
+
+export const FeedbackAdminActionDTO = {
+  validate: (body) => {
+    const errors = {};
+
+    if (body.status && !FEEDBACK_STATUSES.includes(body.status)) {
+      errors.status = 'Feedback status is invalid';
+    }
+
+    if (body.message !== undefined && !body.message?.trim()) {
+      errors.message = 'Message cannot be empty';
+    }
+
+    if (body.resolutionSummary !== undefined && !body.resolutionSummary?.trim()) {
+      errors.resolutionSummary = 'Resolution summary cannot be empty';
+    }
+
+    return Object.keys(errors).length === 0 ? null : errors;
+  },
+};
+
+export const PassengerFeedbackReplyDTO = {
+  validate: (body) => {
+    const errors = {};
+
+    if (!body.message?.trim()) {
+      errors.message = 'Reply message is required';
     }
 
     return Object.keys(errors).length === 0 ? null : errors;
@@ -139,8 +187,12 @@ export const SupportCaseResponseDTO = {
     description: supportCase.description,
     category: supportCase.category,
     ratingScore: supportCase.ratingScore,
+    rating: supportCase.ratingScore,
     priority: supportCase.priority,
     status: supportCase.status,
+    routeId: supportCase.routeId,
+    tripId: supportCase.tripId,
+    ticketId: supportCase.ticketId,
     relatedTripId: supportCase.relatedTripId,
     routeName: supportCase.routeName,
     tripCode: supportCase.tripCode,
@@ -151,7 +203,25 @@ export const SupportCaseResponseDTO = {
     attachments: supportCase.attachments || [],
     lostItem: supportCase.lostItem,
     responses: supportCase.responses || [],
+    conversation: (supportCase.conversation || []).map((message) => ({
+      id: message._id,
+      senderId: message.senderId?._id || message.senderId,
+      senderRole: message.senderRole,
+      sender: message.senderId
+        ? {
+          id: message.senderId._id || message.senderId,
+          fullName: message.senderId.fullName,
+          email: message.senderId.email,
+          role: message.senderId.role || message.senderRole,
+        }
+        : null,
+      message: message.message,
+      createdAt: message.createdAt,
+    })),
     assignedTo: supportCase.assignedTo,
+    assignedAt: supportCase.assignedAt,
+    adminResponse: supportCase.adminResponse,
+    resolutionSummary: supportCase.resolutionSummary,
     resolvedAt: supportCase.resolvedAt,
     closedAt: supportCase.closedAt,
     createdAt: supportCase.createdAt,
@@ -162,6 +232,7 @@ export const SupportCaseResponseDTO = {
 export {
   CASE_TYPES,
   CASE_STATUSES,
+  FEEDBACK_STATUSES,
   CASE_PRIORITIES,
   FEEDBACK_CATEGORIES,
   LOST_ITEM_CATEGORIES,

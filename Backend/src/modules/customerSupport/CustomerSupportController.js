@@ -1,6 +1,8 @@
 import CustomerSupportService from './CustomerSupportService.js';
 import {
   CreateSupportCaseDTO,
+  FeedbackAdminActionDTO,
+  PassengerFeedbackReplyDTO,
   RespondSupportCaseDTO,
   SupportCaseResponseDTO,
   UpdateLostItemCaseDTO,
@@ -43,7 +45,7 @@ export class CustomerSupportController {
 
   static async listCases(req, res, next) {
     try {
-      const result = await CustomerSupportService.listCases(req.query);
+      const result = await CustomerSupportService.listCases(req.query, req.user.userId);
 
       return res.json({
         success: true,
@@ -52,6 +54,80 @@ export class CustomerSupportController {
       });
     } catch (error) {
       logger.error('List support cases error:', error);
+      next(error);
+    }
+  }
+
+  static async listMyFeedback(req, res, next) {
+    try {
+      const result = await CustomerSupportService.listMyFeedback(req.user.userId, req.query);
+
+      return res.json({
+        success: true,
+        data: result.items.map((supportCase) => SupportCaseResponseDTO.format(supportCase)),
+        meta: result.meta,
+      });
+    } catch (error) {
+      logger.error('List passenger feedback error:', error);
+      next(error);
+    }
+  }
+
+  static async getMyFeedback(req, res, next) {
+    try {
+      const supportCase = await CustomerSupportService.getMyFeedback(req.user.userId, req.params.caseId);
+
+      return res.json({
+        success: true,
+        data: SupportCaseResponseDTO.format(supportCase),
+      });
+    } catch (error) {
+      logger.error('Get passenger feedback error:', error);
+
+      if (error.statusCode === 404 || error.message.includes('not found')) {
+        return res.status(404).json({
+          success: false,
+          message: 'Feedback not found',
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async addPassengerFeedbackReply(req, res, next) {
+    try {
+      const validationErrors = PassengerFeedbackReplyDTO.validate(req.body);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const supportCase = await CustomerSupportService.addPassengerFeedbackReply(
+        req.user.userId,
+        req.params.caseId,
+        req.body
+      );
+
+      return res.json({
+        success: true,
+        message: 'Feedback reply submitted successfully',
+        data: SupportCaseResponseDTO.format(supportCase),
+      });
+    } catch (error) {
+      logger.error('Passenger feedback reply error:', error);
+
+      if (error.statusCode === 400) {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
       next(error);
     }
   }
@@ -190,6 +266,84 @@ export class CustomerSupportController {
         });
       }
 
+      next(error);
+    }
+  }
+
+  static async assignFeedback(req, res, next) {
+    try {
+      const supportCase = await CustomerSupportService.assignFeedback(
+        req.params.caseId,
+        req.user.userId,
+        req.body
+      );
+
+      return res.json({
+        success: true,
+        message: 'Feedback assignment updated successfully',
+        data: SupportCaseResponseDTO.format(supportCase),
+      });
+    } catch (error) {
+      logger.error('Assign feedback error:', error);
+
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async updateFeedback(req, res, next) {
+    try {
+      const validationErrors = FeedbackAdminActionDTO.validate(req.body);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const supportCase = await CustomerSupportService.updateFeedback(
+        req.params.caseId,
+        req.user.userId,
+        req.body
+      );
+
+      return res.json({
+        success: true,
+        message: 'Feedback ticket updated successfully',
+        data: SupportCaseResponseDTO.format(supportCase),
+      });
+    } catch (error) {
+      logger.error('Update feedback error:', error);
+
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async getFeedbackAnalytics(req, res, next) {
+    try {
+      const analytics = await CustomerSupportService.getFeedbackAnalytics();
+
+      return res.json({
+        success: true,
+        data: analytics,
+      });
+    } catch (error) {
+      logger.error('Feedback analytics error:', error);
       next(error);
     }
   }

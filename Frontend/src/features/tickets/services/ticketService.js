@@ -6,6 +6,16 @@ export const ticketService = {
     return response.data;
   },
 
+  purchaseMonthlyPass: async (payload) => {
+    const response = await apiClient.post('/tickets/monthly-pass', payload);
+    return response.data;
+  },
+
+  getMyMonthlyPasses: async () => {
+    const response = await apiClient.get('/tickets/monthly-passes/me');
+    return response.data;
+  },
+
   getTicket: async (ticketId) => {
     const response = await apiClient.get(`/tickets/${ticketId}`);
     return response.data;
@@ -13,6 +23,11 @@ export const ticketService = {
 
   cancelTicket: async (ticketId) => {
     const response = await apiClient.patch(`/tickets/${ticketId}/cancel`);
+    return response.data;
+  },
+
+  validateQRCode: async (payload) => {
+    const response = await apiClient.post('/tickets/validate-qr', payload);
     return response.data;
   },
 };
