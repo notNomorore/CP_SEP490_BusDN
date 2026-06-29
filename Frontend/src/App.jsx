@@ -12,7 +12,16 @@ import {
   SubmitFeedbackPage,
 } from './features/customerSupport';
 import { SearchRoutesPage } from './features/routes';
-import { ETicketPage, MyTicketsPage, ValidateTicketPage } from './features/tickets';
+import {
+  ETicketPage,
+  MyTicketsPage,
+  PaymentFailedPage,
+  PaymentSuccessPage,
+  TicketCheckoutPage,
+  TicketPurchasePage,
+  TransactionHistoryPage,
+  ValidateTicketPage,
+} from './features/tickets';
 import { TravelHistoryPage } from './features/travelHistory';
 import {
   AdminCommandLayout,
@@ -139,8 +148,14 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="/tickets/purchase" element={<ProtectedRoute><TicketPurchasePage /></ProtectedRoute>} />
+          <Route path="/tickets/checkout" element={<ProtectedRoute><TicketCheckoutPage /></ProtectedRoute>} />
+          <Route path="/payment/success" element={<ProtectedRoute><PaymentSuccessPage /></ProtectedRoute>} />
+          <Route path="/payment/failed" element={<ProtectedRoute><PaymentFailedPage /></ProtectedRoute>} />
           <Route path="/my-tickets" element={<ProtectedRoute><MyTicketsPage /></ProtectedRoute>} />
-          <Route path="/buy-tickets" element={<ProtectedRoute><MyTicketsPage /></ProtectedRoute>} />
+          <Route path="/my-tickets/:ticketId" element={<ProtectedRoute><ETicketPage /></ProtectedRoute>} />
+          <Route path="/transactions" element={<ProtectedRoute><TransactionHistoryPage /></ProtectedRoute>} />
+          <Route path="/buy-tickets" element={<ProtectedRoute><TicketPurchasePage /></ProtectedRoute>} />
           <Route path="/tickets/:ticketId" element={<ProtectedRoute><ETicketPage /></ProtectedRoute>} />
           <Route path="/conductor/validate-qr" element={<ProtectedRoute><ValidateTicketPage /></ProtectedRoute>} />
           <Route path="/travel-history" element={<ProtectedRoute><TravelHistoryPage /></ProtectedRoute>} />

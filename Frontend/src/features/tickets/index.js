@@ -1,4 +1,9 @@
 export { default as MyTicketsPage } from './pages/MyTicketsPage.jsx';
 export { default as ETicketPage } from './pages/ETicketPage.jsx';
+export { default as TicketPurchasePage } from './pages/TicketPurchasePage.jsx';
+export { default as TicketCheckoutPage } from './pages/TicketCheckoutPage.jsx';
+export { default as PaymentSuccessPage } from './pages/PaymentSuccessPage.jsx';
+export { default as PaymentFailedPage } from './pages/PaymentFailedPage.jsx';
+export { default as TransactionHistoryPage } from './pages/TransactionHistoryPage.jsx';
 export { default as ValidateTicketPage } from './pages/ValidateTicketPage.jsx';
 export { default as ticketService } from './services/ticketService.js';

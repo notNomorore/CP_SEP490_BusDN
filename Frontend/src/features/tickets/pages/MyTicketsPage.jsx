@@ -1,9 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import {
-  ArrowRight,
-  BusFront,
   CalendarDays,
   CreditCard,
   LoaderCircle,
@@ -14,39 +12,7 @@ import {
   Ticket,
 } from 'lucide-react';
 import Header from '../../../shared/components/navigation/Header.jsx';
-import routeService from '../../routes/services/routeService.js';
 import ticketService from '../services/ticketService.js';
-
-const getVietnamDateTimeParts = () => {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Ho_Chi_Minh',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(new Date()).reduce((result, part) => {
-    result[part.type] = part.value;
-    return result;
-  }, {});
-
-  return {
-    date: `${parts.year}-${parts.month}-${parts.day}`,
-    time: `${parts.hour}:${parts.minute}`,
-  };
-};
-
-const isPastVietnamDeparture = (serviceDate, departureTime) => {
-  if (!serviceDate || !departureTime) return true;
-  const departure = new Date(`${serviceDate}T${departureTime}:00+07:00`);
-  return Number.isNaN(departure.getTime()) || departure.getTime() <= Date.now();
-};
-
-const getMinimumDepartureTime = (serviceDate) => {
-  const vietnamNow = getVietnamDateTimeParts();
-  return serviceDate === vietnamNow.date ? vietnamNow.time : undefined;
-};
 
 const formatDate = (value) => {
   if (!value) return 'Không có dữ liệu';
@@ -131,25 +97,8 @@ const getPassDisplayStatus = (pass) => {
 
 const MyTicketsPage = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   const [tickets, setTickets] = useState([]);
   const [monthlyPasses, setMonthlyPasses] = useState([]);
-  const [routes, setRoutes] = useState([]);
-  const [selectedRoute, setSelectedRoute] = useState(location.state?.route || null);
-  const [isLoadingRoutes, setIsLoadingRoutes] = useState(true);
-  const [isPurchasing, setIsPurchasing] = useState(false);
-  const [purchaseError, setPurchaseError] = useState('');
-  const [purchasedTicket, setPurchasedTicket] = useState(null);
-  const [purchaseMode, setPurchaseMode] = useState('ONE_WAY');
-  const [purchaseForm, setPurchaseForm] = useState({
-    departureLocation: '',
-    destinationLocation: '',
-    serviceDate: getVietnamDateTimeParts().date,
-    departureTime: '05:30',
-    passengerType: 'STANDARD',
-    paymentMethod: 'E_WALLET',
-    validityMonths: 1,
-  });
   const [query, setQuery] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -182,116 +131,6 @@ const MyTicketsPage = () => {
     loadTickets();
   }, []);
 
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadRoutes = async () => {
-      setIsLoadingRoutes(true);
-      try {
-        const payload = await routeService.searchRoutes();
-        if (!isMounted) return;
-
-        const nextRoutes = payload.routes || [];
-        setRoutes(nextRoutes);
-        setSelectedRoute((current) => {
-          if (current) {
-            return nextRoutes.find((route) => String(route.id) === String(current.id)) || current;
-          }
-
-          const routeNumber = new URLSearchParams(location.search).get('route');
-          return nextRoutes.find((route) => route.routeNumber === routeNumber) || null;
-        });
-      } catch (err) {
-        if (isMounted) {
-          setPurchaseError(err.message || 'Không thể tải danh sách tuyến xe.');
-        }
-      } finally {
-        if (isMounted) setIsLoadingRoutes(false);
-      }
-    };
-
-    loadRoutes();
-    return () => {
-      isMounted = false;
-    };
-  }, [location.search]);
-
-  useEffect(() => {
-    if (!selectedRoute) return;
-
-    const stops = selectedRoute.stops || [];
-    setPurchaseForm((current) => ({
-      ...current,
-      departureLocation: stops[0]?.name || selectedRoute.origin || '',
-      destinationLocation: stops[stops.length - 1]?.name || selectedRoute.destination || '',
-      departureTime: selectedRoute.operatingHours?.firstDeparture || '05:30',
-    }));
-    setPurchaseError('');
-    setPurchasedTicket(null);
-  }, [selectedRoute]);
-
-  const updatePurchaseForm = (updates) => {
-    setPurchaseForm((current) => ({ ...current, ...updates }));
-  };
-
-  const handlePurchase = async (event) => {
-    event.preventDefault();
-    if (purchaseMode === 'ONE_WAY' && !selectedRoute) {
-      setPurchaseError('Vui lòng chọn tuyến xe trước khi mua vé.');
-      return;
-    }
-    if (
-      purchaseMode === 'ONE_WAY'
-      && purchaseForm.departureLocation === purchaseForm.destinationLocation
-    ) {
-      setPurchaseError('Điểm đi và điểm đến phải khác nhau.');
-      return;
-    }
-    if (
-      purchaseMode === 'ONE_WAY'
-      && isPastVietnamDeparture(purchaseForm.serviceDate, purchaseForm.departureTime)
-    ) {
-      setPurchaseError('Không thể mua vé cho chuyến xe đã khởi hành. Vui lòng chọn thời gian trong tương lai.');
-      return;
-    }
-
-    setIsPurchasing(true);
-    setPurchaseError('');
-    setPurchasedTicket(null);
-
-    try {
-      if (purchaseMode === 'MONTHLY_PASS') {
-        const monthlyPass = await ticketService.purchaseMonthlyPass({
-          passType: purchaseForm.passengerType,
-          startDate: purchaseForm.serviceDate,
-          validityMonths: Number(purchaseForm.validityMonths),
-          paymentMethod: purchaseForm.paymentMethod === 'CASHLESS'
-            ? 'ONLINE_BANKING'
-            : purchaseForm.paymentMethod,
-        });
-        setPurchasedTicket({ ...monthlyPass, purchaseMode: 'MONTHLY_PASS' });
-      } else {
-        const ticket = await routeService.purchaseOneWayTicket({
-          routeId: selectedRoute.id,
-          tripId: `${selectedRoute.routeNumber}-${purchaseForm.serviceDate}-${purchaseForm.departureTime}`,
-          ...purchaseForm,
-        });
-        setPurchasedTicket({ ...ticket, purchaseMode: 'ONE_WAY' });
-      }
-      await loadTickets();
-    } catch (err) {
-      setPurchaseError(err.message || 'Không thể mua vé. Vui lòng thử lại.');
-    } finally {
-      setIsPurchasing(false);
-    }
-  };
-
-  const estimatedMonthlyPrice = {
-    STANDARD: 250000,
-    STUDENT: 120000,
-    PRIORITY: 0,
-  }[purchaseForm.passengerType] * Number(purchaseForm.validityMonths || 1);
-
   const routeOptions = useMemo(() => Array.from(new Set(
     tickets.map((ticket) => ticket.routeNumber).filter(Boolean)
   )).sort(), [tickets]);
@@ -299,14 +138,11 @@ const MyTicketsPage = () => {
   const ticketTypeOptions = ['STANDARD', 'STUDENT', 'PRIORITY'];
 
   const dashboardStats = useMemo(() => {
-    const passItems = monthlyPasses.map((pass) => ({
-      status: getPassDisplayStatus(pass),
-    }));
+    const passItems = monthlyPasses.map((pass) => ({ status: getPassDisplayStatus(pass) }));
     const allItems = [
       ...tickets.map((ticket) => ({ status: ticket.status })),
       ...passItems,
     ];
-
     const countStatus = (statuses) => allItems.filter((item) => statuses.includes(item.status)).length;
 
     return [
@@ -325,30 +161,28 @@ const MyTicketsPage = () => {
   }, [dateFrom, dateTo]);
 
   const filteredTickets = useMemo(() => {
-    if (filterValidationError) {
-      return [];
-    }
+    if (filterValidationError) return [];
 
     return tickets.filter((ticket) => {
-    const matchesStatus = statusFilter === 'ALL' || ticket.status === statusFilter;
-    const matchesType = ticketTypeFilter === 'ALL' || (ticket.passengerType || 'STANDARD') === ticketTypeFilter;
-    const matchesRoute = routeFilter === 'ALL' || ticket.routeNumber === routeFilter;
-    const travelDate = ticket.serviceDate ? new Date(ticket.serviceDate) : null;
-    const matchesDateFrom = !dateFrom || (travelDate && travelDate >= new Date(dateFrom));
-    const matchesDateTo = !dateTo || (travelDate && travelDate <= new Date(`${dateTo}T23:59:59`));
-    const keyword = query.trim().toLowerCase();
-    const matchesQuery = !keyword || [
-      ticket.ticketCode,
-      ticket.routeNumber,
-      ticket.tripInfo?.routeName,
-      ticket.departureLocation,
-      ticket.destinationLocation,
-      passengerTypeLabel(ticket.passengerType),
-      ticket.paymentMethod,
-      ticket.paymentStatus,
-    ].some((value) => String(value || '').toLowerCase().includes(keyword));
+      const matchesStatus = statusFilter === 'ALL' || ticket.status === statusFilter;
+      const matchesType = ticketTypeFilter === 'ALL' || (ticket.passengerType || 'STANDARD') === ticketTypeFilter;
+      const matchesRoute = routeFilter === 'ALL' || ticket.routeNumber === routeFilter;
+      const travelDate = ticket.serviceDate ? new Date(ticket.serviceDate) : null;
+      const matchesDateFrom = !dateFrom || (travelDate && travelDate >= new Date(dateFrom));
+      const matchesDateTo = !dateTo || (travelDate && travelDate <= new Date(`${dateTo}T23:59:59`));
+      const keyword = query.trim().toLowerCase();
+      const matchesQuery = !keyword || [
+        ticket.ticketCode,
+        ticket.routeNumber,
+        ticket.tripInfo?.routeName,
+        ticket.departureLocation,
+        ticket.destinationLocation,
+        passengerTypeLabel(ticket.passengerType),
+        ticket.paymentMethod,
+        ticket.paymentStatus,
+      ].some((value) => String(value || '').toLowerCase().includes(keyword));
 
-    return matchesStatus && matchesType && matchesRoute && matchesDateFrom && matchesDateTo && matchesQuery;
+      return matchesStatus && matchesType && matchesRoute && matchesDateFrom && matchesDateTo && matchesQuery;
     }).sort((left, right) => {
       const purchaseLeft = new Date(left.purchasedAt || 0).getTime();
       const purchaseRight = new Date(right.purchasedAt || 0).getTime();
@@ -391,242 +225,24 @@ const MyTicketsPage = () => {
       <Header />
 
       <main className="mx-auto max-w-7xl px-4 pb-16 pt-32 sm:px-6 lg:px-8">
-        <section className="mb-8 overflow-hidden rounded-[28px] bg-primary text-white shadow-xl shadow-primary/10">
-          <div className="grid lg:grid-cols-[0.8fr_1.2fr]">
-            <div className="bg-gradient-to-br from-primary via-primary-container to-emerald-800 p-7 lg:p-9">
-              <p className="text-xs font-black uppercase tracking-[0.22em] text-tertiary-fixed">Bán vé trực tuyến</p>
-              <h1 className="mt-3 text-3xl font-headline font-black">Mua vé xe buýt</h1>
-              <p className="mt-3 max-w-md text-sm leading-6 text-white/75">
-                Chọn vé một lượt cho một hành trình cụ thể hoặc mua vé tháng để đi lại không giới hạn trong thời hạn sử dụng.
-              </p>
-
-              {purchaseMode === 'ONE_WAY' ? (
-                <label className="mt-7 block text-sm font-bold">
-                  Tuyến xe
-                  <select
-                    value={selectedRoute?.id || ''}
-                    onChange={(event) => {
-                      const route = routes.find((item) => String(item.id) === event.target.value) || null;
-                      setSelectedRoute(route);
-                    }}
-                    disabled={isLoadingRoutes}
-                    className="mt-2 w-full rounded-2xl border border-white/15 bg-white px-4 py-3 font-bold text-primary"
-                  >
-                    <option value="">{isLoadingRoutes ? 'Đang tải tuyến xe...' : 'Chọn tuyến xe'}</option>
-                    {routes.map((route) => (
-                      <option key={route.id} value={route.id}>
-                        {route.routeNumber} - {route.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <div className="mt-7 rounded-2xl border border-white/10 bg-white/10 p-4 text-sm leading-6">
-                  Vé tháng có hiệu lực trên các tuyến xe buýt trong thời gian đã chọn và được lưu trực tiếp vào tài khoản của bạn.
-                </div>
-              )}
-
-              {purchaseMode === 'ONE_WAY' && selectedRoute ? (
-                <div className="mt-5 rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-                  <div className="flex items-center gap-3">
-                    <BusFront className="h-6 w-6 text-tertiary-fixed" />
-                    <div>
-                      <p className="font-black">{selectedRoute.routeNumber} - {selectedRoute.name}</p>
-                      <p className="mt-1 text-xs text-white/70">
-                        Giá vé dự kiến: {formatCurrency(selectedRoute.fare)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              <button
-                type="button"
-                onClick={() => navigate('/search')}
-                className="mt-5 inline-flex items-center gap-2 text-sm font-black text-tertiary-fixed hover:text-white"
-              >
-                Tìm tuyến xe trên bản đồ <ArrowRight className="h-4 w-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handlePurchase} className="bg-white p-7 text-primary lg:p-9">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="text-sm font-bold sm:col-span-2">
-                  Loại vé
-                  <select
-                    value={purchaseMode}
-                    onChange={(event) => {
-                      setPurchaseMode(event.target.value);
-                      setPurchaseError('');
-                      setPurchasedTicket(null);
-                    }}
-                    className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3"
-                  >
-                    <option value="ONE_WAY">Vé một lượt</option>
-                    <option value="MONTHLY_PASS">Vé tháng</option>
-                  </select>
-                </label>
-
-                {purchaseMode === 'ONE_WAY' ? (
-                  <>
-                <label className="text-sm font-bold">
-                  Điểm đi
-                  <select
-                    value={purchaseForm.departureLocation}
-                    onChange={(event) => updatePurchaseForm({ departureLocation: event.target.value })}
-                    disabled={!selectedRoute}
-                    className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3"
-                  >
-                    {(selectedRoute?.stops || []).map((stop) => (
-                      <option key={`from-${stop.order}-${stop.name}`} value={stop.name}>{stop.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-sm font-bold">
-                  Điểm đến
-                  <select
-                    value={purchaseForm.destinationLocation}
-                    onChange={(event) => updatePurchaseForm({ destinationLocation: event.target.value })}
-                    disabled={!selectedRoute}
-                    className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3"
-                  >
-                    {(selectedRoute?.stops || []).map((stop) => (
-                      <option key={`to-${stop.order}-${stop.name}`} value={stop.name}>{stop.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-sm font-bold">
-                  Ngày đi
-                  <input
-                    type="date"
-                    min={getVietnamDateTimeParts().date}
-                    value={purchaseForm.serviceDate}
-                    onChange={(event) => updatePurchaseForm({ serviceDate: event.target.value })}
-                    className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3"
-                  />
-                </label>
-                <label className="text-sm font-bold">
-                  Giờ khởi hành
-                  <input
-                    type="time"
-                    min={getMinimumDepartureTime(purchaseForm.serviceDate)}
-                    value={purchaseForm.departureTime}
-                    onChange={(event) => updatePurchaseForm({ departureTime: event.target.value })}
-                    className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3"
-                  />
-                </label>
-                  </>
-                ) : (
-                  <>
-                    <label className="text-sm font-bold">
-                      Ngày bắt đầu
-                      <input
-                        type="date"
-                        min={getVietnamDateTimeParts().date}
-                        value={purchaseForm.serviceDate}
-                        onChange={(event) => updatePurchaseForm({ serviceDate: event.target.value })}
-                        className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3"
-                      />
-                    </label>
-                    <label className="text-sm font-bold">
-                      Thời hạn
-                      <select
-                        value={purchaseForm.validityMonths}
-                        onChange={(event) => updatePurchaseForm({ validityMonths: event.target.value })}
-                        className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3"
-                      >
-                        <option value="1">1 tháng</option>
-                        <option value="2">2 tháng</option>
-                        <option value="3">3 tháng</option>
-                        <option value="4">4 tháng</option>
-                        <option value="5">5 tháng</option>
-                        <option value="6">6 tháng</option>
-                      </select>
-                    </label>
-                  </>
-                )}
-
-                <label className="text-sm font-bold">
-                  Đối tượng sử dụng
-                  <select
-                    value={purchaseForm.passengerType}
-                    onChange={(event) => updatePurchaseForm({ passengerType: event.target.value })}
-                    className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3"
-                  >
-                    <option value="STANDARD">Phổ thông</option>
-                    <option value="STUDENT">Học sinh / Sinh viên</option>
-                    <option value="PRIORITY">Đối tượng ưu tiên</option>
-                  </select>
-                </label>
-                <label className="text-sm font-bold">
-                  Phương thức thanh toán
-                  <select
-                    value={purchaseForm.paymentMethod}
-                    onChange={(event) => updatePurchaseForm({ paymentMethod: event.target.value })}
-                    className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3"
-                  >
-                    <option value="E_WALLET">Ví điện tử</option>
-                    <option value="CREDIT_CARD">Thẻ tín dụng</option>
-                    <option value="CASHLESS">
-                      {purchaseMode === 'MONTHLY_PASS' ? 'Ngân hàng trực tuyến' : 'Quét QR ngân hàng'}
-                    </option>
-                  </select>
-                </label>
-              </div>
-
-              <div className="mt-5 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-                {purchaseMode === 'MONTHLY_PASS'
-                  ? <>Tổng tiền dự kiến: <strong>{formatCurrency(estimatedMonthlyPrice)}</strong></>
-                  : <>Giá vé được tính theo số điểm dừng thực tế trên tuyến.</>}
-              </div>
-
-              {purchaseError ? (
-                <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-                  {purchaseError}
-                </div>
-              ) : null}
-
-              {purchasedTicket ? (
-                <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-                  <p className="font-black">
-                    {purchasedTicket.purchaseMode === 'MONTHLY_PASS'
-                      ? `Mua vé tháng thành công: ${purchasedTicket.passCode}`
-                      : `Mua vé thành công: ${formatTicketCode(purchasedTicket.ticketCode)}`}
-                  </p>
-                  {purchasedTicket.purchaseMode === 'ONE_WAY' ? (
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/tickets/${purchasedTicket.id || purchasedTicket._id}`)}
-                      className="mt-2 font-black underline"
-                    >
-                      Xem vé điện tử
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-
-              <button
-                type="submit"
-                disabled={(purchaseMode === 'ONE_WAY' && !selectedRoute) || isPurchasing}
-                className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3.5 font-black text-white hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isPurchasing ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Ticket className="h-5 w-5" />}
-                {isPurchasing ? 'Đang xử lý...' : purchaseMode === 'MONTHLY_PASS' ? 'Xác nhận mua vé tháng' : 'Xác nhận mua vé'}
-              </button>
-            </form>
-          </div>
-        </section>
-
         <section className="rounded-[28px] bg-white p-6 shadow-xl shadow-primary/5">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.22em] text-on-tertiary-container">Hoạt động hành khách</p>
               <h1 className="mt-2 text-3xl font-headline font-black text-primary">Tất cả vé của tôi</h1>
               <p className="mt-2 max-w-2xl text-sm text-on-surface-variant">
-                Xem và quản lý vé đang hiệu lực, vé sắp dùng, vé đã sử dụng, vé hết hạn và vé tháng trong cùng một bảng điều khiển.
+                Xem và quản lý vé đang hiệu lực, vé sắp dùng, vé đã sử dụng, vé hết hạn và vé tháng.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => navigate('/tickets/purchase')}
+                className="inline-flex items-center gap-2 rounded-full bg-secondary-container px-4 py-2 text-sm font-black text-on-secondary-container hover:bg-secondary-fixed"
+              >
+                <Ticket className="h-4 w-4" />
+                Mua vé mới
+              </button>
               <button
                 type="button"
                 onClick={loadTickets}
@@ -682,11 +298,7 @@ const MyTicketsPage = () => {
                 aria-label="Lọc đến ngày đi"
               />
             </label>
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              className="rounded-2xl border border-outline-variant/50 bg-surface px-4 py-3 text-sm font-bold text-primary"
-            >
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="rounded-2xl border border-outline-variant/50 bg-surface px-4 py-3 text-sm font-bold text-primary">
               <option value="ALL">Tất cả trạng thái</option>
               <option value="ACTIVE">Còn hiệu lực</option>
               <option value="USED">Đã sử dụng</option>
@@ -694,31 +306,19 @@ const MyTicketsPage = () => {
               <option value="CANCELLED">Đã hủy</option>
               <option value="REFUNDED">Đã hoàn tiền</option>
             </select>
-            <select
-              value={ticketTypeFilter}
-              onChange={(event) => setTicketTypeFilter(event.target.value)}
-              className="rounded-2xl border border-outline-variant/50 bg-surface px-4 py-3 text-sm font-bold text-primary"
-            >
+            <select value={ticketTypeFilter} onChange={(event) => setTicketTypeFilter(event.target.value)} className="rounded-2xl border border-outline-variant/50 bg-surface px-4 py-3 text-sm font-bold text-primary">
               <option value="ALL">Tất cả loại hành khách</option>
               {ticketTypeOptions.map((type) => (
                 <option key={type} value={type}>{passengerTypeLabel(type)}</option>
               ))}
             </select>
-            <select
-              value={routeFilter}
-              onChange={(event) => setRouteFilter(event.target.value)}
-              className="rounded-2xl border border-outline-variant/50 bg-surface px-4 py-3 text-sm font-bold text-primary"
-            >
+            <select value={routeFilter} onChange={(event) => setRouteFilter(event.target.value)} className="rounded-2xl border border-outline-variant/50 bg-surface px-4 py-3 text-sm font-bold text-primary">
               <option value="ALL">Tất cả tuyến xe</option>
               {routeOptions.map((routeNumber) => (
                 <option key={routeNumber} value={routeNumber}>{routeNumber}</option>
               ))}
             </select>
-            <select
-              value={sortOption}
-              onChange={(event) => setSortOption(event.target.value)}
-              className="rounded-2xl border border-outline-variant/50 bg-surface px-4 py-3 text-sm font-bold text-primary"
-            >
+            <select value={sortOption} onChange={(event) => setSortOption(event.target.value)} className="rounded-2xl border border-outline-variant/50 bg-surface px-4 py-3 text-sm font-bold text-primary">
               <option value="PURCHASE_DESC">Mua gần đây nhất</option>
               <option value="PURCHASE_ASC">Mua lâu nhất</option>
               <option value="TRAVEL_DESC">Ngày đi gần nhất</option>
@@ -726,11 +326,7 @@ const MyTicketsPage = () => {
               <option value="PRICE_DESC">Giá cao nhất</option>
               <option value="PRICE_ASC">Giá thấp nhất</option>
             </select>
-            <button
-              type="button"
-              onClick={resetFilters}
-              className="rounded-2xl border border-outline-variant/50 bg-white px-4 py-3 text-sm font-black text-primary hover:bg-surface"
-            >
+            <button type="button" onClick={resetFilters} className="rounded-2xl border border-outline-variant/50 bg-white px-4 py-3 text-sm font-black text-primary hover:bg-surface">
               Đặt lại bộ lọc
             </button>
           </div>
@@ -757,11 +353,11 @@ const MyTicketsPage = () => {
                   key={ticket.id}
                   role="button"
                   tabIndex={0}
-                  onClick={() => navigate(`/tickets/${ticket.id}`)}
+                  onClick={() => navigate(`/my-tickets/${ticket.id}`)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault();
-                      navigate(`/tickets/${ticket.id}`);
+                      navigate(`/my-tickets/${ticket.id}`);
                     }
                   }}
                   className="rounded-[24px] border border-outline-variant/35 bg-surface p-5 text-left transition hover:border-on-tertiary-container hover:shadow-lg"
@@ -783,7 +379,7 @@ const MyTicketsPage = () => {
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
-                        navigate(`/tickets/${ticket.id}`);
+                        navigate(`/my-tickets/${ticket.id}`);
                       }}
                       className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-white hover:bg-primary-container"
                     >
@@ -864,54 +460,50 @@ const MyTicketsPage = () => {
                   const passStatus = getPassDisplayStatus(pass);
 
                   return (
-                  <article key={pass._id || pass.passCode} className="rounded-[24px] border border-outline-variant/35 bg-surface p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <span className="inline-flex items-center gap-2 rounded-full bg-primary px-3 py-1 text-xs font-black text-white">
-                          <Ticket className="h-3.5 w-3.5" />
-                          Vé tháng
+                    <article key={pass._id || pass.passCode} className="rounded-[24px] border border-outline-variant/35 bg-surface p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <span className="inline-flex items-center gap-2 rounded-full bg-primary px-3 py-1 text-xs font-black text-white">
+                            <Ticket className="h-3.5 w-3.5" />
+                            Vé tháng
+                          </span>
+                          <h3 className="mt-3 font-mono text-sm font-black text-primary">{pass.passCode}</h3>
+                        </div>
+                        <span className={`rounded-full px-3 py-1 text-xs font-black ${statusClassName(passStatus)}`}>
+                          {statusLabel(passStatus)}
                         </span>
-                        <h3 className="mt-3 font-mono text-sm font-black text-primary">{pass.passCode}</h3>
                       </div>
-                      <span className={`rounded-full px-3 py-1 text-xs font-black ${statusClassName(passStatus)}`}>
-                        {statusLabel(passStatus)}
-                      </span>
-                    </div>
-                    <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
-                      {pass.digitalPass?.qrCodeImage ? (
-                        <div className="rounded-2xl bg-white px-4 py-3 sm:col-span-2">
-                          <p className="text-xs font-black uppercase tracking-wide text-outline">Ma QR ve thang</p>
-                          <img
-                            src={pass.digitalPass.qrCodeImage}
-                            alt="Monthly pass QR code"
-                            className="mx-auto mt-3 h-44 w-44 object-contain"
-                          />
-                          <p className="mt-2 break-all text-center font-mono text-[11px] font-bold text-outline">
-                            {pass.digitalPass.qrPayload?.slice(0, 32)}...
+                      <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+                        {pass.digitalPass?.qrCodeImage ? (
+                          <div className="rounded-2xl bg-white px-4 py-3 sm:col-span-2">
+                            <p className="text-xs font-black uppercase tracking-wide text-outline">Mã QR vé tháng</p>
+                            <img src={pass.digitalPass.qrCodeImage} alt="Monthly pass QR code" className="mx-auto mt-3 h-44 w-44 object-contain" />
+                            <p className="mt-2 break-all text-center font-mono text-[11px] font-bold text-outline">
+                              {pass.digitalPass.qrPayload?.slice(0, 32)}...
+                            </p>
+                          </div>
+                        ) : null}
+                        <div className="rounded-2xl bg-white px-4 py-3">
+                          <p className="text-xs font-black uppercase tracking-wide text-outline">Đối tượng</p>
+                          <p className="mt-1 font-bold text-primary">{passengerTypeLabel(pass.passType)}</p>
+                        </div>
+                        <div className="rounded-2xl bg-white px-4 py-3">
+                          <p className="text-xs font-black uppercase tracking-wide text-outline">Thời hạn</p>
+                          <p className="mt-1 font-bold text-primary">{formatDate(pass.startDate)} - {formatDate(pass.expiryDate)}</p>
+                        </div>
+                        <div className="rounded-2xl bg-white px-4 py-3">
+                          <p className="text-xs font-black uppercase tracking-wide text-outline">Giá vé</p>
+                          <p className="mt-1 font-bold text-primary">{formatCurrency(pass.passPrice)}</p>
+                        </div>
+                        <div className="rounded-2xl bg-white px-4 py-3">
+                          <p className="text-xs font-black uppercase tracking-wide text-outline">Thanh toán</p>
+                          <p className="mt-1 font-bold text-primary">
+                            {statusLabel(pass.paymentStatus)} · {paymentMethodLabel(pass.paymentMethod)}
                           </p>
                         </div>
-                      ) : null}
-                      <div className="rounded-2xl bg-white px-4 py-3">
-                        <p className="text-xs font-black uppercase tracking-wide text-outline">Đối tượng</p>
-                        <p className="mt-1 font-bold text-primary">{passengerTypeLabel(pass.passType)}</p>
                       </div>
-                      <div className="rounded-2xl bg-white px-4 py-3">
-                        <p className="text-xs font-black uppercase tracking-wide text-outline">Thời hạn</p>
-                        <p className="mt-1 font-bold text-primary">{formatDate(pass.startDate)} - {formatDate(pass.expiryDate)}</p>
-                      </div>
-                      <div className="rounded-2xl bg-white px-4 py-3">
-                        <p className="text-xs font-black uppercase tracking-wide text-outline">Giá vé</p>
-                        <p className="mt-1 font-bold text-primary">{formatCurrency(pass.passPrice)}</p>
-                      </div>
-                      <div className="rounded-2xl bg-white px-4 py-3">
-                        <p className="text-xs font-black uppercase tracking-wide text-outline">Thanh toán</p>
-                        <p className="mt-1 font-bold text-primary">
-                          {statusLabel(pass.paymentStatus)} · {paymentMethodLabel(pass.paymentMethod)}
-                        </p>
-                      </div>
-                    </div>
-                  </article>
-                );
+                    </article>
+                  );
                 })}
               </div>
             ) : (
@@ -927,4 +519,3 @@ const MyTicketsPage = () => {
 };
 
 export default MyTicketsPage;
-

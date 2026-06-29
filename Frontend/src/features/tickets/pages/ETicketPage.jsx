@@ -194,11 +194,11 @@ const ETicketPage = () => {
       <main className="mx-auto max-w-7xl px-4 pb-16 pt-32 sm:px-6 lg:px-8">
         <button
           type="button"
-          onClick={() => navigate('/buy-tickets')}
+          onClick={() => navigate('/my-tickets')}
           className="mb-5 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-bold text-primary shadow-sm hover:bg-surface"
         >
           <ArrowLeft className="h-4 w-4" />
-          Quay láº¡i trang mua vÃ©
+          Quay lại vé của tôi
         </button>
 
         {isLoading ? (
