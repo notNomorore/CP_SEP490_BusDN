@@ -7,6 +7,7 @@ import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { createApp } from './app.js';
 import logger from './utils/logger.js';
 import registerFleetOperationSockets from './modules/fleetOperations/fleetOperations.socket.js';
+import registerOperationChatSockets from './modules/operationChat/operationChat.socket.js';
 
 let isConnectingDatabase = false;
 
@@ -42,6 +43,7 @@ const startServer = async () => {
     });
 
     registerFleetOperationSockets(io);
+    registerOperationChatSockets(io);
 
     io.on('connection', (socket) => {
       logger.info(`Socket.IO client connected: ${socket.id}`);

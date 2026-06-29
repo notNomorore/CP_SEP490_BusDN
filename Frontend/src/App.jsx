@@ -7,11 +7,21 @@ import {
   AdminCustomerSupportPage,
   AdminLostItemCasesPage,
   LostItemCaseStatusPage,
+  MyFeedbackPage,
   ReportLostItemPage,
   SubmitFeedbackPage,
 } from './features/customerSupport';
 import { SearchRoutesPage } from './features/routes';
-import { ETicketPage, MyTicketsPage } from './features/tickets';
+import {
+  ETicketPage,
+  MyTicketsPage,
+  PaymentFailedPage,
+  PaymentSuccessPage,
+  TicketCheckoutPage,
+  TicketPurchasePage,
+  TransactionHistoryPage,
+  ValidateTicketPage,
+} from './features/tickets';
 import { TravelHistoryPage } from './features/travelHistory';
 import {
   AdminCommandLayout,
@@ -24,6 +34,7 @@ import {
   UserAccountsPage,
 } from './features/admin';
 import { ScheduleOperationsPage } from './features/scheduleOperations';
+import { OperationChatPage } from './features/operationChat';
 import {
   LoginPage,
   RegisterPage,
@@ -140,10 +151,20 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="/tickets/purchase" element={<ProtectedRoute><TicketPurchasePage /></ProtectedRoute>} />
+          <Route path="/tickets/checkout" element={<ProtectedRoute><TicketCheckoutPage /></ProtectedRoute>} />
+          <Route path="/payment/success" element={<ProtectedRoute><PaymentSuccessPage /></ProtectedRoute>} />
+          <Route path="/payment/failed" element={<ProtectedRoute><PaymentFailedPage /></ProtectedRoute>} />
           <Route path="/my-tickets" element={<ProtectedRoute><MyTicketsPage /></ProtectedRoute>} />
+          <Route path="/my-tickets/:ticketId" element={<ProtectedRoute><ETicketPage /></ProtectedRoute>} />
+          <Route path="/transactions" element={<ProtectedRoute><TransactionHistoryPage /></ProtectedRoute>} />
+          <Route path="/buy-ticket" element={<ProtectedRoute><TicketPurchasePage /></ProtectedRoute>} />
+          <Route path="/buy-tickets" element={<ProtectedRoute><TicketPurchasePage /></ProtectedRoute>} />
           <Route path="/tickets/:ticketId" element={<ProtectedRoute><ETicketPage /></ProtectedRoute>} />
+          <Route path="/conductor/validate-qr" element={<ProtectedRoute><ValidateTicketPage /></ProtectedRoute>} />
           <Route path="/travel-history" element={<ProtectedRoute><TravelHistoryPage /></ProtectedRoute>} />
           <Route path="/submit-feedback" element={<ProtectedRoute><SubmitFeedbackPage /></ProtectedRoute>} />
+          <Route path="/my-feedback" element={<ProtectedRoute><MyFeedbackPage /></ProtectedRoute>} />
           <Route path="/report-lost-item" element={<ProtectedRoute><ReportLostItemPage /></ProtectedRoute>} />
           <Route path="/lost-item-cases" element={<ProtectedRoute><LostItemCaseStatusPage /></ProtectedRoute>} />
 
@@ -190,6 +211,7 @@ function App() {
             <Route path="maintenance-approval" element={<MaintenanceApprovalPage />} />
             <Route path="system-monitoring" element={<SystemMonitoringPage />} />
             <Route path="system-monitoring/suspicious" element={<SystemMonitoringPage />} />
+            <Route path="operation-chat" element={<OperationChatPage embedded />} />
           </Route>
 
           <Route
@@ -298,6 +320,14 @@ function App() {
             )}
           />
           <Route
+            path="/operations/chat"
+            element={(
+              <OperationsRoute>
+                <OperationChatPage />
+              </OperationsRoute>
+            )}
+          />
+          <Route
             path="/bus-assistant"
             element={(
               <BusAssistantRoute>
@@ -309,6 +339,7 @@ function App() {
             <Route path="assigned-trips" element={<AssignedTripsPage />} />
             <Route path="shift-schedule" element={<ShiftSchedulePage />} />
             <Route path="operation-notifications" element={<OperationNotificationsPage />} />
+            <Route path="operation-chat" element={<OperationChatPage embedded />} />
             <Route path="validate-ticket" element={<ValidateQrTicketPage />} />
             <Route path="walkin-ticket" element={<CreateWalkInTicketPage />} />
             <Route path="incident-reports" element={<IncidentReportPage />} />

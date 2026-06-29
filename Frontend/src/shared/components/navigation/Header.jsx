@@ -39,9 +39,20 @@ const Header = ({ forceDarkMode = false }) => {
     { key: 'passenger.nav.monitoring', path: '/admin/system-monitoring', requiresAuth: true, adminOnly: true },
     { key: 'passenger.nav.partner', href: '/#partners', hideForAdmin: true },
     { key: 'passenger.nav.routes', path: '/search', hideForAdmin: true },
+    {
+      key: 'passenger.nav.buyTickets',
+      label: 'Mua vé',
+      path: '/tickets/purchase',
+      activePaths: ['/tickets/purchase', '/tickets/checkout', '/payment/success', '/payment/failed'],
+      requiresAuth: true,
+      hideForAdmin: true,
+    },
     { key: 'passenger.nav.tickets', label: 'My Tickets', path: '/my-tickets', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.transactions', label: 'Lịch sử giao dịch', path: '/transactions', requiresAuth: true, hideForAdmin: true },
     { key: 'passenger.nav.history', label: 'Travel History', path: '/travel-history', requiresAuth: true, hideForAdmin: true },
-    { key: 'passenger.nav.feedback', label: 'Feedback', path: '/submit-feedback', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.feedback', label: 'Submit Feedback', path: '/submit-feedback', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.myFeedback', label: 'My Feedback', path: '/my-feedback', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.reportLostItem', label: 'Report Lost Item', path: '/report-lost-item', requiresAuth: true, hideForAdmin: true },
     { key: 'passenger.nav.lostItems', label: 'Lost Items', path: '/lost-item-cases', requiresAuth: true, hideForAdmin: true },
     { key: 'passenger.nav.help', href: '/#support', hideForAdmin: true }
   ].filter((link) => (!link.adminOnly || isAdmin()) && (!link.hideForAdmin || !isAdmin()));
@@ -184,7 +195,10 @@ const Header = ({ forceDarkMode = false }) => {
           {/* Navigation - Hidden on mobile */}
           <nav className="hidden lg:flex items-center gap-4">
             {navLinks.map((link) => {
-              const isActive = link.path && location.pathname.startsWith(link.path);
+              const isActive = link.path && (
+                location.pathname.startsWith(link.path)
+                || link.activePaths?.some((path) => location.pathname.startsWith(path))
+              );
 
               return (
                 <a
@@ -484,7 +498,10 @@ const Header = ({ forceDarkMode = false }) => {
         >
           <nav aria-label="Mobile primary navigation" className="mx-auto grid max-w-screen-2xl gap-1">
             {navLinks.map((link) => {
-              const isActive = link.path && location.pathname.startsWith(link.path);
+              const isActive = link.path && (
+                location.pathname.startsWith(link.path)
+                || link.activePaths?.some((path) => location.pathname.startsWith(path))
+              );
               const itemClassName = `flex min-h-11 items-center rounded-xl px-4 text-sm font-semibold ${
                 isActive
                   ? 'bg-on-tertiary-container text-primary'

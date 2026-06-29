@@ -42,6 +42,33 @@ const ValidateQrTicketPage = () => {
 
   useEffect(() => () => stopCamera(), [stopCamera]);
 
+  useEffect(() => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+
+    if (!cameraActive || !video || !stream) return undefined;
+
+    let cancelled = false;
+    video.srcObject = stream;
+
+    const playCamera = async () => {
+      try {
+        await video.play();
+      } catch {
+        if (!cancelled) {
+          setError(t.cameraPermissionDenied);
+          stopCamera();
+        }
+      }
+    };
+
+    playCamera();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cameraActive, stopCamera, t.cameraPermissionDenied]);
+
   const update = (field) => (event) => setForm((current) => ({ ...current, [field]: event.target.value }));
 
   const readQrFromSource = useCallback(async (source) => {
@@ -78,11 +105,6 @@ const ValidateQrTicketPage = () => {
       });
       streamRef.current = stream;
       setCameraActive(true);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
 
       if (!('BarcodeDetector' in window)) {
         return;

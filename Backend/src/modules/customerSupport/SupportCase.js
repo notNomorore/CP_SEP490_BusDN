@@ -35,11 +35,16 @@ const SupportCaseSchema = new mongoose.Schema(
       type: String,
       enum: [
         'SERVICE_QUALITY',
+        'ROUTE_DELAY',
         'DELAY',
         'DRIVER_BEHAVIOR',
+        'BUS_ASSISTANT_BEHAVIOR',
         'BUS_ASSISTANT_SERVICE',
+        'BUS_CLEANLINESS',
         'ROUTE_EXPERIENCE',
+        'APP_ISSUE',
         'MOBILE_APPLICATION',
+        'PAYMENT_ISSUE',
         'SUGGESTION',
         'COMPLAINT',
         'SAFETY',
@@ -56,15 +61,39 @@ const SupportCaseSchema = new mongoose.Schema(
     },
     priority: {
       type: String,
-      enum: ['LOW', 'NORMAL', 'HIGH', 'URGENT'],
-      default: 'NORMAL',
+      enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'NORMAL', 'URGENT'],
+      default: 'LOW',
       index: true,
     },
     status: {
       type: String,
-      enum: ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'SUBMITTED', 'UNDER_REVIEW', 'RESPONDED', 'REJECTED', 'CLOSED'],
+      enum: [
+        'PENDING',
+        'IN_PROGRESS',
+        'WAITING_FOR_PASSENGER',
+        'RESOLVED',
+        'REJECTED',
+        'CLOSED',
+        'OPEN',
+        'SUBMITTED',
+        'UNDER_REVIEW',
+        'RESPONDED',
+      ],
       default: 'OPEN',
       index: true,
+    },
+    routeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Route',
+    },
+    tripId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    ticketId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Ticket',
     },
     relatedTripId: {
       type: String,
@@ -145,9 +174,43 @@ const SupportCaseSchema = new mongoose.Schema(
         },
       },
     ],
+    conversation: [
+      {
+        senderId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          required: true,
+        },
+        senderRole: {
+          type: String,
+          enum: ['PASSENGER', 'ADMIN'],
+          required: true,
+        },
+        message: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
+    },
+    assignedAt: Date,
+    adminResponse: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    resolutionSummary: {
+      type: String,
+      trim: true,
+      default: '',
     },
     resolvedAt: Date,
     closedAt: Date,
@@ -159,5 +222,7 @@ const SupportCaseSchema = new mongoose.Schema(
 
 SupportCaseSchema.index({ createdAt: -1 });
 SupportCaseSchema.index({ type: 1, status: 1, createdAt: -1 });
+SupportCaseSchema.index({ passenger: 1, type: 1, createdAt: -1 });
+SupportCaseSchema.index({ assignedTo: 1, status: 1, createdAt: -1 });
 
 export default mongoose.model('SupportCase', SupportCaseSchema);

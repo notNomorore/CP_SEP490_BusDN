@@ -21,6 +21,7 @@ import {
   Clock3,
   ListChecks,
   MapPin,
+  MessageCircle,
   PlayCircle,
   RefreshCw,
   Route,
@@ -29,6 +30,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import useAuthStore from '../../auth/stores/authStore.js';
+import { OperationChatPage } from '../../operationChat';
 import scheduleOperationsService from '../services/scheduleOperationsService.js';
 
 const STATUS_META = {
@@ -2072,8 +2074,19 @@ const ScheduleOperationsPage = () => {
           >
             <BellRing size={16} /> Thông báo vận hành
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('chat')}
+            className={`inline-flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium transition ${
+              activeTab === 'chat'
+                ? 'bg-emerald-400 text-slate-950'
+                : 'bg-white/5 text-slate-300 hover:bg-white/10'
+            }`}
+          >
+            <MessageCircle size={16} /> Nhóm trò chuyện
+          </button>
           <div className="mt-2 border-t border-white/10 pt-3 text-xs leading-5 text-slate-400">
-            Theo dõi chuyến được phân công, kiểm tra xe và lịch ca làm việc cá nhân.
+            Theo dõi chuyến được phân công, kiểm tra xe, lịch ca làm việc và trao đổi vận hành.
           </div>
         </nav>
 
@@ -2081,18 +2094,27 @@ const ScheduleOperationsPage = () => {
           <section className="mb-5 rounded border border-white/10 bg-white/[0.04] px-4 py-4">
             <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-400">Driver Operations</p>
             <h1 className="mt-1 text-2xl font-black text-white">
-              {activeTab === 'trips' ? 'Chuyến được phân công' : activeTab === 'shifts' ? 'Lịch ca làm việc' : 'Thông báo vận hành'}
+              {activeTab === 'trips'
+                ? 'Chuyến được phân công'
+                : activeTab === 'shifts'
+                  ? 'Lịch ca làm việc'
+                  : activeTab === 'chat'
+                    ? 'Nhóm trò chuyện vận hành'
+                    : 'Thông báo vận hành'}
             </h1>
             <p className="mt-1 text-sm text-slate-400">
               {activeTab === 'trips'
                 ? 'Tiếp nhận chuyến, kiểm tra xe và vận hành theo phân công.'
                 : activeTab === 'shifts'
                   ? 'Theo dõi ca làm việc của bạn theo tuần.'
-                  : 'Theo dõi phản hồi từ điều hành và cập nhật xử lý báo cáo đã gửi.'}
+                  : activeTab === 'chat'
+                    ? 'Trao đổi nhanh với điều hành, tài xế và phụ xe trong nhóm vận hành.'
+                    : 'Theo dõi phản hồi từ điều hành và cập nhật xử lý báo cáo đã gửi.'}
             </p>
           </section>
 
           <section className="space-y-6">
+          {activeTab !== 'chat' && (
           <div className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-end md:justify-between">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1">
@@ -2125,6 +2147,7 @@ const ScheduleOperationsPage = () => {
               Làm mới lịch
             </button>
           </div>
+          )}
 
           {successMessage && (
             <div className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -2138,7 +2161,11 @@ const ScheduleOperationsPage = () => {
             </div>
           )}
 
-          {isLoading ? (
+          {activeTab === 'chat' ? (
+            <div className="mt-6">
+              <OperationChatPage embedded />
+            </div>
+          ) : isLoading ? (
             <div className="mt-6 rounded-lg border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
               Đang tải lịch vận hành...
             </div>

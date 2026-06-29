@@ -8,6 +8,7 @@ import {
   ClipboardCheck,
   FileWarning,
   LogOut,
+  MessageCircle,
   Moon,
   Pencil,
   QrCode,
@@ -27,6 +28,7 @@ const navItems = [
   { to: '/bus-assistant/assigned-trips', labelKey: 'assignedTrips', label: 'Chuyến được phân công', icon: Route },
   { to: '/bus-assistant/shift-schedule', labelKey: 'shiftSchedule', label: 'Lịch ca làm việc', icon: CalendarDays },
   { to: '/bus-assistant/operation-notifications', labelKey: 'operationNotifications', label: 'Thông báo vận hành', icon: BellRing },
+  { to: '/bus-assistant/operation-chat', labelKey: 'operationChat', label: 'Nhóm trò chuyện', icon: MessageCircle },
   { to: '/bus-assistant/validate-ticket', labelKey: 'validateQr', icon: QrCode },
   { to: '/bus-assistant/walkin-ticket', labelKey: 'walkInTicket', icon: ReceiptText },
   { to: '/bus-assistant/incident-reports', labelKey: 'incidentReports', label: 'Báo cáo sự cố', icon: FileWarning },
@@ -43,6 +45,7 @@ const navItemOrder = [
   '/bus-assistant/assigned-trips',
   '/bus-assistant/shift-schedule',
   '/bus-assistant/operation-notifications',
+  '/bus-assistant/operation-chat',
 ];
 
 const orderedNavItems = navItemOrder
