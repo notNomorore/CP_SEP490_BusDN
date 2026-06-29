@@ -249,6 +249,25 @@ export class TicketService {
     const tripId = `${route.routeNumber}-${serviceDateValue}-${departureTime}`;
 
     const ticketPrice = this.calculatePrice(route, startStop, endStop);
+    const existingPendingTicket = await Ticket.findOne({
+      passenger: user._id,
+      routeId: route._id,
+      tripId,
+      departureLocation: startStop.name,
+      destinationLocation: endStop.name,
+      passengerType,
+      ticketPrice,
+      paymentStatus: 'PENDING',
+      bookingStatus: 'PENDING',
+      ticketStatus: { $ne: 'CANCELLED' },
+      serviceDate,
+      departureTime,
+    }).lean();
+
+    if (existingPendingTicket) {
+      return existingPendingTicket;
+    }
+
     const ticketCode = await this.generateUniqueTicketCode();
     const ticket = new Ticket({
       ticketCode,
@@ -304,7 +323,35 @@ export class TicketService {
       .populate('passenger', 'fullName email phoneNumber')
       .lean();
 
-    return Promise.all(tickets.map((ticket) => this.buildTicketView(ticket)));
+    const seenPendingKeys = new Set();
+    const visibleTickets = tickets.filter((ticket) => {
+      if (ticket.paymentStatus !== 'PENDING' || ticket.bookingStatus !== 'PENDING' || ticket.ticketStatus === 'CANCELLED') {
+        return true;
+      }
+
+      const serviceDateKey = ticket.serviceDate
+        ? new Date(ticket.serviceDate).toISOString().slice(0, 10)
+        : '';
+      const pendingKey = [
+        ticket.routeId?._id || ticket.routeId,
+        ticket.tripId,
+        ticket.departureLocation,
+        ticket.destinationLocation,
+        ticket.passengerType,
+        ticket.ticketPrice,
+        serviceDateKey,
+        ticket.departureTime,
+      ].map((value) => String(value || '')).join('|');
+
+      if (seenPendingKeys.has(pendingKey)) {
+        return false;
+      }
+
+      seenPendingKeys.add(pendingKey);
+      return true;
+    });
+
+    return Promise.all(visibleTickets.map((ticket) => this.buildTicketView(ticket)));
   }
 
   static getCurrentTicketStatus(ticket) {
@@ -612,7 +659,14 @@ export class TicketService {
     const description = ticketType === 'ONE_WAY'
       ? `BusDN ${orderTarget.ticketCode}`
       : `BusDN ${orderTarget.passCode}`;
-    const paymentOrder = await PaymentOrder.create({
+    const existingPaymentOrder = await PaymentOrder.findOne({
+      passenger: userId,
+      status: 'PENDING',
+      ...(ticketType === 'ONE_WAY'
+        ? { ticketId: orderTarget._id }
+        : { monthlyPassId: orderTarget._id }),
+    });
+    const paymentOrder = existingPaymentOrder || await PaymentOrder.create({
       orderCode,
       passenger: userId,
       ticketType,
@@ -637,26 +691,28 @@ export class TicketService {
       };
     }
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const payosLink = await PayOSService.createPaymentLink({
-      orderCode,
-      amount,
-      description,
-      returnUrl: `${frontendUrl}/my-tickets`,
-      cancelUrl: `${frontendUrl}/tickets/checkout`,
-    });
+    if (!paymentOrder.payos?.qrCode) {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const payosLink = await PayOSService.createPaymentLink({
+        orderCode: paymentOrder.orderCode,
+        amount,
+        description,
+        returnUrl: `${frontendUrl}/my-tickets`,
+        cancelUrl: `${frontendUrl}/tickets/checkout`,
+      });
 
-    paymentOrder.payos = {
-      paymentLinkId: payosLink.paymentLinkId || '',
-      checkoutUrl: payosLink.checkoutUrl || '',
-      qrCode: payosLink.qrCode || '',
-      rawStatus: payosLink.status || 'PENDING',
-      rawResponse: payosLink,
-    };
-    await paymentOrder.save();
+      paymentOrder.payos = {
+        paymentLinkId: payosLink.paymentLinkId || '',
+        checkoutUrl: payosLink.checkoutUrl || '',
+        qrCode: payosLink.qrCode || '',
+        rawStatus: payosLink.status || 'PENDING',
+        rawResponse: payosLink,
+      };
+      await paymentOrder.save();
+    }
 
     return {
-      orderCode,
+      orderCode: paymentOrder.orderCode,
       status: paymentOrder.status,
       amount,
       ticketType,
