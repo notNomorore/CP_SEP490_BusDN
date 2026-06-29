@@ -1,207 +1,173 @@
-import axios from 'axios';
+import apiClient from '../../../shared/services/apiClient.js';
 
-const DEFAULT_API_BASE_URL = 'http://localhost:3000/api';
+const FRONTEND_RUN_ID_KEY = 'frontendRunId';
+const AUTH_STORAGE_KEYS = ['authToken', 'authUser'];
 
-// Always prefer the current environment/default over stale browser storage.
-const getApiBaseUrl = () => {
-  const envBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
-  const baseUrl = envBaseUrl || DEFAULT_API_BASE_URL;
-
-  localStorage.setItem('apiBaseUrl', baseUrl);
-  return baseUrl;
+const clearCookie = (name, path = '/') => {
+  document.cookie = `${name}=; Max-Age=0; path=${path}; SameSite=Lax`;
 };
 
-// Create axios instance
-const apiClient = axios.create({
-  baseURL: getApiBaseUrl(),
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+const clearSessionCookies = () => {
+  document.cookie
+    .split(';')
+    .map((cookie) => cookie.split('=')[0].trim())
+    .filter(Boolean)
+    .forEach((name) => {
+      clearCookie(name);
+      clearCookie(name, window.location.pathname || '/');
+    });
+};
 
-// Add token to requests
-apiClient.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('authToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
+const clearStoredAuthSession = () => {
+  AUTH_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+  sessionStorage.removeItem('registrationOtpSession');
+  clearSessionCookies();
+};
 
-// Handle response errors
-apiClient.interceptors.response.use(
-  (response) => response.data,
-  (error) => {
-    const token = localStorage.getItem('authToken');
-    const requestUrl = error.config?.url || '';
-    const isPublicAuthRequest = [
-      '/auth/login',
-      '/auth/register',
-      '/auth/verify-otp',
-      '/auth/resend-otp',
-      '/auth/forgot-password',
-      '/auth/reset-password',
-    ].some((path) => requestUrl.includes(path));
+const clearAuthSessionAfterFrontendRestart = () => {
+  const currentRunId = import.meta.env.VITE_FRONTEND_RUN_ID;
+  const previousRunId = localStorage.getItem(FRONTEND_RUN_ID_KEY);
 
-    // Logout if unauthorized
-    if (error.response?.status === 401 && token && !isPublicAuthRequest) {
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('authUser');
-      window.location.href = '/auth/login';
-    }
-    throw error.response?.data || error;
+  if (previousRunId !== currentRunId) {
+    clearStoredAuthSession();
+    localStorage.setItem(FRONTEND_RUN_ID_KEY, currentRunId);
   }
-);
+};
 
-/**
- * Auth Service - API calls for authentication
- */
+clearAuthSessionAfterFrontendRestart();
+
+const persistSession = (token, user) => {
+  if (token) {
+    localStorage.setItem('authToken', token);
+  }
+
+  if (user) {
+    localStorage.setItem('authUser', JSON.stringify(user));
+  }
+};
+
+const getStoredToken = () => {
+  const directToken = localStorage.getItem('authToken')
+    || localStorage.getItem('token')
+    || localStorage.getItem('accessToken');
+
+  if (directToken) {
+    return directToken;
+  }
+
+  try {
+    const storedUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+    return storedUser.token || storedUser.accessToken || '';
+  } catch {
+    return '';
+  }
+};
+
 export const authService = {
-  /**
-   * Register new user
-   */
-  register: async (data) => {
-    return apiClient.post('/auth/register', {
+  register: async (data) =>
+    apiClient.post('/auth/register', {
       email: data.email || undefined,
-      phone: data.phone || undefined,
+      phoneNumber: data.phoneNumber || data.phone || undefined,
       fullName: data.fullName,
       password: data.password,
       confirmPassword: data.confirmPassword,
-    });
-  },
+    }),
 
-  /**
-   * Verify OTP
-   */
-  verifyOTP: async (data) => {
-    return apiClient.post('/auth/verify-otp', {
+  verifyOTP: async (data) =>
+    apiClient.post('/auth/verify-otp', {
       email: data.email || undefined,
-      phone: data.phone || undefined,
+      phoneNumber: data.phoneNumber || data.phone || undefined,
       otp: data.otp,
-    });
-  },
+    }),
 
-  /**
-   * Resend account verification OTP
-   */
-  resendOtp: async (data) => {
-    return apiClient.post('/auth/resend-otp', {
+  resendOtp: async (data) =>
+    apiClient.post('/auth/resend-otp', {
       email: data.email || undefined,
-      phone: data.phone || undefined,
-    });
-  },
+      phoneNumber: data.phoneNumber || data.phone || undefined,
+    }),
 
-  /**
-   * Login user
-   */
   login: async (identifier, password) => {
-    const response = await apiClient.post('/auth/login', {
-      identifier,
-      password,
-    });
-
-    // Store token and user
-    if (response.token) {
-      localStorage.setItem('authToken', response.token);
-      localStorage.setItem('authUser', JSON.stringify(response.user));
+    let response;
+    try {
+      response = await apiClient.post('/auth/login', {
+        identifier,
+        password,
+      });
+    } catch (error) {
+      const isLocked = error?.code === 'ACCOUNT_LOCKED' || error?.statusCode === 423 || error?.response?.status === 423;
+      const message = isLocked
+        ? error?.message || 'Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên để được hỗ trợ.'
+        : error?.message || 'Đăng nhập thất bại. Vui lòng kiểm tra tài khoản, mật khẩu hoặc trạng thái tài khoản.';
+      const normalizedError = new Error(message);
+      normalizedError.code = isLocked ? 'ACCOUNT_LOCKED' : error?.code;
+      normalizedError.reason = error?.reason;
+      normalizedError.lockedUntil = error?.lockedUntil;
+      throw normalizedError;
     }
 
+    persistSession(response.token, response.user);
     return response;
   },
 
-  /**
-   * Request password reset
-   */
-  requestPasswordReset: async (data) => {
-    return apiClient.post('/auth/forgot-password', {
+  requestPasswordReset: async (data) =>
+    apiClient.post('/auth/forgot-password', {
       email: data.email || undefined,
-      phone: data.phone || undefined,
-    });
-  },
+      phoneNumber: data.phoneNumber || data.phone || undefined,
+    }),
 
-  /**
-   * Reset password with OTP
-   */
-  resetPassword: async (data) => {
-    const response = await apiClient.post('/auth/reset-password', {
+  resetPassword: async (data) =>
+    apiClient.post('/auth/reset-password', {
       token: data.token,
       otp: data.otp,
       newPassword: data.newPassword,
       confirmPassword: data.confirmPassword,
-    });
+    }),
 
-    return response;
-  },
-
-  /**
-   * Change password (requires auth)
-   */
   changePassword: async (data) => {
-    return apiClient.post('/auth/change-password', {
+    const response = await apiClient.post('/auth/change-password', {
       currentPassword: data.currentPassword,
       newPassword: data.newPassword,
       confirmPassword: data.confirmPassword,
     });
-  },
-
-  /**
-   * Get current user profile
-   */
-  getCurrentUser: async () => {
-    return apiClient.get('/auth/me');
-  },
-
-  /**
-   * Update user profile
-   */
-  updateProfile: async (data) => {
-    const response = await apiClient.put('/auth/profile', data);
-
-    // Update stored user
-    if (response.user) {
-      localStorage.setItem('authUser', JSON.stringify(response.user));
-    }
-
+    persistSession(getStoredToken(), response.user);
     return response;
   },
 
-  /**
-   * Logout user
-   */
+  getCurrentUser: async () => {
+    const response = await apiClient.get('/auth/me');
+    persistSession(getStoredToken(), response.user);
+    return response;
+  },
+
+  updateProfile: async (data) => {
+    const response = await apiClient.put('/auth/profile', data);
+    persistSession(getStoredToken(), response.user);
+    return response;
+  },
+
   logout: async () => {
     try {
       await apiClient.post('/auth/logout');
     } finally {
-      // Clear stored data regardless of API response
+      clearStoredAuthSession();
       localStorage.removeItem('authToken');
+      localStorage.removeItem('token');
+      localStorage.removeItem('accessToken');
       localStorage.removeItem('authUser');
     }
   },
 
-  /**
-   * Check if user has valid token
-   */
-  isAuthenticated: () => {
-    return !!localStorage.getItem('authToken');
-  },
+  isAuthenticated: () => Boolean(getStoredToken()),
 
-  /**
-   * Get stored user data
-   */
   getStoredUser: () => {
     const stored = localStorage.getItem('authUser');
     return stored ? JSON.parse(stored) : null;
   },
 
-  /**
-   * Get stored token
-   */
-  getToken: () => {
-    return localStorage.getItem('authToken');
-  },
+  getToken: () => getStoredToken(),
+
+  setStoredUser: (user) => persistSession(getStoredToken(), user),
 };
 
+export { apiClient };
 export default authService;

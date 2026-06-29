@@ -5,76 +5,76 @@ const Footer = () => {
     {
       title: 'Về chúng tôi',
       links: [
-        'Giới Thiệu Vexere.com',
+        'Giới thiệu BusDN',
         'Tuyển dụng',
         'Tin tức',
-        'Liên hệ'
-      ]
+        'Liên hệ',
+      ],
     },
     {
       title: 'Hỗ trợ',
       links: [
         'Hướng dẫn thanh toán',
-        'Quy chế Vexere.com',
-        'Ticket Refund',
-        'Privacy Policy'
-      ]
+        'Quy định sử dụng',
+        'Hoàn vé',
+        'Chính sách bảo mật',
+      ],
     },
     {
       title: 'Trở thành đối tác',
       links: [
-        'Partner Portal',
+        'Cổng thông tin đối tác',
         'Phần mềm quản lý nhà xe',
-        'Bus Operators',
-        'Tổng đài AI'
-      ]
-    }
+        'Đơn vị vận tải',
+        'Tổng đài AI',
+      ],
+    },
   ];
 
   return (
-    <footer className="bg-on-surface dark:bg-primary-container text-surface-dim dark:text-on-primary-fixed-variant pt-20 pb-10">
+    <footer id="support" className="scroll-mt-24 bg-on-surface pb-10 pt-20 text-surface-dim dark:bg-primary-container dark:text-on-primary-fixed-variant">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-12 px-8 py-16 w-full max-w-7xl mx-auto">
-        {/* Company Info */}
         <div className="space-y-6">
           <div className="text-xl font-display font-bold text-tertiary-fixed-dim">
-            Veridian Transit
+            BusDN
           </div>
           <p className="text-body-md font-body opacity-70">
             The Guided Path to Seamless Travel.
           </p>
 
-          {/* Social Links */}
           <div className="flex gap-4">
-            <a
-              href="#"
-              className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-on-tertiary-container hover:text-primary transition-all duration-300"
+            <button
+              type="button"
+              disabled
+              title="Social channel coming soon"
+              className="flex h-10 w-10 cursor-not-allowed items-center justify-center rounded-full bg-white/10 opacity-60"
+              aria-label="Social channel coming soon"
             >
               <span className="material-symbols-outlined">social_leaderboard</span>
-            </a>
-            <a
-              href="#"
-              className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-on-tertiary-container hover:text-primary transition-all duration-300"
+            </button>
+            <button
+              type="button"
+              disabled
+              title="Video channel coming soon"
+              className="flex h-10 w-10 cursor-not-allowed items-center justify-center rounded-full bg-white/10 opacity-60"
+              aria-label="Video channel coming soon"
             >
               <span className="material-symbols-outlined">video_library</span>
-            </a>
+            </button>
           </div>
         </div>
 
-        {/* Links Sections */}
-        {sections.map((section, idx) => (
-          <div key={idx} className="space-y-6">
+        {sections.map((section) => (
+          <div key={section.title} className="space-y-6">
             <h4 className="text-title-lg font-headline text-surface-bright">
               {section.title}
             </h4>
             <ul className="space-y-3">
-              {section.links.map((link, linkIdx) => (
-                <li key={linkIdx}>
-                  <a
-                    href="#"
-                    className="text-surface-variant/60 hover:text-surface-bright hover:translate-x-1 inline-block transition-transform duration-300"
-                  >
+              {section.links.map((link) => (
+                <li key={link}>
+                  <span className="inline-block text-surface-variant/70">
                     {link}
-                  </a>
+                  </span>
                 </li>
               ))}
             </ul>
@@ -82,14 +82,13 @@ const Footer = () => {
         ))}
       </div>
 
-      {/* Bottom Footer */}
       <div className="container mx-auto px-8 pt-12 border-t border-white/5 text-center md:text-left flex flex-col md:flex-row justify-between items-center gap-4">
         <p className="text-sm opacity-50">
-          © 2024 Veridian Transit. The Guided Path to Seamless Travel.
+          © {new Date().getFullYear()} BusDN. The Guided Path to Seamless Travel.
         </p>
         <div className="flex gap-8 text-sm opacity-50">
           <span>MST: 0315133726</span>
-          <span>TP. Hồ Chí Minh, Việt Nam</span>
+          <span>TP. Ho Chi Minh, Viet Nam</span>
         </div>
       </div>
     </footer>

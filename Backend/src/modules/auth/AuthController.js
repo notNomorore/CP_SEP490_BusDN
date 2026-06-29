@@ -13,6 +13,7 @@ import {
   UserResponseDTO,
 } from './dto/auth.dto.js';
 import logger from '../../utils/logger.js';
+import { createAuditLog } from '../systemMonitoring/auditLogger.js';
 
 /**
  * Auth Controller
@@ -24,12 +25,19 @@ export class AuthController {
    */
   static async register(req, res, next) {
     try {
-      const { email, phone, fullName, password, confirmPassword } = req.body;
+      const {
+        email,
+        phone,
+        phoneNumber,
+        fullName,
+        password,
+        confirmPassword,
+      } = req.body;
 
       // Validate input
       const validationErrors = RegisterDTO.validate({
         email,
-        phone,
+        phone: phoneNumber || phone,
         fullName,
         password,
         confirmPassword,
@@ -46,7 +54,7 @@ export class AuthController {
       // Register user
       const result = await AuthService.registerUser({
         email,
-        phone,
+        phone: phoneNumber || phone,
         fullName,
         password,
       });
@@ -56,7 +64,6 @@ export class AuthController {
         message: 'Registration successful. OTP sent to your email/phone.',
         userId: result.userId,
         expiresAt: result.expiresAt,
-        ...(config.nodeEnv !== 'production' ? { devOtp: result.otp } : {}),
       });
     } catch (error) {
       logger.error('Registration error:', error);
@@ -78,10 +85,14 @@ export class AuthController {
    */
   static async verifyOTP(req, res, next) {
     try {
-      const { email, phone, otp } = req.body;
+      const { email, phone, phoneNumber, otp } = req.body;
 
       // Validate input
-      const validationErrors = VerifyOtpDTO.validate({ email, phone, otp });
+      const validationErrors = VerifyOtpDTO.validate({
+        email,
+        phone: phoneNumber || phone,
+        otp,
+      });
 
       if (validationErrors) {
         return res.status(400).json({
@@ -92,17 +103,45 @@ export class AuthController {
       }
 
       // Verify OTP
-      const user = await AuthService.verifyOTP(email, phone, otp);
+      const user = await AuthService.verifyOTP(email, phoneNumber || phone, otp);
+
+      // Generate JWT token on successful verification (auto-login)
+      const token = jwt.sign(
+        {
+          userId: user._id,
+          email: user.email,
+          role: user.role,
+        },
+        config.jwt.secret,
+        { expiresIn: config.jwt.expire || '7d' }
+      );
+
+      await createAuditLog({
+        req,
+        user,
+        action: 'LOGIN',
+        module: 'AUTH',
+        description: 'User logged in successfully.',
+        status: 'SUCCESS',
+        riskLevel: 'LOW',
+      });
 
       return res.json({
         success: true,
         message: 'Email verified successfully',
-        user: UserResponseDTO.format(user),
+        ...AuthResponseDTO.format(user, token),
       });
     } catch (error) {
       logger.error('OTP verification error:', error);
 
       if (error.message.includes('Invalid OTP') || error.message.includes('expired')) {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      if (error.message === 'No OTP request found') {
         return res.status(400).json({
           success: false,
           message: error.message,
@@ -126,9 +165,12 @@ export class AuthController {
    */
   static async resendOTP(req, res, next) {
     try {
-      const { email, phone } = req.body;
+      const { email, phone, phoneNumber } = req.body;
 
-      const validationErrors = ResendOtpDTO.validate({ email, phone });
+      const validationErrors = ResendOtpDTO.validate({
+        email,
+        phone: phoneNumber || phone,
+      });
 
       if (validationErrors) {
         return res.status(400).json({
@@ -138,14 +180,13 @@ export class AuthController {
         });
       }
 
-      const result = await AuthService.resendVerificationOTP(email, phone);
+      const result = await AuthService.resendVerificationOTP(email, phoneNumber || phone);
 
       return res.json({
         success: true,
         message: 'Verification OTP resent successfully',
         userId: result.userId,
         expiresAt: result.expiresAt,
-        ...(config.nodeEnv !== 'production' ? { devOtp: result.otp } : {}),
       });
     } catch (error) {
       logger.error('Resend OTP error:', error);
@@ -205,14 +246,33 @@ export class AuthController {
     } catch (error) {
       logger.error('Login error:', error);
 
+      await createAuditLog({
+        req,
+        user: { email: req.body?.identifier || '' },
+        action: 'LOGIN',
+        module: 'AUTH',
+        description: 'Login attempt failed.',
+        status: 'FAILED',
+        riskLevel: 'MEDIUM',
+        metadata: { reason: error.message },
+      });
+
       if (
-        error.message.includes('Invalid email/phone')
+        error.code === 'ACCOUNT_LOCKED'
+        || error.message.includes('Invalid email/phone')
         || error.message.includes('not verified')
         || error.message.includes('locked')
       ) {
-        return res.status(401).json({
+        return res.status(error.code === 'ACCOUNT_LOCKED' ? 423 : 401).json({
           success: false,
           message: error.message,
+          ...(error.code === 'ACCOUNT_LOCKED'
+            ? {
+              code: error.code,
+              reason: error.reason,
+              lockedUntil: error.lockedUntil,
+            }
+            : {}),
         });
       }
 
@@ -226,10 +286,13 @@ export class AuthController {
    */
   static async forgotPassword(req, res, next) {
     try {
-      const { email, phone } = req.body;
+      const { email, phone, phoneNumber } = req.body;
 
       // Validate input
-      const validationErrors = ForgotPasswordDTO.validate({ email, phone });
+      const validationErrors = ForgotPasswordDTO.validate({
+        email,
+        phone: phoneNumber || phone,
+      });
 
       if (validationErrors) {
         return res.status(400).json({
@@ -240,7 +303,7 @@ export class AuthController {
       }
 
       // Request password reset
-      const result = await AuthService.requestPasswordReset(email, phone);
+      const result = await AuthService.requestPasswordReset(email, phoneNumber || phone);
 
       return res.json({
         success: true,
@@ -355,7 +418,11 @@ export class AuthController {
     } catch (error) {
       logger.error('Change password error:', error);
 
-      if (error.message.includes('incorrect') || error.message.includes('not found')) {
+      if (
+        error.message.includes('incorrect')
+        || error.message.includes('not found')
+        || error.message.includes('different')
+      ) {
         return res.status(400).json({
           success: false,
           message: error.message,
@@ -409,6 +476,16 @@ export class AuthController {
       }
 
       await AuthService.logoutUser(userId);
+
+      await createAuditLog({
+        req,
+        user: req.user,
+        action: 'LOGOUT',
+        module: 'AUTH',
+        description: 'User logged out.',
+        status: 'SUCCESS',
+        riskLevel: 'LOW',
+      });
 
       return res.json({
         success: true,

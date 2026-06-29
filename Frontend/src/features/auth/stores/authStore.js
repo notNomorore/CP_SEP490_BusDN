@@ -13,9 +13,10 @@ export const useAuthStore = create((set, get) => ({
   error: null,
 
   // Selectors
-  isAdmin: () => get().user?.role === 'ADMIN' || get().user?.role === 'STAFF',
+  isAdmin: () => get().user?.role === 'ADMIN',
   isDriver: () => get().user?.role === 'DRIVER',
-  isConductor: () => get().user?.role === 'CONDUCTOR',
+  isBusAssistant: () => get().user?.role === 'BUS_ASSISTANT',
+  isConductor: () => ['CONDUCTOR', 'BUS_ASSISTANT', 'BUS ASSISTANT'].includes(get().user?.role),
   isPassenger: () => get().user?.role === 'PASSENGER',
 
   // Actions
@@ -43,6 +44,8 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const result = await authService.verifyOTP(data);
+      set({ error: null });
+
       return result;
     } catch (error) {
       const errorMsg = error.message || 'OTP verification failed';
@@ -87,14 +90,14 @@ export const useAuthStore = create((set, get) => ({
 
       return result;
     } catch (error) {
-      const errorMsg = error.message || 'Login failed';
+      const errorMsg = error.message || 'Đăng nhập thất bại. Vui lòng kiểm tra tài khoản, mật khẩu hoặc trạng thái tài khoản.';
       set({
         user: null,
         token: null,
         isAuthenticated: false,
         error: errorMsg,
       });
-      throw error;
+      throw new Error(errorMsg);
     } finally {
       set({ isLoading: false });
     }
@@ -235,6 +238,14 @@ export const useAuthStore = create((set, get) => ({
    */
   clearError: () => {
     set({ error: null });
+  },
+
+  syncUser: (user) => {
+    authService.setStoredUser(user);
+    set({
+      user,
+      isAuthenticated: true,
+    });
   },
 
   /**

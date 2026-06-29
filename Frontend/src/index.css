@@ -24,11 +24,23 @@
 /* Global Font Setup */
 html {
   @apply scroll-smooth;
+  scroll-padding-top: 6rem;
 }
 
 body {
   @apply bg-background text-on-surface font-body;
   font-family: 'Inter', sans-serif;
+  min-width: 320px;
+  background:
+    radial-gradient(circle at top right, rgba(181, 239, 209, 0.42), transparent 26%),
+    linear-gradient(180deg, #f4faf7 0%, #eef6f2 45%, #f7fbf9 100%);
+}
+
+.dark body {
+  background:
+    radial-gradient(circle at top left, rgba(34, 197, 94, 0.12), transparent 22%),
+    linear-gradient(180deg, #071516 0%, #102225 100%);
+  color: #e2e8f0;
 }
 
 h1, h2, h3, h4, h5, h6,
@@ -42,13 +54,48 @@ h1, h2, h3, h4, h5, h6,
   @apply bg-primary-fixed text-primary;
 }
 
-/* Smooth Transitions */
-* {
-  @apply transition-colors transition-transform;
+.dark ::selection {
+  background: rgba(110, 231, 183, 0.35);
+  color: #ecfdf5;
 }
 
-button {
-  @apply active:scale-95 transition-transform;
+input::selection,
+textarea::selection {
+  background: rgba(181, 239, 209, 0.35);
+  color: #001a0f;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus {
+  -webkit-text-fill-color: #001a0f;
+  box-shadow: 0 0 0 1000px #ffffff inset;
+  transition: background-color 9999s ease-out 0s;
+}
+
+input,
+textarea,
+select {
+  color: #001a0f;
+}
+
+.dark input,
+.dark textarea,
+.dark select {
+  color: #e2e8f0;
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(193, 200, 195, 0.35);
+}
+
+.soft-panel {
+  box-shadow: 0 20px 55px rgba(0, 26, 15, 0.08);
 }
 
 /* Scrollbar Styling */
@@ -61,8 +108,16 @@ button {
   @apply bg-surface-container;
 }
 
+.dark ::-webkit-scrollbar-track {
+  background: #0f1f22;
+}
+
 ::-webkit-scrollbar-thumb {
   @apply bg-outline rounded-full;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #35585b;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -71,7 +126,11 @@ button {
 
 /* Focus Ring */
 :focus-visible {
-  @apply outline-2 outline-offset-2 outline-primary;
+  @apply outline outline-2 outline-offset-2 outline-primary;
+}
+
+.dark :focus-visible {
+  outline-color: #6ee7b7;
 }
 
 /* Placeholder Styling */
@@ -84,4 +143,35 @@ input:focus,
 textarea:focus,
 select:focus {
   @apply ring-2 ring-on-tertiary-container;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.leaflet-tooltip.bus-stop-name-tooltip {
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+  color: #064e3b;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 5px 8px;
+}
+
+.leaflet-tooltip.bus-stop-name-tooltip::before {
+  display: none;
 }

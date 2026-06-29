@@ -23,9 +23,8 @@ const Promotions = () => {
   ];
 
   return (
-    <section className="bg-surface-container py-24">
+    <section className="relative z-0 bg-surface-container py-20 lg:py-24">
       <div className="container mx-auto px-6">
-        {/* Header */}
         <div className="flex justify-between items-end mb-12">
           <div>
             <span className="text-on-tertiary-container font-bold text-sm uppercase tracking-widest">
@@ -37,14 +36,12 @@ const Promotions = () => {
           </div>
         </div>
 
-        {/* Promo Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {promos.map(promo => (
+          {promos.map((promo) => (
             <div
               key={promo.id}
               className="bg-surface-container-lowest rounded-[2rem] p-6 shadow-xl hover:shadow-2xl transition-all border border-outline-variant/15 flex flex-col gap-6 group"
             >
-              {/* Image */}
               <div className="overflow-hidden rounded-2xl aspect-[16/9]">
                 <img
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
@@ -53,7 +50,6 @@ const Promotions = () => {
                 />
               </div>
 
-              {/* Content */}
               <div>
                 <h3 className="text-xl font-headline font-bold text-primary mb-2">
                   {promo.title}

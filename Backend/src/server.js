@@ -6,12 +6,33 @@ import { config } from './config/environment.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { createApp } from './app.js';
 import logger from './utils/logger.js';
+import registerFleetOperationSockets from './modules/fleetOperations/fleetOperations.socket.js';
+
+let isConnectingDatabase = false;
+
+const connectDatabaseWithRetry = async () => {
+  if (isConnectingDatabase) {
+    return;
+  }
+
+  isConnectingDatabase = true;
+  try {
+    await connectDatabase();
+  } catch (error) {
+    logger.warn('MongoDB unavailable during startup. Retrying in 15 seconds...');
+    setTimeout(() => {
+      isConnectingDatabase = false;
+      connectDatabaseWithRetry();
+    }, 15000);
+    return;
+  }
+
+  isConnectingDatabase = false;
+};
 
 const startServer = async () => {
   try {
     logger.info('Initializing server...');
-    await connectDatabase();
-
     const app = createApp();
     const server = http.createServer(app);
 
@@ -19,6 +40,8 @@ const startServer = async () => {
       cors: config.cors,
       transports: ['websocket', 'polling'],
     });
+
+    registerFleetOperationSockets(io);
 
     io.on('connection', (socket) => {
       logger.info(`Socket.IO client connected: ${socket.id}`);
@@ -68,8 +91,12 @@ const startServer = async () => {
     process.on('unhandledRejection', (reason, promise) => {
       logger.error('Unhandled Rejection at:', promise);
       logger.error('Unhandled Rejection reason:', reason);
-      process.exit(1);
     });
+
+    // Complete the initial database connection attempt before accepting API
+    // requests. With Mongoose buffering disabled, listening first creates a
+    // startup race where route requests fail before the connection is ready.
+    await connectDatabaseWithRetry();
 
     server.listen(config.port, config.host, () => {
       logger.info(`Server running at http://${config.host}:${config.port}`);

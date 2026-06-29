@@ -3,12 +3,13 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// Load environment variables
-dotenv.config({ path: '.env.local' });
-dotenv.config({ path: '.env' });
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, '../..');
+
+// Load environment variables from the backend root, independent of the shell cwd.
+dotenv.config({ path: path.join(rootDir, '.env.local') });
+dotenv.config({ path: path.join(rootDir, '.env') });
 
 const getEnv = (key, fallback = undefined) => {
   const value = process.env[key];
@@ -24,6 +25,34 @@ const getEnv = (key, fallback = undefined) => {
 const toNumber = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isNaN(parsed) ? fallback : parsed;
+};
+
+const toList = (value, fallback = []) => {
+  const source = typeof value === 'string' ? value : '';
+  const list = source
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return list.length ? list : fallback;
+};
+
+const createCorsOrigin = () => {
+  const allowedOrigins = toList(getEnv('CORS_ORIGIN'), ['http://localhost:5173']);
+  const isDevelopment = getEnv('NODE_ENV', 'development') === 'development';
+  const localDevOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
+
+  return (origin, callback) => {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (allowedOrigins.includes(origin) || (isDevelopment && localDevOriginPattern.test(origin))) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS origin not allowed: ${origin}`), false);
+  };
 };
 
 export const config = {
@@ -50,6 +79,11 @@ export const config = {
     refreshExpire: getEnv('JWT_REFRESH_EXPIRE', '30d'),
   },
 
+  // QR e-ticket signing
+  qr: {
+    secret: getEnv('QR_SECRET', getEnv('JWT_SECRET', 'dev_qr_secret_do_not_use_in_production')),
+  },
+
   // Session
   session: {
     secret: getEnv('SESSION_SECRET', 'dev_session_secret'),
@@ -69,12 +103,16 @@ export const config = {
     port: toNumber(getEnv('SMTP_PORT', '587'), 587),
     user: getEnv('SMTP_USER'),
     password: getEnv('SMTP_PASSWORD'),
-    from: getEnv('EMAIL_FROM', 'noreply@veridian-transit.com'),
+  },
+
+  emailFrom: {
+    name: getEnv('EMAIL_FROM_NAME', 'BusDN'),
+    email: getEnv('EMAIL_FROM', 'noreply@veridian-transit.com'),
   },
 
   // CORS
   cors: {
-    origin: getEnv('CORS_ORIGIN', 'http://localhost:5173'),
+    origin: createCorsOrigin(),
     credentials: true,
   },
 
@@ -95,16 +133,42 @@ export const config = {
     url: getEnv('REDIS_URL', 'redis://localhost:6379'),
   },
 
+  // Google Maps Platform
+  googleMaps: {
+    apiKey: getEnv('GOOGLE_MAPS_API_KEY'),
+  },
+
+  // Da Nang public bus data
+  danabus: {
+    stopApiUrl: getEnv(
+      'DANABUS_STOP_API_URL',
+      'https://ecobus.danang.gov.vn/api/api/BusStop/GetListBusStop'
+    ),
+    requestTimeoutMs: toNumber(getEnv('DANABUS_REQUEST_TIMEOUT_MS', '20000'), 20000),
+  },
+
   // Logging
   logging: {
     level: getEnv('LOG_LEVEL', 'info'),
   },
 
+  rateLimit: {
+    windowMs: toNumber(getEnv('RATE_LIMIT_WINDOW_MS', '900000'), 900000),
+    apiMax: toNumber(
+      getEnv('RATE_LIMIT_API_MAX', getEnv('NODE_ENV', 'development') === 'development' ? '5000' : '1000'),
+      getEnv('NODE_ENV', 'development') === 'development' ? 5000 : 1000
+    ),
+    authMax: toNumber(
+      getEnv('RATE_LIMIT_AUTH_MAX', getEnv('NODE_ENV', 'development') === 'development' ? '100' : '10'),
+      getEnv('NODE_ENV', 'development') === 'development' ? 100 : 10
+    ),
+  },
+
   // Paths
   paths: {
-    root: path.dirname(__dirname),
+    root: rootDir,
     src: __dirname,
-    uploads: path.join(path.dirname(__dirname), 'uploads'),
+    uploads: path.join(rootDir, 'uploads'),
   },
 
   // Feature Flags

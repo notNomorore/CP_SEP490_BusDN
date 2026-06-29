@@ -1,11 +1,25 @@
 import crypto from 'crypto';
 import User from './User.js';
 import logger from '../../utils/logger.js';
+import emailService from '../../utils/emailService.js';
 
 /**
  * Auth Service - Handles authentication business logic
  */
 export class AuthService {
+  static createLockedLoginError(user) {
+    const reason = user.accountLock?.reason?.trim() || 'Kh\u00f4ng c\u00f3 l\u00fd do c\u1ee5 th\u1ec3';
+    const lockedUntil = user.accountLock?.lockedUntil;
+    const untilText = lockedUntil
+      ? ` Th\u1eddi h\u1ea1n kh\u00f3a \u0111\u1ebfn: ${new Date(lockedUntil).toLocaleString('vi-VN')}.`
+      : '';
+    const error = new Error(`T\u00e0i kho\u1ea3n \u0111\u00e3 b\u1ecb kh\u00f3a. L\u00fd do: ${reason}.${untilText} Vui l\u00f2ng li\u00ean h\u1ec7 qu\u1ea3n tr\u1ecb vi\u00ean \u0111\u1ec3 \u0111\u01b0\u1ee3c h\u1ed7 tr\u1ee3.`);
+    error.code = 'ACCOUNT_LOCKED';
+    error.reason = reason;
+    error.lockedUntil = lockedUntil || null;
+    return error;
+  }
+
   static buildIdentifierConditions(email, phone) {
     const conditions = [];
 
@@ -14,7 +28,7 @@ export class AuthService {
     }
 
     if (phone) {
-      conditions.push({ phone });
+      conditions.push({ phoneNumber: phone });
     }
 
     return conditions;
@@ -38,8 +52,9 @@ export class AuthService {
    * Register new user
    */
   static async registerUser(registerData) {
-    const { email, phone, fullName, password } = registerData;
-    const identifierConditions = this.buildIdentifierConditions(email, phone);
+    const { email, phone, phoneNumber, fullName, password } = registerData;
+    const normalizedPhone = phoneNumber || phone;
+    const identifierConditions = this.buildIdentifierConditions(email, normalizedPhone);
 
     if (identifierConditions.length === 0) {
       throw new Error('Email or phone is required');
@@ -61,7 +76,7 @@ export class AuthService {
     // Create new user
     const user = new User({
       email: email?.toLowerCase(),
-      phone,
+      phoneNumber: normalizedPhone,
       fullName: fullName.trim(),
       password,
       otp: {
@@ -74,7 +89,18 @@ export class AuthService {
 
     await user.save();
 
-    logger.info(`User registered: ${email || phone}`);
+    // Send verification OTP email
+    if (email) {
+      try {
+        await emailService.sendVerificationOTP(email, otp, fullName.trim());
+        logger.info(`Verification OTP email sent to: ${email}`);
+      } catch (emailError) {
+        logger.warn(`Failed to send verification OTP email to ${email}:`, emailError.message);
+        // Don't throw - registration should still succeed even if email fails
+      }
+    }
+
+    logger.info(`User registered: ${email || normalizedPhone}`);
 
     return {
       userId: user._id,
@@ -113,6 +139,17 @@ export class AuthService {
     user.otp = undefined;
     await user.save();
 
+    // Send welcome email
+    if (email) {
+      try {
+        await emailService.sendWelcomeEmail(email, user.fullName);
+        logger.info(`Welcome email sent to: ${email}`);
+      } catch (emailError) {
+        logger.warn(`Failed to send welcome email to ${email}:`, emailError.message);
+        // Don't throw - verification should still succeed even if email fails
+      }
+    }
+
     logger.info(`User verified: ${email || phone}`);
 
     return user;
@@ -144,6 +181,17 @@ export class AuthService {
     };
     await user.save();
 
+    // Send verification OTP email
+    if (email) {
+      try {
+        await emailService.sendVerificationOTP(email, otp, user.fullName);
+        logger.info(`Verification OTP email resent to: ${email}`);
+      } catch (emailError) {
+        logger.warn(`Failed to resend verification OTP email to ${email}:`, emailError.message);
+        // Don't throw - resend should still succeed even if email fails
+      }
+    }
+
     logger.info(`Verification OTP resent: ${email || phone}`);
 
     return {
@@ -161,7 +209,7 @@ export class AuthService {
     const user = await User.findOne({
       $or: [
         { email: identifier?.toLowerCase() },
-        { phone: identifier },
+        { phoneNumber: identifier },
       ],
     }).select('+password');
 
@@ -174,19 +222,22 @@ export class AuthService {
       throw new Error('User account not verified');
     }
 
-    // Check if user is locked
-    if (user.accountLock?.isLocked) {
-      if (user.accountLock.lockedUntil && new Date() < user.accountLock.lockedUntil) {
-        throw new Error('Account is temporarily locked');
-      }
-      // Unlock if lockout period has expired
-      user.accountLock = undefined;
-      await user.save();
-    }
+    // Locked accounts must receive a clear lock message with the lock reason.
+    if (user.accountLock?.isLocked || user.status === 'LOCKED') {
+      const hasExpiry = Boolean(user.accountLock?.lockedUntil);
+      const lockExpired = hasExpiry && new Date() >= user.accountLock.lockedUntil;
 
-    // Check if user is active
-    if (user.status === 'LOCKED') {
-      throw new Error('Account is locked by admin');
+      if (lockExpired) {
+        user.status = 'ACTIVE';
+        user.accountLock = {
+          isLocked: false,
+          reason: '',
+          lockedUntil: null,
+        };
+        await user.save();
+      } else {
+        throw this.createLockedLoginError(user);
+      }
     }
 
     // Verify password
@@ -234,6 +285,17 @@ export class AuthService {
 
     await user.save();
 
+    // Send password reset OTP email
+    if (email) {
+      try {
+        await emailService.sendPasswordResetOTP(email, otp, user.fullName);
+        logger.info(`Password reset OTP email sent to: ${email}`);
+      } catch (emailError) {
+        logger.warn(`Failed to send password reset OTP email to ${email}:`, emailError.message);
+        // Don't throw - password reset should still succeed even if email fails
+      }
+    }
+
     logger.info(`Password reset requested for: ${email || phone}`);
 
     return {
@@ -275,7 +337,7 @@ export class AuthService {
     user.passwordReset = undefined;
     await user.save();
 
-    logger.info(`Password reset for: ${user.email || user.phone}`);
+    logger.info(`Password reset for: ${user.email || user.phoneNumber}`);
 
     return user;
   }
@@ -296,8 +358,14 @@ export class AuthService {
       throw new Error('Current password is incorrect');
     }
 
+    const isSamePassword = await user.comparePassword(newPassword);
+    if (isSamePassword) {
+      throw new Error('New password must be different from the temporary password');
+    }
+
     // Update password
     user.password = newPassword;
+    user.isFirstLogin = false;
     await user.save();
 
     logger.info(`Password changed for user: ${userId}`);

@@ -6,12 +6,35 @@ import morgan from 'morgan';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import session from 'express-session';
+import path from 'path';
 
 import { config } from './config/environment.js';
 import { responseHandler } from './utils/response.js';
 import { globalErrorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import logger from './utils/logger.js';
 import authRoutes from './modules/auth/authRoutes.js';
+import priorityProfileRoutes from './modules/priorityProfile/priorityProfileRoutes.js';
+import customerSupportRoutes from './modules/customerSupport/customerSupportRoutes.js';
+import routeRoutes from './modules/routes/routeRoutes.js';
+import adminRoutes from './modules/admin/adminRoutes.js';
+import profileRoutes from './modules/profile/profileRoutes.js';
+import promotionRoutes from './modules/promotions/promotionRoutes.js';
+import revenueReportRoutes from './modules/revenue/revenueReport.routes.js';
+import routeEfficiencyRoutes from './modules/analytics/routeEfficiency.routes.js';
+import incidentReportRoutes from './modules/incidents/incidentReport.routes.js';
+import systemMonitoringRoutes from './modules/systemMonitoring/systemMonitoring.routes.js';
+import fareOperationsRoutes from './modules/fareOperations/fareOperations.routes.js';
+import walkInTicketRoutes from './modules/walkInTickets/walkInTicket.routes.js';
+import passengerComplianceRoutes from './modules/passengerCompliance/passengerCompliance.routes.js';
+import fleetOperationsRoutes from './modules/fleetOperations/fleetOperations.routes.js';
+import fleetMonitoringRoutes from './modules/fleetMonitoring/fleetMonitoring.routes.js';
+import systemNotificationRoutes from './modules/systemNotifications/systemNotification.routes.js';
+import vehicleIssueRoutes from './modules/vehicleIssues/vehicleIssue.routes.js';
+import maintenanceApprovalRoutes from './modules/vehicleIssues/maintenanceApproval.routes.js';
+import vehicleReassignmentRoutes from './modules/vehicleReassignments/vehicleReassignment.routes.js';
+import busAssistantRoutes from './modules/busAssistant/busAssistant.routes.js';
+import scheduleOperationsRoutes from './modules/scheduleOperations/scheduleOperationsRoutes.js';
+import ticketRoutes from './modules/tickets/ticketRoutes.js';
 
 export const createApp = () => {
   const app = express();
@@ -20,7 +43,9 @@ export const createApp = () => {
   app.set('trust proxy', 1);
 
   // Security middleware
-  app.use(helmet());
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  }));
   app.use(cors(config.cors));
 
   // Compression middleware
@@ -36,20 +61,36 @@ export const createApp = () => {
   // Body parsing middleware
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
+  app.use('/uploads', express.static(path.resolve(config.paths.uploads)));
 
   // Rate limiting
   const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // 100 requests per windowMs
-    message: 'Too many requests from this IP, please try again later.',
-    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+    windowMs: config.rateLimit.windowMs,
+    max: config.rateLimit.apiMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => req.path.startsWith('/auth/'),
+    handler: (req, res, _next, options) => res.status(options.statusCode).json({
+      success: false,
+      statusCode: options.statusCode,
+      message: 'Request limit reached. Please wait briefly and try again.',
+      retryAfter: res.getHeader('Retry-After') || null,
+      timestamp: new Date().toISOString(),
+    }),
   });
 
   const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: config.nodeEnv === 'development' ? 100 : 5,
-    message: 'Too many authentication attempts, please try again later.',
+    windowMs: config.rateLimit.windowMs,
+    max: config.rateLimit.authMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res, _next, options) => res.status(options.statusCode).json({
+      success: false,
+      statusCode: options.statusCode,
+      message: 'Too many authentication attempts. Please wait before trying again.',
+      retryAfter: res.getHeader('Retry-After') || null,
+      timestamp: new Date().toISOString(),
+    }),
   });
 
   app.use('/api/', limiter);
@@ -78,11 +119,31 @@ export const createApp = () => {
     );
   });
 
-  // Routes will be mounted here
   app.use('/api/auth', authRoutes);
-  // app.use('/api/routes', routeRoutes);
-  // etc...
+  app.use('/api/priority-profile', priorityProfileRoutes);
+  app.use('/api/customer-support', customerSupportRoutes);
+  app.use('/api/admin', adminRoutes);
+  app.use('/api/profile', profileRoutes);
+  app.use('/api/admin/promotions', promotionRoutes);
+  app.use('/api/admin/revenue', revenueReportRoutes);
+  app.use('/api/admin/analytics', routeEfficiencyRoutes);
+  app.use('/api/admin/incidents', incidentReportRoutes);
+  app.use('/api/admin', systemMonitoringRoutes);
+  app.use('/api/admin/fares', fareOperationsRoutes);
+  app.use('/api/admin', walkInTicketRoutes);
+  app.use('/api/admin', passengerComplianceRoutes);
+  app.use('/api/admin/fleet', fleetMonitoringRoutes);
+  app.use('/api/admin/notifications', systemNotificationRoutes);
+  app.use('/api/admin/vehicle-issues', vehicleIssueRoutes);
+  app.use('/api/admin/maintenance', maintenanceApprovalRoutes);
+  app.use('/api/admin', vehicleReassignmentRoutes);
 
+  app.use('/api/bus-assistant', busAssistantRoutes);
+  app.use('/api/fleet-operations', fleetOperationsRoutes);
+  app.use('/api/tickets', ticketRoutes);
+  app.use('/api/routes', routeRoutes);
+  app.use('/api/schedule-operations', scheduleOperationsRoutes);
+  // app.use('/api/bus-stops', busStopRoutes);
   // 404 handler (must be after all routes)
   app.use(notFoundHandler);
 
