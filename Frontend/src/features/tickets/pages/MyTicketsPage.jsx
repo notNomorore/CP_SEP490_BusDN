@@ -10,8 +10,11 @@ import {
   Route,
   Search,
   Ticket,
+  Trash2,
+  WalletCards,
 } from 'lucide-react';
 import Header from '../../../shared/components/navigation/Header.jsx';
+import toast from '../../../shared/utils/toast.js';
 import ticketService from '../services/ticketService.js';
 
 const formatDate = (value) => {
@@ -88,6 +91,33 @@ const ticketTypeLabel = (type) => ({
   MONTHLY_PASS: 'Vé tháng',
 }[type] || type || 'Vé một lượt');
 
+const isPendingPaymentTicket = (ticket) => (
+  ticket?.status === 'PENDING'
+  && ticket?.paymentStatus === 'PENDING'
+  && ticket?.bookingStatus !== 'CANCELLED'
+  && ticket?.ticketStatus !== 'CANCELLED'
+);
+
+const buildCheckoutOrderFromTicket = (ticket) => ({
+  ticketType: 'ONE_WAY',
+  route: {
+    id: ticket.routeId?._id || ticket.routeId || ticket.route?.id || ticket.route?._id,
+    _id: ticket.routeId?._id || ticket.routeId || ticket.route?.id || ticket.route?._id,
+    routeNumber: ticket.routeNumber,
+    name: ticket.tripInfo?.routeName || ticket.routeNumber,
+  },
+  routeNumber: ticket.routeNumber,
+  routeName: ticket.tripInfo?.routeName || ticket.routeNumber,
+  departureLocation: ticket.departureLocation,
+  destinationLocation: ticket.destinationLocation,
+  serviceDate: ticket.serviceDate ? String(ticket.serviceDate).slice(0, 10) : '',
+  expiryDate: ticket.serviceDate ? String(ticket.serviceDate).slice(0, 10) : '',
+  departureTime: ticket.departureTime,
+  passengerType: ticket.passengerType || 'STANDARD',
+  passengerTypeLabel: passengerTypeLabel(ticket.passengerType),
+  price: ticket.ticketPrice,
+});
+
 const getPassDisplayStatus = (pass) => {
   if (pass.passStatus === 'CANCELLED') return 'CANCELLED';
   if (pass.passStatus === 'REFUNDED') return 'REFUNDED';
@@ -113,6 +143,7 @@ const MyTicketsPage = () => {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [sortOption, setSortOption] = useState('PURCHASE_DESC');
   const [isLoading, setIsLoading] = useState(true);
+  const [processingTicketId, setProcessingTicketId] = useState('');
   const [error, setError] = useState('');
 
   const loadTickets = async () => {
@@ -136,6 +167,78 @@ const MyTicketsPage = () => {
   useEffect(() => {
     loadTickets();
   }, []);
+
+  const handlePayPendingTicket = async (event, ticket) => {
+    event.stopPropagation();
+    setProcessingTicketId(ticket.id);
+    setError('');
+
+    try {
+      const payment = await ticketService.createPendingTicketPayment(ticket.id);
+      if (payment.status === 'PAID') {
+        toast.success(payment.message || 'Thanh toán thành công. Vé đã được kích hoạt.');
+        await loadTickets();
+        return;
+      }
+
+      navigate('/tickets/checkout', {
+        state: {
+          order: buildCheckoutOrderFromTicket(ticket),
+          payment,
+        },
+      });
+    } catch (err) {
+      const message = err?.message || 'Không thể tạo mã thanh toán cho vé này.';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setProcessingTicketId('');
+    }
+  };
+
+  const handleDeletePendingTicket = async (event, ticket) => {
+    event.stopPropagation();
+
+    if (!window.confirm('Xóa vé chưa thanh toán này?')) {
+      return;
+    }
+
+    setProcessingTicketId(ticket.id);
+    setError('');
+    try {
+      await ticketService.cancelTicket(ticket.id);
+      toast.success('Đã xóa vé chưa thanh toán.');
+      await loadTickets();
+    } catch (err) {
+      const message = err?.message || 'Không thể xóa vé này.';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setProcessingTicketId('');
+    }
+  };
+
+  const handleCancelPendingTicket = async (event, ticket) => {
+    event.stopPropagation();
+
+    if (!window.confirm('Huy ve chua thanh toan nay?')) {
+      return;
+    }
+
+    setProcessingTicketId(ticket.id);
+    setError('');
+    try {
+      await ticketService.cancelTicket(ticket.id);
+      toast.success('Da huy ve chua thanh toan.');
+      await loadTickets();
+    } catch (err) {
+      const message = err?.message || 'Khong the huy ve nay.';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setProcessingTicketId('');
+    }
+  };
 
   const routeOptions = useMemo(() => Array.from(new Set(
     tickets.map((ticket) => ticket.routeNumber).filter(Boolean)
@@ -448,6 +551,28 @@ const MyTicketsPage = () => {
                       </p>
                     </div>
                   </div>
+                  {isPendingPaymentTicket(ticket) ? (
+                    <div className="mt-4 grid gap-3 border-t border-outline-variant/40 pt-4 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={(event) => handlePayPendingTicket(event, ticket)}
+                        disabled={processingTicketId === ticket.id}
+                        className="inline-flex items-center justify-center gap-2 rounded-full bg-secondary px-4 py-3 text-sm font-black text-white hover:bg-secondary-fixed-dim disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {processingTicketId === ticket.id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <WalletCards className="h-4 w-4" />}
+                        Thanh toan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => handleCancelPendingTicket(event, ticket)}
+                        disabled={processingTicketId === ticket.id}
+                        className="inline-flex items-center justify-center gap-2 rounded-full border border-red-200 bg-white px-4 py-3 text-sm font-black text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Huy ve
+                      </button>
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </div>

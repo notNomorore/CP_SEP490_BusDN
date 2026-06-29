@@ -45,6 +45,11 @@ export class TicketController {
     const payment = await TicketService.getPaymentOrderStatus(req.user.userId, req.params.orderCode);
     return res.success(payment, 'Payment status retrieved successfully');
   }
+
+  static async createPendingTicketPayment(req, res) {
+    const payment = await TicketService.createPaymentForPendingTicket(req.user.userId, req.params.ticketId);
+    return res.success(payment, 'Payment QR created successfully', 201);
+  }
 }
 
 export default TicketController;

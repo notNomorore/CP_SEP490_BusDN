@@ -50,7 +50,7 @@ const TicketCheckoutPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const order = location.state?.order;
-  const [payment, setPayment] = useState(null);
+  const [payment, setPayment] = useState(location.state?.payment || null);
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState('');

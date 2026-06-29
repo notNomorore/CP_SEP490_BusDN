@@ -677,6 +677,105 @@ export class TicketService {
     };
   }
 
+  static async createPaymentForPendingTicket(userId, ticketId) {
+    if (!mongoose.isValidObjectId(ticketId)) {
+      throw new CustomError('Không tìm thấy thông tin vé.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const ticket = await Ticket.findOne({
+      _id: ticketId,
+      passenger: userId,
+      paymentStatus: 'PENDING',
+      bookingStatus: 'PENDING',
+    });
+
+    if (!ticket) {
+      throw new CustomError('Không tìm thấy vé chưa thanh toán.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    let paymentOrder = await PaymentOrder.findOne({
+      passenger: userId,
+      ticketId: ticket._id,
+      status: 'PENDING',
+    });
+
+    if (!paymentOrder) {
+      paymentOrder = await PaymentOrder.create({
+        orderCode: this.buildPayOSOrderCode(),
+        passenger: userId,
+        ticketType: 'ONE_WAY',
+        payload: {
+          ticketId: ticket._id,
+          routeId: ticket.routeId,
+          departureLocation: ticket.departureLocation,
+          destinationLocation: ticket.destinationLocation,
+          serviceDate: ticket.serviceDate,
+          departureTime: ticket.departureTime,
+          passengerType: ticket.passengerType,
+        },
+        amount: ticket.ticketPrice,
+        description: `BusDN ${ticket.ticketCode}`,
+        status: ticket.ticketPrice > 0 ? 'PENDING' : 'PAID',
+        ticketId: ticket._id,
+      });
+    }
+
+    if (paymentOrder.amount <= 0) {
+      await this.completePaymentOrder(paymentOrder);
+      return {
+        orderCode: paymentOrder.orderCode,
+        status: 'PAID',
+        amount: paymentOrder.amount,
+        ticketType: 'ONE_WAY',
+        checkoutUrl: '',
+        qrCode: '',
+        qrCodeImage: '',
+        message: 'Vé miễn phí đã được kích hoạt.',
+      };
+    }
+
+    if (!paymentOrder.payos?.qrCode) {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const payosLink = await PayOSService.createPaymentLink({
+        orderCode: paymentOrder.orderCode,
+        amount: paymentOrder.amount,
+        description: paymentOrder.description,
+        returnUrl: `${frontendUrl}/my-tickets`,
+        cancelUrl: `${frontendUrl}/my-tickets`,
+      });
+
+      paymentOrder.payos = {
+        paymentLinkId: payosLink.paymentLinkId || '',
+        checkoutUrl: payosLink.checkoutUrl || '',
+        qrCode: payosLink.qrCode || '',
+        rawStatus: payosLink.status || 'PENDING',
+        rawResponse: payosLink,
+      };
+      await paymentOrder.save();
+    }
+
+    return {
+      orderCode: paymentOrder.orderCode,
+      status: paymentOrder.status,
+      amount: paymentOrder.amount,
+      ticketType: 'ONE_WAY',
+      checkoutUrl: paymentOrder.payos.checkoutUrl,
+      qrCode: paymentOrder.payos.qrCode,
+      qrCodeImage: paymentOrder.payos.qrCode
+        ? await QRCode.toDataURL(paymentOrder.payos.qrCode, {
+          errorCorrectionLevel: 'M',
+          margin: 2,
+          width: 320,
+          color: {
+            dark: '#002f1b',
+            light: '#ffffff',
+          },
+        })
+        : '',
+      paymentLinkId: paymentOrder.payos.paymentLinkId,
+    };
+  }
+
   static async completePaymentOrder(paymentOrder) {
     if (paymentOrder.ticketType === 'ONE_WAY' && paymentOrder.ticketId) {
       const ticket = await Ticket.findById(paymentOrder.ticketId);

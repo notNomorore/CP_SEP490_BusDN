@@ -19,6 +19,7 @@ router.post('/monthly-pass', authorizeRole('PASSENGER'), asyncHandler(TicketCont
 router.get('/monthly-passes/me', authorizeRole('PASSENGER'), asyncHandler(TicketController.listMyMonthlyPasses));
 router.post('/payments', authorizeRole('PASSENGER'), asyncHandler(TicketController.createPayment));
 router.get('/payments/:orderCode', authorizeRole('PASSENGER'), asyncHandler(TicketController.getPaymentStatus));
+router.post('/:ticketId/payment', authorizeRole('PASSENGER'), asyncHandler(TicketController.createPendingTicketPayment));
 router.get('/:ticketId', authorizeRole('PASSENGER'), asyncHandler(TicketController.getMyTicket));
 router.patch('/:ticketId/cancel', authorizeRole('PASSENGER'), asyncHandler(TicketController.cancelMyTicket));
 

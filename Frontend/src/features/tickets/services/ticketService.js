@@ -55,6 +55,11 @@ export const ticketService = {
     const response = await apiClient.get(`/tickets/payments/${orderCode}`);
     return response.data;
   },
+
+  createPendingTicketPayment: async (ticketId) => {
+    const response = await apiClient.post(`/tickets/${ticketId}/payment`);
+    return response.data;
+  },
 };
 
 export default ticketService;
