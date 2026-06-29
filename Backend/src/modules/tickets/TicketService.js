@@ -9,9 +9,7 @@ import Ticket from './Ticket.js';
 import MonthlyPass from './MonthlyPass.js';
 import QRCodeService from './QRCodeService.js';
 
-const PAYMENT_METHODS = new Set(['CREDIT_CARD', 'E_WALLET', 'CASHLESS']);
 const PASSENGER_TYPES = new Set(['STANDARD', 'STUDENT', 'PRIORITY']);
-const MONTHLY_PASS_PAYMENT_METHODS = new Set(['CREDIT_CARD', 'E_WALLET', 'ONLINE_BANKING']);
 const MONTHLY_PASS_PRICES = {
   STANDARD: 250000,
   STUDENT: 120000,
@@ -207,10 +205,14 @@ export class TicketService {
       throw new CustomError('Chuyến đi hoặc tuyến xe đã chọn không tồn tại', HTTP_STATUS.NOT_FOUND);
     }
 
-    const startStop = this.findStop(route, payload.departureLocation) || route.stops?.[0];
-    const endStop = this.findStop(route, payload.destinationLocation) || route.stops?.[route.stops.length - 1];
+    const startStop = this.findStop(route, payload.departureLocation);
+    const endStop = this.findStop(route, payload.destinationLocation);
 
-    if (!startStop || !endStop || startStop.order >= endStop.order) {
+    if (!startStop || !endStop) {
+      throw new CustomError('Diem di hoac diem den khong thuoc tuyen da chon', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    if (startStop.order >= endStop.order) {
       throw new CustomError('Điểm đi hoặc điểm đến không hợp lệ', HTTP_STATUS.BAD_REQUEST);
     }
 
@@ -219,14 +221,8 @@ export class TicketService {
       throw new CustomError('Loại vé không hợp lệ', HTTP_STATUS.BAD_REQUEST);
     }
 
-    const paymentMethod = String(payload.paymentMethod || '').trim().toUpperCase();
-    if (!PAYMENT_METHODS.has(paymentMethod)) {
-      throw new CustomError('Phương thức thanh toán không hợp lệ', HTTP_STATUS.BAD_REQUEST);
-    }
+    const paymentMethod = '';
 
-    if (String(payload.paymentReference || '').trim().toUpperCase() === 'FAIL') {
-      throw new CustomError('Thanh toán thất bại. Vui lòng thử lại.', HTTP_STATUS.BAD_REQUEST);
-    }
 
     const departureTime = payload.departureTime || route.operatingHours?.firstDeparture || '05:30';
     const departureDate = buildVietnamDepartureDate(payload.serviceDate, departureTime);
@@ -264,8 +260,8 @@ export class TicketService {
       passengerType,
       ticketPrice,
       paymentMethod,
-      paymentStatus: 'PAID',
-      bookingStatus: 'SUCCESS',
+      paymentStatus: 'PENDING',
+      bookingStatus: 'PENDING',
       ticketStatus: 'ACTIVE',
       serviceDate,
       departureTime,
@@ -294,23 +290,6 @@ export class TicketService {
     };
 
     await ticket.save();
-
-    user.travelHistory.push({
-      routeNumber: route.routeNumber,
-      tripId,
-      ticketCode,
-      ticketType: 'ONE_WAY',
-      fromStop: startStop.name,
-      toStop: endStop.name,
-      boardedAt: departureDate,
-      arrivedAt: new Date(departureDate.getTime() + (route.estimatedDurationMinutes || 0) * 60 * 1000),
-      durationMinutes: route.estimatedDurationMinutes || 0,
-      fare: ticketPrice,
-      vehicleLabel: payload.vehicleLabel || '',
-      paymentMethod,
-      status: 'COMPLETED',
-    });
-    await user.save();
 
     return ticket.toObject();
   }
@@ -384,7 +363,7 @@ export class TicketService {
       ? ticket.passenger
       : await User.findById(ticket.passenger).select('fullName email phoneNumber').lean();
     const status = this.getCurrentTicketStatus(ticket);
-    const isCancelable = status === 'ACTIVE';
+    const isCancelable = status === 'ACTIVE' || status === 'PENDING';
 
     return {
       ...ticket,
@@ -511,14 +490,8 @@ export class TicketService {
       throw new CustomError('Loại vé tháng đã chọn không khả dụng', HTTP_STATUS.BAD_REQUEST);
     }
 
-    const paymentMethod = String(payload.paymentMethod || '').trim().toUpperCase();
-    if (!MONTHLY_PASS_PAYMENT_METHODS.has(paymentMethod)) {
-      throw new CustomError('Phương thức thanh toán không hợp lệ', HTTP_STATUS.BAD_REQUEST);
-    }
+    const paymentMethod = '';
 
-    if (String(payload.paymentReference || '').trim().toUpperCase() === 'FAIL') {
-      throw new CustomError('Thanh toán thất bại. Vui lòng thực hiện lại giao dịch.', HTTP_STATUS.BAD_REQUEST);
-    }
 
     const activePass = await MonthlyPass.findOne({
       passenger: user._id,
@@ -532,10 +505,34 @@ export class TicketService {
     }
 
     const selectedRoute = payload.routeId ? await this.findRoute(payload.routeId) : null;
+    if (payload.routeId && !selectedRoute) {
+      throw new CustomError('Tuyen xe da chon khong ton tai', HTTP_STATUS.NOT_FOUND);
+    }
+
     const routeCode = selectedRoute?.routeNumber || String(payload.routeCode || 'ALL').trim().toUpperCase();
     const startDate = normalizeDate(payload.startDate);
+    const currentMonthStart = new Date();
+    currentMonthStart.setDate(1);
+    currentMonthStart.setHours(0, 0, 0, 0);
+    if (startDate < currentMonthStart) {
+      throw new CustomError('Khong the dat ve thang cho thang da qua', HTTP_STATUS.BAD_REQUEST);
+    }
+
     const validityMonths = Math.max(Number(payload.validityMonths) || 1, 1);
     const expiryDate = new Date(this.addMonths(startDate, validityMonths).getTime() - 1);
+    const duplicatePendingPass = await MonthlyPass.findOne({
+      passenger: user._id,
+      passType,
+      routeCode,
+      passStatus: 'PENDING',
+      startDate,
+      expiryDate,
+    }).lean();
+
+    if (duplicatePendingPass && !payload.renew) {
+      throw new CustomError('Ban da co ve thang cung tuyen va thoi han dang cho xu ly.', HTTP_STATUS.CONFLICT);
+    }
+
     const passPrice = MONTHLY_PASS_PRICES[passType] * validityMonths;
     const passCode = buildPassCode();
     const issuedAt = new Date();
@@ -552,8 +549,8 @@ export class TicketService {
       validUntil: expiryDate,
       passPrice,
       paymentMethod,
-      paymentStatus: 'PAID',
-      passStatus: 'ACTIVE',
+      paymentStatus: 'PENDING',
+      passStatus: 'PENDING',
       digitalPass: {
         issuedAt,
         expiresAt: expiryDate,
@@ -575,10 +572,6 @@ export class TicketService {
     };
 
     await monthlyPass.save();
-
-    user.monthlyPassStatus = 'ACTIVE';
-    user.monthlyPassExpireDate = expiryDate;
-    await user.save();
 
     return monthlyPass.toObject();
   }

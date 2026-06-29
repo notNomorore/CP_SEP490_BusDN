@@ -55,10 +55,16 @@ const statusLabel = (status) => ({
   USED: 'ÄÃ£ sá»­ dá»¥ng',
   EXPIRED: 'ÄÃ£ háº¿t háº¡n',
   CANCELLED: 'ÄÃ£ há»§y',
-  PENDING: 'Äang xá»­ lÃ½',
+  PENDING: 'Da dat ve',
   PAID: 'ÄÃ£ thanh toÃ¡n',
   FAILED: 'Tháº¥t báº¡i',
 }[status] || status || 'KhÃ´ng xÃ¡c Ä‘á»‹nh');
+
+const paymentStatusLabel = (status) => ({
+  PENDING: 'Chua thanh toan',
+  PAID: 'Da thanh toan',
+  FAILED: 'Thanh toan that bai',
+}[status] || status || 'Chua thanh toan');
 
 const passengerTypeLabel = (type) => ({
   STANDARD: 'Phá»• thÃ´ng',
@@ -71,7 +77,7 @@ const paymentMethodLabel = (method) => ({
   CREDIT_CARD: 'Tháº» tÃ­n dá»¥ng',
   CASHLESS: 'QuÃ©t QR ngÃ¢n hÃ ng',
   ONLINE_BANKING: 'NgÃ¢n hÃ ng trá»±c tuyáº¿n',
-}[method] || method || 'KhÃ´ng cÃ³ dá»¯ liá»‡u');
+}[method] || method || 'Chua chon phuong thuc');
 
 const normalizeNote = (note) => ({
   'Please arrive at the boarding stop at least 5 minutes before departure.': 'Vui lÃ²ng cÃ³ máº·t táº¡i Ä‘iá»ƒm lÃªn xe Ã­t nháº¥t 5 phÃºt trÆ°á»›c giá» khá»Ÿi hÃ nh.',
@@ -239,7 +245,13 @@ const ETicketPage = () => {
                       <QrCode className="h-5 w-5" />
                       MÃ£ QR cá»§a vÃ©
                     </div>
-                    <QRPreview payload={ticket.qrCode?.payload} image={ticket.qrCode?.image} />
+                    {ticket.status === 'ACTIVE' ? (
+                      <QRPreview payload={ticket.qrCode?.payload} image={ticket.qrCode?.image} />
+                    ) : (
+                      <div className="rounded-[24px] border border-outline-variant/50 bg-slate-50 p-6 text-center text-sm font-bold text-slate-600">
+                        QR chua kha dung cho ve chua thanh toan.
+                      </div>
+                    )}
                   </div>
 
                   <div className="rounded-[24px] border border-outline-variant/40 bg-surface p-5">
@@ -257,7 +269,7 @@ const ETicketPage = () => {
                     <InfoRow label="HÃ nh khÃ¡ch" value={ticket.passengerInfo?.fullName} />
                     <InfoRow label="Loáº¡i vÃ©" value="VÃ© má»™t lÆ°á»£t" />
                     <InfoRow label="GiÃ¡ vÃ©" value={formatCurrency(ticket.ticketPrice)} />
-                    <InfoRow label="PhÆ°Æ¡ng thá»©c thanh toÃ¡n" value={paymentMethodLabel(ticket.paymentMethod)} />
+                    <InfoRow label="Thanh toan" value={`${paymentStatusLabel(ticket.paymentStatus)} - ${paymentMethodLabel(ticket.paymentMethod)}`} />
                     <InfoRow label="Thá»i gian mua" value={formatDate(ticket.purchasedAt, 'dd/MM/yyyy HH:mm')} />
                   </div>
                 </div>

@@ -59,10 +59,16 @@ const statusLabel = (status) => ({
   EXPIRED: 'Đã hết hạn',
   CANCELLED: 'Đã hủy',
   REFUNDED: 'Đã hoàn tiền',
-  PENDING: 'Đang xử lý',
+  PENDING: 'Da dat ve',
   PAID: 'Đã thanh toán',
   FAILED: 'Thất bại',
 }[status] || status || 'Không xác định');
+
+const paymentStatusLabel = (status) => ({
+  PENDING: 'Chua thanh toan',
+  PAID: 'Da thanh toan',
+  FAILED: 'Thanh toan that bai',
+}[status] || status || 'Chua thanh toan');
 
 const passengerTypeLabel = (type) => ({
   STANDARD: 'Vé phổ thông',
@@ -75,7 +81,7 @@ const paymentMethodLabel = (method) => ({
   CREDIT_CARD: 'Thẻ tín dụng',
   CASHLESS: 'Quét QR ngân hàng',
   ONLINE_BANKING: 'Ngân hàng trực tuyến',
-}[method] || method || 'Không có dữ liệu');
+}[method] || method || 'Chua chon phuong thuc');
 
 const ticketTypeLabel = (type) => ({
   ONE_WAY: 'Vé một lượt',
@@ -301,6 +307,7 @@ const MyTicketsPage = () => {
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="rounded-2xl border border-outline-variant/50 bg-surface px-4 py-3 text-sm font-bold text-primary">
               <option value="ALL">Tất cả trạng thái</option>
               <option value="ACTIVE">Còn hiệu lực</option>
+              <option value="PENDING">Da dat ve</option>
               <option value="USED">Đã sử dụng</option>
               <option value="EXPIRED">Đã hết hạn</option>
               <option value="CANCELLED">Đã hủy</option>
@@ -375,17 +382,24 @@ const MyTicketsPage = () => {
                       </div>
                       <h2 className="mt-3 font-mono text-sm font-black text-primary">{formatTicketCode(ticket.ticketCode)}</h2>
                     </div>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        navigate(`/my-tickets/${ticket.id}`);
-                      }}
-                      className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-white hover:bg-primary-container"
-                    >
-                      <QrCode className="h-4 w-4" />
-                      Xem mã QR
-                    </button>
+                    {ticket.status === 'ACTIVE' ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          navigate(`/my-tickets/${ticket.id}`);
+                        }}
+                        className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-white hover:bg-primary-container"
+                      >
+                        <QrCode className="h-4 w-4" />
+                        Xem ma QR
+                      </button>
+                    ) : (
+                      <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">
+                        <QrCode className="h-4 w-4" />
+                        QR chua kha dung
+                      </span>
+                    )}
                   </div>
 
                   <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
@@ -430,7 +444,7 @@ const MyTicketsPage = () => {
                     <div className="rounded-2xl bg-white px-4 py-3">
                       <p className="text-xs font-black uppercase tracking-wide text-outline">Thanh toán</p>
                       <p className="mt-1 font-bold text-primary">
-                        {statusLabel(ticket.paymentStatus)} · {paymentMethodLabel(ticket.paymentMethod)}
+                        {paymentStatusLabel(ticket.paymentStatus)} - {paymentMethodLabel(ticket.paymentMethod)}
                       </p>
                     </div>
                   </div>
@@ -498,7 +512,7 @@ const MyTicketsPage = () => {
                         <div className="rounded-2xl bg-white px-4 py-3">
                           <p className="text-xs font-black uppercase tracking-wide text-outline">Thanh toán</p>
                           <p className="mt-1 font-bold text-primary">
-                            {statusLabel(pass.paymentStatus)} · {paymentMethodLabel(pass.paymentMethod)}
+                            {paymentStatusLabel(pass.paymentStatus)} - {paymentMethodLabel(pass.paymentMethod)}
                           </p>
                         </div>
                       </div>

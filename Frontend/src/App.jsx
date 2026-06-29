@@ -155,6 +155,7 @@ function App() {
           <Route path="/my-tickets" element={<ProtectedRoute><MyTicketsPage /></ProtectedRoute>} />
           <Route path="/my-tickets/:ticketId" element={<ProtectedRoute><ETicketPage /></ProtectedRoute>} />
           <Route path="/transactions" element={<ProtectedRoute><TransactionHistoryPage /></ProtectedRoute>} />
+          <Route path="/buy-ticket" element={<ProtectedRoute><TicketPurchasePage /></ProtectedRoute>} />
           <Route path="/buy-tickets" element={<ProtectedRoute><TicketPurchasePage /></ProtectedRoute>} />
           <Route path="/tickets/:ticketId" element={<ProtectedRoute><ETicketPage /></ProtectedRoute>} />
           <Route path="/conductor/validate-qr" element={<ProtectedRoute><ValidateTicketPage /></ProtectedRoute>} />
