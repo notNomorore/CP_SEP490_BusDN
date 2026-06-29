@@ -2,9 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, BusFront, Clock3, CreditCard, LoaderCircle, Map, Ticket } from 'lucide-react';
 import Header from '../../../shared/components/navigation/Header.jsx';
-import toast from '../../../shared/utils/toast.js';
 import routeService from '../../routes/services/routeService.js';
-import ticketService from '../services/ticketService.js';
 
 const getVietnamDate = () => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Ho_Chi_Minh',
@@ -47,7 +45,6 @@ const TicketPurchasePage = () => {
   const [routes, setRoutes] = useState([]);
   const [selectedRoute, setSelectedRoute] = useState(location.state?.route || null);
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [mode, setMode] = useState('ONE_WAY');
   const [error, setError] = useState('');
   const currentMonth = new Date().getMonth() + 1;
@@ -105,15 +102,15 @@ const TicketPurchasePage = () => {
 
   const monthlyBounds = useMemo(() => buildMonthBounds(form.year, form.month), [form.year, form.month]);
   const monthlyPrice = {
-    STANDARD: 150000,
-    STUDENT: 90000,
+    STANDARD: 250000,
+    STUDENT: 120000,
     PRIORITY: 0,
-  }[form.passengerType] || 150000;
+  }[form.passengerType] || 250000;
   const estimatedPrice = mode === 'MONTHLY_PASS' ? monthlyPrice : selectedRoute?.fare || 7000;
 
   const updateForm = (updates) => setForm((current) => ({ ...current, ...updates }));
 
-  const handleSubmit = async (event) => {
+  const handleSubmit = (event) => {
     event.preventDefault();
     if (mode === 'ONE_WAY' && !selectedRoute) {
       setError('Vui lòng chọn tuyến xe trước khi tiếp tục.');
@@ -175,35 +172,7 @@ const TicketPurchasePage = () => {
       price: estimatedPrice,
     };
 
-    setIsSubmitting(true);
-    try {
-      if (order.ticketType === 'ONE_WAY') {
-        await ticketService.purchaseOneWayTicket({
-          routeId: selectedRoute.id || selectedRoute._id,
-          departureLocation: form.departureLocation,
-          destinationLocation: form.destinationLocation,
-          serviceDate: form.serviceDate,
-          departureTime: form.departureTime,
-          passengerType: form.passengerType,
-        });
-      } else {
-        await ticketService.purchaseMonthlyPass({
-          routeId: selectedRoute.id || selectedRoute._id,
-          passType: form.passengerType,
-          startDate: monthlyBounds.startDate,
-          validityMonths: 1,
-        });
-      }
-
-      toast.success(order.ticketType === 'ONE_WAY' ? 'Da dat ve thanh cong.' : 'Da dat ve thang thanh cong.');
-      navigate('/my-tickets');
-    } catch (err) {
-      const message = err?.message || 'Khong the dat ve. Vui long thu lai.';
-      setError(message);
-      toast.error(message);
-    } finally {
-      setIsSubmitting(false);
-    }
+    navigate('/tickets/checkout', { state: { order } });
   };
 
   return (
@@ -212,7 +181,7 @@ const TicketPurchasePage = () => {
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-32 sm:px-6 lg:px-8">
         <div className="mb-8">
           <h1 className="text-3xl font-headline font-black text-primary">Mua vé xe buýt</h1>
-          <p className="mt-2 text-sm text-on-surface-variant">Chon thong tin hanh trinh de dat ve. Thanh toan se duoc bo sung o giai doan sau.</p>
+          <p className="mt-2 text-sm text-on-surface-variant">Chon thong tin hanh trinh va tiep tuc thanh toan bang ma QR.</p>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.8fr)]">
@@ -310,9 +279,9 @@ const TicketPurchasePage = () => {
               {error ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 sm:col-span-2">{error}</div> : null}
 
               <div className="flex flex-col gap-3 pt-2 sm:col-span-2 sm:flex-row">
-                <button type="submit" disabled={isLoadingRoutes || isSubmitting || !selectedRoute} className="inline-flex flex-1 items-center justify-center gap-2 rounded-full bg-primary-container px-5 py-4 font-black text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">
-                  {isLoadingRoutes || isSubmitting ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Ticket className="h-5 w-5" />}
-                  {isSubmitting ? 'Dang dat ve...' : 'Dat ve'}
+                <button type="submit" disabled={isLoadingRoutes || !selectedRoute} className="inline-flex flex-1 items-center justify-center gap-2 rounded-full bg-primary-container px-5 py-4 font-black text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">
+                  {isLoadingRoutes ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Ticket className="h-5 w-5" />}
+                  Tiep tuc thanh toan
                 </button>
                 <button type="button" onClick={() => navigate('/search')} className="inline-flex flex-1 items-center justify-center gap-2 rounded-full border border-secondary px-5 py-4 font-black text-secondary hover:bg-surface-container">
                   <Map className="h-5 w-5" />

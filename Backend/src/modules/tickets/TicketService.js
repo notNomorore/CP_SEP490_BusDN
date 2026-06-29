@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import mongoose from 'mongoose';
+import QRCode from 'qrcode';
 import { CustomError } from '../../middleware/errorHandler.js';
 import { HTTP_STATUS } from '../../constants/index.js';
 import User from '../auth/User.js';
@@ -8,6 +9,8 @@ import RouteService from '../routes/RouteService.js';
 import Ticket from './Ticket.js';
 import MonthlyPass from './MonthlyPass.js';
 import QRCodeService from './QRCodeService.js';
+import PaymentOrder from './PaymentOrder.js';
+import PayOSService from './PayOSService.js';
 
 const PASSENGER_TYPES = new Set(['STANDARD', 'STUDENT', 'PRIORITY']);
 const MONTHLY_PASS_PRICES = {
@@ -221,7 +224,7 @@ export class TicketService {
       throw new CustomError('Loại vé không hợp lệ', HTTP_STATUS.BAD_REQUEST);
     }
 
-    const paymentMethod = '';
+    const paymentMethod = String(payload.paymentMethod || 'PAYOS').trim().toUpperCase();
 
 
     const departureTime = payload.departureTime || route.operatingHours?.firstDeparture || '05:30';
@@ -490,7 +493,7 @@ export class TicketService {
       throw new CustomError('Loại vé tháng đã chọn không khả dụng', HTTP_STATUS.BAD_REQUEST);
     }
 
-    const paymentMethod = '';
+    const paymentMethod = String(payload.paymentMethod || 'PAYOS').trim().toUpperCase();
 
 
     const activePass = await MonthlyPass.findOne({
@@ -578,6 +581,209 @@ export class TicketService {
 
   static async listMyMonthlyPasses(userId) {
     return MonthlyPass.find({ passenger: userId }).sort({ purchasedAt: -1 }).lean();
+  }
+
+  static buildPayOSOrderCode() {
+    return (Date.now() * 1000) + crypto.randomInt(100, 999);
+  }
+
+  static async createPaymentOrder(userId, payload = {}) {
+    const ticketType = String(payload.ticketType || '').trim().toUpperCase();
+    let orderTarget;
+    let amount;
+
+    if (ticketType === 'ONE_WAY') {
+      orderTarget = await this.purchaseOneWayTicket(userId, {
+        ...payload,
+        paymentMethod: 'PAYOS',
+      });
+      amount = orderTarget.ticketPrice;
+    } else if (ticketType === 'MONTHLY_PASS') {
+      orderTarget = await this.purchaseMonthlyPass(userId, {
+        ...payload,
+        paymentMethod: 'PAYOS',
+      });
+      amount = orderTarget.passPrice;
+    } else {
+      throw new CustomError('Loại vé thanh toán không hợp lệ', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const orderCode = this.buildPayOSOrderCode();
+    const description = ticketType === 'ONE_WAY'
+      ? `BusDN ${orderTarget.ticketCode}`
+      : `BusDN ${orderTarget.passCode}`;
+    const paymentOrder = await PaymentOrder.create({
+      orderCode,
+      passenger: userId,
+      ticketType,
+      payload,
+      amount,
+      description,
+      status: amount > 0 ? 'PENDING' : 'PAID',
+      ticketId: ticketType === 'ONE_WAY' ? orderTarget._id : undefined,
+      monthlyPassId: ticketType === 'MONTHLY_PASS' ? orderTarget._id : undefined,
+    });
+
+    if (amount <= 0) {
+      await this.completePaymentOrder(paymentOrder);
+      return {
+        orderCode,
+        status: 'PAID',
+        amount,
+        ticketType,
+        checkoutUrl: '',
+        qrCode: '',
+        message: 'Vé miễn phí đã được kích hoạt.',
+      };
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const payosLink = await PayOSService.createPaymentLink({
+      orderCode,
+      amount,
+      description,
+      returnUrl: `${frontendUrl}/my-tickets`,
+      cancelUrl: `${frontendUrl}/tickets/checkout`,
+    });
+
+    paymentOrder.payos = {
+      paymentLinkId: payosLink.paymentLinkId || '',
+      checkoutUrl: payosLink.checkoutUrl || '',
+      qrCode: payosLink.qrCode || '',
+      rawStatus: payosLink.status || 'PENDING',
+      rawResponse: payosLink,
+    };
+    await paymentOrder.save();
+
+    return {
+      orderCode,
+      status: paymentOrder.status,
+      amount,
+      ticketType,
+      checkoutUrl: paymentOrder.payos.checkoutUrl,
+      qrCode: paymentOrder.payos.qrCode,
+      qrCodeImage: paymentOrder.payos.qrCode
+        ? await QRCode.toDataURL(paymentOrder.payos.qrCode, {
+          errorCorrectionLevel: 'M',
+          margin: 2,
+          width: 320,
+          color: {
+            dark: '#002f1b',
+            light: '#ffffff',
+          },
+        })
+        : '',
+      paymentLinkId: paymentOrder.payos.paymentLinkId,
+    };
+  }
+
+  static async completePaymentOrder(paymentOrder) {
+    if (paymentOrder.ticketType === 'ONE_WAY' && paymentOrder.ticketId) {
+      const ticket = await Ticket.findById(paymentOrder.ticketId);
+      if (!ticket) {
+        throw new CustomError('Không tìm thấy vé cần kích hoạt', HTTP_STATUS.NOT_FOUND);
+      }
+
+      ticket.paymentMethod = 'PAYOS';
+      ticket.paymentStatus = 'PAID';
+      ticket.bookingStatus = 'SUCCESS';
+      ticket.ticketStatus = 'ACTIVE';
+      await ticket.save();
+
+      const user = await User.findById(ticket.passenger);
+      const route = await Route.findById(ticket.routeId).lean();
+      const alreadyLogged = user?.travelHistory?.some((item) => item.ticketCode === ticket.ticketCode);
+      if (user && !alreadyLogged) {
+        user.travelHistory.push({
+          routeNumber: ticket.routeNumber,
+          tripId: ticket.tripId,
+          ticketCode: ticket.ticketCode,
+          ticketType: 'ONE_WAY',
+          fromStop: ticket.departureLocation,
+          toStop: ticket.destinationLocation,
+          boardedAt: ticket.validFrom,
+          arrivedAt: route?.estimatedDurationMinutes
+            ? new Date(new Date(ticket.validFrom).getTime() + route.estimatedDurationMinutes * 60 * 1000)
+            : ticket.validUntil,
+          durationMinutes: route?.estimatedDurationMinutes || 0,
+          fare: ticket.ticketPrice,
+          paymentMethod: 'PAYOS',
+          status: 'COMPLETED',
+        });
+        await user.save();
+      }
+    }
+
+    if (paymentOrder.ticketType === 'MONTHLY_PASS' && paymentOrder.monthlyPassId) {
+      const monthlyPass = await MonthlyPass.findById(paymentOrder.monthlyPassId);
+      if (!monthlyPass) {
+        throw new CustomError('Không tìm thấy vé tháng cần kích hoạt', HTTP_STATUS.NOT_FOUND);
+      }
+
+      monthlyPass.paymentMethod = 'PAYOS';
+      monthlyPass.paymentStatus = 'PAID';
+      monthlyPass.passStatus = 'ACTIVE';
+      await monthlyPass.save();
+
+      await User.findByIdAndUpdate(monthlyPass.passenger, {
+        monthlyPassStatus: 'ACTIVE',
+        monthlyPassExpireDate: monthlyPass.expiryDate,
+      });
+    }
+
+    paymentOrder.status = 'PAID';
+    paymentOrder.paidAt = paymentOrder.paidAt || new Date();
+    paymentOrder.completedAt = paymentOrder.completedAt || new Date();
+    await paymentOrder.save();
+  }
+
+  static async getPaymentOrderStatus(userId, orderCode) {
+    const numericOrderCode = Number(orderCode);
+    if (!Number.isSafeInteger(numericOrderCode)) {
+      throw new CustomError('Mã thanh toán không hợp lệ', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const paymentOrder = await PaymentOrder.findOne({
+      orderCode: numericOrderCode,
+      passenger: userId,
+    });
+
+    if (!paymentOrder) {
+      throw new CustomError('Không tìm thấy đơn thanh toán', HTTP_STATUS.NOT_FOUND);
+    }
+
+    if (paymentOrder.status === 'PAID') {
+      return {
+        orderCode: paymentOrder.orderCode,
+        status: paymentOrder.status,
+        amount: paymentOrder.amount,
+        ticketId: paymentOrder.ticketId,
+        monthlyPassId: paymentOrder.monthlyPassId,
+      };
+    }
+
+    const payosInfo = await PayOSService.getPaymentLinkInformation(paymentOrder.orderCode);
+    const rawStatus = String(payosInfo.status || '').toUpperCase();
+    paymentOrder.payos.rawStatus = rawStatus;
+    paymentOrder.payos.rawResponse = payosInfo;
+
+    if (rawStatus === 'PAID') {
+      await this.completePaymentOrder(paymentOrder);
+    } else if (rawStatus === 'CANCELLED') {
+      paymentOrder.status = 'CANCELLED';
+      await paymentOrder.save();
+    } else {
+      await paymentOrder.save();
+    }
+
+    return {
+      orderCode: paymentOrder.orderCode,
+      status: paymentOrder.status,
+      rawStatus,
+      amount: paymentOrder.amount,
+      ticketId: paymentOrder.ticketId,
+      monthlyPassId: paymentOrder.monthlyPassId,
+    };
   }
 
   static getValidationMessage(status) {

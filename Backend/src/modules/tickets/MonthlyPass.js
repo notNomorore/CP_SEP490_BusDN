@@ -30,7 +30,7 @@ const MonthlyPassSchema = new mongoose.Schema(
     passPrice: { type: Number, required: true, min: 0 },
     paymentMethod: {
       type: String,
-      enum: ['', 'CREDIT_CARD', 'E_WALLET', 'ONLINE_BANKING'],
+      enum: ['', 'CREDIT_CARD', 'E_WALLET', 'ONLINE_BANKING', 'PAYOS'],
       default: '',
     },
     paymentStatus: {

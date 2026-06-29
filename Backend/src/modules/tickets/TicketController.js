@@ -35,6 +35,16 @@ export class TicketController {
     const result = await TicketService.validateQRCode(req.user.userId, req.body);
     return res.success(result, result.message || 'Ticket validated successfully');
   }
+
+  static async createPayment(req, res) {
+    const payment = await TicketService.createPaymentOrder(req.user.userId, req.body);
+    return res.success(payment, 'Payment QR created successfully', 201);
+  }
+
+  static async getPaymentStatus(req, res) {
+    const payment = await TicketService.getPaymentOrderStatus(req.user.userId, req.params.orderCode);
+    return res.success(payment, 'Payment status retrieved successfully');
+  }
 }
 
 export default TicketController;

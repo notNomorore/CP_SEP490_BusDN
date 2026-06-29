@@ -38,7 +38,7 @@ const TicketSchema = new mongoose.Schema(
     ticketPrice: { type: Number, required: true, min: 0 },
     paymentMethod: {
       type: String,
-      enum: ['', 'CREDIT_CARD', 'E_WALLET', 'CASHLESS'],
+      enum: ['', 'CREDIT_CARD', 'E_WALLET', 'CASHLESS', 'PAYOS'],
       default: '',
     },
     paymentStatus: {

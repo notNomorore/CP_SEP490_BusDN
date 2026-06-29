@@ -45,6 +45,16 @@ export const ticketService = {
     const response = await apiClient.post('/tickets/validate-qr', payload);
     return response.data;
   },
+
+  createPayment: async (payload) => {
+    const response = await apiClient.post('/tickets/payments', payload);
+    return response.data;
+  },
+
+  getPaymentStatus: async (orderCode) => {
+    const response = await apiClient.get(`/tickets/payments/${orderCode}`);
+    return response.data;
+  },
 };
 
 export default ticketService;

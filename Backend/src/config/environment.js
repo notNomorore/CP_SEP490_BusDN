@@ -128,6 +128,17 @@ export const config = {
     publicKey: getEnv('STRIPE_PUBLIC_KEY'),
   },
 
+  payos: {
+    clientId: getEnv('PAYOS_CLIENT_ID'),
+    apiKey: getEnv('PAYOS_API_KEY'),
+    checksumKey: getEnv('PAYOS_CHECKSUM_KEY'),
+    apiBaseUrl: getEnv('PAYOS_API_BASE_URL', 'https://api-merchant.payos.vn'),
+  },
+
+  frontend: {
+    url: getEnv('FRONTEND_URL', 'http://localhost:5173'),
+  },
+
   // Redis
   redis: {
     url: getEnv('REDIS_URL', 'redis://localhost:6379'),
