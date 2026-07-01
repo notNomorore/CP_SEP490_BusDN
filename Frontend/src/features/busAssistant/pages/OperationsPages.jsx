@@ -6,11 +6,14 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Plus,
   RefreshCw,
   Route,
+  UserRound,
   XCircle,
 } from 'lucide-react';
 import useTheme from '../../../shared/hooks/useTheme.js';
+import useAuthStore from '../../auth/stores/authStore.js';
 import scheduleOperationsService from '../../scheduleOperations/services/scheduleOperationsService.js';
 
 const toInputDate = (date) => date.toISOString().slice(0, 10);
@@ -42,6 +45,34 @@ const formatShiftDate = (value) => new Date(`${value}T00:00:00`).toLocaleDateStr
   day: '2-digit',
   month: '2-digit',
 });
+
+const formatShortDate = (value) => {
+  if (!value) return '--/--';
+  const date = new Date(`${value}T00:00:00`);
+  return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+};
+
+const formatCompactDate = (value) => {
+  if (!value) return '--/--/----';
+  return value.split('-').reverse().join('/');
+};
+
+const toShiftMinutes = (value) => {
+  if (!value) return null;
+  const match = String(value).match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+};
+
+const getShiftDurationHours = (shift) => {
+  const start = toShiftMinutes(shift.startTime);
+  const end = toShiftMinutes(shift.endTime);
+  if (start === null || end === null) return 0;
+  const minutes = end >= start ? end - start : end + (24 * 60) - start;
+  return minutes / 60;
+};
+
+const formatHours = (value) => `${Number(value || 0).toFixed(1).replace('.0', '')}h`;
 
 const getDefaultRange = () => {
   const from = new Date();
@@ -451,7 +482,7 @@ export const ShiftSchedulePage = () => {
   const [shifts, setShifts] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const { isDarkMode } = useTheme();
+  const { user } = useAuthStore();
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -480,6 +511,19 @@ export const ShiftSchedulePage = () => {
     return result;
   }, {}), [shifts]);
 
+  const weeklyStats = useMemo(() => {
+    const totalHours = shifts.reduce((total, shift) => total + getShiftDurationHours(shift), 0);
+    const assignedCount = shifts.filter((shift) => ['ASSIGNED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED'].includes(shift.assignmentStatus)).length;
+    const completedCount = shifts.filter((shift) => shift.assignmentStatus === 'COMPLETED').length;
+
+    return {
+      totalHours,
+      shiftCount: shifts.length,
+      assignedCount,
+      completedCount,
+    };
+  }, [shifts]);
+
   const changeWeek = (offset) => {
     setFilters(getWeekRange(addCalendarDays(filters.from, offset * 7)));
   };
@@ -488,92 +532,171 @@ export const ShiftSchedulePage = () => {
     if (value) setFilters(getWeekRange(value));
   };
 
-  const panelClass = isDarkMode
-    ? 'border-white/10 bg-slate-950/35 text-slate-100'
-    : 'border-emerald-100 bg-white text-slate-950';
-  const dayHeaderClass = isDarkMode
-    ? 'border-white/10 bg-white/[0.05] text-slate-200'
-    : 'border-slate-200 bg-slate-50 text-slate-700';
-  const emptyClass = isDarkMode
-    ? 'border-white/10 bg-white/[0.03] text-slate-500'
-    : 'border-slate-200 bg-slate-50 text-slate-400';
+  const profileName = user?.fullName || user?.name || 'Phụ xe BusDN';
+  const profileId = user?.employeeCode || user?.staffCode || user?.username || user?.email || 'BUS-ASSISTANT';
 
   return (
-    <PageShell
-      title="Lịch ca làm việc"
-      subtitle="Theo dõi các ca được phân công theo tuần. Chỉ các ca của bạn mới hiển thị tại đây."
-      icon={CalendarDays}
-      filters={filters}
-      setFilters={setFilters}
-      onRefresh={load}
-      isLoading={isLoading}
-      error={error}
-    >
-      <section className={`overflow-hidden rounded-2xl border ${panelClass}`}>
-        <div className="flex flex-col gap-4 border-b border-inherit p-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-500">UC40 - Lịch ca làm việc</p>
-            <h2 className="mt-1 text-lg font-black">Lịch làm việc theo tuần</h2>
-            <p className={isDarkMode ? 'mt-1 text-sm text-slate-400' : 'mt-1 text-sm text-slate-500'}>
-              {filters.from.split('-').reverse().join('/')} - {filters.to.split('-').reverse().join('/')} · {shifts.length} ca được phân công
-            </p>
+    <section className="min-h-[calc(100vh-96px)] rounded-[32px] bg-[#effaf5] p-5 text-[#061c13] shadow-[0_24px_60px_rgba(0,26,15,0.08)] lg:p-8">
+      <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-black tracking-tight">Lịch ca làm việc</h1>
+            <span className="hidden h-7 w-px bg-emerald-950/10 sm:block" />
+            <span className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-900/75">
+              <CalendarDays size={17} />
+              {formatCompactDate(filters.from)} - {formatCompactDate(filters.to)}
+            </span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={() => changeWeek(-1)} className="inline-flex h-10 w-10 items-center justify-center rounded border border-emerald-300 text-emerald-600" title="Tuần trước">
-              <ChevronLeft size={18} />
-            </button>
-            <input
-              type="date"
-              value={filters.from}
-              onChange={(event) => selectWeek(event.target.value)}
-              className={isDarkMode ? 'h-10 rounded border border-white/10 bg-slate-950 px-3 text-sm text-slate-100' : 'h-10 rounded border border-slate-200 bg-white px-3 text-sm text-slate-900'}
-              aria-label="Chọn một ngày trong tuần cần xem"
-            />
-            <button type="button" onClick={() => setFilters(getWeekRange())} className="h-10 rounded border border-emerald-300 px-3 text-sm font-bold text-emerald-600">
-              Tuần này
-            </button>
-            <button type="button" onClick={() => changeWeek(1)} className="inline-flex h-10 w-10 items-center justify-center rounded border border-emerald-300 text-emerald-600" title="Tuần sau">
-              <ChevronRight size={18} />
-            </button>
+          <p className="mt-8 text-3xl font-black tracking-tight lg:text-4xl">Hoạt động trợ lý xe buýt</p>
+          <p className="mt-2 max-w-2xl text-base text-emerald-950/72">
+            Theo dõi các ca được phân công theo tuần. Chi tiết các ca của bạn hiển thị tại đây.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="inline-flex items-center gap-2 rounded-full bg-white/70 px-5 py-3 text-sm font-black text-emerald-950 shadow-[0_10px_26px_rgba(0,26,15,0.06)]">
+            <CheckCircle2 size={18} className="text-emerald-500" />
+            System Status: Active
+          </span>
+          <button
+            type="button"
+            onClick={load}
+            disabled={isLoading}
+            className="inline-flex items-center gap-2 rounded-full bg-[#001f14] px-6 py-4 text-sm font-black text-white shadow-[0_18px_34px_rgba(0,26,15,0.22)] disabled:opacity-60"
+          >
+            <Plus size={18} />
+            Thêm mới
+          </button>
+        </div>
+      </header>
+
+      {error ? <div className="mt-5 rounded-2xl bg-rose-50 px-5 py-4 text-sm font-semibold text-rose-700 shadow-[0_12px_30px_rgba(127,29,29,0.08)]">{error}</div> : null}
+
+      <div className="mt-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#00452d] text-white shadow-[0_12px_26px_rgba(0,26,15,0.18)]">
+            <CalendarDays size={24} />
+          </div>
+          <div>
+            <h2 className="text-xl font-black">UC40 - Lịch ca làm việc</h2>
+            <p className="text-sm font-semibold text-emerald-950/60">
+              {formatCompactDate(filters.from)} - {formatCompactDate(filters.to)} · {shifts.length} ca được phân công
+            </p>
           </div>
         </div>
 
-        <div className="overflow-x-auto p-4">
-          <div className="grid min-w-[980px] grid-cols-7 gap-3">
-            {weekDays.map((date) => {
-              const dayShifts = shiftsByDate[date] || [];
-              const isToday = date === toLocalInputDate(new Date());
-              return (
-                <div key={date} className={`min-h-[280px] overflow-hidden rounded-xl border ${isToday ? 'border-emerald-400 ring-1 ring-emerald-300/60' : dayHeaderClass}`}>
-                  <div className={`border-b px-3 py-3 ${isToday ? 'border-emerald-300 bg-emerald-500/10 text-emerald-600' : dayHeaderClass}`}>
-                    <p className="text-xs font-black uppercase tracking-[0.12em]">{formatShiftDate(date)}</p>
-                    <p className="mt-1 text-base font-black">{date.slice(8, 10)}/{date.slice(5, 7)}</p>
-                  </div>
-                  <div className="space-y-2 p-2">
-                    {dayShifts.length ? dayShifts.map((shift) => (
-                      <article key={shift.id} className={isDarkMode ? 'rounded-lg border border-emerald-400/25 bg-emerald-400/10 p-3' : 'rounded-lg border border-emerald-100 bg-emerald-50 p-3'}>
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-black leading-5">{shift.startTime} - {shift.endTime}</p>
-                          <span className={`rounded-full px-2 py-1 text-[10px] font-black ${statusClass[shift.assignmentStatus] || statusClass.SCHEDULED}`}>
-                            {statusLabels[shift.assignmentStatus] || shift.assignmentStatus}
-                          </span>
-                        </div>
-                        <p className="mt-2 text-sm font-bold">{shift.shiftName}</p>
-                        <p className={isDarkMode ? 'mt-1 text-xs text-slate-300' : 'mt-1 text-xs text-slate-600'}>{shift.shiftCode}</p>
-                        {shift.route?.routeName ? <p className={isDarkMode ? 'mt-2 text-xs text-emerald-200' : 'mt-2 text-xs text-emerald-800'}>{shift.route.routeCode} · {shift.route.routeName}</p> : null}
-                        {shift.description ? <p className={isDarkMode ? 'mt-2 line-clamp-3 text-xs text-slate-400' : 'mt-2 line-clamp-3 text-xs text-slate-500'}>{shift.description}</p> : null}
-                      </article>
-                    )) : (
-                      <div className={`mt-2 rounded-lg border border-dashed p-3 text-center text-xs ${emptyClass}`}>Không có ca</div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => changeWeek(-1)} className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-white text-emerald-950 shadow-[0_10px_24px_rgba(0,26,15,0.06)]" title="Tuần trước">
+            <ChevronLeft size={20} />
+          </button>
+          <input
+            type="date"
+            value={filters.from}
+            onChange={(event) => selectWeek(event.target.value)}
+            className="h-12 rounded-xl bg-white px-4 text-sm font-bold text-emerald-950 outline-none shadow-[0_10px_24px_rgba(0,26,15,0.06)]"
+            aria-label="Chọn một ngày trong tuần cần xem"
+          />
+          <button type="button" onClick={() => setFilters(getWeekRange())} className="h-12 rounded-xl bg-white px-5 text-sm font-black text-emerald-950 shadow-[0_10px_24px_rgba(0,26,15,0.06)]">
+            Tuần này
+          </button>
+          <button type="button" onClick={() => changeWeek(1)} className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-white text-emerald-950 shadow-[0_10px_24px_rgba(0,26,15,0.06)]" title="Tuần sau">
+            <ChevronRight size={20} />
+          </button>
         </div>
-      </section>
-    </PageShell>
+      </div>
+
+      <div className="mt-5 overflow-x-auto pb-2">
+        <div className="grid min-w-[1120px] grid-cols-7 gap-4">
+          {weekDays.map((date) => {
+            const dayShifts = shiftsByDate[date] || [];
+            const isToday = date === toLocalInputDate(new Date());
+            return (
+              <section
+                key={date}
+                className={`min-h-[290px] rounded-[28px] p-5 shadow-[0_16px_32px_rgba(0,26,15,0.05)] ${
+                  isToday ? 'bg-[#00452d] text-white ring-4 ring-emerald-100' : 'bg-[#e8f4ef] text-emerald-950'
+                }`}
+              >
+                <div>
+                  <p className={`text-xs font-black uppercase tracking-[0.18em] ${isToday ? 'text-emerald-300' : 'text-emerald-900/55'}`}>
+                    {formatShiftDate(date)}
+                  </p>
+                  <p className="mt-1 text-2xl font-black">{formatShortDate(date)}</p>
+                </div>
+
+                <div className="mt-5 space-y-3">
+                  {dayShifts.length ? dayShifts.map((shift) => (
+                    <article
+                      key={shift.id || shift.shiftCode}
+                      className={`rounded-2xl p-5 shadow-[0_12px_24px_rgba(0,26,15,0.08)] ${
+                        isToday ? 'bg-white/12 text-white' : 'bg-white text-emerald-950'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="text-lg font-black">{shift.startTime} - {shift.endTime}</p>
+                        <span className="shrink-0 rounded-full bg-emerald-300 px-3 py-1 text-[10px] font-black uppercase text-emerald-950">
+                          {statusLabels[shift.assignmentStatus] || 'Đã phân công'}
+                        </span>
+                      </div>
+                      <p className="mt-3 text-sm font-black">{shift.shiftName || 'Ca làm việc'}</p>
+                      <p className={`mt-1 text-xs font-semibold ${isToday ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                        {shift.shiftCode || 'Chưa có mã ca'}
+                      </p>
+                      <p className={`mt-4 text-xs leading-5 ${isToday ? 'text-white/78' : 'text-emerald-950/62'}`}>
+                        {shift.description || shift.notes || 'Ca được hệ thống phân công theo lịch vận hành.'}
+                      </p>
+                    </article>
+                  )) : (
+                    <div className={`rounded-2xl px-4 py-8 text-center text-sm font-semibold ${isToday ? 'bg-white/12 text-white/70' : 'bg-white/70 text-emerald-950/45'}`}>
+                      Không có ca
+                    </div>
+                  )}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-8 grid gap-6 xl:grid-cols-[1fr_320px]">
+        <section className="rounded-[28px] bg-white p-7 shadow-[0_20px_40px_rgba(0,26,15,0.06)]">
+          <h2 className="text-xl font-black">Hiệu suất hoạt động tuần này</h2>
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl bg-[#f2fcf8] p-5">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-950/55">Tổng giờ</p>
+              <p className="mt-3 text-2xl font-black">{formatHours(weeklyStats.totalHours)}</p>
+            </div>
+            <div className="rounded-2xl bg-[#f2fcf8] p-5">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-950/55">Số ca</p>
+              <p className="mt-3 text-2xl font-black">{String(weeklyStats.shiftCount).padStart(2, '0')}</p>
+            </div>
+            <div className="rounded-2xl bg-[#f2fcf8] p-5">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-950/55">Đã phân công</p>
+              <p className="mt-3 text-2xl font-black text-emerald-600">{weeklyStats.assignedCount}</p>
+            </div>
+            <div className="rounded-2xl bg-[#f2fcf8] p-5">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-950/55">Hoàn thành</p>
+              <p className="mt-3 text-2xl font-black">{weeklyStats.completedCount}</p>
+            </div>
+          </div>
+        </section>
+
+        <aside className="rounded-[28px] bg-[#00452d] p-7 text-white shadow-[0_20px_40px_rgba(0,26,15,0.12)]">
+          <div className="flex items-center gap-4">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-900 ring-4 ring-emerald-400/30">
+              <UserRound size={28} />
+            </div>
+            <div>
+              <h2 className="text-xl font-black">{profileName}</h2>
+              <p className="text-sm font-semibold text-emerald-200">ID: {profileId}</p>
+            </div>
+          </div>
+          <p className="mt-6 text-sm leading-6 text-emerald-50/80">
+            Lịch chỉ hiển thị những ca thuộc về tài khoản đang đăng nhập. Vui lòng có mặt trước giờ bắt đầu ca để chuẩn bị vận hành.
+          </p>
+        </aside>
+      </div>
+    </section>
   );
 };
 export const OperationNotificationsPage = () => {

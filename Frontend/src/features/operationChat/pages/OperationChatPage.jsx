@@ -1,6 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import { Bell, MessageCircle, RefreshCcw, Send, ShieldCheck, Users } from 'lucide-react';
+import {
+  Bell,
+  CirclePlus,
+  Info,
+  MessageCircle,
+  Paperclip,
+  Pin,
+  Search,
+  Send,
+  ShieldCheck,
+  Smile,
+} from 'lucide-react';
 import useAuthStore from '../../auth/stores/authStore.js';
 import operationChatService from '../services/operationChatService.js';
 
@@ -19,9 +30,19 @@ const formatTime = (value) => {
   return new Intl.DateTimeFormat('vi-VN', {
     hour: '2-digit',
     minute: '2-digit',
+  }).format(new Date(value));
+};
+
+const formatMessageDate = (value) => {
+  if (!value) return 'Hôm nay';
+  const date = new Date(value);
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) return 'Hôm nay';
+  return new Intl.DateTimeFormat('vi-VN', {
     day: '2-digit',
     month: '2-digit',
-  }).format(new Date(value));
+    year: 'numeric',
+  }).format(date);
 };
 
 const roleLabel = (role) => {
@@ -31,11 +52,27 @@ const roleLabel = (role) => {
   return role || 'Thành viên';
 };
 
+const getInitials = (value = '') => {
+  const words = String(value).trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return 'BN';
+  return words.slice(0, 2).map((word) => word[0]).join('').toUpperCase();
+};
+
 const mergeMessage = (messages, message) => {
   if (!message?.id) return messages;
   if (messages.some((item) => item.id === message.id)) return messages;
   return [...messages, message];
 };
+
+const getSenderName = (message) => message.sender?.fullName
+  || message.sender?.name
+  || message.sender?.username
+  || 'Thành viên';
+
+const getPreviewText = (group) => group.lastMessage?.content
+  || group.lastMessageContent
+  || group.description
+  || 'Trao đổi vận hành';
 
 const OperationChatPage = ({ embedded = false }) => {
   const { user } = useAuthStore();
@@ -43,6 +80,7 @@ const OperationChatPage = ({ embedded = false }) => {
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
+  const [search, setSearch] = useState('');
   const [isLoadingGroups, setIsLoadingGroups] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -55,7 +93,17 @@ const OperationChatPage = ({ embedded = false }) => {
     [groups, selectedGroupId]
   );
 
+  const filteredGroups = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) return groups;
+    return groups.filter((group) => (
+      group.name?.toLowerCase().includes(keyword)
+      || group.description?.toLowerCase().includes(keyword)
+    ));
+  }, [groups, search]);
+
   const currentUserId = String(user?.id || user?._id || '');
+  const firstMessageDate = messages[0]?.sentAt || new Date().toISOString();
 
   const loadGroups = async () => {
     setIsLoadingGroups(true);
@@ -79,7 +127,6 @@ const OperationChatPage = ({ embedded = false }) => {
     try {
       const result = await operationChatService.getMessages(groupId);
       setMessages(result?.messages || []);
-      await operationChatService.markRead(groupId);
     } catch (err) {
       setError(err?.message || 'Không thể tải tin nhắn.');
     } finally {
@@ -92,10 +139,12 @@ const OperationChatPage = ({ embedded = false }) => {
   }, []);
 
   useEffect(() => {
-    if (!selectedGroupId) return undefined;
     loadMessages(selectedGroupId);
-    return undefined;
   }, [selectedGroupId]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages.length, selectedGroupId]);
 
   useEffect(() => {
     const token = getToken();
@@ -107,18 +156,16 @@ const OperationChatPage = ({ embedded = false }) => {
     });
     socketRef.current = socket;
 
-    socket.on('server:operation-chat:message', (message) => {
-      if (message.groupId !== selectedGroupId) {
-        setGroups((current) => current.map((group) => (
-          group.id === message.groupId
-            ? { ...group, unreadCount: (group.unreadCount || 0) + 1, lastMessageAt: message.sentAt }
-            : group
-        )));
-        return;
-      }
-
-      setMessages((current) => mergeMessage(current, message));
-      operationChatService.markRead(message.groupId).catch(() => {});
+    socket.on('operation-chat:message', (message) => {
+      if (!message?.groupId) return;
+      setGroups((current) => current.map((group) => (
+        group.id === message.groupId
+          ? { ...group, lastMessage: message, lastMessageContent: message.content }
+          : group
+      )));
+      setMessages((current) => (
+        message.groupId === selectedGroupId ? mergeMessage(current, message) : current
+      ));
     });
 
     return () => {
@@ -130,20 +177,11 @@ const OperationChatPage = ({ embedded = false }) => {
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket || !selectedGroupId) return undefined;
-
     socket.emit('operation-chat:join', { groupId: selectedGroupId });
-    setGroups((current) => current.map((group) => (
-      group.id === selectedGroupId ? { ...group, unreadCount: 0 } : group
-    )));
-
     return () => {
       socket.emit('operation-chat:leave', { groupId: selectedGroupId });
     };
   }, [selectedGroupId]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages.length, selectedGroupId]);
 
   const handleSend = async (event) => {
     event.preventDefault();
@@ -153,10 +191,13 @@ const OperationChatPage = ({ embedded = false }) => {
     setIsSending(true);
     setError('');
     try {
-      const result = await operationChatService.sendMessage(selectedGroupId, content);
-      if (result?.message) {
-        setMessages((current) => mergeMessage(current, result.message));
-      }
+      const result = await operationChatService.sendMessage(selectedGroupId, { content });
+      setMessages((current) => mergeMessage(current, result?.message));
+      setGroups((current) => current.map((group) => (
+        group.id === selectedGroupId
+          ? { ...group, lastMessage: result?.message, lastMessageContent: content }
+          : group
+      )));
       setDraft('');
     } catch (err) {
       setError(err?.message || 'Không thể gửi tin nhắn.');
@@ -165,153 +206,197 @@ const OperationChatPage = ({ embedded = false }) => {
     }
   };
 
+  const shellClass = embedded
+    ? 'h-[calc(100vh-168px)] min-h-[720px] overflow-hidden rounded border border-white/10 bg-[#eaf6f1] shadow-[0_24px_70px_rgba(0,0,0,0.22)] lg:grid lg:grid-cols-[330px_minmax(0,1fr)]'
+    : 'h-[calc(100vh-48px)] min-h-[760px] overflow-hidden rounded-[28px] border border-emerald-950/20 bg-[#eaf6f1] shadow-[0_26px_80px_rgba(0,32,18,0.22)] lg:grid lg:grid-cols-[330px_minmax(0,1fr)]';
+
   return (
-    <div className={embedded ? 'min-h-0' : 'min-h-screen bg-slate-950 text-slate-100'}>
-      <section className={embedded ? 'mx-auto w-full max-w-7xl' : 'mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8'}>
-        <div className="rounded-2xl border border-emerald-300/20 bg-slate-950 text-slate-100 shadow-2xl shadow-emerald-950/20">
-          <header className="flex flex-col gap-4 border-b border-white/10 px-5 py-5 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.32em] text-emerald-300">UC116</p>
-              <h1 className="mt-2 text-2xl font-black text-white">Nhóm trò chuyện vận hành</h1>
-              <p className="mt-1 text-sm text-slate-300">
-                Tài xế, phụ xe và admin trao đổi nhanh về lịch trình, sự cố, đổi tuyến và hỗ trợ khẩn cấp.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={loadGroups}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-emerald-300"
-            >
-              <RefreshCcw size={17} />
-              Làm mới
-            </button>
-          </header>
-
-          {error ? (
-            <div className="mx-5 mt-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-100">
-              {error}
-            </div>
-          ) : null}
-
-          <div className="grid min-h-[620px] gap-0 lg:grid-cols-[330px_minmax(0,1fr)]">
-            <aside className="border-b border-white/10 p-4 lg:border-b-0 lg:border-r">
-              <div className="mb-3 flex items-center gap-2 text-sm font-black text-slate-200">
-                <Users size={17} />
-                Nhóm của tôi
+    <div className={embedded ? 'min-h-0 text-white' : 'min-h-screen bg-[#f2fcf8] text-white'}>
+      <section className={embedded ? 'w-full' : 'mx-auto w-full max-w-[1500px] px-6 py-6'}>
+        <div className={shellClass}>
+          <aside className="flex min-h-0 flex-col border-r border-emerald-950/10 bg-[#eaf6f1] text-[#041d12]">
+            <div className="px-7 py-7">
+              <p className="text-[11px] font-black uppercase tracking-[0.24em] text-emerald-700">UC116</p>
+              <h1 className="mt-2 text-2xl font-black">Nhóm của tôi</h1>
+              <div className="mt-5 flex h-12 items-center gap-3 rounded-2xl bg-white px-4 shadow-sm">
+                <Search size={18} className="text-emerald-900/45" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-emerald-950 outline-none placeholder:text-emerald-950/35"
+                  placeholder="Tìm kiếm nhóm..."
+                />
               </div>
-              <div className="space-y-2">
-                {isLoadingGroups ? (
-                  <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">Đang tải nhóm...</div>
-                ) : null}
-                {!isLoadingGroups && groups.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-white/15 bg-white/5 p-4 text-sm text-slate-300">
-                    Bạn chưa thuộc nhóm trò chuyện vận hành nào.
-                  </div>
-                ) : null}
-                {groups.map((group) => (
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-7">
+              {isLoadingGroups ? (
+                <div className="rounded-2xl bg-white/70 px-5 py-4 text-sm font-semibold text-emerald-950/60">Đang tải nhóm...</div>
+              ) : null}
+              {!isLoadingGroups && filteredGroups.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-emerald-900/15 bg-white/50 px-5 py-8 text-center text-sm font-semibold text-emerald-950/55">
+                  Chưa có nhóm trò chuyện.
+                </div>
+              ) : null}
+              {filteredGroups.map((group) => {
+                const isActive = group.id === selectedGroupId;
+                return (
                   <button
-                    key={group.id}
                     type="button"
+                    key={group.id}
                     onClick={() => setSelectedGroupId(group.id)}
                     className={[
-                      'w-full rounded-xl border px-4 py-3 text-left transition',
-                      selectedGroupId === group.id
-                        ? 'border-emerald-300 bg-emerald-400 text-slate-950'
-                        : 'border-white/10 bg-white/[0.04] text-slate-100 hover:border-emerald-300/60',
+                      'group w-full rounded-[20px] px-5 py-4 text-left transition',
+                      isActive
+                        ? 'bg-[#c9f4df] shadow-[inset_4px_0_0_#20b979]'
+                        : 'hover:bg-white/65',
                     ].join(' ')}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-black">{group.name}</p>
-                        <p className={selectedGroupId === group.id ? 'mt-1 text-xs text-slate-800' : 'mt-1 text-xs text-slate-400'}>
-                          {group.memberCount} thành viên
+                      <div className="min-w-0">
+                        <p className="truncate text-base font-black text-emerald-950">{group.name}</p>
+                        <p className="mt-1 text-xs font-bold text-emerald-900/65">
+                          {group.memberCount || 0} thành viên
                         </p>
                       </div>
-                      {group.unreadCount ? (
-                        <span className="rounded-full bg-red-500 px-2 py-1 text-xs font-black text-white">
-                          {group.unreadCount}
-                        </span>
-                      ) : null}
+                      <span className="shrink-0 text-[11px] font-semibold text-emerald-950/45">
+                        {formatTime(group.lastMessage?.sentAt)}
+                      </span>
                     </div>
+                    <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-emerald-950/55">
+                      {getPreviewText(group)}
+                    </p>
                   </button>
-                ))}
-              </div>
-            </aside>
+                );
+              })}
+            </div>
+          </aside>
 
-            <section className="flex min-h-[620px] flex-col">
-              <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-                <div>
-                  <h2 className="text-lg font-black text-white">{selectedGroup?.name || 'Chọn nhóm trò chuyện'}</h2>
-                  <p className="text-sm text-slate-400">{selectedGroup?.description || 'Mở nhóm để xem và gửi tin nhắn.'}</p>
+          <section className="flex min-h-0 min-w-0 flex-col bg-[#002613]">
+            <header className="flex min-h-[88px] items-center justify-between border-b border-white/[0.08] bg-[#002613]/95 px-7 py-4">
+              <div className="flex min-w-0 items-center gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#28bd7d] text-lg font-black text-[#002613]">
+                  {getInitials(selectedGroup?.name)}
                 </div>
-                <span className="inline-flex items-center gap-2 rounded-full bg-emerald-400/10 px-3 py-1.5 text-xs font-black text-emerald-200">
+                <div className="min-w-0">
+                  <h2 className="truncate text-xl font-black text-white">
+                    {selectedGroup?.name || 'Chọn nhóm trò chuyện'}
+                  </h2>
+                  <p className="truncate text-sm font-semibold text-emerald-200/75">
+                    {selectedGroup
+                      ? `${selectedGroup.memberCount || 0} thành viên · Đang hoạt động`
+                      : 'Mở nhóm để xem và gửi tin nhắn.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="hidden items-center gap-5 text-emerald-100/70 sm:flex">
+                <Search size={20} />
+                <Pin size={20} />
+                <Info size={20} />
+                <span className="h-8 w-px bg-white/10" />
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/[0.08] px-3 py-2 text-xs font-black text-emerald-100">
                   <ShieldCheck size={15} />
                   {roleLabel(user?.role)}
                 </span>
               </div>
+            </header>
 
-              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-5">
-                {isLoadingMessages ? (
-                  <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">Đang tải tin nhắn...</div>
-                ) : null}
-                {!isLoadingMessages && selectedGroupId && messages.length === 0 ? (
-                  <div className="grid min-h-[360px] place-items-center rounded-xl border border-dashed border-white/10 bg-white/[0.03] text-center">
-                    <div>
-                      <MessageCircle className="mx-auto text-emerald-300" size={32} />
-                      <p className="mt-3 text-sm font-semibold text-slate-300">Chưa có tin nhắn nào trong nhóm này.</p>
-                    </div>
+            {error ? (
+              <div className="mx-7 mt-5 rounded-2xl border border-red-300/25 bg-red-500/10 px-5 py-4 text-sm font-semibold text-red-100">
+                {error}
+              </div>
+            ) : null}
+
+            <div className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_70%_10%,rgba(43,164,113,0.10),transparent_30%),linear-gradient(180deg,#002613_0%,#001b0e_100%)] px-7 py-7">
+              <div className="mx-auto mb-8 w-fit rounded-full bg-white/[0.07] px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-emerald-50/85">
+                {formatMessageDate(firstMessageDate)}
+              </div>
+
+              {isLoadingMessages ? (
+                <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-5 text-sm font-semibold text-emerald-50/70">
+                  Đang tải tin nhắn...
+                </div>
+              ) : null}
+              {!isLoadingMessages && selectedGroupId && messages.length === 0 ? (
+                <div className="grid min-h-[420px] place-items-center rounded-[24px] border border-dashed border-white/10 bg-white/[0.03] text-center">
+                  <div>
+                    <MessageCircle className="mx-auto text-emerald-300" size={34} />
+                    <p className="mt-3 text-sm font-semibold text-emerald-50/70">
+                      Chưa có tin nhắn nào trong nhóm này.
+                    </p>
                   </div>
-                ) : null}
+                </div>
+              ) : null}
+
+              <div className="space-y-8 pb-3">
                 {messages.map((message) => {
                   const isMine = String(message.sender?.id) === currentUserId;
+                  const senderName = getSenderName(message);
                   return (
                     <article key={message.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                      <div className={[
-                        'max-w-[min(720px,85%)] rounded-2xl px-4 py-3',
-                        isMine ? 'bg-emerald-400 text-slate-950' : 'bg-white/[0.06] text-slate-100',
-                      ].join(' ')}
-                      >
-                        <div className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em]">
-                          <span>{message.sender?.fullName || 'Thành viên'}</span>
-                          <span className={isMine ? 'text-slate-700' : 'text-emerald-200'}>{roleLabel(message.senderRole)}</span>
+                      <div className={`flex max-w-[min(620px,76%)] flex-col ${isMine ? 'items-end text-right' : 'items-start text-left'}`}>
+                        <div className={`mb-2 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.08em] ${isMine ? 'justify-end text-emerald-100' : 'justify-start text-[#2fd38f]'}`}>
+                          <span>{isMine ? roleLabel(message.senderRole) : senderName}</span>
+                          <span className="rounded-md bg-white/[0.08] px-2 py-1 text-[10px] text-emerald-100/80">
+                            {isMine ? senderName : roleLabel(message.senderRole)}
+                          </span>
                         </div>
-                        <p className="whitespace-pre-wrap text-sm font-medium leading-relaxed">{message.content}</p>
-                        <p className={isMine ? 'mt-2 text-right text-xs text-slate-700' : 'mt-2 text-right text-xs text-slate-400'}>
+                        <div
+                          className={[
+                            'rounded-2xl px-5 py-3.5 text-sm font-semibold leading-relaxed shadow-[0_14px_30px_rgba(0,0,0,0.18)]',
+                            isMine
+                              ? 'rounded-br-md bg-[#28bd7d] text-[#002613]'
+                              : 'rounded-bl-md bg-white text-[#061c13]',
+                          ].join(' ')}
+                        >
+                          <p className="whitespace-pre-wrap">{message.content}</p>
+                        </div>
+                        <p className="mt-2 text-xs font-semibold text-emerald-50/45">
                           {formatTime(message.sentAt)}
                         </p>
                       </div>
                     </article>
                   );
                 })}
-                <div ref={bottomRef} />
               </div>
+              <div ref={bottomRef} />
+            </div>
 
-              <form onSubmit={handleSend} className="border-t border-white/10 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row">
+            <form onSubmit={handleSend} className="border-t border-white/[0.08] bg-[#002613] px-7 py-5">
+              <div className="flex items-center gap-4">
+                <button type="button" className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/12 text-emerald-100/70 transition hover:bg-white/[0.08] sm:inline-flex" title="Đính kèm">
+                  <CirclePlus size={21} />
+                </button>
+                <button type="button" className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/12 text-emerald-100/70 transition hover:bg-white/[0.08] sm:inline-flex" title="Biểu cảm">
+                  <Smile size={20} />
+                </button>
+                <div className="flex min-h-14 flex-1 items-center rounded-2xl border border-white/10 bg-white/[0.06] px-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                   <textarea
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
                     disabled={!selectedGroupId}
-                    rows={2}
-                    className="min-h-[52px] flex-1 resize-none rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                    rows={1}
+                    className="max-h-32 min-h-8 flex-1 resize-none bg-transparent py-2 text-sm font-semibold text-white outline-none placeholder:text-emerald-100/40 disabled:cursor-not-allowed"
                     placeholder="Nhập tin nhắn vận hành..."
                   />
-                  <button
-                    type="submit"
-                    disabled={!draft.trim() || !selectedGroupId || isSending}
-                    className="inline-flex min-w-36 items-center justify-center gap-2 rounded-xl bg-emerald-400 px-5 py-3 text-sm font-black text-slate-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Send size={17} />
-                    {isSending ? 'Đang gửi...' : 'Gửi'}
-                  </button>
+                  <Paperclip className="ml-3 text-emerald-100/45" size={18} />
                 </div>
-                <p className="mt-2 flex items-center gap-2 text-xs text-slate-400">
-                  <Bell size={14} />
-                  Tin nhắn rỗng sẽ không được gửi. Chỉ thành viên trong nhóm mới xem và gửi được.
-                </p>
-              </form>
-            </section>
-          </div>
+                <button
+                  type="submit"
+                  disabled={!draft.trim() || !selectedGroupId || isSending}
+                  className="inline-flex h-14 min-w-28 items-center justify-center gap-2 rounded-2xl bg-[#28bd7d] px-6 text-sm font-black text-[#002613] transition hover:bg-[#5de0a9] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Send size={17} />
+                  {isSending ? 'Đang gửi...' : 'Gửi'}
+                </button>
+              </div>
+              <p className="mt-3 flex items-center justify-center gap-2 text-xs font-semibold text-emerald-100/40">
+                <Bell size={14} />
+                Tin nhắn được bảo mật. Chỉ thành viên trong nhóm mới xem và gửi được.
+              </p>
+            </form>
+          </section>
         </div>
       </section>
     </div>
