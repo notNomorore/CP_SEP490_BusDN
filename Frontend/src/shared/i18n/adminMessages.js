@@ -22,6 +22,7 @@ export const adminMessages = {
     'admin.sidebar.delayedTrips': 'Delayed Trips',
     'admin.sidebar.routesScheduling': 'Routes & Scheduling',
     'admin.sidebar.shiftScheduling': 'Shift Assignment & Shifts',
+    'admin.sidebar.operationChat': 'Operation Chat',
     'admin.sidebar.routeAnalytics': 'Route Analytics',
     'admin.sidebar.congestedRoutes': 'Congested Routes',
     'admin.sidebar.feedbackAnalytics': 'Feedback Analytics',
@@ -79,6 +80,7 @@ export const adminMessages = {
     'passenger.fallbackName': 'Passenger',
   },
   vi: {
+    'admin.sidebar.operationChat': 'Nhóm trò chuyện',
     'admin.brand': 'Điều hành BusDN',
     'admin.subtitle': 'Trung tâm vận hành khu vực',
     'admin.header.workspace': 'Không gian quản trị hợp nhất',
@@ -175,6 +177,7 @@ export const adminNavGroups = [
       { path: '/admin/fleet/delayed-trips', key: 'admin.sidebar.delayedTrips', icon: 'schedule' },
       { path: '/admin/routes', key: 'admin.sidebar.routesScheduling', icon: 'map' },
       { path: '/admin/shifts', key: 'admin.sidebar.shiftScheduling', icon: 'badge' },
+      { path: '/admin/operation-chat', key: 'admin.sidebar.operationChat', icon: 'forum' },
       { path: '/admin/analytics/congested-routes', key: 'admin.sidebar.congestedRoutes', icon: 'traffic' },
     ],
   },
