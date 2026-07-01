@@ -52,7 +52,6 @@ const TicketCheckoutPage = () => {
   const order = location.state?.order;
   const [payment, setPayment] = useState(location.state?.payment || null);
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
-  const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -69,7 +68,6 @@ const TicketCheckoutPage = () => {
   const checkPaymentStatus = useCallback(async (orderCode, { silent = false } = {}) => {
     if (!orderCode) return;
 
-    if (!silent) setIsChecking(true);
     try {
       const status = await ticketService.getPaymentStatus(orderCode);
       if (status.status === 'PAID') {
@@ -85,8 +83,6 @@ const TicketCheckoutPage = () => {
       if (!silent) {
         setError(err?.message || 'Không thể kiểm tra trạng thái thanh toán.');
       }
-    } finally {
-      if (!silent) setIsChecking(false);
     }
   }, [navigate]);
 
@@ -214,10 +210,6 @@ const TicketCheckoutPage = () => {
             ) : null}
 
             <div className="mt-6 space-y-3">
-              <button type="button" onClick={() => checkPaymentStatus(payment?.orderCode)} disabled={!payment?.orderCode || isChecking} className="flex w-full items-center justify-center gap-2 rounded-full bg-secondary px-5 py-4 font-black text-white hover:bg-secondary-fixed-dim disabled:cursor-not-allowed disabled:opacity-60">
-                {isChecking ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Check className="h-5 w-5" />}
-                Tôi đã thanh toán
-              </button>
               <button type="button" onClick={createPayment} disabled={isCreatingPayment} className="w-full rounded-full border border-outline-variant px-5 py-3 font-black text-primary hover:bg-surface-container-low disabled:opacity-60">
                 Tạo lại mã QR
               </button>

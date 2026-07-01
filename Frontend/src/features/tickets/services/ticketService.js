@@ -21,16 +21,6 @@ export const ticketService = {
     return response.data;
   },
 
-  purchaseMonthlyPass: async (payload) => {
-    const response = await apiClient.post('/tickets/monthly-pass', payload);
-    return response.data;
-  },
-
-  getMyMonthlyPasses: async () => {
-    const response = await apiClient.get('/tickets/monthly-passes/me');
-    return response.data;
-  },
-
   getTicket: async (ticketId) => {
     const response = await apiClient.get(`/tickets/${ticketId}`);
     return response.data;

@@ -159,6 +159,69 @@ const buildValidationResult = (result, message, data = {}) => ({
   ...data,
 });
 
+const buildTicketValidationInfo = (ticket, route) => ({
+  ticketInfo: {
+    _id: ticket._id,
+    ticketCode: ticket.ticketCode,
+    ticketType: ticket.ticketType || 'ONE_WAY',
+    passengerType: ticket.passengerType || 'STANDARD',
+    status: ticket.ticketStatus || '',
+    paymentStatus: ticket.paymentStatus || '',
+    bookingStatus: ticket.bookingStatus || '',
+    routeCode: ticket.routeCode || ticket.routeNumber,
+    routeNumber: ticket.routeNumber,
+    tripId: ticket.tripId,
+    departureLocation: ticket.departureLocation,
+    destinationLocation: ticket.destinationLocation,
+    serviceDate: ticket.serviceDate,
+    departureTime: ticket.departureTime,
+    amount: ticket.ticketPrice,
+    ticketPrice: ticket.ticketPrice,
+    validFrom: ticket.validFrom,
+    validUntil: ticket.validUntil || ticket.expiresAt,
+    usedAt: ticket.usedAt,
+  },
+  passengerInfo: {
+    _id: ticket.passenger?._id || ticket.passenger || null,
+    fullName: ticket.passenger?.fullName || 'Passenger',
+    email: ticket.passenger?.email || '',
+    phoneNumber: ticket.passenger?.phoneNumber || '',
+  },
+  routeInfo: {
+    _id: route?._id || ticket.routeId?._id || ticket.routeId || null,
+    routeCode: ticket.routeCode || ticket.routeNumber,
+    routeNumber: ticket.routeNumber,
+    name: route?.name || route?.routeName || ticket.routeNumber,
+  },
+});
+
+const buildMonthlyPassValidationInfo = (monthlyPass) => ({
+  ticketInfo: {
+    _id: monthlyPass._id,
+    passCode: monthlyPass.passCode,
+    ticketCode: monthlyPass.passCode,
+    ticketType: 'MONTHLY_PASS',
+    passengerType: monthlyPass.passType,
+    status: monthlyPass.passStatus,
+    paymentStatus: monthlyPass.paymentStatus,
+    routeCode: monthlyPass.routeCode || 'ALL',
+    amount: monthlyPass.passPrice,
+    ticketPrice: monthlyPass.passPrice,
+    validFrom: monthlyPass.validFrom || monthlyPass.startDate,
+    validUntil: monthlyPass.validUntil || monthlyPass.expiryDate,
+  },
+  passengerInfo: {
+    _id: monthlyPass.passenger?._id || monthlyPass.passenger || null,
+    fullName: monthlyPass.passenger?.fullName || 'Passenger',
+    email: monthlyPass.passenger?.email || '',
+    phoneNumber: monthlyPass.passenger?.phoneNumber || '',
+  },
+  routeInfo: {
+    routeCode: monthlyPass.routeCode || 'ALL',
+    name: monthlyPass.routeCode && monthlyPass.routeCode !== 'ALL' ? monthlyPass.routeCode : 'All routes',
+  },
+});
+
 export class TicketService {
   static async findRoute(routeId) {
     await RouteService.ensureSampleRoutes();
@@ -195,6 +258,75 @@ export class TicketService {
     }
 
     return `TKT-${crypto.randomBytes(4).toString('hex')}`.toUpperCase();
+  }
+
+  static buildDuplicateTicketMatch(ticket) {
+    return {
+      passenger: ticket.passenger,
+      routeId: ticket.routeId,
+      tripId: ticket.tripId,
+      departureLocation: ticket.departureLocation,
+      destinationLocation: ticket.destinationLocation,
+      passengerType: ticket.passengerType,
+      ticketPrice: ticket.ticketPrice,
+      serviceDate: ticket.serviceDate,
+      departureTime: ticket.departureTime,
+    };
+  }
+
+  static async cancelDuplicatePendingTicketsForPaidTicket(ticket) {
+    if (!ticket || ticket.paymentStatus !== 'PAID' || ticket.bookingStatus !== 'SUCCESS') {
+      return;
+    }
+
+    const duplicatePendingTickets = await Ticket.find({
+      ...this.buildDuplicateTicketMatch(ticket),
+      _id: { $ne: ticket._id },
+      paymentStatus: 'PENDING',
+      bookingStatus: 'PENDING',
+      ticketStatus: { $ne: 'CANCELLED' },
+    }).select('_id');
+
+    if (!duplicatePendingTickets.length) {
+      return;
+    }
+
+    const duplicateTicketIds = duplicatePendingTickets.map((duplicateTicket) => duplicateTicket._id);
+    await Ticket.updateMany(
+      { _id: { $in: duplicateTicketIds } },
+      {
+        $set: {
+          bookingStatus: 'CANCELLED',
+          ticketStatus: 'CANCELLED',
+          cancelledAt: new Date(),
+        },
+      }
+    );
+
+    await PaymentOrder.updateMany(
+      {
+        passenger: ticket.passenger,
+        ticketId: { $in: duplicateTicketIds },
+        status: 'PENDING',
+      },
+      {
+        $set: {
+          status: 'CANCELLED',
+          'payos.rawStatus': 'CANCELLED',
+        },
+      }
+    );
+  }
+
+  static async cleanupPaidDuplicatePendingTickets(userId) {
+    const paidTickets = await Ticket.find({
+      passenger: userId,
+      paymentStatus: 'PAID',
+      bookingStatus: 'SUCCESS',
+      ticketStatus: { $ne: 'CANCELLED' },
+    }).sort({ purchasedAt: -1 });
+
+    await Promise.all(paidTickets.map((ticket) => this.cancelDuplicatePendingTicketsForPaidTicket(ticket)));
   }
 
   static async purchaseOneWayTicket(userId, payload) {
@@ -249,7 +381,7 @@ export class TicketService {
     const tripId = `${route.routeNumber}-${serviceDateValue}-${departureTime}`;
 
     const ticketPrice = this.calculatePrice(route, startStop, endStop);
-    const existingPendingTicket = await Ticket.findOne({
+    const duplicateTicketQuery = {
       passenger: user._id,
       routeId: route._id,
       tripId,
@@ -257,11 +389,25 @@ export class TicketService {
       destinationLocation: endStop.name,
       passengerType,
       ticketPrice,
+      serviceDate,
+      departureTime,
+    };
+    const existingPaidTicket = await Ticket.findOne({
+      ...duplicateTicketQuery,
+      paymentStatus: 'PAID',
+      bookingStatus: 'SUCCESS',
+      ticketStatus: { $ne: 'CANCELLED' },
+    }).lean();
+
+    if (existingPaidTicket) {
+      return existingPaidTicket;
+    }
+
+    const existingPendingTicket = await Ticket.findOne({
+      ...duplicateTicketQuery,
       paymentStatus: 'PENDING',
       bookingStatus: 'PENDING',
       ticketStatus: { $ne: 'CANCELLED' },
-      serviceDate,
-      departureTime,
     }).lean();
 
     if (existingPendingTicket) {
@@ -317,6 +463,9 @@ export class TicketService {
   }
 
   static async listMyTickets(userId) {
+    await this.reconcilePendingPaymentOrders(userId);
+    await this.cleanupPaidDuplicatePendingTickets(userId);
+
     const tickets = await Ticket.find({ passenger: userId })
       .sort({ purchasedAt: -1 })
       .populate('routeId')
@@ -515,6 +664,56 @@ export class TicketService {
     ticket.cancelledAt = new Date();
     await ticket.save();
 
+    if (status === 'PENDING') {
+      const duplicatePendingTickets = await Ticket.find({
+        _id: { $ne: ticket._id },
+        passenger: userId,
+        routeId: ticket.routeId,
+        tripId: ticket.tripId,
+        departureLocation: ticket.departureLocation,
+        destinationLocation: ticket.destinationLocation,
+        passengerType: ticket.passengerType,
+        ticketPrice: ticket.ticketPrice,
+        serviceDate: ticket.serviceDate,
+        departureTime: ticket.departureTime,
+        paymentStatus: 'PENDING',
+        bookingStatus: 'PENDING',
+        ticketStatus: { $ne: 'CANCELLED' },
+      }).select('_id');
+
+      const cancelledTicketIds = [
+        ticket._id,
+        ...duplicatePendingTickets.map((duplicateTicket) => duplicateTicket._id),
+      ];
+
+      if (duplicatePendingTickets.length) {
+        await Ticket.updateMany(
+          { _id: { $in: duplicatePendingTickets.map((duplicateTicket) => duplicateTicket._id) } },
+          {
+            $set: {
+              bookingStatus: 'CANCELLED',
+              ticketStatus: 'CANCELLED',
+              cancelledAt: new Date(),
+            },
+          }
+        );
+      }
+
+      await PaymentOrder.updateMany(
+        {
+          passenger: userId,
+          ticketId: { $in: cancelledTicketIds },
+          status: 'PENDING',
+        },
+        {
+          $set: {
+            status: 'CANCELLED',
+            'payos.rawStatus': 'CANCELLED',
+          },
+        }
+      );
+    }
+
     return this.getMyTicketById(userId, ticket._id);
   }
 
@@ -627,6 +826,8 @@ export class TicketService {
   }
 
   static async listMyMonthlyPasses(userId) {
+    await this.reconcilePendingPaymentOrders(userId);
+
     return MonthlyPass.find({ passenger: userId }).sort({ purchasedAt: -1 }).lean();
   }
 
@@ -645,6 +846,19 @@ export class TicketService {
         paymentMethod: 'PAYOS',
       });
       amount = orderTarget.ticketPrice;
+      if (orderTarget.paymentStatus === 'PAID' && orderTarget.bookingStatus === 'SUCCESS') {
+        return {
+          orderCode: 0,
+          status: 'PAID',
+          amount,
+          ticketType,
+          checkoutUrl: '',
+          qrCode: '',
+          qrCodeImage: '',
+          paymentLinkId: '',
+          message: 'Vé này đã được thanh toán.',
+        };
+      }
     } else if (ticketType === 'MONTHLY_PASS') {
       orderTarget = await this.purchaseMonthlyPass(userId, {
         ...payload,
@@ -752,8 +966,34 @@ export class TicketService {
     let paymentOrder = await PaymentOrder.findOne({
       passenger: userId,
       ticketId: ticket._id,
-      status: 'PENDING',
-    });
+      status: { $in: ['PENDING', 'PAID'] },
+    }).sort({ createdAt: -1 });
+
+    if (paymentOrder?.status === 'PENDING') {
+      try {
+        await this.syncPaymentOrderWithPayOS(paymentOrder);
+      } catch {
+        // Keep the existing pending QR usable if PayOS status lookup is temporarily unavailable.
+      }
+    }
+
+    if (paymentOrder?.status === 'PAID') {
+      await this.completePaymentOrder(paymentOrder);
+      return {
+        orderCode: paymentOrder.orderCode,
+        status: 'PAID',
+        amount: paymentOrder.amount,
+        ticketType: 'ONE_WAY',
+        checkoutUrl: '',
+        qrCode: '',
+        qrCodeImage: '',
+        message: 'Thanh toan thanh cong. Ve da duoc kich hoat.',
+      };
+    }
+
+    if (paymentOrder && paymentOrder.status !== 'PENDING') {
+      paymentOrder = null;
+    }
 
     if (!paymentOrder) {
       paymentOrder = await PaymentOrder.create({
@@ -838,12 +1078,19 @@ export class TicketService {
       if (!ticket) {
         throw new CustomError('Không tìm thấy vé cần kích hoạt', HTTP_STATUS.NOT_FOUND);
       }
+      if (ticket.bookingStatus === 'CANCELLED' || ticket.ticketStatus === 'CANCELLED') {
+        paymentOrder.status = 'CANCELLED';
+        paymentOrder.completedAt = paymentOrder.completedAt || new Date();
+        await paymentOrder.save();
+        return;
+      }
 
       ticket.paymentMethod = 'PAYOS';
       ticket.paymentStatus = 'PAID';
       ticket.bookingStatus = 'SUCCESS';
       ticket.ticketStatus = 'ACTIVE';
       await ticket.save();
+      await this.cancelDuplicatePendingTicketsForPaidTicket(ticket);
 
       const user = await User.findById(ticket.passenger);
       const route = await Route.findById(ticket.routeId).lean();
@@ -892,6 +1139,54 @@ export class TicketService {
     await paymentOrder.save();
   }
 
+  static async reconcilePendingPaymentOrders(userId) {
+    const pendingOrders = await PaymentOrder.find({
+      passenger: userId,
+      status: 'PENDING',
+      $or: [
+        { ticketId: { $exists: true, $ne: null } },
+        { monthlyPassId: { $exists: true, $ne: null } },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .limit(20);
+
+    await Promise.all(pendingOrders.map(async (paymentOrder) => {
+      try {
+        await this.syncPaymentOrderWithPayOS(paymentOrder);
+      } catch {
+        // Do not block the tickets page if PayOS is temporarily unavailable.
+      }
+    }));
+  }
+
+  static async syncPaymentOrderWithPayOS(paymentOrder) {
+    if (!paymentOrder || paymentOrder.status === 'PAID') {
+      return paymentOrder;
+    }
+
+    const payosInfo = await PayOSService.getPaymentLinkInformation(paymentOrder.orderCode);
+    const rawStatus = String(payosInfo.status || '').toUpperCase();
+
+    paymentOrder.payos = {
+      ...(paymentOrder.payos || {}),
+      rawStatus,
+      rawResponse: payosInfo,
+    };
+
+    if (rawStatus === 'PAID') {
+      await this.completePaymentOrder(paymentOrder);
+      return paymentOrder;
+    }
+
+    if (rawStatus === 'CANCELLED') {
+      paymentOrder.status = 'CANCELLED';
+    }
+
+    await paymentOrder.save();
+    return paymentOrder;
+  }
+
   static async getPaymentOrderStatus(userId, orderCode) {
     const numericOrderCode = Number(orderCode);
     if (!Number.isSafeInteger(numericOrderCode)) {
@@ -917,24 +1212,12 @@ export class TicketService {
       };
     }
 
-    const payosInfo = await PayOSService.getPaymentLinkInformation(paymentOrder.orderCode);
-    const rawStatus = String(payosInfo.status || '').toUpperCase();
-    paymentOrder.payos.rawStatus = rawStatus;
-    paymentOrder.payos.rawResponse = payosInfo;
-
-    if (rawStatus === 'PAID') {
-      await this.completePaymentOrder(paymentOrder);
-    } else if (rawStatus === 'CANCELLED') {
-      paymentOrder.status = 'CANCELLED';
-      await paymentOrder.save();
-    } else {
-      await paymentOrder.save();
-    }
+    await this.syncPaymentOrderWithPayOS(paymentOrder);
 
     return {
       orderCode: paymentOrder.orderCode,
       status: paymentOrder.status,
-      rawStatus,
+      rawStatus: paymentOrder.payos?.rawStatus || '',
       amount: paymentOrder.amount,
       ticketId: paymentOrder.ticketId,
       monthlyPassId: paymentOrder.monthlyPassId,
@@ -1021,6 +1304,8 @@ export class TicketService {
     if (!ticket) {
       return buildValidationResult('NOT_FOUND', 'Ticket was not found.', { ticketCode });
     }
+    const route = ticket.routeId && typeof ticket.routeId === 'object' ? ticket.routeId : null;
+    const validationInfo = buildTicketValidationInfo(ticket, route);
 
     if (isSignedScan) {
       const expectedValues = [
@@ -1042,6 +1327,7 @@ export class TicketService {
       return buildValidationResult('WRONG_ROUTE', 'Ticket is not valid for this route.', {
         ticketCode: ticket.ticketCode,
         routeCode: ticket.routeCode || ticket.routeNumber,
+        ...validationInfo,
       });
     }
 
@@ -1049,6 +1335,7 @@ export class TicketService {
       return buildValidationResult('WRONG_ROUTE', 'Ticket is not valid for this route.', {
         ticketCode: ticket.ticketCode,
         routeCode: ticket.routeCode || ticket.routeNumber,
+        ...validationInfo,
       });
     }
 
@@ -1056,6 +1343,7 @@ export class TicketService {
       return buildValidationResult('WRONG_ROUTE', 'Ticket is not valid for this trip.', {
         ticketCode: ticket.ticketCode,
         tripId: ticket.tripId,
+        ...validationInfo,
       });
     }
 
@@ -1070,6 +1358,7 @@ export class TicketService {
         ticketType: ticket.ticketType || 'ONE_WAY',
         routeCode: ticket.routeCode || ticket.routeNumber,
         validUntil: ticket.validUntil || ticket.expiresAt,
+        ...validationInfo,
       });
     }
 
@@ -1099,6 +1388,8 @@ export class TicketService {
       validFrom: ticket.validFrom,
       validUntil: ticket.validUntil || ticket.expiresAt,
       usedAt: ticket.usedAt,
+      validationStatus: 'VALIDATED',
+      ...buildTicketValidationInfo(ticket, route),
     });
   }
 
@@ -1114,6 +1405,7 @@ export class TicketService {
     if (!monthlyPass) {
       return buildValidationResult('NOT_FOUND', 'Monthly pass was not found.', { passCode });
     }
+    const validationInfo = buildMonthlyPassValidationInfo(monthlyPass);
 
     if (signedPayload) {
       const qrData = signedPayload.data || {};
@@ -1137,6 +1429,7 @@ export class TicketService {
         return buildValidationResult('WRONG_ROUTE', 'Monthly pass is not valid for this route.', {
           passCode: monthlyPass.passCode,
           routeCode: monthlyPass.routeCode || 'ALL',
+          ...validationInfo,
         });
       }
     }
@@ -1150,20 +1443,22 @@ export class TicketService {
       return buildValidationResult('WRONG_ROUTE', 'Monthly pass is not valid for this route.', {
         passCode: monthlyPass.passCode,
         routeCode: monthlyPass.routeCode,
+        ...validationInfo,
       });
     }
 
     const now = new Date();
     if (monthlyPass.passStatus === 'CANCELLED') {
-      return buildValidationResult('CANCELLED', 'Cancelled ticket', { passCode: monthlyPass.passCode });
+      return buildValidationResult('CANCELLED', 'Cancelled ticket', { passCode: monthlyPass.passCode, ...validationInfo });
     }
     if (monthlyPass.passStatus !== 'ACTIVE') {
-      return buildValidationResult('INVALID_QR', 'Ticket is not active', { passCode: monthlyPass.passCode });
+      return buildValidationResult('INVALID_QR', 'Ticket is not active', { passCode: monthlyPass.passCode, ...validationInfo });
     }
     if (new Date(monthlyPass.validFrom || monthlyPass.startDate) > now || new Date(monthlyPass.validUntil || monthlyPass.expiryDate) < now) {
       return buildValidationResult('EXPIRED', 'Expired ticket', {
         passCode: monthlyPass.passCode,
         validUntil: monthlyPass.validUntil || monthlyPass.expiryDate,
+        ...validationInfo,
       });
     }
 
@@ -1187,6 +1482,8 @@ export class TicketService {
       validatedBy: validatorUserId,
       validFrom: monthlyPass.validFrom || monthlyPass.startDate,
       validUntil: monthlyPass.validUntil || monthlyPass.expiryDate,
+      validationStatus: 'VALIDATED',
+      ...validationInfo,
     });
   }
 }
