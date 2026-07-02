@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -34,6 +34,8 @@ const destinations = [
       'https://lh3.googleusercontent.com/aida-public/AB6AXuBTclYWEMmSc9NLTgUwDv9on7AFX-SSpA5gPI1ogZN-TD9umRy6yxhLhY05HSnXwdnhNvtc5WOT_HWHnMvrQMl2CevyJtJwtUnTAWXtWdT3b0nQwKCki3s72wp73yTo9qn2sRdNen8AIa2e9n8CBbLOyU2DCghI_mQ2qJrCuGChKthcFGUc7k2ZJ5R6-NwZczM_XHtBDmCcV9s9rm2D0OrHdW-p-xAe3p1CQ7ZhiFTcC8JsrDLcPXA_mFT0glXrCoHpVvKmhNtQwoE',
   },
 ];
+
+const priorityPassengerRoute = '/priority-passenger' as Href;
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
@@ -255,15 +257,21 @@ export default function HomeScreen() {
 
         <Pressable
           accessibilityLabel="Contact support"
+          onPress={() => router.push(priorityPassengerRoute)}
           style={[styles.supportButton, { bottom: 82 + insets.bottom }]}
         >
-          <MaterialCommunityIcons color={colors.white} name="headset" size={23} />
+          <MaterialCommunityIcons color={colors.white} name="shield-star-outline" size={23} />
         </Pressable>
 
         <View style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 10) }]}>
           <NavItem active icon="home" label="Home" />
           <NavItem icon="compass-outline" label="Explore" />
           <NavItem icon="ticket-confirmation-outline" label="Tickets" />
+          <NavItem
+            icon="shield-star-outline"
+            label="Priority"
+            onPress={() => router.push(priorityPassengerRoute)}
+          />
           <NavItem
             icon="account-outline"
             label="Profile"
