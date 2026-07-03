@@ -20,6 +20,7 @@ import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
 import type { OperationChatGroup, OperationChatMessage } from '@/types/operationChat';
+import { goBackOrReplace } from '@/utils/navigation';
 import { formatTime } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
@@ -115,7 +116,7 @@ export default function OperationGroupChatScreen() {
       >
         <View style={styles.screen}>
           <View style={styles.header}>
-            <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => router.back()}>
+            <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
               <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
             </Pressable>
             <View style={styles.headerText}>

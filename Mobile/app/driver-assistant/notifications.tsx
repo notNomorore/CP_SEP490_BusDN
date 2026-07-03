@@ -9,6 +9,7 @@ import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
 import type { OperationNotification } from '@/types/scheduleOperations';
+import { goBackOrReplace } from '@/utils/navigation';
 import { formatDate, formatTime, getWeekRange } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
@@ -50,7 +51,7 @@ export default function DriverNotificationsScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => router.back()}>
+          <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View style={styles.headerText}>

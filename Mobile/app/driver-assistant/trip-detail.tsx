@@ -10,6 +10,7 @@ import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
 import type { AssignedTrip } from '@/types/scheduleOperations';
+import { goBackOrReplace } from '@/utils/navigation';
 import { formatTime, getTripStatus } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
@@ -95,7 +96,7 @@ export default function TripDetailScreen() {
       <View style={styles.screenShell}>
         <Screen>
           <View style={styles.header}>
-            <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => router.back()}>
+            <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant/assigned-trips')}>
               <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
             </Pressable>
             <Text style={styles.title}>Trip Detail</Text>
@@ -111,7 +112,7 @@ export default function TripDetailScreen() {
     <View style={styles.screenShell}>
       <Screen>
       <View style={styles.header}>
-        <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => router.back()}>
+        <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant/assigned-trips')}>
           <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
         </Pressable>
         <View>
