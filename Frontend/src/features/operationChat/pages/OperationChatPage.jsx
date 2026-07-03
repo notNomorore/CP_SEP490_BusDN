@@ -74,6 +74,15 @@ const getPreviewText = (group) => group.lastMessage?.content
   || group.description
   || 'Trao đổi vận hành';
 
+const getMessageContent = (message) => {
+  const content = message?.content;
+  if (typeof content === 'string') return content;
+  if (content && typeof content === 'object') {
+    return content.content || content.message || content.text || JSON.stringify(content);
+  }
+  return '';
+};
+
 const OperationChatPage = ({ embedded = false }) => {
   const { user } = useAuthStore();
   const [groups, setGroups] = useState([]);
@@ -191,7 +200,7 @@ const OperationChatPage = ({ embedded = false }) => {
     setIsSending(true);
     setError('');
     try {
-      const result = await operationChatService.sendMessage(selectedGroupId, { content });
+      const result = await operationChatService.sendMessage(selectedGroupId, content);
       setMessages((current) => mergeMessage(current, result?.message));
       setGroups((current) => current.map((group) => (
         group.id === selectedGroupId
@@ -350,7 +359,7 @@ const OperationChatPage = ({ embedded = false }) => {
                               : 'rounded-bl-md bg-white text-[#061c13]',
                           ].join(' ')}
                         >
-                          <p className="whitespace-pre-wrap">{message.content}</p>
+                          <p className="whitespace-pre-wrap">{getMessageContent(message)}</p>
                         </div>
                         <p className="mt-2 text-xs font-semibold text-emerald-50/45">
                           {formatTime(message.sentAt)}

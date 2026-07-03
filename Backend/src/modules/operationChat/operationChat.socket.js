@@ -7,7 +7,8 @@ import ChatGroup from './ChatGroup.js';
 const CHAT_EVENTS = {
   JOIN: 'operation-chat:join',
   LEAVE: 'operation-chat:leave',
-  MESSAGE: 'server:operation-chat:message',
+  MESSAGE: 'operation-chat:message',
+  SERVER_MESSAGE: 'server:operation-chat:message',
 };
 
 let socketServer = null;
@@ -55,7 +56,6 @@ const assertSocketMembership = async (groupId, user) => {
     members: {
       $elemMatch: {
         user: user.userId,
-        role: user.role,
       },
     },
   }).select('_id').lean();
@@ -70,6 +70,7 @@ const assertSocketMembership = async (groupId, user) => {
 export const emitOperationChatMessage = (message) => {
   if (!socketServer || !message?.groupId) return;
   socketServer.to(roomName(message.groupId)).emit(CHAT_EVENTS.MESSAGE, message);
+  socketServer.to(roomName(message.groupId)).emit(CHAT_EVENTS.SERVER_MESSAGE, message);
 };
 
 export const registerOperationChatSockets = (io) => {

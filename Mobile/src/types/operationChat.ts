@@ -12,6 +12,8 @@ export type OperationChatGroup = {
   type?: string;
   memberCount?: number;
   lastMessageAt?: string | null;
+  lastMessage?: OperationChatMessage | null;
+  lastMessageContent?: string;
   unreadCount?: number;
 };
 
@@ -20,7 +22,11 @@ export type OperationChatMessage = {
   groupId: string;
   sender?: OperationChatUser;
   senderRole?: string;
-  content: string;
+  content: string | {
+    content?: string;
+    message?: string;
+    text?: string;
+  };
   sentAt?: string;
   isRead?: boolean;
   readBy?: Array<{

@@ -12,7 +12,10 @@ export const operationChatService = {
   },
 
   sendMessage: async (groupId, content) => {
-    const response = await apiClient.post(`/operation-chat/groups/${groupId}/messages`, { content });
+    const normalizedContent = typeof content === 'object'
+      ? content?.content
+      : content;
+    const response = await apiClient.post(`/operation-chat/groups/${groupId}/messages`, { content: normalizedContent });
     return response.data;
   },
 

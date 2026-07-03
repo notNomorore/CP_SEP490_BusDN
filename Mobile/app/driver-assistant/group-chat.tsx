@@ -23,6 +23,15 @@ import type { OperationChatGroup, OperationChatMessage } from '@/types/operation
 import { formatTime } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
+const getMessageContent = (message?: OperationChatMessage | null) => {
+  const content = message?.content;
+  if (typeof content === 'string') return content;
+  if (content && typeof content === 'object') {
+    return content.content || content.message || content.text || JSON.stringify(content);
+  }
+  return '';
+};
+
 export default function OperationGroupChatScreen() {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
@@ -85,6 +94,11 @@ export default function OperationGroupChatScreen() {
     try {
       const payload = await operationChatApi.sendMessage(selectedGroup.id, content);
       setMessages((current) => [...current, payload.message]);
+      setGroups((current) => current.map((group) => (
+        group.id === selectedGroup.id
+          ? { ...group, lastMessage: payload.message, lastMessageContent: getMessageContent(payload.message), unreadCount: 0 }
+          : group
+      )));
       setDraft('');
     } catch (error) {
       Alert.alert('Unable to send message', getErrorMessage(error, 'Unable to send this message.'));
@@ -128,6 +142,11 @@ export default function OperationGroupChatScreen() {
                   <Text numberOfLines={1} style={[styles.groupName, active && styles.groupNameActive]}>
                     {group.name}
                   </Text>
+                  {group.lastMessage || group.lastMessageContent ? (
+                    <Text numberOfLines={1} style={[styles.groupPreview, active && styles.groupPreviewActive]}>
+                      {group.lastMessageContent || getMessageContent(group.lastMessage)}
+                    </Text>
+                  ) : null}
                   {group.unreadCount ? (
                     <View style={styles.unreadPill}>
                       <Text style={styles.unreadText}>{group.unreadCount}</Text>
@@ -155,12 +174,13 @@ export default function OperationGroupChatScreen() {
                   <Text style={styles.emptyText}>No messages yet. Start the operation discussion.</Text>
                 ) : messages.map((message) => {
                   const mine = message.sender?.id === user?.id;
+                  const content = getMessageContent(message);
                   return (
                     <View key={message.id} style={[styles.messageBubble, mine ? styles.myMessage : styles.otherMessage]}>
                       {!mine ? (
                         <Text style={styles.senderName}>{message.sender?.fullName || message.senderRole || 'Operator'}</Text>
                       ) : null}
-                      <Text style={[styles.messageText, mine && styles.myMessageText]}>{message.content}</Text>
+                      <Text style={[styles.messageText, mine && styles.myMessageText]}>{content}</Text>
                       <Text style={[styles.messageTime, mine && styles.myMessageTime]}>{formatTime(message.sentAt)}</Text>
                     </View>
                   );
@@ -209,10 +229,12 @@ const styles = StyleSheet.create({
   kicker: { color: colors.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
   title: { color: colors.primary, fontSize: 25, fontWeight: '900' },
   groupRow: { gap: 8, paddingBottom: 12 },
-  groupChip: { maxWidth: 230, minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: colors.outline, borderRadius: 20, backgroundColor: colors.card, paddingHorizontal: 12 },
+  groupChip: { maxWidth: 260, minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: colors.outline, borderRadius: 20, backgroundColor: colors.card, paddingHorizontal: 12 },
   groupChipActive: { borderColor: colors.primary, backgroundColor: colors.primary },
   groupName: { flexShrink: 1, color: colors.primary, fontSize: 12, fontWeight: '900' },
   groupNameActive: { color: colors.white },
+  groupPreview: { maxWidth: 95, flexShrink: 1, color: colors.muted, fontSize: 10, fontWeight: '700' },
+  groupPreviewActive: { color: '#bfead5' },
   unreadPill: { minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: colors.error },
   unreadText: { color: colors.white, fontSize: 10, fontWeight: '900' },
   chatPanel: { flex: 1, overflow: 'hidden', borderRadius: 22, backgroundColor: colors.card },

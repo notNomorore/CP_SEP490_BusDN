@@ -19,6 +19,13 @@ const createHttpError = (message, statusCode = 400) => {
   return error;
 };
 
+const normalizeMessageContent = (value) => {
+  if (value && typeof value === 'object') {
+    return String(value.content || value.message || value.text || '').trim();
+  }
+  return String(value || '').trim();
+};
+
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 
 const assertAllowedRole = (user) => {
@@ -34,24 +41,28 @@ const formatUser = (user) => ({
   role: user?.role || '',
 });
 
-const formatGroup = (group, unreadCount = 0) => ({
+const formatGroup = (group, unreadCount = 0, lastMessage = null) => ({
   id: normalizeId(group._id),
   name: group.name,
   description: group.description,
   type: group.type,
   memberCount: group.members?.length || 0,
   lastMessageAt: group.lastMessageAt,
+  lastMessage,
+  lastMessageContent: lastMessage?.content || '',
   unreadCount,
 });
 
-const formatMessage = (message) => ({
+const formatMessage = (message, actorId = null) => ({
   id: normalizeId(message._id),
   groupId: normalizeId(message.group),
   sender: formatUser(message.sender),
   senderRole: message.senderRole,
   content: message.content,
   sentAt: message.sentAt,
-  isRead: Boolean(message.readBy?.length),
+  isRead: actorId
+    ? (message.readBy || []).some((read) => normalizeId(read.user) === normalizeId(actorId))
+    : Boolean(message.readBy?.length),
   readBy: (message.readBy || []).map((read) => ({
     userId: normalizeId(read.user),
     readAt: read.readAt,
@@ -59,17 +70,27 @@ const formatMessage = (message) => ({
 });
 
 export class OperationChatService {
-  static async ensureDefaultGroup() {
+  static async ensureDefaultGroup(actor = null) {
     const staff = await User.find({
       role: { $in: ALLOWED_ROLES },
       status: { $ne: 'LOCKED' },
     }).select('_id role').lean();
 
-    const members = staff.map((user) => ({
+    const memberMap = new Map(staff.map((user) => [normalizeId(user._id), {
       user: user._id,
       role: user.role,
       joinedAt: new Date(),
-    }));
+    }]));
+
+    if (actor?.userId && ALLOWED_ROLES.includes(actor.role)) {
+      memberMap.set(normalizeId(actor.userId), {
+        user: toObjectId(actor.userId),
+        role: actor.role,
+        joinedAt: new Date(),
+      });
+    }
+
+    const members = [...memberMap.values()];
 
     const group = await ChatGroup.findOneAndUpdate(
       { type: 'OPERATIONS', name: DEFAULT_GROUP_NAME },
@@ -107,7 +128,6 @@ export class OperationChatService {
       members: {
         $elemMatch: {
           user: userId,
-          role: user.role,
         },
       },
     });
@@ -126,14 +146,13 @@ export class OperationChatService {
     }
     const userId = toObjectId(user.userId);
 
-    await this.ensureDefaultGroup();
+    await this.ensureDefaultGroup(user);
 
     const groups = await ChatGroup.find({
       isActive: true,
       members: {
         $elemMatch: {
           user: userId,
-          role: user.role,
         },
       },
     }).sort({ lastMessageAt: -1, updatedAt: -1 }).lean();
@@ -145,7 +164,19 @@ export class OperationChatService {
     ]);
     const unreadMap = new Map(unreadByGroup.map((item) => [normalizeId(item._id), item.count]));
 
-    return groups.map((group) => formatGroup(group, unreadMap.get(normalizeId(group._id)) || 0));
+    const latestMessageEntries = await Promise.all(groups.map(async (group) => {
+      const message = await ChatMessage.findOne({ group: group._id })
+        .populate('sender', 'fullName name email role')
+        .sort({ sentAt: -1 })
+        .lean();
+      return [normalizeId(group._id), message ? formatMessage(message, userId) : null];
+    }));
+    const latestMessageMap = new Map(latestMessageEntries);
+
+    return groups.map((group) => {
+      const groupId = normalizeId(group._id);
+      return formatGroup(group, unreadMap.get(groupId) || 0, latestMessageMap.get(groupId) || null);
+    });
   }
 
   static async listMessages(groupId, user, query = {}) {
@@ -153,11 +184,6 @@ export class OperationChatService {
     const userId = toObjectId(user.userId);
 
     const limit = Math.min(Math.max(Number(query.limit) || 80, 1), 150);
-    const messages = await ChatMessage.find({ group: groupId })
-      .populate('sender', 'fullName name email role')
-      .sort({ sentAt: -1 })
-      .limit(limit);
-
     await ChatMessage.updateMany(
       {
         group: groupId,
@@ -167,11 +193,17 @@ export class OperationChatService {
       { $push: { readBy: { user: userId, readAt: new Date() } } }
     );
 
-    return messages.reverse().map(formatMessage);
+    const messages = await ChatMessage.find({ group: groupId })
+      .populate('sender', 'fullName name email role')
+      .sort({ sentAt: -1 })
+      .limit(limit)
+      .lean();
+
+    return messages.reverse().map((message) => formatMessage(message, userId));
   }
 
   static async sendMessage(groupId, user, payload = {}) {
-    const content = String(payload.content || '').trim();
+    const content = normalizeMessageContent(payload.content);
     if (!content) {
       throw createHttpError('Message content is required', 400);
     }
@@ -192,7 +224,7 @@ export class OperationChatService {
 
     const populated = await ChatMessage.findById(message._id)
       .populate('sender', 'fullName name email role');
-    const formatted = formatMessage(populated);
+    const formatted = formatMessage(populated, userId);
     emitOperationChatMessage(formatted);
 
     return formatted;
