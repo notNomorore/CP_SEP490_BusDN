@@ -391,7 +391,7 @@ export class ScheduleOperationsService {
     })
       .populate({
         path: 'shiftId',
-        match: { status: 'ACTIVE' },
+        match: { status: { $in: ['ACTIVE', 'APPROVED', 'DRAFT'] } },
         populate: { path: 'routeId', select: 'routeCode routeName' },
       })
       .sort({ workDate: 1, createdAt: 1 })
