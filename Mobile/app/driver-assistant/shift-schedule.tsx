@@ -158,7 +158,7 @@ export default function ShiftScheduleScreen() {
               return (
                 <View key={day} style={[styles.dayTile, isToday && styles.dayTileActive]}>
                   <Text style={[styles.dayName, isToday && styles.dayTextActive]}>{formatDate(day).slice(0, 3).toUpperCase()}</Text>
-                  <Text style={[styles.dayNumber, isToday && styles.dayTextActive]}>{new Date(day).getDate()}</Text>
+                  <Text style={[styles.dayNumber, isToday && styles.dayTextActive]}>{Number(day.slice(-2))}</Text>
                 </View>
               );
             })}
