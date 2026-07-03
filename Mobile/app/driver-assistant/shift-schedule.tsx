@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import scheduleOperationsApi from '@/api/scheduleOperations.api';
@@ -46,19 +46,27 @@ export default function ShiftScheduleScreen() {
   const [shifts, setShifts] = useState<ShiftSchedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const requestIdRef = useRef(0);
 
   const loadSchedule = useCallback(async () => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const requestedRange = { ...range };
     setIsLoading(true);
     setError('');
     try {
-      const payload = await scheduleOperationsApi.getShiftSchedule(range);
+      const payload = await scheduleOperationsApi.getShiftSchedule(requestedRange);
+      if (requestId !== requestIdRef.current) return;
       setShifts(payload.shifts || []);
     } catch (error) {
+      if (requestId !== requestIdRef.current) return;
       const message = getErrorMessage(error, 'Unable to load shift schedule.');
       setError(message);
       Alert.alert('Unable to load shift schedule', message);
     } finally {
-      setIsLoading(false);
+      if (requestId === requestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [range]);
 
