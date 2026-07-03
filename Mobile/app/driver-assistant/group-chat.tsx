@@ -1,5 +1,4 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -33,6 +32,21 @@ const getMessageContent = (message?: OperationChatMessage | null) => {
   return '';
 };
 
+const getInitials = (value?: string) => {
+  const words = String(value || 'OP')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return words.slice(0, 2).map((word) => word[0]).join('').toUpperCase() || 'OP';
+};
+
+const getGroupPreview = (group: OperationChatGroup) => (
+  group.lastMessageContent
+  || getMessageContent(group.lastMessage)
+  || group.description
+  || 'Tap to open operation chat'
+);
+
 export default function OperationGroupChatScreen() {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
@@ -46,7 +60,7 @@ export default function OperationGroupChatScreen() {
   const [loadError, setLoadError] = useState('');
 
   const selectedGroup = useMemo(
-    () => groups.find((group) => group.id === selectedGroupId) || groups[0] || null,
+    () => groups.find((group) => group.id === selectedGroupId) || null,
     [groups, selectedGroupId],
   );
   const currentUserId = String(user?.id || '');
@@ -58,7 +72,9 @@ export default function OperationGroupChatScreen() {
       const payload = await operationChatApi.getGroups();
       const nextGroups = payload.groups || [];
       setGroups(nextGroups);
-      setSelectedGroupId((current) => current || nextGroups[0]?.id || '');
+      setSelectedGroupId((current) => (
+        current && nextGroups.some((group) => group.id === current) ? current : ''
+      ));
     } catch (error) {
       setLoadError(getErrorMessage(error, 'Unable to load operation chat groups.'));
     } finally {
@@ -99,6 +115,18 @@ export default function OperationGroupChatScreen() {
     }
   }, [loadMessages, selectedGroup?.id]);
 
+  const openGroup = (groupId: string) => {
+    setSelectedGroupId(groupId);
+    setMessages([]);
+  };
+
+  const closeThread = () => {
+    setSelectedGroupId('');
+    setMessages([]);
+    setDraft('');
+    setLoadError('');
+  };
+
   useEffect(() => {
     if (!selectedGroup?.id) return undefined;
     const timer = setInterval(() => {
@@ -136,68 +164,103 @@ export default function OperationGroupChatScreen() {
       >
         <View style={styles.screen}>
           <View style={styles.header}>
-            <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+            <Pressable
+              accessibilityLabel="Back"
+              hitSlop={10}
+              onPress={() => (selectedGroup ? closeThread() : goBackOrReplace('/driver-assistant'))}
+            >
               <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
             </Pressable>
             <View style={styles.headerText}>
               <Text style={styles.kicker}>OPERATION CHAT</Text>
-              <Text style={styles.title}>Group Chat</Text>
+              <Text numberOfLines={1} style={styles.title}>{selectedGroup?.name || 'Chats'}</Text>
+              {selectedGroup ? (
+                <Text numberOfLines={1} style={styles.subtitle}>
+                  {selectedGroup.memberCount || 0} members
+                </Text>
+              ) : null}
             </View>
             {isLoadingGroups ? <ActivityIndicator color={colors.primary} /> : null}
           </View>
 
-          <ScrollView
-            horizontal
-            contentContainerStyle={styles.groupRow}
-            showsHorizontalScrollIndicator={false}
-          >
-            {groups.map((group) => {
-              const active = group.id === selectedGroup?.id;
-              return (
-                <Pressable
-                  accessibilityRole="button"
-                  key={group.id}
-                  onPress={() => setSelectedGroupId(group.id)}
-                  style={[styles.groupChip, active && styles.groupChipActive]}
+          {!selectedGroup ? (
+            <View style={styles.inboxPanel}>
+              {isLoadingGroups ? (
+                <View style={styles.loading}>
+                  <ActivityIndicator color={colors.primary} />
+                  <Text style={styles.loadingText}>Loading chats...</Text>
+                </View>
+              ) : loadError ? (
+                <View>
+                  <Text style={styles.emptyText}>{loadError}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void loadGroups()}
+                    style={styles.retryButton}
+                  >
+                    <Text style={styles.retryText}>Retry</Text>
+                  </Pressable>
+                </View>
+              ) : groups.length === 0 ? (
+                <Text style={styles.emptyText}>No operation chat group is available for this account.</Text>
+              ) : (
+                <ScrollView
+                  contentContainerStyle={[styles.inboxList, { paddingBottom: 104 + insets.bottom }]}
+                  showsVerticalScrollIndicator={false}
                 >
-                  <Text numberOfLines={1} style={[styles.groupName, active && styles.groupNameActive]}>
-                    {group.name}
-                  </Text>
-                  {group.lastMessage || group.lastMessageContent ? (
-                    <Text numberOfLines={1} style={[styles.groupPreview, active && styles.groupPreviewActive]}>
-                      {group.lastMessageContent || getMessageContent(group.lastMessage)}
-                    </Text>
-                  ) : null}
-                  {group.unreadCount ? (
-                    <View style={styles.unreadPill}>
-                      <Text style={styles.unreadText}>{group.unreadCount}</Text>
-                    </View>
-                  ) : null}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          <View style={styles.chatPanel}>
-            {isLoadingMessages ? (
+                  {groups.map((group) => (
+                    <Pressable
+                      accessibilityRole="button"
+                      key={group.id}
+                      onPress={() => openGroup(group.id)}
+                      style={styles.chatRow}
+                    >
+                      <View style={styles.avatar}>
+                        <Text style={styles.avatarText}>{getInitials(group.name)}</Text>
+                      </View>
+                      <View style={styles.chatSummary}>
+                        <View style={styles.chatSummaryTop}>
+                          <Text numberOfLines={1} style={styles.chatName}>{group.name}</Text>
+                          <Text style={styles.chatTime}>{formatTime(group.lastMessageAt || group.lastMessage?.sentAt)}</Text>
+                        </View>
+                        <View style={styles.chatSummaryBottom}>
+                          <Text
+                            numberOfLines={1}
+                            style={[styles.chatPreview, group.unreadCount ? styles.chatPreviewUnread : null]}
+                          >
+                            {group.unreadCount ? `${group.unreadCount} new messages` : getGroupPreview(group)}
+                          </Text>
+                          {group.unreadCount ? <View style={styles.unreadDot} /> : null}
+                        </View>
+                      </View>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+          ) : (
+            <View style={styles.chatPanel}>
+              {isLoadingMessages ? (
               <View style={styles.loading}>
                 <ActivityIndicator color={colors.primary} />
                 <Text style={styles.loadingText}>Loading messages...</Text>
               </View>
-            ) : loadError ? (
+              ) : loadError ? (
               <View>
                 <Text style={styles.emptyText}>{loadError}</Text>
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => void loadGroups()}
+                  onPress={() => {
+                    if (selectedGroup?.id) {
+                      void loadMessages(selectedGroup.id);
+                    }
+                  }}
                   style={styles.retryButton}
                 >
                   <Text style={styles.retryText}>Retry</Text>
                 </Pressable>
               </View>
-            ) : groups.length === 0 ? (
-              <Text style={styles.emptyText}>No operation chat group is available for this account.</Text>
-            ) : (
+              ) : (
               <ScrollView
                 contentContainerStyle={[styles.messageList, { paddingBottom: 128 + insets.bottom }]}
                 showsVerticalScrollIndicator={false}
@@ -218,32 +281,35 @@ export default function OperationGroupChatScreen() {
                   );
                 })}
               </ScrollView>
-            )}
-          </View>
-
-          <View style={[styles.inputBar, { bottom: 72 + Math.max(insets.bottom, 10) }]}>
-            <TextInput
-              accessibilityLabel="Message"
-              multiline
-              onChangeText={setDraft}
-              placeholder="Message the operation group..."
-              placeholderTextColor={colors.muted}
-              style={styles.input}
-              value={draft}
-            />
-            <Pressable
-              accessibilityRole="button"
-              disabled={!draft.trim() || isSending}
-              onPress={() => void sendMessage()}
-              style={[styles.sendButton, (!draft.trim() || isSending) && styles.sendButtonDisabled]}
-            >
-              {isSending ? (
-                <ActivityIndicator color={colors.white} size="small" />
-              ) : (
-                <MaterialCommunityIcons color={colors.white} name="send" size={20} />
               )}
-            </Pressable>
-          </View>
+            </View>
+          )}
+
+          {selectedGroup ? (
+            <View style={[styles.inputBar, { bottom: 72 + Math.max(insets.bottom, 10) }]}>
+              <TextInput
+                accessibilityLabel="Message"
+                multiline
+                onChangeText={setDraft}
+                placeholder="Message the operation group..."
+                placeholderTextColor={colors.muted}
+                style={styles.input}
+                value={draft}
+              />
+              <Pressable
+                accessibilityRole="button"
+                disabled={!draft.trim() || isSending}
+                onPress={() => void sendMessage()}
+                style={[styles.sendButton, (!draft.trim() || isSending) && styles.sendButtonDisabled]}
+              >
+                {isSending ? (
+                  <ActivityIndicator color={colors.white} size="small" />
+                ) : (
+                  <MaterialCommunityIcons color={colors.white} name="send" size={20} />
+                )}
+              </Pressable>
+            </View>
+          ) : null}
 
           <RoleBottomNav active="chat" role={user?.role} />
         </View>
@@ -260,15 +326,20 @@ const styles = StyleSheet.create({
   headerText: { flex: 1 },
   kicker: { color: colors.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
   title: { color: colors.primary, fontSize: 25, fontWeight: '900' },
-  groupRow: { gap: 8, paddingBottom: 12 },
-  groupChip: { maxWidth: 260, minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: colors.outline, borderRadius: 20, backgroundColor: colors.card, paddingHorizontal: 12 },
-  groupChipActive: { borderColor: colors.primary, backgroundColor: colors.primary },
-  groupName: { flexShrink: 1, color: colors.primary, fontSize: 12, fontWeight: '900' },
-  groupNameActive: { color: colors.white },
-  groupPreview: { maxWidth: 95, flexShrink: 1, color: colors.muted, fontSize: 10, fontWeight: '700' },
-  groupPreviewActive: { color: '#bfead5' },
-  unreadPill: { minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: colors.error },
-  unreadText: { color: colors.white, fontSize: 10, fontWeight: '900' },
+  subtitle: { marginTop: 2, color: colors.muted, fontSize: 12, fontWeight: '700' },
+  inboxPanel: { flex: 1 },
+  inboxList: { paddingBottom: 14 },
+  chatRow: { minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 18, paddingHorizontal: 4, paddingVertical: 8 },
+  avatar: { width: 58, height: 58, alignItems: 'center', justifyContent: 'center', borderRadius: 29, backgroundColor: colors.primary },
+  avatarText: { color: colors.white, fontSize: 16, fontWeight: '900' },
+  chatSummary: { minWidth: 0, flex: 1, borderBottomWidth: 1, borderBottomColor: '#dbe8e2', paddingRight: 2, paddingVertical: 8 },
+  chatSummaryTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  chatName: { flex: 1, color: colors.text, fontSize: 17, fontWeight: '900' },
+  chatTime: { color: colors.muted, fontSize: 12, fontWeight: '700' },
+  chatSummaryBottom: { marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  chatPreview: { minWidth: 0, flex: 1, color: colors.muted, fontSize: 14, fontWeight: '700' },
+  chatPreviewUnread: { color: colors.primary, fontWeight: '900' },
+  unreadDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#0a84ff' },
   chatPanel: { flex: 1, overflow: 'hidden', borderRadius: 22, backgroundColor: colors.card },
   loading: { flex: 1, minHeight: 260, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: colors.muted, fontWeight: '700' },
