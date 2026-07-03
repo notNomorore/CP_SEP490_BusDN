@@ -19,8 +19,8 @@ export const getTodayRange = () => {
   return { from: today, to: today };
 };
 
-export const getWeekRange = () => {
-  const today = new Date();
+export const getWeekRange = (anchor: Date | string = new Date()) => {
+  const today = typeof anchor === 'string' ? new Date(anchor) : new Date(anchor);
   const day = today.getDay();
   const diffToMonday = day === 0 ? -6 : 1 - day;
   const monday = addDays(today, diffToMonday);

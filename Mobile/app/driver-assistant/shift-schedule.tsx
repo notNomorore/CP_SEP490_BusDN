@@ -1,5 +1,4 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -13,7 +12,19 @@ import { goBackOrReplace } from '@/utils/navigation';
 import { addDays, formatDate, formatDateKey, getShiftStatus, getTodayRange, getWeekRange, toDateInput } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
-const weekDays = Array.from({ length: 7 }, (_, index) => toDateInput(addDays(getWeekRange().from, index)));
+const assignedStatuses = new Set(['ASSIGNED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED']);
+
+const getShiftDurationHours = (shift: ShiftSchedule) => {
+  if (!/^\d{2}:\d{2}$/.test(String(shift.startTime || '')) || !/^\d{2}:\d{2}$/.test(String(shift.endTime || ''))) {
+    return 0;
+  }
+  const [startHour, startMinute] = String(shift.startTime).split(':').map(Number);
+  const [endHour, endMinute] = String(shift.endTime).split(':').map(Number);
+  const start = startHour * 60 + startMinute;
+  let end = endHour * 60 + endMinute;
+  if (end < start) end += 24 * 60;
+  return Math.max((end - start) / 60, 0);
+};
 
 function DetailPill({ icon, label, value }: { icon: React.ComponentProps<typeof MaterialCommunityIcons>['name']; label: string; value?: string | null }) {
   return (
@@ -31,24 +42,33 @@ function DetailPill({ icon, label, value }: { icon: React.ComponentProps<typeof 
 
 export default function ShiftScheduleScreen() {
   const user = useAuthStore((state) => state.user);
+  const [range, setRange] = useState(() => getWeekRange());
   const [shifts, setShifts] = useState<ShiftSchedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const loadSchedule = useCallback(async () => {
     setIsLoading(true);
+    setError('');
     try {
-      const payload = await scheduleOperationsApi.getShiftSchedule(getWeekRange());
+      const payload = await scheduleOperationsApi.getShiftSchedule(range);
       setShifts(payload.shifts || []);
     } catch (error) {
-      Alert.alert('Unable to load shift schedule', getErrorMessage(error, 'Unable to load shift schedule.'));
+      const message = getErrorMessage(error, 'Unable to load shift schedule.');
+      setError(message);
+      Alert.alert('Unable to load shift schedule', message);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [range]);
 
   useEffect(() => {
     void loadSchedule();
   }, [loadSchedule]);
+
+  const weekDays = useMemo(() => (
+    Array.from({ length: 7 }, (_, index) => toDateInput(addDays(range.from, index)))
+  ), [range.from]);
 
   const todayShift = useMemo(() => (
     shifts.find((shift) => formatDateKey(shift.workDate) === getTodayRange().from) || null
@@ -59,6 +79,17 @@ export default function ShiftScheduleScreen() {
     result[key] = [...(result[key] || []), shift];
     return result;
   }, {}), [shifts]);
+
+  const weeklyStats = useMemo(() => ({
+    totalHours: shifts.reduce((total, shift) => total + getShiftDurationHours(shift), 0),
+    shiftCount: shifts.length,
+    assignedCount: shifts.filter((shift) => assignedStatuses.has(String(shift.assignmentStatus || ''))).length,
+    completedCount: shifts.filter((shift) => shift.assignmentStatus === 'COMPLETED').length,
+  }), [shifts]);
+
+  const changeWeek = (offset: number) => {
+    setRange(getWeekRange(addDays(range.from, offset * 7)));
+  };
 
   return (
     <View style={styles.screenShell}>
@@ -73,10 +104,49 @@ export default function ShiftScheduleScreen() {
         </View>
       </View>
 
+      <View style={styles.weekControls}>
+        <Pressable accessibilityRole="button" onPress={() => changeWeek(-1)} style={styles.weekButton}>
+          <MaterialCommunityIcons color={colors.primary} name="chevron-left" size={23} />
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={() => setRange(getWeekRange())} style={styles.weekCenter}>
+          <Text style={styles.weekLabel}>{formatDate(range.from)} - {formatDate(range.to)}</Text>
+          <Text style={styles.weekHint}>Tap for current week</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={() => changeWeek(1)} style={styles.weekButton}>
+          <MaterialCommunityIcons color={colors.primary} name="chevron-right" size={23} />
+        </Pressable>
+      </View>
+
+      <View style={styles.statsGrid}>
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>Total Hours</Text>
+          <Text style={styles.statValue}>{weeklyStats.totalHours.toFixed(1)}</Text>
+        </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>Shifts</Text>
+          <Text style={styles.statValue}>{weeklyStats.shiftCount}</Text>
+        </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>Assigned</Text>
+          <Text style={styles.statValueAccent}>{weeklyStats.assignedCount}</Text>
+        </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>Completed</Text>
+          <Text style={styles.statValue}>{weeklyStats.completedCount}</Text>
+        </View>
+      </View>
+
       {isLoading ? (
         <View style={styles.loading}>
           <ActivityIndicator color={colors.primary} />
           <Text style={styles.loadingText}>Loading shift schedule...</Text>
+        </View>
+      ) : error ? (
+        <View>
+          <Text style={styles.emptyText}>{error}</Text>
+          <Pressable accessibilityRole="button" onPress={() => void loadSchedule()} style={styles.retryButton}>
+            <Text style={styles.retryText}>Retry</Text>
+          </Pressable>
         </View>
       ) : shifts.length === 0 ? (
         <Text style={styles.emptyText}>No shift schedule assigned for this week.</Text>
@@ -162,9 +232,21 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 },
   kicker: { color: colors.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
   title: { color: colors.primary, fontSize: 25, fontWeight: '900' },
+  weekControls: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+  weekButton: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: colors.card },
+  weekCenter: { minHeight: 46, flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: colors.card, paddingHorizontal: 12 },
+  weekLabel: { color: colors.primary, fontSize: 13, fontWeight: '900' },
+  weekHint: { marginTop: 2, color: colors.muted, fontSize: 10, fontWeight: '700' },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 18 },
+  statCard: { width: '47%', borderRadius: 18, backgroundColor: colors.card, padding: 14 },
+  statLabel: { color: colors.muted, fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
+  statValue: { marginTop: 8, color: colors.primary, fontSize: 22, fontWeight: '900' },
+  statValueAccent: { marginTop: 8, color: colors.accent, fontSize: 22, fontWeight: '900' },
   loading: { minHeight: 260, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: colors.muted, fontWeight: '700' },
   emptyText: { borderRadius: 18, backgroundColor: colors.surfaceLow, padding: 16, color: colors.muted, fontSize: 13, fontWeight: '700' },
+  retryButton: { alignSelf: 'flex-start', marginTop: 12, borderRadius: 18, backgroundColor: colors.primary, paddingHorizontal: 18, paddingVertical: 10 },
+  retryText: { color: colors.white, fontSize: 13, fontWeight: '900' },
   calendarRow: { flexDirection: 'row', gap: 8, marginBottom: 24 },
   dayTile: { flex: 1, minHeight: 62, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: colors.surfaceLow },
   dayTileActive: { backgroundColor: colors.primary },

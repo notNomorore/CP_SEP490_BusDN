@@ -49,8 +49,19 @@ export type AssignedTrip = {
   acceptanceStatus?: string;
   tripStatus?: string;
   inspection?: {
+    id?: string;
+    inspectionCode?: string;
     status?: string;
+    checklist?: Record<string, unknown>;
+    issueCategory?: string | null;
+    issueDescription?: string;
+    startedAt?: string | null;
+    confirmedAt?: string | null;
+    reportedAt?: string | null;
   };
+  dutyInstructions?: string[];
+  rejectionReason?: string;
+  acceptedAt?: string | null;
   notes?: string;
 };
 
@@ -64,6 +75,7 @@ export type ShiftSchedule = {
   startTime?: string;
   endTime?: string;
   description?: string;
+  notes?: string;
   route?: {
     id?: string;
     routeCode?: string;
