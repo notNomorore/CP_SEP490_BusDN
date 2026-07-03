@@ -7,6 +7,9 @@ import OperationNotification from './OperationNotification.js';
 import VehicleInspection from './VehicleInspection.js';
 import IncidentReport from '../incidents/IncidentReport.js';
 import VehicleIssueService from '../vehicleIssues/vehicleIssue.service.js';
+import Shift from '../shifts/Shift.js';
+import DriverShiftAssignment from '../shifts/DriverShiftAssignment.js';
+import AssistantShiftAssignment from '../shifts/AssistantShiftAssignment.js';
 
 const TRAFFIC_CATEGORIES = [
   'HEAVY_TRAFFIC',
@@ -370,7 +373,36 @@ export class ScheduleOperationsService {
   }
 
   static async listShiftSchedule(userId, role, query = {}) {
-    return this.listAssignedTrips(userId, role, query);
+    const from = startOfDay(parseDate(query.from, new Date()));
+    const to = endOfDay(parseDate(query.to, addDays(from, 6)));
+    const isDriver = role === 'DRIVER';
+    const isAssistant = role === 'BUS_ASSISTANT' || role === 'CONDUCTOR';
+
+    if (!isDriver && !isAssistant) {
+      return [];
+    }
+
+    const AssignmentModel = isDriver ? DriverShiftAssignment : AssistantShiftAssignment;
+    const staffField = isDriver ? 'driverId' : 'assistantId';
+    const assignments = await AssignmentModel.find({
+      [staffField]: userId,
+      workDate: { $gte: from, $lte: to },
+      status: { $ne: 'CANCELLED' },
+    })
+      .populate({
+        path: 'shiftId',
+        match: { status: 'ACTIVE' },
+        populate: { path: 'routeId', select: 'routeCode routeName' },
+      })
+      .sort({ workDate: 1, createdAt: 1 })
+      .lean();
+
+    return assignments
+      .filter((assignment) => assignment.shiftId)
+      .map((assignment) => ({
+        ...assignment,
+        shift: assignment.shiftId,
+      }));
   }
 
   static async listOperationNotifications(userId, role, query = {}) {

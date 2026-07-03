@@ -3,7 +3,13 @@ import { config } from '../config/environment.js';
 import logger from '../utils/logger.js';
 import User from '../modules/auth/User.js';
 
-const normalizeRole = (role) => String(role || '').trim().toUpperCase();
+const normalizeRole = (role) => {
+  const normalized = String(role || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'CONDUCTOR' || normalized === 'ASSISTANT' || normalized === 'BUSASSISTANT') {
+    return 'BUS_ASSISTANT';
+  }
+  return normalized;
+};
 const buildLockedAccountResponse = (user) => {
   const reason = user.accountLock?.reason?.trim() || 'Không có lý do cụ thể';
   const lockedUntil = user.accountLock?.lockedUntil;
@@ -145,7 +151,10 @@ export const authorizeCurrentUserRole = (...allowedRoles) => {
         });
       }
 
-      if (!allowedRoles.includes(user.role)) {
+      const normalizedAllowedRoles = allowedRoles.map(normalizeRole);
+      const userRole = normalizeRole(user.role);
+
+      if (!normalizedAllowedRoles.includes(userRole)) {
         return res.status(403).json({
           success: false,
           message: 'Forbidden - Insufficient permissions',
@@ -153,7 +162,7 @@ export const authorizeCurrentUserRole = (...allowedRoles) => {
       }
 
       req.user.email = user.email;
-      req.user.role = user.role;
+      req.user.role = userRole;
       return next();
     } catch (error) {
       logger.error('Current user role authorization error:', error);

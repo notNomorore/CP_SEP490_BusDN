@@ -34,6 +34,7 @@ import {
   UserAccountsPage,
 } from './features/admin';
 import { ScheduleOperationsPage } from './features/scheduleOperations';
+import { OperationChatPage } from './features/operationChat';
 import {
   LoginPage,
   RegisterPage,
@@ -69,6 +70,8 @@ import { MaintenanceApprovalPage } from './features/admin/maintenanceApproval';
 import { SystemMonitoringPage } from './features/admin/systemMonitoring';
 import { FareOperationsPage } from './features/admin/fareOperations';
 import { WalkInTicketMonitoringPage } from './features/admin/walkInTickets';
+import ShiftManagementPage from './features/admin/pages/ShiftManagementPage.jsx';
+import AutoGenerateShiftPage from './features/admin/pages/AutoGenerateShiftPage.jsx';
 import { PassengerCompliancePage } from './features/admin/passengerCompliance';
 import NotFoundPage from './shared/components/common/NotFoundPage.jsx';
 import I18nBoundary from './shared/components/I18nBoundary.jsx';
@@ -187,6 +190,8 @@ function App() {
             <Route path="fleet/delayed-trips" element={<AdminDelayedTripsPage />} />
             <Route path="fleet/locations" element={<DashboardAdminPage embedded />} />
             <Route path="routes" element={<RouteControlPage />} />
+            <Route path="shifts" element={<ShiftManagementPage />} />
+            <Route path="shifts/auto-generate" element={<AutoGenerateShiftPage />} />
             <Route path="users" element={<UserAccountsPage />} />
             <Route path="staff-performance" element={<StaffPerformancePage />} />
             <Route path="priority-verification" element={<AdminPriorityVerificationPage />} />
@@ -206,6 +211,7 @@ function App() {
             <Route path="maintenance-approval" element={<MaintenanceApprovalPage />} />
             <Route path="system-monitoring" element={<SystemMonitoringPage />} />
             <Route path="system-monitoring/suspicious" element={<SystemMonitoringPage />} />
+            <Route path="operation-chat" element={<OperationChatPage embedded />} />
           </Route>
 
           <Route
@@ -314,6 +320,14 @@ function App() {
             )}
           />
           <Route
+            path="/operations/chat"
+            element={(
+              <OperationsRoute>
+                <OperationChatPage />
+              </OperationsRoute>
+            )}
+          />
+          <Route
             path="/bus-assistant"
             element={(
               <BusAssistantRoute>
@@ -325,6 +339,7 @@ function App() {
             <Route path="assigned-trips" element={<AssignedTripsPage />} />
             <Route path="shift-schedule" element={<ShiftSchedulePage />} />
             <Route path="operation-notifications" element={<OperationNotificationsPage />} />
+            <Route path="operation-chat" element={<OperationChatPage embedded />} />
             <Route path="validate-ticket" element={<ValidateQrTicketPage />} />
             <Route path="walkin-ticket" element={<CreateWalkInTicketPage />} />
             <Route path="incident-reports" element={<IncidentReportPage />} />

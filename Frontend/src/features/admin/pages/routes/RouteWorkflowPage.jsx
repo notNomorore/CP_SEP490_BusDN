@@ -27,7 +27,6 @@ const operationSections = [
 ];
 
 operationSections.push({ key: 'scheduling', label: 'Điều phối lịch chuyến', hint: 'Tạo lịch, gán xe và nhân sự theo chuyến' });
-operationSections.push({ key: 'shift-list', label: 'Danh sách ca làm', hint: 'Xem, chỉnh sửa và xóa các ca đã tạo' });
 
 const busStatusLabels = {
   ACTIVE: 'Đang hoạt động',
@@ -544,8 +543,8 @@ const ScheduleListPanel = ({ onDeleteSchedule, onEditSchedule, onEmergencyReassi
   <div className="rounded-2xl border border-slate-200 bg-white p-4 text-slate-900">
     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
       <div>
-        <h2 className="text-lg font-black text-slate-950">Danh sách ca làm</h2>
-        <p className="mt-1 text-xs leading-5 text-slate-500">Xem, chỉnh sửa hoặc xóa từng ca trong lịch điều phối tuyến.</p>
+        <h2 className="text-lg font-black text-slate-950">Danh sách lịch chuyến</h2>
+        <p className="mt-1 text-xs leading-5 text-slate-500">Xem, chỉnh sửa hoặc xóa từng lịch chuyến đã điều phối.</p>
       </div>
       <div className="flex flex-wrap items-end gap-2">
         <label>
@@ -2240,25 +2239,6 @@ const RouteWorkflowPage = () => {
               </div>
             </section>
           ) : null}
-
-          {activeOperationSection === 'shift-list' ? (
-            <section className="mb-5 grid gap-5">
-                <ScheduleListPanel
-                  onDeleteSchedule={deleteSchedule}
-                  onEditSchedule={(schedule) => {
-                    setScheduleForEditing(schedule);
-                    setActiveOperationSection('scheduling');
-                  }}
-                  onEmergencyReassign={(schedule) => {
-                    setEmergencySchedule(schedule);
-                  }}
-                  onSelectSchedule={setSelectedSchedule}
-                  routes={routes}
-                  schedules={schedules}
-                  selectedScheduleId={selectedSchedule?._id}
-                />
-            </section>
-          ) : null}
         </div>
       </main>
       <EmergencyReassignmentModal
@@ -2270,13 +2250,6 @@ const RouteWorkflowPage = () => {
         schedule={emergencySchedule}
         schedules={schedules}
       />
-      {activeOperationSection === 'shift-list' ? (
-        <ScheduleRouteDetailModal
-          onClose={() => setSelectedSchedule(null)}
-          routes={routes}
-          schedule={selectedSchedule}
-        />
-      ) : null}
     </div>
   );
 };

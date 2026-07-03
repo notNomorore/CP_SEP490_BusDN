@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -13,8 +13,10 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
+import { isDriverAssistantRole } from '@/utils/roleNavigation';
 
 const destinations = [
   {
@@ -34,6 +36,9 @@ const destinations = [
       'https://lh3.googleusercontent.com/aida-public/AB6AXuBTclYWEMmSc9NLTgUwDv9on7AFX-SSpA5gPI1ogZN-TD9umRy6yxhLhY05HSnXwdnhNvtc5WOT_HWHnMvrQMl2CevyJtJwtUnTAWXtWdT3b0nQwKCki3s72wp73yTo9qn2sRdNen8AIa2e9n8CBbLOyU2DCghI_mQ2qJrCuGChKthcFGUc7k2ZJ5R6-NwZczM_XHtBDmCcV9s9rm2D0OrHdW-p-xAe3p1CQ7ZhiFTcC8JsrDLcPXA_mFT0glXrCoHpVvKmhNtQwoE',
   },
 ];
+
+const priorityPassengerRoute = '/priority-passenger' as Href;
+const driverAssistantRoute = '/driver-assistant' as Href;
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
@@ -57,33 +62,6 @@ function SearchField({
   );
 }
 
-function NavItem({
-  icon,
-  label,
-  active = false,
-  onPress,
-}: {
-  icon: IconName;
-  label: string;
-  active?: boolean;
-  onPress?: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={[styles.navItem, active && styles.navItemActive]}
-    >
-      <MaterialCommunityIcons
-        color={active ? colors.white : '#527064'}
-        name={icon}
-        size={21}
-      />
-      <Text style={[styles.navLabel, active && styles.navLabelActive]}>{label}</Text>
-    </Pressable>
-  );
-}
-
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
@@ -95,8 +73,13 @@ export default function HomeScreen() {
   useEffect(() => {
     if (isHydrated && !isAuthenticated) {
       router.replace('/auth/login');
+      return;
     }
-  }, [isHydrated, isAuthenticated]);
+
+    if (isHydrated && isAuthenticated && isDriverAssistantRole(user?.role)) {
+      router.replace(driverAssistantRoute);
+    }
+  }, [isHydrated, isAuthenticated, user?.role]);
 
   const searchRoutes = () => {
     Alert.alert(
@@ -106,6 +89,10 @@ export default function HomeScreen() {
         : 'Choose a destination before searching.',
     );
   };
+
+  if (isHydrated && isAuthenticated && isDriverAssistantRole(user?.role)) {
+    return null;
+  }
 
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
@@ -236,6 +223,18 @@ export default function HomeScreen() {
           </Pressable>
 
           <View style={styles.smallSales}>
+            {isDriverAssistantRole(user?.role) ? (
+              <Pressable
+                onPress={() => router.push(driverAssistantRoute)}
+                style={[styles.smallSale, styles.workSale]}
+              >
+                <MaterialCommunityIcons color={colors.white} name="bus-clock" size={30} />
+                <View>
+                  <Text style={[styles.smallSaleTitle, styles.workSaleTitle]}>Work Dashboard</Text>
+                  <Text style={[styles.smallSaleText, styles.workSaleText]}>Trips and shift schedule</Text>
+                </View>
+              </Pressable>
+            ) : null}
             <Pressable style={[styles.smallSale, styles.firstRide]}>
               <MaterialCommunityIcons color="#34725a" name="tag-outline" size={30} />
               <View>
@@ -255,21 +254,13 @@ export default function HomeScreen() {
 
         <Pressable
           accessibilityLabel="Contact support"
+          onPress={() => router.push(priorityPassengerRoute)}
           style={[styles.supportButton, { bottom: 82 + insets.bottom }]}
         >
-          <MaterialCommunityIcons color={colors.white} name="headset" size={23} />
+          <MaterialCommunityIcons color={colors.white} name="shield-star-outline" size={23} />
         </Pressable>
 
-        <View style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-          <NavItem active icon="home" label="Home" />
-          <NavItem icon="compass-outline" label="Explore" />
-          <NavItem icon="ticket-confirmation-outline" label="Tickets" />
-          <NavItem
-            icon="account-outline"
-            label="Profile"
-            onPress={() => router.push('/profile')}
-          />
-        </View>
+        <RoleBottomNav active="home" role={user?.role} />
       </View>
     </SafeAreaView>
   );
@@ -354,6 +345,9 @@ const styles = StyleSheet.create({
   smallSale: { flex: 1, height: 126, justifyContent: 'space-between', padding: 15, borderRadius: 20 },
   firstRide: { backgroundColor: '#bfead5' },
   groupSale: { backgroundColor: '#e1eae6' },
+  workSale: { backgroundColor: colors.primary },
+  workSaleTitle: { color: colors.white },
+  workSaleText: { color: '#bfead5' },
   smallSaleTitle: { color: colors.primary, fontSize: 12, fontWeight: '800' },
   smallSaleText: { marginTop: 3, color: '#52675e', fontSize: 9 },
   supportButton: { position: 'absolute', right: 19, zIndex: 3, width: 49, height: 49, alignItems: 'center', justifyContent: 'center', borderRadius: 25, backgroundColor: '#174c39', shadowColor: '#001a0f', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.22, shadowRadius: 12, elevation: 7 },
