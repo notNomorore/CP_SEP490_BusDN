@@ -14,6 +14,13 @@ const CHAT_EVENTS = {
 let socketServer = null;
 
 const roomName = (groupId) => `operation-chat:${groupId}`;
+const normalizeRole = (role) => {
+  const normalized = String(role || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'CONDUCTOR' || normalized === 'ASSISTANT' || normalized === 'BUSASSISTANT') {
+    return 'BUS_ASSISTANT';
+  }
+  return normalized;
+};
 
 const extractToken = (socket) => {
   const authToken = socket.handshake.auth?.token;
@@ -33,7 +40,7 @@ const attachUser = async (socket) => {
   socket.data.user = {
     userId: user._id,
     email: user.email || decoded.email,
-    role: user.role,
+    role: normalizeRole(user.role),
   };
 
   return socket.data.user;
@@ -46,7 +53,7 @@ const emitAck = (callback, payload) => {
 };
 
 const assertSocketMembership = async (groupId, user) => {
-  if (!['ADMIN', 'DRIVER', 'BUS_ASSISTANT'].includes(user?.role)) {
+  if (!['ADMIN', 'DRIVER', 'BUS_ASSISTANT'].includes(normalizeRole(user?.role))) {
     throw new Error('Operation chat role is required');
   }
 

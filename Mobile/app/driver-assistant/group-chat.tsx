@@ -43,6 +43,7 @@ export default function OperationGroupChatScreen() {
   const [isLoadingGroups, setIsLoadingGroups] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   const selectedGroup = useMemo(
     () => groups.find((group) => group.id === selectedGroupId) || groups[0] || null,
@@ -51,29 +52,39 @@ export default function OperationGroupChatScreen() {
 
   const loadGroups = useCallback(async () => {
     setIsLoadingGroups(true);
+    setLoadError('');
     try {
       const payload = await operationChatApi.getGroups();
       const nextGroups = payload.groups || [];
       setGroups(nextGroups);
       setSelectedGroupId((current) => current || nextGroups[0]?.id || '');
     } catch (error) {
-      Alert.alert('Unable to load group chat', getErrorMessage(error, 'Unable to load operation chat groups.'));
+      setLoadError(getErrorMessage(error, 'Unable to load operation chat groups.'));
     } finally {
       setIsLoadingGroups(false);
     }
   }, []);
 
-  const loadMessages = useCallback(async (groupId: string) => {
+  const loadMessages = useCallback(async (groupId: string, options: { silent?: boolean } = {}) => {
     if (!groupId) return;
-    setIsLoadingMessages(true);
+    if (!options.silent) {
+      setIsLoadingMessages(true);
+    }
+    setLoadError('');
     try {
       const payload = await operationChatApi.getMessages(groupId, { limit: 80 });
       setMessages(payload.messages || []);
       await operationChatApi.markRead(groupId);
     } catch (error) {
-      Alert.alert('Unable to load messages', getErrorMessage(error, 'Unable to load operation chat messages.'));
+      const message = getErrorMessage(error, 'Unable to load operation chat messages.');
+      setLoadError(message);
+      if (!options.silent) {
+        Alert.alert('Unable to load messages', message);
+      }
     } finally {
-      setIsLoadingMessages(false);
+      if (!options.silent) {
+        setIsLoadingMessages(false);
+      }
     }
   }, []);
 
@@ -85,6 +96,14 @@ export default function OperationGroupChatScreen() {
     if (selectedGroup?.id) {
       void loadMessages(selectedGroup.id);
     }
+  }, [loadMessages, selectedGroup?.id]);
+
+  useEffect(() => {
+    if (!selectedGroup?.id) return undefined;
+    const timer = setInterval(() => {
+      void loadMessages(selectedGroup.id, { silent: true });
+    }, 12000);
+    return () => clearInterval(timer);
   }, [loadMessages, selectedGroup?.id]);
 
   const sendMessage = async () => {
@@ -164,6 +183,17 @@ export default function OperationGroupChatScreen() {
                 <ActivityIndicator color={colors.primary} />
                 <Text style={styles.loadingText}>Loading messages...</Text>
               </View>
+            ) : loadError ? (
+              <View>
+                <Text style={styles.emptyText}>{loadError}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => void loadGroups()}
+                  style={styles.retryButton}
+                >
+                  <Text style={styles.retryText}>Retry</Text>
+                </Pressable>
+              </View>
             ) : groups.length === 0 ? (
               <Text style={styles.emptyText}>No operation chat group is available for this account.</Text>
             ) : (
@@ -242,6 +272,8 @@ const styles = StyleSheet.create({
   loading: { flex: 1, minHeight: 260, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: colors.muted, fontWeight: '700' },
   emptyText: { margin: 16, borderRadius: 18, backgroundColor: colors.surfaceLow, padding: 16, color: colors.muted, fontSize: 13, fontWeight: '700' },
+  retryButton: { alignSelf: 'flex-start', marginHorizontal: 16, borderRadius: 18, backgroundColor: colors.primary, paddingHorizontal: 18, paddingVertical: 10 },
+  retryText: { color: colors.white, fontSize: 13, fontWeight: '900' },
   messageList: { gap: 10, padding: 14 },
   messageBubble: { maxWidth: '82%', borderRadius: 18, paddingHorizontal: 13, paddingVertical: 10 },
   myMessage: { alignSelf: 'flex-end', borderBottomRightRadius: 6, backgroundColor: colors.primary },

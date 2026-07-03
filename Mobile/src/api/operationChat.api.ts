@@ -24,6 +24,7 @@ async function withChatFallback<T>(request: (basePath: string) => Promise<T>) {
     if (!isNotFoundError(error)) {
       throw error;
     }
+    console.warn('Operation chat primary API returned 404. Retrying mobile-compatible alias.');
     return request(scheduleChatAliasPath);
   }
 }

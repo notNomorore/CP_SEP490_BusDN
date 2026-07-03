@@ -8,6 +8,13 @@ const ALLOWED_ROLES = ['ADMIN', 'DRIVER', 'BUS_ASSISTANT'];
 const DEFAULT_GROUP_NAME = 'Nhóm vận hành BusDN';
 
 const normalizeId = (value) => String(value || '');
+const normalizeRole = (role) => {
+  const normalized = String(role || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'CONDUCTOR' || normalized === 'ASSISTANT' || normalized === 'BUSASSISTANT') {
+    return 'BUS_ASSISTANT';
+  }
+  return normalized;
+};
 
 const toObjectId = (value) => (
   value instanceof mongoose.Types.ObjectId ? value : new mongoose.Types.ObjectId(value)
@@ -29,7 +36,7 @@ const normalizeMessageContent = (value) => {
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 
 const assertAllowedRole = (user) => {
-  if (!ALLOWED_ROLES.includes(user?.role)) {
+  if (!ALLOWED_ROLES.includes(normalizeRole(user?.role))) {
     throw createHttpError('Only Admin, Driver, and Bus Assistant can access operation chat', 403);
   }
 };
@@ -82,10 +89,11 @@ export class OperationChatService {
       joinedAt: new Date(),
     }]));
 
-    if (actor?.userId && ALLOWED_ROLES.includes(actor.role)) {
+    const actorRole = normalizeRole(actor?.role);
+    if (actor?.userId && ALLOWED_ROLES.includes(actorRole)) {
       memberMap.set(normalizeId(actor.userId), {
         user: toObjectId(actor.userId),
-        role: actor.role,
+        role: actorRole,
         joinedAt: new Date(),
       });
     }
@@ -213,7 +221,7 @@ export class OperationChatService {
     const message = await ChatMessage.create({
       group: group._id,
       sender: userId,
-      senderRole: user.role,
+      senderRole: normalizeRole(user.role),
       content,
       sentAt: new Date(),
       readBy: [{ user: userId, readAt: new Date() }],
