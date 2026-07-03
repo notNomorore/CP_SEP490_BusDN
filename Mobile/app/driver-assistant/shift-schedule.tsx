@@ -88,12 +88,23 @@ export default function ShiftScheduleScreen() {
     return result;
   }, {}), [shifts]);
 
+  const ungroupedShifts = useMemo(() => (
+    shifts.filter((shift) => !weekDays.includes(formatDateKey(shift.workDate)))
+  ), [shifts, weekDays]);
+
   const weeklyStats = useMemo(() => ({
     totalHours: shifts.reduce((total, shift) => total + getShiftDurationHours(shift), 0),
     shiftCount: shifts.length,
     assignedCount: shifts.filter((shift) => assignedStatuses.has(String(shift.assignmentStatus || ''))).length,
     completedCount: shifts.filter((shift) => shift.assignmentStatus === 'COMPLETED').length,
   }), [shifts]);
+
+  const nextShift = useMemo(() => (
+    [...shifts].sort((left, right) => (
+      String(left.workDate || '').localeCompare(String(right.workDate || ''))
+      || String(left.startTime || '').localeCompare(String(right.startTime || ''))
+    ))[0] || null
+  ), [shifts]);
 
   const changeWeek = (offset: number) => {
     setRange(getWeekRange(addDays(range.from, offset * 7)));
@@ -144,6 +155,23 @@ export default function ShiftScheduleScreen() {
         </View>
       </View>
 
+      {nextShift ? (
+        <View style={styles.nextShiftCard}>
+          <View style={styles.nextShiftIcon}>
+            <MaterialCommunityIcons color={colors.white} name="calendar-clock" size={22} />
+          </View>
+          <View style={styles.nextShiftText}>
+            <Text style={styles.nextShiftLabel}>Next assigned shift</Text>
+            <Text numberOfLines={1} style={styles.nextShiftTitle}>
+              {formatDate(nextShift.workDate)} · {nextShift.startTime || 'N/A'} - {nextShift.endTime || 'N/A'}
+            </Text>
+            <Text numberOfLines={1} style={styles.nextShiftRoute}>
+              {nextShift.shiftName || 'Shift'} · {nextShift.route?.routeCode || nextShift.route?.routeName || 'No route'}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
       {isLoading ? (
         <View style={styles.loading}>
           <ActivityIndicator color={colors.primary} />
@@ -163,10 +191,12 @@ export default function ShiftScheduleScreen() {
           <View style={styles.calendarRow}>
             {weekDays.map((day) => {
               const isToday = day === toDateInput();
+              const hasShift = Boolean(shiftsByDate[day]?.length);
               return (
-                <View key={day} style={[styles.dayTile, isToday && styles.dayTileActive]}>
-                  <Text style={[styles.dayName, isToday && styles.dayTextActive]}>{formatDate(day).slice(0, 3).toUpperCase()}</Text>
-                  <Text style={[styles.dayNumber, isToday && styles.dayTextActive]}>{Number(day.slice(-2))}</Text>
+                <View key={day} style={[styles.dayTile, hasShift && styles.dayTileHasShift, isToday && styles.dayTileActive]}>
+                  <Text style={[styles.dayName, hasShift && styles.dayTextHasShift, isToday && styles.dayTextActive]}>{formatDate(day).slice(0, 3).toUpperCase()}</Text>
+                  <Text style={[styles.dayNumber, hasShift && styles.dayTextHasShift, isToday && styles.dayTextActive]}>{Number(day.slice(-2))}</Text>
+                  {hasShift ? <View style={[styles.shiftDot, isToday && styles.shiftDotActive]} /> : null}
                 </View>
               );
             })}
@@ -226,6 +256,23 @@ export default function ShiftScheduleScreen() {
                 </View>
               );
             })}
+            {ungroupedShifts.length ? (
+              <View style={styles.timelineGroup}>
+                <View style={styles.timelineDot} />
+                <View style={styles.timelineContent}>
+                  <Text style={styles.timelineDate}>Other assigned shifts</Text>
+                  {ungroupedShifts.map((shift) => (
+                    <View key={shift.id} style={styles.shiftRow}>
+                      <View>
+                        <Text style={styles.shiftRowTime}>{formatDate(shift.workDate)} · {shift.startTime || 'N/A'} - {shift.endTime || 'N/A'}</Text>
+                        <Text style={styles.shiftRowName}>{shift.shiftName || 'Shift'}</Text>
+                      </View>
+                      <Text style={styles.routeChip}>{shift.route?.routeCode || 'Route'}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
           </View>
         </>
       )}
@@ -250,6 +297,12 @@ const styles = StyleSheet.create({
   statLabel: { color: colors.muted, fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
   statValue: { marginTop: 8, color: colors.primary, fontSize: 22, fontWeight: '900' },
   statValueAccent: { marginTop: 8, color: colors.accent, fontSize: 22, fontWeight: '900' },
+  nextShiftCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18, borderRadius: 20, backgroundColor: colors.primary, padding: 14 },
+  nextShiftIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.14)' },
+  nextShiftText: { minWidth: 0, flex: 1 },
+  nextShiftLabel: { color: '#bfead5', fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
+  nextShiftTitle: { marginTop: 3, color: colors.white, fontSize: 15, fontWeight: '900' },
+  nextShiftRoute: { marginTop: 2, color: '#d4f2e5', fontSize: 12, fontWeight: '700' },
   loading: { minHeight: 260, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: colors.muted, fontWeight: '700' },
   emptyText: { borderRadius: 18, backgroundColor: colors.surfaceLow, padding: 16, color: colors.muted, fontSize: 13, fontWeight: '700' },
@@ -257,10 +310,14 @@ const styles = StyleSheet.create({
   retryText: { color: colors.white, fontSize: 13, fontWeight: '900' },
   calendarRow: { flexDirection: 'row', gap: 8, marginBottom: 24 },
   dayTile: { flex: 1, minHeight: 62, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: colors.surfaceLow },
+  dayTileHasShift: { backgroundColor: '#d4f2e5' },
   dayTileActive: { backgroundColor: colors.primary },
   dayName: { color: colors.muted, fontSize: 9, fontWeight: '900' },
   dayNumber: { marginTop: 3, color: colors.text, fontSize: 15, fontWeight: '900' },
+  dayTextHasShift: { color: colors.primary },
   dayTextActive: { color: colors.white },
+  shiftDot: { width: 5, height: 5, marginTop: 4, borderRadius: 3, backgroundColor: colors.accent },
+  shiftDotActive: { backgroundColor: colors.white },
   sectionTitle: { marginBottom: 12, color: colors.text, fontSize: 17, fontWeight: '900' },
   todaySection: { marginBottom: 24 },
   todayCard: { overflow: 'hidden', borderLeftWidth: 4, borderLeftColor: colors.primary, borderRadius: 22, backgroundColor: colors.card, padding: 18 },
