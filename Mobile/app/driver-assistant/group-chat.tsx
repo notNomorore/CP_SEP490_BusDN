@@ -49,6 +49,7 @@ export default function OperationGroupChatScreen() {
     () => groups.find((group) => group.id === selectedGroupId) || groups[0] || null,
     [groups, selectedGroupId],
   );
+  const currentUserId = String(user?.id || '');
 
   const loadGroups = useCallback(async () => {
     setIsLoadingGroups(true);
@@ -204,7 +205,7 @@ export default function OperationGroupChatScreen() {
                 {messages.length === 0 ? (
                   <Text style={styles.emptyText}>No messages yet. Start the operation discussion.</Text>
                 ) : messages.map((message) => {
-                  const mine = message.sender?.id === user?.id;
+                  const mine = String(message.sender?.id || '') === currentUserId;
                   const content = getMessageContent(message);
                   return (
                     <View key={message.id} style={[styles.messageBubble, mine ? styles.myMessage : styles.otherMessage]}>
