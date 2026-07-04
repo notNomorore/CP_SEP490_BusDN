@@ -16,8 +16,10 @@ router.post('/shifts/:shiftId/assign-vehicle', ShiftController.assignVehicleToSe
 router.post('/shifts/:shiftId/assign-trip', ShiftController.assignTripToSelectedShift);
 router.get('/shifts/:shiftId/assignments', ShiftController.listShiftAssignments);
 router.put('/shifts/:shiftId', ShiftController.updateShift);
+router.delete('/shifts', ShiftController.archiveShifts);
 router.delete('/shifts/:shiftId', ShiftController.archiveShift);
 router.get('/shift-assignments', ShiftController.listAssignments);
+router.get('/shift-audit-logs', ShiftController.listAuditLogs);
 router.post('/shift-assignments/drivers', ShiftController.assignDriver);
 router.post('/shift-assignments/vehicles', ShiftController.assignVehicle);
 router.post('/shift-assignments/trips', ShiftController.assignTrip);

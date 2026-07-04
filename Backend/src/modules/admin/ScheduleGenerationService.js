@@ -7,8 +7,18 @@ import DriverShiftAssignment from '../shifts/DriverShiftAssignment.js';
 import AssistantShiftAssignment from '../shifts/AssistantShiftAssignment.js';
 
 const ACTIVE_TRIP_STATUSES = ['PLANNED', 'ASSIGNED', 'IN_PROGRESS'];
+const ASSIGNABLE_BUS_STATUSES = ['ACTIVE', 'RESERVE'];
+const ASSIGNABLE_SHIFT_STATUSES = ['ACTIVE', 'APPROVED', 'PUBLISHED'];
 
 const normalizeDate = (value) => {
+  if (typeof value === 'string') {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      date.setHours(0, 0, 0, 0);
+      return date;
+    }
+  }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
   date.setHours(0, 0, 0, 0);
@@ -20,6 +30,13 @@ const addDays = (date, amount) => {
   next.setDate(next.getDate() + amount);
   next.setHours(0, 0, 0, 0);
   return next;
+};
+
+const dateBounds = (value) => {
+  const start = normalizeDate(value);
+  if (!start) return null;
+  const end = addDays(start, 1);
+  return { start, end };
 };
 
 const dateKey = (value) => {
@@ -103,6 +120,46 @@ const getOperationalDurationMinutes = (direction) => {
   return Math.min(80, Math.max(60, configuredDuration, urbanBusDuration));
 };
 
+const getMaxConcurrentRows = (rows) => {
+  const rowsByDate = new Map();
+  rows.forEach((row) => {
+    const start = toMinutes(row.departureTime);
+    const end = toMinutes(row.turnaroundEndTime || row.expectedArrivalTime);
+    if (start === null || end === null || end <= start) return;
+    const dayRows = rowsByDate.get(row.serviceDate) || [];
+    dayRows.push({ start, end });
+    rowsByDate.set(row.serviceDate, dayRows);
+  });
+
+  let maxConcurrent = 0;
+  rowsByDate.forEach((dayRows) => {
+    const events = dayRows
+      .flatMap((row) => [
+        { minute: row.start, delta: 1 },
+        { minute: row.end, delta: -1 },
+      ])
+      .sort((left, right) => left.minute - right.minute || left.delta - right.delta);
+    let running = 0;
+    events.forEach((event) => {
+      running += event.delta;
+      maxConcurrent = Math.max(maxConcurrent, running);
+    });
+  });
+  return maxConcurrent;
+};
+
+const buildPreviewSummary = (rows, vehicles, availableDriverIds, availableAssistantIds) => ({
+  totalTrips: rows.length,
+  assignedTrips: rows.filter((row) => row.vehicle?.busId && row.driver?.userId && row.assistant?.userId).length,
+  missingVehicles: rows.filter((row) => !row.vehicle?.busId).length,
+  missingDrivers: rows.filter((row) => !row.driver?.userId).length,
+  missingAssistants: rows.filter((row) => !row.assistant?.userId).length,
+  maxConcurrentTrips: getMaxConcurrentRows(rows),
+  assignableVehicles: vehicles.length,
+  availableDrivers: availableDriverIds.size,
+  availableAssistants: availableAssistantIds.size,
+});
+
 export default class ScheduleGenerationService {
   static async generatePreview(body) {
     const routeId = body.routeId;
@@ -135,21 +192,31 @@ export default class ScheduleGenerationService {
     }
 
     const [vehicles, drivers, assistants] = await Promise.all([
-      FleetBus.find({ status: { $in: ['ACTIVE', 'RESERVE', 'ASSIGNED'] } }).sort({ busCode: 1 }).lean(),
+      FleetBus.find({ status: { $in: ASSIGNABLE_BUS_STATUSES } }).sort({ busCode: 1 }).lean(),
       User.find({ role: 'DRIVER', status: 'ACTIVE' }).sort({ fullName: 1 }).lean(),
       User.find({ role: { $in: ['CONDUCTOR', 'BUS_ASSISTANT'] }, status: 'ACTIVE' }).sort({ fullName: 1 }).lean(),
     ]);
     const previewRows = [];
+    const availableDriverIds = new Set();
+    const availableAssistantIds = new Set();
 
     for (let date = new Date(startDate); date <= endDate; date = addDays(date, 1)) {
       if (route.scheduleConfig?.operatingDays?.length && !route.scheduleConfig.operatingDays.includes(weekdayToken(date))) continue;
       const dayStart = new Date(date);
       const dayEnd = addDays(date, 1);
       const existingSchedules = await TripSchedule.find({ serviceDate: { $gte: dayStart, $lt: dayEnd }, status: { $in: ACTIVE_TRIP_STATUSES } }).lean();
+      const bounds = dateBounds(date);
+      const workDateFilter = bounds ? { $gte: bounds.start, $lt: bounds.end } : date;
       const [driverAssignments, assistantAssignments] = await Promise.all([
-        DriverShiftAssignment.find({ workDate: date, status: { $in: ['ASSIGNED', 'IN_PROGRESS'] } }).populate('shiftId').lean(),
-        AssistantShiftAssignment.find({ workDate: date, status: { $in: ['ASSIGNED', 'IN_PROGRESS'] } }).populate('shiftId').lean(),
+        DriverShiftAssignment.find({ workDate: workDateFilter, status: { $in: ['ASSIGNED', 'IN_PROGRESS'] } }).populate('shiftId').lean(),
+        AssistantShiftAssignment.find({ workDate: workDateFilter, status: { $in: ['ASSIGNED', 'IN_PROGRESS'] } }).populate('shiftId').lean(),
       ]);
+      driverAssignments.forEach((assignment) => {
+        if (ASSIGNABLE_SHIFT_STATUSES.includes(assignment.shiftId?.status)) availableDriverIds.add(getId(assignment.driverId));
+      });
+      assistantAssignments.forEach((assignment) => {
+        if (ASSIGNABLE_SHIFT_STATUSES.includes(assignment.shiftId?.status)) availableAssistantIds.add(getId(assignment.assistantId));
+      });
 
       for (const direction of ['OUTBOUND', 'INBOUND']) {
         const routeDirection = direction === 'OUTBOUND' ? route.outboundRoute : route.inboundRoute;
@@ -161,16 +228,17 @@ export default class ScheduleGenerationService {
             departure += frequency;
             continue;
           }
-          const range = { start: departure, end: arrival + layover };
+          const tripRange = { start: departure, end: arrival };
+          const resourceRange = { start: departure, end: arrival + layover };
           const eligibleDrivers = drivers.filter((driver) => driverAssignments.some((assignment) => (
-            getId(assignment.driverId) === getId(driver) && assignment.shiftId?.status === 'ACTIVE' && isInsideShift(range, assignment.shiftId)
+            getId(assignment.driverId) === getId(driver) && ASSIGNABLE_SHIFT_STATUSES.includes(assignment.shiftId?.status) && isInsideShift(tripRange, assignment.shiftId)
           )));
           const eligibleAssistants = assistants.filter((assistant) => assistantAssignments.some((assignment) => (
-            getId(assignment.assistantId) === getId(assistant) && assignment.shiftId?.status === 'ACTIVE' && isInsideShift(range, assignment.shiftId)
+            getId(assignment.assistantId) === getId(assistant) && ASSIGNABLE_SHIFT_STATUSES.includes(assignment.shiftId?.status) && isInsideShift(tripRange, assignment.shiftId)
           )));
-          const vehicle = body.autoAssign !== false ? chooseResource(vehicles, existingSchedules, previewRows.filter((row) => row.serviceDate === dateKey(date)), 'vehicle', range) : null;
-          const driver = body.autoAssign !== false ? chooseResource(eligibleDrivers, existingSchedules, previewRows.filter((row) => row.serviceDate === dateKey(date)), 'driver', range) : null;
-          const assistant = body.autoAssign !== false ? chooseResource(eligibleAssistants, existingSchedules, previewRows.filter((row) => row.serviceDate === dateKey(date)), 'assistant', range) : null;
+          const vehicle = body.autoAssign !== false ? chooseResource(vehicles, existingSchedules, previewRows.filter((row) => row.serviceDate === dateKey(date)), 'vehicle', resourceRange) : null;
+          const driver = body.autoAssign !== false ? chooseResource(eligibleDrivers, existingSchedules, previewRows.filter((row) => row.serviceDate === dateKey(date)), 'driver', resourceRange) : null;
+          const assistant = body.autoAssign !== false ? chooseResource(eligibleAssistants, existingSchedules, previewRows.filter((row) => row.serviceDate === dateKey(date)), 'assistant', resourceRange) : null;
           const warnings = [];
           if (body.autoAssign !== false && !vehicle) warnings.push('Chưa tìm được xe phù hợp.');
           if (body.autoAssign !== false && !driver) warnings.push('Chưa tìm được tài xế có ca làm phù hợp.');
@@ -206,6 +274,7 @@ export default class ScheduleGenerationService {
         scheduleConfig: route.scheduleConfig,
       },
       rows: previewRows,
+      summary: buildPreviewSummary(previewRows, vehicles, availableDriverIds, availableAssistantIds),
     };
   }
 
@@ -254,6 +323,48 @@ export default class ScheduleGenerationService {
       }
       if (first === null || last === null || row.range.start < first || row.range.start > last) {
         throw Object.assign(new Error(`Lịch ${row.scheduleCode} nằm ngoài khung giờ cấu hình tuyến.`), { statusCode: 400 });
+      }
+    }
+    const incompleteRow = normalizedRows.find((row) => !row.vehicle?.busId || !row.driver?.userId || !row.assistant?.userId);
+    if (incompleteRow) {
+      throw Object.assign(new Error(`Lịch ${incompleteRow.scheduleCode} chưa đủ xe, tài xế hoặc phụ xe nên không thể lưu thành lịch chạy.`), { statusCode: 409 });
+    }
+    for (const row of normalizedRows) {
+      const bounds = dateBounds(row.serviceDate);
+      const workDateFilter = bounds ? { $gte: bounds.start, $lt: bounds.end } : row.serviceDate;
+      if (row.vehicle?.busId) {
+        const bus = await FleetBus.findOne({ _id: row.vehicle.busId, status: { $in: ASSIGNABLE_BUS_STATUSES } }).lean();
+        if (!bus) {
+          throw Object.assign(new Error(`Xe của lịch ${row.scheduleCode} không khả dụng để khai thác.`), { statusCode: 409 });
+        }
+      }
+      if (row.driver?.userId) {
+        const driverAssignments = await DriverShiftAssignment.find({
+          driverId: row.driver.userId,
+          workDate: workDateFilter,
+          status: { $in: ['ASSIGNED', 'IN_PROGRESS'] },
+        }).populate('shiftId').lean();
+        const hasDriverShift = driverAssignments.some((assignment) => (
+          ASSIGNABLE_SHIFT_STATUSES.includes(assignment.shiftId?.status)
+          && isInsideShift({ start: toMinutes(row.departureTime), end: toMinutes(row.expectedArrivalTime) }, assignment.shiftId)
+        ));
+        if (!hasDriverShift) {
+          throw Object.assign(new Error(`Tài xế của lịch ${row.scheduleCode} không có ca làm phù hợp.`), { statusCode: 409 });
+        }
+      }
+      if (row.assistant?.userId) {
+        const assistantAssignments = await AssistantShiftAssignment.find({
+          assistantId: row.assistant.userId,
+          workDate: workDateFilter,
+          status: { $in: ['ASSIGNED', 'IN_PROGRESS'] },
+        }).populate('shiftId').lean();
+        const hasAssistantShift = assistantAssignments.some((assignment) => (
+          ASSIGNABLE_SHIFT_STATUSES.includes(assignment.shiftId?.status)
+          && isInsideShift({ start: toMinutes(row.departureTime), end: toMinutes(row.expectedArrivalTime) }, assignment.shiftId)
+        ));
+        if (!hasAssistantShift) {
+          throw Object.assign(new Error(`Phụ xe của lịch ${row.scheduleCode} không có ca làm phù hợp.`), { statusCode: 409 });
+        }
       }
     }
     const dates = normalizedRows.map((row) => row.serviceDate);
