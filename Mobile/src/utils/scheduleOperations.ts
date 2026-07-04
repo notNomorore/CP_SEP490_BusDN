@@ -1,7 +1,22 @@
 import type { AssignedTrip, ShiftSchedule } from '@/types/scheduleOperations';
 
+const dateOnlyPattern = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+export const parseScheduleDate = (value: Date | string = new Date()) => {
+  if (value instanceof Date) return new Date(value);
+
+  const text = String(value || '').trim();
+  const match = dateOnlyPattern.exec(text);
+  if (match) {
+    const [, year, month, day] = match;
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  }
+
+  return new Date(text);
+};
+
 export const toDateInput = (value: Date | string = new Date()) => {
-  const date = typeof value === 'string' ? new Date(value) : value;
+  const date = parseScheduleDate(value);
   const year = date.getFullYear();
   const month = `${date.getMonth() + 1}`.padStart(2, '0');
   const day = `${date.getDate()}`.padStart(2, '0');
@@ -9,7 +24,7 @@ export const toDateInput = (value: Date | string = new Date()) => {
 };
 
 export const addDays = (value: Date | string, days: number) => {
-  const date = typeof value === 'string' ? new Date(value) : new Date(value);
+  const date = parseScheduleDate(value);
   date.setDate(date.getDate() + days);
   return date;
 };
@@ -19,8 +34,8 @@ export const getTodayRange = () => {
   return { from: today, to: today };
 };
 
-export const getWeekRange = () => {
-  const today = new Date();
+export const getWeekRange = (anchor: Date | string = new Date()) => {
+  const today = parseScheduleDate(anchor);
   const day = today.getDay();
   const diffToMonday = day === 0 ? -6 : 1 - day;
   const monday = addDays(today, diffToMonday);
@@ -39,7 +54,7 @@ export const formatTime = (value?: string | null) => {
 
 export const formatDate = (value?: string | null) => {
   if (!value) return 'N/A';
-  const date = new Date(value);
+  const date = parseScheduleDate(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat('en', { weekday: 'short', month: 'short', day: '2-digit' }).format(date);
 };
