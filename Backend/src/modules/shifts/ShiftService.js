@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+﻿import mongoose from 'mongoose';
 import User from '../auth/User.js';
 import FleetBus from '../admin/FleetBus.js';
 import TripSchedule from '../admin/TripSchedule.js';
@@ -7,12 +7,14 @@ import DriverShiftAssignment from './DriverShiftAssignment.js';
 import AssistantShiftAssignment from './AssistantShiftAssignment.js';
 import VehicleShiftAssignment from './VehicleShiftAssignment.js';
 import TripShiftAssignment from './TripShiftAssignment.js';
+import ShiftAuditLog from './ShiftAuditLog.js';
 
-const SHIFT_STATUSES = new Set(['ACTIVE', 'INACTIVE', 'ARCHIVED']);
-const SHIFT_TYPES = new Set(['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT', 'FULL_DAY', 'CUSTOM']);
+const SHIFT_STATUSES = new Set(['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PUBLISHED', 'ACTIVE', 'INACTIVE', 'IN_PROGRESS', 'COMPLETED', 'ABSENT', 'CANCELLED', 'ARCHIVED', 'SUMMARY_SUBMITTED']);
+const SHIFT_TYPES = new Set(['MORNING', 'AFTERNOON']);
 const ASSIGNMENT_STATUSES = new Set(['ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']);
 const BLOCKING_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'];
 const ACTIVE_TRIP_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS'];
+const CLOSED_SHIFT_STATUSES = ['ARCHIVED', 'CANCELLED', 'COMPLETED', 'ABSENT'];
 const MAX_DRIVER_MINUTES_PER_DAY = 8 * 60;
 const OPERATING_START_MINUTES = (5 * 60) + 30;
 const OPERATING_END_MINUTES = (18 * 60) + 30;
@@ -52,16 +54,31 @@ const toMinutes = (value) => {
   return (hours * 60) + minutes;
 };
 
+const buildPlannedDateTimes = ({ workDate, startTime, endTime }) => {
+  const dateOnly = normalizeDateOnly(workDate);
+  const start = toMinutes(startTime);
+  const end = toMinutes(endTime);
+  if (!dateOnly || start === null || end === null) {
+    return { plannedStartDateTime: null, plannedEndDateTime: null, durationMinutes: 0 };
+  }
+  const plannedStartDateTime = new Date(dateOnly);
+  plannedStartDateTime.setMinutes(start);
+  const plannedEndDateTime = new Date(dateOnly);
+  plannedEndDateTime.setMinutes(end);
+  if (end <= start) plannedEndDateTime.setDate(plannedEndDateTime.getDate() + 1);
+  return {
+    plannedStartDateTime,
+    plannedEndDateTime,
+    durationMinutes: Math.max(0, Math.round((plannedEndDateTime - plannedStartDateTime) / 60000)),
+  };
+};
+
 const clockToken = (value) => String(value || '').replace(':', '') || '0000';
 
 const generatedShiftName = ({ shiftType, startTime, endTime }) => {
   const label = {
     MORNING: 'Ca sáng',
     AFTERNOON: 'Ca chiều',
-    EVENING: 'Ca tối',
-    NIGHT: 'Ca đêm',
-    FULL_DAY: 'Ca cả ngày',
-    CUSTOM: 'Ca làm việc',
   }[String(shiftType || '').toUpperCase()] || 'Ca làm việc';
   return `${label} ${startTime || '--:--'}-${endTime || '--:--'}`;
 };
@@ -93,7 +110,11 @@ const normalizeShiftPayload = (body = {}, actorId) => {
   const startTime = String(body.startTime || '').trim();
   const endTime = String(body.endTime || '').trim();
   const workDate = normalizeDateOnly(body.workDate || body.date);
-  const shiftType = SHIFT_TYPES.has(String(body.shiftType || '').toUpperCase()) ? String(body.shiftType).toUpperCase() : 'CUSTOM';
+  const requestedShiftType = String(body.shiftType || 'MORNING').toUpperCase();
+  const shiftType = requestedShiftType;
+  const planned = buildPlannedDateTimes({ workDate, startTime, endTime });
+  const requestedStatus = String(body.status || '').toUpperCase();
+  const status = SHIFT_STATUSES.has(requestedStatus) ? requestedStatus : 'DRAFT';
   const datePart = workDate ? toDateToken(workDate).slice(2) : Date.now().toString(36);
   const generatedCode = `SHIFT-${datePart}-${clockToken(startTime)}-${clockToken(endTime)}-${shiftType}`;
 
@@ -104,9 +125,15 @@ const normalizeShiftPayload = (body = {}, actorId) => {
     workDate,
     startTime,
     endTime,
+    plannedStartDateTime: body.plannedStartDateTime ? new Date(body.plannedStartDateTime) : planned.plannedStartDateTime,
+    plannedEndDateTime: body.plannedEndDateTime ? new Date(body.plannedEndDateTime) : planned.plannedEndDateTime,
+    actualStartDateTime: body.actualStartDateTime ? new Date(body.actualStartDateTime) : undefined,
+    actualEndDateTime: body.actualEndDateTime ? new Date(body.actualEndDateTime) : undefined,
     breakMinutes: Number(body.breakMinutes || 0),
     shiftType,
-    status: SHIFT_STATUSES.has(String(body.status || '').toUpperCase()) ? String(body.status).toUpperCase() : 'ACTIVE',
+    status,
+    approvalStatus: body.approvalStatus || (status === 'DRAFT' ? 'DRAFT' : undefined),
+    requiresAssistant: body.requiresAssistant !== false,
     description: String(body.description || '').trim(),
     updatedBy: actorId,
   };
@@ -116,19 +143,21 @@ const validateShiftPayload = (payload) => {
   const errors = [];
   const startMinutes = toMinutes(payload.startTime);
   const endMinutes = toMinutes(payload.endTime);
+  const planned = buildPlannedDateTimes(payload);
 
   if (!payload.shiftCode) errors.push('Ma ca la bat buoc.');
   if (!payload.workDate) errors.push('Ngay lam viec la bat buoc.');
   if (!payload.shiftName) errors.push('Tên ca là bắt buộc.');
   if (startMinutes === null) errors.push('Giờ bắt đầu là bắt buộc.');
   if (endMinutes === null) errors.push('Giờ kết thúc là bắt buộc.');
+  if (!SHIFT_TYPES.has(payload.shiftType)) errors.push('Hệ thống chỉ hỗ trợ ca sáng và ca chiều.');
   if (startMinutes !== null && endMinutes !== null) {
-    if (startMinutes >= endMinutes) errors.push('Gio ket thuc phai lon hon gio bat dau.');
+    if (startMinutes >= endMinutes) errors.push('Giờ kết thúc phải lớn hơn giờ bắt đầu.');
     if (startMinutes < OPERATING_START_MINUTES || endMinutes > OPERATING_END_MINUTES) {
-      errors.push('Ca lam chi duoc nam trong khung van hanh 05:30 - 18:30.');
+      errors.push('Ca làm chỉ được nằm trong khung vận hành 05:30 - 18:30.');
     }
-    if (endMinutes - startMinutes > MAX_DRIVER_MINUTES_PER_DAY) {
-      errors.push('Moi ca khong duoc vuot qua 8 gio lam viec.');
+    if (planned.durationMinutes > MAX_DRIVER_MINUTES_PER_DAY) {
+      errors.push('Mỗi ca không được vượt quá 8 giờ làm việc.');
     }
   }
   if (!Number.isFinite(payload.breakMinutes) || payload.breakMinutes < 0) {
@@ -138,6 +167,22 @@ const validateShiftPayload = (payload) => {
   return errors;
 };
 
+const logShiftAudit = async ({ shiftId, action, oldValue = null, newValue = null, changedBy, reason = '' }) => {
+  if (!shiftId) return;
+  try {
+    await ShiftAuditLog.create({
+      entityId: shiftId,
+      action,
+      oldValue,
+      newValue,
+      changedBy,
+      reason,
+    });
+  } catch {
+    // Audit logging must not block the operational shift workflow.
+  }
+};
+
 const ensureShift = async (shiftId) => {
   if (!isValidObjectId(shiftId)) return null;
   return Shift.findById(shiftId).lean();
@@ -145,17 +190,18 @@ const ensureShift = async (shiftId) => {
 
 const ensureActiveShift = async (shiftId) => {
   const shift = await ensureShift(shiftId);
-  if (!shift || shift.status !== 'ACTIVE') {
+  if (!shift || CLOSED_SHIFT_STATUSES.includes(shift.status)) {
     throw Object.assign(new Error('Khong tim thay ca lam viec.'), { statusCode: 404 });
   }
   return shift;
 };
 
-const findOverlappingAssignment = async ({ model, resourceField, resourceId, workDate, shift }) => {
+const findOverlappingAssignment = async ({ model, resourceField, resourceId, workDate, shift, excludeShiftId }) => {
   const assignments = await model.find({
     [resourceField]: resourceId,
     workDate,
     status: { $in: BLOCKING_ASSIGNMENT_STATUSES },
+    ...(excludeShiftId ? { shiftId: { $ne: excludeShiftId } } : {}),
   }).lean();
 
   if (!assignments.length) return null;
@@ -215,6 +261,77 @@ const getTotalAssignedMinutesForAssistant = async ({ assistantId, workDate, excl
   return shifts.reduce((total, assignedShift) => total + getShiftDurationMinutes(assignedShift), 0);
 };
 
+const assertAssignedResourcesStillFitShift = async (shift) => {
+  if (!shift?._id || CLOSED_SHIFT_STATUSES.includes(shift.status)) return;
+  const workDate = normalizeDateOnly(shift.workDate);
+  if (!workDate) return;
+
+  const [driverAssignment, assistantAssignment, vehicleAssignment, tripAssignments] = await Promise.all([
+    getAssignedDriver(shift._id),
+    getAssignedAssistant(shift._id),
+    getAssignedVehicle(shift._id),
+    TripShiftAssignment.find({
+      shiftId: shift._id,
+      status: { $in: ACTIVE_TRIP_ASSIGNMENT_STATUSES },
+    }).populate('tripId', 'scheduleCode departureTime expectedArrivalTime').lean(),
+  ]);
+
+  if (driverAssignment) {
+    const driverId = driverAssignment.driverId?._id || driverAssignment.driverId;
+    const conflict = await findOverlappingAssignment({
+      model: DriverShiftAssignment,
+      resourceField: 'driverId',
+      resourceId: driverId,
+      workDate,
+      shift,
+      excludeShiftId: shift._id,
+    });
+    if (conflict) throw Object.assign(new Error('Tai xe dang duoc phan cong ca khac trung thoi gian.'), { statusCode: 409 });
+    const assignedMinutes = await getTotalAssignedMinutesForDriver({ driverId, workDate, excludeShiftId: shift._id });
+    if (assignedMinutes + getShiftDurationMinutes(shift) > MAX_DRIVER_MINUTES_PER_DAY) {
+      throw Object.assign(new Error('Tai xe vuot qua so gio lam toi da trong ngay.'), { statusCode: 409 });
+    }
+  }
+
+  if (assistantAssignment) {
+    const assistantId = assistantAssignment.assistantId?._id || assistantAssignment.assistantId;
+    const conflict = await findOverlappingAssignment({
+      model: AssistantShiftAssignment,
+      resourceField: 'assistantId',
+      resourceId: assistantId,
+      workDate,
+      shift,
+      excludeShiftId: shift._id,
+    });
+    if (conflict) throw Object.assign(new Error('Phu xe dang duoc phan cong ca khac trung thoi gian.'), { statusCode: 409 });
+    const assignedMinutes = await getTotalAssignedMinutesForAssistant({ assistantId, workDate, excludeShiftId: shift._id });
+    if (assignedMinutes + getShiftDurationMinutes(shift) > MAX_DRIVER_MINUTES_PER_DAY) {
+      throw Object.assign(new Error('Phu xe vuot qua so gio lam toi da trong ngay.'), { statusCode: 409 });
+    }
+  }
+
+  if (vehicleAssignment) {
+    const vehicleId = vehicleAssignment.vehicleId?._id || vehicleAssignment.vehicleId;
+    const conflict = await findOverlappingAssignment({
+      model: VehicleShiftAssignment,
+      resourceField: 'vehicleId',
+      resourceId: vehicleId,
+      workDate,
+      shift,
+      excludeShiftId: shift._id,
+    });
+    if (conflict) throw Object.assign(new Error('Xe dang duoc phan cong ca khac trung thoi gian.'), { statusCode: 409 });
+  }
+
+  const outOfRangeTrip = tripAssignments.find((assignment) => {
+    const trip = assignment.tripId;
+    return trip && (!isTimeInsideShift(trip.departureTime, shift) || !isTimeInsideShift(trip.expectedArrivalTime, shift));
+  });
+  if (outOfRangeTrip) {
+    throw Object.assign(new Error(`Chuyen ${outOfRangeTrip.tripId.scheduleCode || ''} khong nam trong khoang thoi gian cua ca.`), { statusCode: 409 });
+  }
+};
+
 const hasLeaveConflict = (driver, workDate) => {
   const leaveRanges = [
     ...(Array.isArray(driver.staffAvailability?.leaveRequests) ? driver.staffAvailability.leaveRequests : []),
@@ -265,44 +382,78 @@ const isRemovedAutoShiftTemplate = (shift) => {
   ));
 };
 
+const buildShiftFilters = (query = {}) => {
+  const filters = {};
+  const startDate = normalizeDateOnly(query.from || query.startDate);
+  const endDate = normalizeDateOnly(query.to || query.endDate);
+  const workDate = normalizeDateOnly(query.date || query.workDate);
+  if (startDate || endDate) {
+    filters.workDate = {};
+    if (startDate) filters.workDate.$gte = startDate;
+    if (endDate) filters.workDate.$lte = endDate;
+  } else if (workDate) {
+    filters.workDate = workDate;
+  }
+  if (query.status && query.status !== 'ALL') {
+    filters.status = query.status;
+  } else {
+    filters.status = { $ne: 'ARCHIVED' };
+  }
+  if (query.search?.trim()) {
+    const searchRegex = new RegExp(String(query.search).trim().replace(/[|\\{}()[\]^$+*?.]/g, '\\$&'), 'i');
+    filters.$or = [{ shiftCode: searchRegex }, { shiftName: searchRegex }, { shiftType: searchRegex }];
+  }
+  return filters;
+};
+
 export default class ShiftService {
   static normalizeShiftPayload = normalizeShiftPayload;
 
   static validateShiftPayload = validateShiftPayload;
 
   static async listShifts(query = {}) {
-    const filters = {};
-    const startDate = normalizeDateOnly(query.from || query.startDate);
-    const endDate = normalizeDateOnly(query.to || query.endDate);
-    const workDate = normalizeDateOnly(query.date || query.workDate);
-    if (startDate || endDate) {
-      filters.workDate = {};
-      if (startDate) filters.workDate.$gte = startDate;
-      if (endDate) filters.workDate.$lte = endDate;
-    } else if (workDate) {
-      filters.workDate = workDate;
-    }
-    if (query.status && query.status !== 'ALL') {
-      filters.status = query.status;
-    } else {
-      filters.status = { $ne: 'ARCHIVED' };
-    }
-    if (query.search?.trim()) {
-      const searchRegex = new RegExp(String(query.search).trim().replace(/[|\\{}()[\]^$+*?.]/g, '\\$&'), 'i');
-      filters.$or = [{ shiftCode: searchRegex }, { shiftName: searchRegex }, { shiftType: searchRegex }];
-    }
+    const filters = buildShiftFilters(query);
     return Shift.find(filters).sort({ workDate: 1, startTime: 1, shiftName: 1 }).lean();
   }
 
   static async createShift(payload) {
     const shift = new Shift(payload);
     await shift.save();
+    await logShiftAudit({
+      shiftId: shift._id,
+      action: 'CREATE',
+      newValue: shift.toObject(),
+      changedBy: payload.createdBy || payload.updatedBy,
+      reason: payload.description || '',
+    });
     return shift.toObject();
   }
 
   static async updateShift(shiftId, payload) {
     if (!isValidObjectId(shiftId)) return null;
-    return Shift.findByIdAndUpdate(shiftId, { $set: payload }, { new: true, runValidators: true }).lean();
+    const originalShift = await Shift.findById(shiftId).lean();
+    if (!originalShift) return null;
+
+    const nextShift = {
+      ...originalShift,
+      ...payload,
+      _id: originalShift._id,
+      workDate: payload.workDate || originalShift.workDate,
+    };
+    await assertAssignedResourcesStillFitShift(nextShift);
+
+    const updated = await Shift.findByIdAndUpdate(shiftId, { $set: payload }, { new: true, runValidators: true }).lean();
+    if (updated) {
+      await logShiftAudit({
+        shiftId,
+        action: 'UPDATE',
+        oldValue: originalShift,
+        newValue: updated,
+        changedBy: payload.updatedBy,
+        reason: payload.description || '',
+      });
+    }
+    return updated;
   }
 
   static async deactivateShift(shiftId, actorId) {
@@ -331,14 +482,86 @@ export default class ShiftService {
           { $set: { status: 'CANCELLED', updatedBy: actorId } }
         ),
       ]);
+      await logShiftAudit({
+        shiftId,
+        action: 'CANCEL',
+        oldValue: null,
+        newValue: shift,
+        changedBy: actorId,
+        reason: 'Huy ca lam',
+      });
     }
     return shift;
   }
 
+  static async listAuditLogs(query = {}) {
+    const filters = {};
+    if (query.shiftId && isValidObjectId(query.shiftId)) filters.entityId = query.shiftId;
+    return ShiftAuditLog.find(filters).sort({ changedAt: -1 }).limit(200).lean();
+  }
+
+  static async deactivateShifts(query = {}, actorId) {
+    const filters = buildShiftFilters(query);
+    const shifts = await Shift.find(filters).select('_id').lean();
+    const shiftIds = shifts.map((shift) => shift._id);
+    if (!shiftIds.length) {
+      return {
+        archivedShifts: 0,
+        cancelledAssignments: {
+          drivers: 0,
+          assistants: 0,
+          vehicles: 0,
+          trips: 0,
+        },
+      };
+    }
+
+    const [shiftResult, driverResult, assistantResult, vehicleResult, tripResult] = await Promise.all([
+      Shift.updateMany(
+        { _id: { $in: shiftIds } },
+        { $set: { status: 'ARCHIVED', updatedBy: actorId } }
+      ),
+      DriverShiftAssignment.updateMany(
+        { shiftId: { $in: shiftIds }, status: { $in: ['ASSIGNED', 'IN_PROGRESS'] } },
+        { $set: { status: 'CANCELLED', updatedBy: actorId } }
+      ),
+      AssistantShiftAssignment.updateMany(
+        { shiftId: { $in: shiftIds }, status: { $in: ['ASSIGNED', 'IN_PROGRESS'] } },
+        { $set: { status: 'CANCELLED', updatedBy: actorId } }
+      ),
+      VehicleShiftAssignment.updateMany(
+        { shiftId: { $in: shiftIds }, status: { $in: ['ASSIGNED', 'IN_PROGRESS'] } },
+        { $set: { status: 'CANCELLED', updatedBy: actorId } }
+      ),
+      TripShiftAssignment.updateMany(
+        { shiftId: { $in: shiftIds }, status: { $in: ['ASSIGNED', 'IN_PROGRESS'] } },
+        { $set: { status: 'CANCELLED', updatedBy: actorId } }
+      ),
+    ]);
+
+    return {
+      archivedShifts: shiftResult.modifiedCount || 0,
+      cancelledAssignments: {
+        drivers: driverResult.modifiedCount || 0,
+        assistants: assistantResult.modifiedCount || 0,
+        vehicles: vehicleResult.modifiedCount || 0,
+        trips: tripResult.modifiedCount || 0,
+      },
+    };
+  }
+
   static async listAssignments(query = {}) {
     const workDate = normalizeDateOnly(query.workDate);
+    const startDate = normalizeDateOnly(query.from || query.startDate);
+    const endDate = normalizeDateOnly(query.to || query.endDate);
     const baseFilter = {};
-    if (workDate) baseFilter.workDate = workDate;
+    if (startDate || endDate) {
+      baseFilter.workDate = {};
+      if (startDate) baseFilter.workDate.$gte = startDate;
+      if (endDate) baseFilter.workDate.$lte = endDate;
+    } else if (workDate) {
+      baseFilter.workDate = workDate;
+    }
     if (query.shiftId && isValidObjectId(query.shiftId)) baseFilter.shiftId = query.shiftId;
 
     const [driverAssignments, assistantAssignments, vehicleAssignments, tripAssignments] = await Promise.all([
@@ -366,7 +589,7 @@ export default class ShiftService {
       ensureShift(shiftId),
     ]);
     if (!driver) throw Object.assign(new Error('Không tìm thấy tài xế.'), { statusCode: 404 });
-    if (!shift || shift.status !== 'ACTIVE') throw Object.assign(new Error('Không tìm thấy ca làm việc.'), { statusCode: 404 });
+    if (!shift || CLOSED_SHIFT_STATUSES.includes(shift.status)) throw Object.assign(new Error('Không tìm thấy ca làm việc.'), { statusCode: 404 });
     if (hasLeaveConflict(driver, dateOnly)) {
       throw Object.assign(new Error('Tài xế đang nghỉ phép.'), { statusCode: 409 });
     }
@@ -377,6 +600,7 @@ export default class ShiftService {
       resourceId: driverId,
       workDate: dateOnly,
       shift,
+      excludeShiftId: shiftId,
     });
     if (conflict) {
       throw Object.assign(new Error('Tài xế đã có ca khác trong khoảng thời gian này.'), { statusCode: 409 });
@@ -411,7 +635,7 @@ export default class ShiftService {
     if (!vehicle) throw Object.assign(new Error('Không tìm thấy xe.'), { statusCode: 404 });
     if (vehicle.status === 'MAINTENANCE') throw Object.assign(new Error('Xe đang bảo trì.'), { statusCode: 409 });
     if (vehicle.status === 'INACTIVE') throw Object.assign(new Error('Xe không hoạt động.'), { statusCode: 409 });
-    if (!shift || shift.status !== 'ACTIVE') throw Object.assign(new Error('Không tìm thấy ca làm việc.'), { statusCode: 404 });
+    if (!shift || CLOSED_SHIFT_STATUSES.includes(shift.status)) throw Object.assign(new Error('Không tìm thấy ca làm việc.'), { statusCode: 404 });
 
     const conflict = await findOverlappingAssignment({
       model: VehicleShiftAssignment,
@@ -419,6 +643,7 @@ export default class ShiftService {
       resourceId: vehicleId,
       workDate: dateOnly,
       shift,
+      excludeShiftId: shiftId,
     });
     if (conflict) {
       throw Object.assign(new Error('Xe đã được phân công trong khoảng thời gian này.'), { statusCode: 409 });
@@ -449,7 +674,7 @@ export default class ShiftService {
     ]);
 
     if (!trip) throw Object.assign(new Error('Không tìm thấy chuyến.'), { statusCode: 404 });
-    if (!shift || shift.status !== 'ACTIVE') throw Object.assign(new Error('Không tìm thấy ca làm việc.'), { statusCode: 404 });
+    if (!shift || CLOSED_SHIFT_STATUSES.includes(shift.status)) throw Object.assign(new Error('Không tìm thấy ca làm việc.'), { statusCode: 404 });
     if (driverId && !driver) throw Object.assign(new Error('Không tìm thấy tài xế.'), { statusCode: 404 });
     if (vehicleId && !vehicle) throw Object.assign(new Error('Không tìm thấy xe.'), { statusCode: 404 });
     if (vehicle?.status === 'MAINTENANCE') throw Object.assign(new Error('Xe đang bảo trì.'), { statusCode: 409 });
@@ -504,9 +729,8 @@ export default class ShiftService {
     if (hasLeaveConflict(driver, workDate)) throw Object.assign(new Error('Tai xe dang nghi phep.'), { statusCode: 409 });
 
     const existingForShift = await getAssignedDriver(shiftId);
-    if (existingForShift && String(existingForShift.driverId?._id || existingForShift.driverId) === String(driverId)) {
-      return existingForShift;
-    }
+    const sameDriverAlreadyAssigned = existingForShift
+      && String(existingForShift.driverId?._id || existingForShift.driverId) === String(driverId);
 
     const conflict = await findOverlappingAssignment({
       model: DriverShiftAssignment,
@@ -514,12 +738,17 @@ export default class ShiftService {
       resourceId: driverId,
       workDate,
       shift,
+      excludeShiftId: shiftId,
     });
     if (conflict) throw Object.assign(new Error('Tai xe da co ca khac trung thoi gian.'), { statusCode: 409 });
 
     const assignedMinutes = await getTotalAssignedMinutesForDriver({ driverId, workDate, excludeShiftId: shiftId });
     if (assignedMinutes + getShiftDurationMinutes(shift) > MAX_DRIVER_MINUTES_PER_DAY) {
       throw Object.assign(new Error('Tai xe vuot qua so gio lam toi da trong ngay.'), { statusCode: 409 });
+    }
+
+    if (sameDriverAlreadyAssigned) {
+      return existingForShift;
     }
 
     const assignment = new DriverShiftAssignment({
@@ -552,9 +781,8 @@ export default class ShiftService {
     if (hasLeaveConflict(assistant, workDate)) throw Object.assign(new Error('Phu xe dang nghi phep.'), { statusCode: 409 });
 
     const existingForShift = await getAssignedAssistant(shiftId);
-    if (existingForShift && String(existingForShift.assistantId?._id || existingForShift.assistantId) === String(assistantId)) {
-      return existingForShift;
-    }
+    const sameAssistantAlreadyAssigned = existingForShift
+      && String(existingForShift.assistantId?._id || existingForShift.assistantId) === String(assistantId);
 
     const conflict = await findOverlappingAssignment({
       model: AssistantShiftAssignment,
@@ -562,12 +790,17 @@ export default class ShiftService {
       resourceId: assistantId,
       workDate,
       shift,
+      excludeShiftId: shiftId,
     });
     if (conflict) throw Object.assign(new Error('Phu xe da co ca khac trung thoi gian.'), { statusCode: 409 });
 
     const assignedMinutes = await getTotalAssignedMinutesForAssistant({ assistantId, workDate, excludeShiftId: shiftId });
     if (assignedMinutes + getShiftDurationMinutes(shift) > MAX_DRIVER_MINUTES_PER_DAY) {
       throw Object.assign(new Error('Phu xe vuot qua so gio lam toi da trong ngay.'), { statusCode: 409 });
+    }
+
+    if (sameAssistantAlreadyAssigned) {
+      return existingForShift;
     }
 
     const assignment = new AssistantShiftAssignment({
@@ -608,6 +841,7 @@ export default class ShiftService {
       resourceId: vehicleId,
       workDate,
       shift,
+      excludeShiftId: shiftId,
     });
     if (conflict) throw Object.assign(new Error('Xe da duoc phan cong trong khoang thoi gian nay.'), { statusCode: 409 });
 

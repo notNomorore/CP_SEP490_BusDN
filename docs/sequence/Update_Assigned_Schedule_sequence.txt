@@ -1,0 +1,88 @@
+﻿@startuml
+title Update Assigned Schedule - Sequence Diagram
+
+hide footbox
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+actor Admin
+participant "Admin Web App" as Web
+participant "AdminController" as ScheduleController
+participant "AdminModel" as ScheduleRepository
+database "TripSchedule Collection" as ScheduleDB
+database "FleetBus Collection" as VehicleDB
+database "DriverShiftAssignment Collection" as DriverAssignDB
+database "AssistantShiftAssignment Collection" as AssistantAssignDB
+
+Admin -> Web: 1: Save assigned schedule changes
+activate Web
+Web -> ScheduleController: 1.1: PUT /api/admin/trip-schedules/:scheduleId
+activate ScheduleController
+ScheduleController -> ScheduleRepository: 1.2: findTripScheduleById(scheduleId)
+activate ScheduleRepository
+ScheduleRepository -> ScheduleDB: 1.2.1: find schedule
+activate ScheduleDB
+ScheduleDB --> ScheduleRepository: 1.2.2: current schedule or null
+deactivate ScheduleDB
+ScheduleRepository --> ScheduleController: 1.3: current schedule
+deactivate ScheduleRepository
+alt [schedule not found]
+    ScheduleController --> Web: 1.4.1: 404 Trip schedule not found
+else [completed or cancelled schedule]
+    ScheduleController --> Web: 1.4.2: 409 schedule cannot be edited
+else [schedule editable]
+    ScheduleController -> ScheduleController: 1.5: normalize and validate updated schedule payload
+    alt [validation failed]
+        ScheduleController --> Web: 1.6.1: 400 Trip schedule validation failed
+    else [validation passed]
+        opt [vehicle selected]
+            ScheduleController -> ScheduleRepository: 1.7.1: findBuses and verify vehicle status
+            activate ScheduleRepository
+            ScheduleRepository -> VehicleDB: 1.7.2: find vehicles
+            activate VehicleDB
+            VehicleDB --> ScheduleRepository: 1.7.3: vehicle list
+            deactivate VehicleDB
+            ScheduleRepository --> ScheduleController: 1.7.4: vehicle availability
+            deactivate ScheduleRepository
+        end
+        ScheduleController -> ScheduleRepository: 1.8: findEligibleDriverShiftAssignment and findEligibleAssistantShiftAssignment
+        activate ScheduleRepository
+        ScheduleRepository -> DriverAssignDB: 1.8.1: check driver shift fit
+        activate DriverAssignDB
+        DriverAssignDB --> ScheduleRepository: 1.8.2: driver eligibility
+        deactivate DriverAssignDB
+        ScheduleRepository -> AssistantAssignDB: 1.8.3: check assistant shift fit
+        activate AssistantAssignDB
+        AssistantAssignDB --> ScheduleRepository: 1.8.4: assistant eligibility
+        deactivate AssistantAssignDB
+        ScheduleRepository --> ScheduleController: 1.9: staff eligibility
+        deactivate ScheduleRepository
+        ScheduleController -> ScheduleRepository: 1.10: findScheduleAssignmentConflicts(payload, scheduleId)
+        activate ScheduleRepository
+        ScheduleRepository -> ScheduleDB: 1.10.1: find overlapping assignments
+        activate ScheduleDB
+        ScheduleDB --> ScheduleRepository: 1.10.2: conflicts
+        deactivate ScheduleDB
+        ScheduleRepository --> ScheduleController: 1.11: conflict list
+        deactivate ScheduleRepository
+        alt [schedule conflict detected]
+            ScheduleController --> Web: 1.12.1: 409 assignment conflict
+        else [assignment available]
+            ScheduleController -> ScheduleRepository: 1.13: updateTripScheduleById(scheduleId, payload)
+            activate ScheduleRepository
+            ScheduleRepository -> ScheduleDB: 1.13.1: save updated TripSchedule
+            activate ScheduleDB
+            ScheduleDB --> ScheduleRepository: 1.13.2: updated schedule
+            deactivate ScheduleDB
+            ScheduleRepository --> ScheduleController: 1.14: updated schedule
+            deactivate ScheduleRepository
+            ScheduleController --> Web: 1.15: 200 Trip schedule updated successfully
+        end
+    end
+end
+deactivate ScheduleController
+Web --> Admin: 1.16: Refresh assigned schedule view
+deactivate Web
+@enduml

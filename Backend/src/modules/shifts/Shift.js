@@ -38,13 +38,41 @@ const ShiftSchema = new mongoose.Schema(
     },
     shiftType: {
       type: String,
-      enum: ['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT', 'FULL_DAY', 'CUSTOM'],
-      default: 'CUSTOM',
+      enum: ['MORNING', 'AFTERNOON'],
+      default: 'MORNING',
     },
+    plannedStartDateTime: {
+      type: Date,
+      default: null,
+    },
+    plannedEndDateTime: {
+      type: Date,
+      default: null,
+    },
+    actualStartDateTime: {
+      type: Date,
+      default: null,
+    },
+    actualEndDateTime: {
+      type: Date,
+      default: null,
+    },
+    requiresAssistant: {
+      type: Boolean,
+      default: true,
+    },
+    approvalStatus: {
+      type: String,
+      enum: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'PUBLISHED'],
+      default: 'DRAFT',
+    },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    approvedAt: { type: Date, default: null },
+    publishedAt: { type: Date, default: null },
     status: {
       type: String,
-      enum: ['ACTIVE', 'INACTIVE', 'ARCHIVED', 'SUMMARY_SUBMITTED'],
-      default: 'ACTIVE',
+      enum: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PUBLISHED', 'ACTIVE', 'INACTIVE', 'IN_PROGRESS', 'COMPLETED', 'ABSENT', 'CANCELLED', 'ARCHIVED', 'SUMMARY_SUBMITTED'],
+      default: 'DRAFT',
     },
     description: {
       type: String,
@@ -60,5 +88,6 @@ const ShiftSchema = new mongoose.Schema(
 ShiftSchema.index({ shiftCode: 1, workDate: 1 }, { unique: true });
 ShiftSchema.index({ status: 1, workDate: 1, startTime: 1 });
 ShiftSchema.index({ routeId: 1, workDate: 1, startTime: 1 });
+ShiftSchema.index({ plannedStartDateTime: 1, plannedEndDateTime: 1, status: 1 });
 
 export default mongoose.model('Shift', ShiftSchema);

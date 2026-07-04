@@ -1,0 +1,40 @@
+﻿@startuml
+title Unlock User Account - Sequence Diagram
+
+hide footbox
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+actor Admin
+participant "Admin Web App" as Web
+participant "AdminController" as UserController
+participant "AdminModel" as UserRepository
+database "User Collection" as UserDB
+
+note over UserController,UserRepository
+Implemented as PATCH /api/admin/users/:userId/unlock. It updates to ACTIVE without a separate already-active validation branch.
+end note
+
+Admin -> Web: 1: Confirm unlock user account
+activate Web
+Web -> UserController: 1.1: PATCH /api/admin/users/:userId/unlock
+activate UserController
+UserController -> UserRepository: 1.2: unlockUserById(userId, actorId)
+activate UserRepository
+UserRepository -> UserDB: 1.2.1: findByIdAndUpdate status ACTIVE and clear accountLock
+activate UserDB
+UserDB --> UserRepository: 1.2.2: updated user or null
+deactivate UserDB
+UserRepository --> UserController: 1.3: updated user or null
+deactivate UserRepository
+alt [user not found]
+    UserController --> Web: 1.4.1: 404 User account not found
+else [user unlocked]
+    UserController --> Web: 1.4.2: 200 User account unlocked successfully
+end
+deactivate UserController
+Web --> Admin: 1.5: Show unlock result and refresh list
+deactivate Web
+@enduml

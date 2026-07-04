@@ -1,0 +1,61 @@
+﻿@startuml
+title Assign Stops to Route - Sequence Diagram
+
+hide footbox
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+actor Admin
+participant "Admin Web App" as Web
+participant "Admin Web App" as PathEditor
+participant "AdminController" as RouteController
+participant "AdminModel" as RouteRepository
+database "BusRoute Collection" as RouteDB
+database "RouteStation Collection" as StopDB
+
+note over PathEditor,RouteController
+There is no standalone assign-stops endpoint. Assignment happens when the route path is saved with orderedStops; AdminModel.syncRouteStationAssignments writes routeAssignments on RouteStation for published routes.
+end note
+
+Admin -> Web: 1: Add stops to route direction and save
+activate Web
+Web -> PathEditor: 1.1: validate stop sequence and station references
+activate PathEditor
+alt [invalid stop sequence]
+    PathEditor --> Web: 1.2.1: show sequence error
+else [sequence valid]
+    PathEditor --> Web: 1.2.2: build route orderedStops payload
+end
+deactivate PathEditor
+Web -> RouteController: 1.3: PUT /api/admin/routes/:routeId
+activate RouteController
+RouteController -> RouteController: 1.4: validate routeId and orderedStops
+alt [validation failed]
+    RouteController --> Web: 1.5.1: 400 Route validation failed
+else [validation passed]
+    RouteController -> RouteRepository: 1.6: updateRouteById(routeId, payload)
+    activate RouteRepository
+    RouteRepository -> RouteDB: 1.6.1: update BusRoute orderedStops
+    activate RouteDB
+    RouteDB --> RouteRepository: 1.6.2: updated route or null
+    deactivate RouteDB
+    alt [route found]
+        RouteRepository -> StopDB: 1.7.1: pull old routeAssignments and add current assignments
+        activate StopDB
+        StopDB --> RouteRepository: 1.7.2: assignments synchronized
+        deactivate StopDB
+    end
+    RouteRepository --> RouteController: 1.8: route or null
+    deactivate RouteRepository
+    alt [route not found]
+        RouteController --> Web: 1.9.1: 404 Route not found
+    else [stops assigned]
+        RouteController --> Web: 1.9.2: 200 Route updated successfully
+    end
+end
+deactivate RouteController
+Web --> Admin: 1.10: Display updated route stops
+deactivate Web
+@enduml

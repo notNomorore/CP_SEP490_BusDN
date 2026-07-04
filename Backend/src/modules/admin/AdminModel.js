@@ -5,6 +5,7 @@ import RouteStation from './RouteStation.js';
 import TripSchedule from './TripSchedule.js';
 import DriverShiftAssignment from '../shifts/DriverShiftAssignment.js';
 import AssistantShiftAssignment from '../shifts/AssistantShiftAssignment.js';
+import TripShiftAssignment from '../shifts/TripShiftAssignment.js';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
@@ -13,6 +14,7 @@ const SORT_FIELDS = new Set(['createdAt', 'fullName', 'email', 'role', 'status',
 const PERFORMANCE_ROLES = ['DRIVER', 'BUS_ASSISTANT'];
 const ROUTE_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'routeCode', 'routeName', 'status']);
 const SCHEDULE_SORT_FIELDS = new Set(['serviceDate', 'departureTime', 'updatedAt', 'scheduleCode', 'status']);
+const ASSIGNABLE_SHIFT_STATUSES = ['ACTIVE', 'APPROVED', 'PUBLISHED'];
 
 const defaultSummary = {
   totalUsers: 0,
@@ -108,11 +110,18 @@ const scheduleTimesOverlap = (first, second) => {
 };
 
 const getDateBounds = (value) => {
-  const start = new Date(value);
+  let start;
+  if (typeof value === 'string') {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      start = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    }
+  }
+  if (!start) start = new Date(value);
   if (Number.isNaN(start.getTime())) return null;
   start.setHours(0, 0, 0, 0);
   const end = new Date(start);
-  end.setDate(start.getDate() + 1);
+  end.setDate(end.getDate() + 1);
   return { start, end };
 };
 
@@ -658,6 +667,10 @@ export default class AdminModel {
     };
   }
 
+  static async countTripSchedules(filters) {
+    return TripSchedule.countDocuments(filters);
+  }
+
   static async findScheduleAssignmentConflicts(payload, excludeScheduleId) {
     const dateBounds = getDateBounds(payload.serviceDate);
     const filters = {
@@ -690,7 +703,7 @@ export default class AdminModel {
 
     return assignments.find((assignment) => (
       assignment.shiftId
-      && assignment.shiftId.status === 'ACTIVE'
+      && ASSIGNABLE_SHIFT_STATUSES.includes(assignment.shiftId.status)
       && isTimeRangeInsideShift(payload, assignment.shiftId)
     )) || null;
   }
@@ -709,7 +722,7 @@ export default class AdminModel {
 
     return assignments.find((assignment) => (
       assignment.shiftId
-      && assignment.shiftId.status === 'ACTIVE'
+      && ASSIGNABLE_SHIFT_STATUSES.includes(assignment.shiftId.status)
       && isTimeRangeInsideShift(payload, assignment.shiftId)
     )) || null;
   }
@@ -744,6 +757,26 @@ export default class AdminModel {
   }
 
   static async deleteTripScheduleById(scheduleId) {
-    return TripSchedule.findByIdAndDelete(scheduleId).lean();
+    const schedule = await TripSchedule.findByIdAndDelete(scheduleId).lean();
+    if (schedule) {
+      await TripShiftAssignment.deleteMany({ tripId: schedule._id });
+    }
+    return schedule;
+  }
+
+  static async deleteTripSchedules(filters) {
+    const schedules = await TripSchedule.find(filters).select('_id').lean();
+    const scheduleIds = schedules.map((schedule) => schedule._id);
+    if (!scheduleIds.length) return { deletedCount: 0, deletedAssignmentCount: 0 };
+
+    const [assignmentResult, scheduleResult] = await Promise.all([
+      TripShiftAssignment.deleteMany({ tripId: { $in: scheduleIds } }),
+      TripSchedule.deleteMany({ _id: { $in: scheduleIds } }),
+    ]);
+
+    return {
+      deletedCount: scheduleResult.deletedCount || 0,
+      deletedAssignmentCount: assignmentResult.deletedCount || 0,
+    };
   }
 }

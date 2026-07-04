@@ -1,0 +1,46 @@
+﻿@startuml
+title Add New Vehicle - Sequence Diagram
+
+hide footbox
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+actor Admin
+participant "Admin Web App" as Web
+participant "AdminController" as VehicleController
+participant "AdminModel" as VehicleRepository
+database "FleetBus Collection" as VehicleDB
+
+Admin -> Web: 1: Submit new vehicle form
+activate Web
+Web -> VehicleController: 1.1: POST /api/admin/buses
+activate VehicleController
+VehicleController -> VehicleController: 1.2: normalizeBusPayload and validateBusPayload
+alt [validation failed]
+    VehicleController --> Web: 1.3.1: 400 Bus validation failed
+else [validation passed]
+    VehicleController -> VehicleRepository: 1.4: createBus(payload)
+    activate VehicleRepository
+    VehicleRepository -> VehicleDB: 1.4.1: save FleetBus
+    activate VehicleDB
+    alt [duplicate bus code or plate]
+        VehicleDB --> VehicleRepository: 1.4.2: duplicate key error
+        VehicleRepository --> VehicleController: 1.4.3: duplicate key error
+    else [vehicle saved]
+        VehicleDB --> VehicleRepository: 1.5.1: saved bus
+        VehicleRepository --> VehicleController: 1.5.2: created bus
+    end
+    deactivate VehicleDB
+    deactivate VehicleRepository
+    alt [duplicate plate number]
+        VehicleController --> Web: 1.6.1: 409 Bus code or plate number already exists
+    else [created]
+        VehicleController --> Web: 1.6.2: 201 Bus created successfully
+    end
+end
+deactivate VehicleController
+Web --> Admin: 1.7: Refresh fleet list
+deactivate Web
+@enduml

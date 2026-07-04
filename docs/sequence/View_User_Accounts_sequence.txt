@@ -1,0 +1,45 @@
+﻿@startuml
+title View User Accounts - Sequence Diagram
+
+hide footbox
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+actor Admin
+participant "Admin Web App" as Web
+participant "AdminController" as UserController
+participant "AdminModel" as UserRepository
+database "User Collection" as UserDB
+
+note over UserController,UserRepository
+Source uses AdminController and AdminModel for user management; no separate UserService or UserRepository class is implemented.
+end note
+
+Admin -> Web: 1: Open user accounts page
+activate Web
+Web -> UserController: 1.1: GET /api/admin/users?role&status&search&page&limit
+activate UserController
+UserController -> UserRepository: 1.2: buildUserQueryOptions(query)
+activate UserRepository
+UserRepository --> UserController: 1.3: filters, pagination, sort
+deactivate UserRepository
+UserController -> UserRepository: 1.4: findUsers(options)
+activate UserRepository
+UserRepository -> UserDB: 1.4.1: find users, count, aggregate summary
+activate UserDB
+UserDB --> UserRepository: 1.4.2: users, total, summary
+deactivate UserDB
+UserRepository --> UserController: 1.5: users result
+deactivate UserRepository
+alt [no users matched]
+    UserController -> UserController: 1.6.1: build empty list response
+else [users found]
+    UserController -> UserController: 1.6.2: build paginated response
+end
+UserController --> Web: 1.7: 200 Users retrieved successfully
+deactivate UserController
+Web --> Admin: 1.8: Display table, pagination, and summary
+deactivate Web
+@enduml
