@@ -587,15 +587,16 @@ export default class AdminModel {
     if (query.routeId) filters.routeId = query.routeId;
     if (query.status && query.status !== 'ALL') filters.status = query.status;
     if (query.startDate || query.endDate) {
-      const start = new Date(query.startDate || query.endDate);
-      const end = new Date(query.endDate || query.startDate);
-      end.setDate(end.getDate() + 1);
-      filters.serviceDate = { $gte: start, $lt: end };
+      const startBounds = getDateBounds(query.startDate || query.endDate);
+      const endBounds = getDateBounds(query.endDate || query.startDate);
+      if (startBounds && endBounds) {
+        filters.serviceDate = { $gte: startBounds.start, $lt: endBounds.end };
+      }
     } else if (query.serviceDate) {
-      const date = new Date(query.serviceDate);
-      const nextDate = new Date(date);
-      nextDate.setDate(date.getDate() + 1);
-      filters.serviceDate = { $gte: date, $lt: nextDate };
+      const dateBounds = getDateBounds(query.serviceDate);
+      if (dateBounds) {
+        filters.serviceDate = { $gte: dateBounds.start, $lt: dateBounds.end };
+      }
     }
     if (query.search?.trim()) {
       const searchRegex = new RegExp(escapeRegex(query.search.trim()), 'i');

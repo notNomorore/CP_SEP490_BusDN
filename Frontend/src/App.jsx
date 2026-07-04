@@ -21,6 +21,7 @@ import {
   RouteControlPage,
   StaffPerformancePage,
   SystemNotificationsPage,
+  TripScheduleDetailPage,
   UserAccountsPage,
 } from './features/admin';
 import { ScheduleOperationsPage } from './features/scheduleOperations';
@@ -169,6 +170,7 @@ function App() {
             <Route path="fleet/delayed-trips" element={<AdminDelayedTripsPage />} />
             <Route path="fleet/locations" element={<DashboardAdminPage embedded />} />
             <Route path="routes" element={<RouteControlPage />} />
+            <Route path="trip-schedules" element={<TripScheduleDetailPage />} />
             <Route path="shifts" element={<ShiftManagementPage />} />
             <Route path="shifts/auto-generate" element={<AutoGenerateShiftPage />} />
             <Route path="users" element={<UserAccountsPage />} />
@@ -221,6 +223,14 @@ function App() {
             element={(
               <AdminRoute>
                 <RouteControlPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/trip-schedules"
+            element={(
+              <AdminRoute>
+                <TripScheduleDetailPage />
               </AdminRoute>
             )}
           />
