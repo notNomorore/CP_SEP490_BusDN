@@ -1,4 +1,4 @@
-import type { AssignedTrip, ShiftSchedule } from '@/types/scheduleOperations';
+import type { AssignedTrip, RoutePoint, ShiftSchedule } from '@/types/scheduleOperations';
 
 const dateOnlyPattern = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -82,3 +82,17 @@ export const isTripUpcoming = (trip: AssignedTrip) => {
 export const isTripCompleted = (trip: AssignedTrip) => ['COMPLETED', 'DONE'].includes(getTripStatus(trip));
 
 export const isTripDelayed = (trip: AssignedTrip) => ['DELAYED', 'LATE'].includes(getTripStatus(trip)) || trip.gpsSync?.status === 'DELAYED';
+
+export const getRouteStops = (trip: AssignedTrip): RoutePoint[] => {
+  const stops = trip.route?.stops?.filter((stop) => stop.stopName || stop.address) || [];
+  if (stops.length) {
+    return [...stops].sort((first, second) => Number(first.stopOrder || 0) - Number(second.stopOrder || 0));
+  }
+
+  return (trip.route?.pathPoints || []).filter((point) => point.stopName || point.address);
+};
+
+export const formatCoordinate = (value?: number | null) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 'N/A';
+  return value.toFixed(6);
+};
