@@ -52,6 +52,7 @@ export type AssignedTrip = {
     direction?: string;
     estimatedDistanceKm?: number;
     estimatedDurationMinutes?: number;
+    pathPoints?: RoutePoint[];
     stops?: Array<{
       id?: string | null;
       stationId?: string | null;

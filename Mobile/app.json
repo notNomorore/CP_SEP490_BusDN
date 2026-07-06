@@ -13,7 +13,10 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "BusDN uses your current location to sync driver GPS during active trips."},
+          "locationWhenInUsePermission": "BusDN uses your current location to sync driver GPS during active trips."
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "BusDN needs camera access so bus assistants can scan passenger QR tickets."
