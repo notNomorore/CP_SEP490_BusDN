@@ -1,5 +1,5 @@
 import User from '../auth/User.js';
-import BusRoute from './BusRoute.js';
+import Route from '../routes/Route.js';
 import FleetBus from './FleetBus.js';
 import RouteStation from './RouteStation.js';
 import TripSchedule from './TripSchedule.js';
@@ -409,8 +409,8 @@ export default class AdminModel {
 
   static async findRoutes(options) {
     const [routes, total, summary] = await Promise.all([
-      BusRoute.find(options.filters).sort(options.sort).skip(options.skip).limit(options.limit).lean(),
-      BusRoute.countDocuments(options.filters),
+      Route.find(options.filters).sort(options.sort).skip(options.skip).limit(options.limit).lean(),
+      Route.countDocuments(options.filters),
       this.getRouteSummary(),
     ]);
 
@@ -427,7 +427,7 @@ export default class AdminModel {
   }
 
   static async getRouteSummary() {
-    const summary = await BusRoute.aggregate([
+    const summary = await Route.aggregate([
       {
         $group: {
           _id: null,
@@ -451,18 +451,18 @@ export default class AdminModel {
   }
 
   static async findRouteById(routeId) {
-    return BusRoute.findById(routeId).lean();
+    return Route.findById(routeId).lean();
   }
 
   static async createRoute(payload) {
-    const route = new BusRoute(payload);
+    const route = new Route(payload);
     await route.save();
     await this.syncRouteStationAssignments(route);
     return this.findRouteById(route._id);
   }
 
   static async updateRouteById(routeId, payload) {
-    const route = await BusRoute.findByIdAndUpdate(routeId, { $set: payload }, {
+    const route = await Route.findByIdAndUpdate(routeId, { $set: payload }, {
       new: true,
       runValidators: true,
     });

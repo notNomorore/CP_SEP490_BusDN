@@ -203,8 +203,8 @@ const resolveRouteAssignment = async ({ routeId, direction }) => {
     return [];
   }
 
-  const BusRoute = (await import('../admin/BusRoute.js')).default;
-  const route = await BusRoute.findById(routeId).select('_id routeCode routeName').lean();
+  const Route = (await import('../routes/Route.js')).default;
+  const route = await Route.findById(routeId).select('_id routeCode routeName').lean();
   if (!route) {
     const error = new Error('Route not found for bus stop assignment');
     error.statusCode = 400;

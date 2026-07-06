@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import User from '../auth/User.js';
-import BusRoute from '../admin/BusRoute.js';
+import Route from '../routes/Route.js';
 import FleetBus from '../admin/FleetBus.js';
 import TripSchedule from '../admin/TripSchedule.js';
 import Shift from './Shift.js';
@@ -187,7 +187,7 @@ export default class AutoGenerateShiftService {
     const date = normalizeDate(workDate);
     const range = rangeOf({ startTime, endTime });
     if (!date || !range) throw Object.assign(new Error('Ngày và khung giờ hợp lệ là bắt buộc.'), { statusCode: 400 });
-    const route = mongoose.Types.ObjectId.isValid(routeId) ? await BusRoute.findById(routeId).lean() : null;
+    const route = mongoose.Types.ObjectId.isValid(routeId) ? await Route.findById(routeId).lean() : null;
     const assignments = await loadAssignmentsForDate(date);
     const duration = range.end - range.start;
 
@@ -289,7 +289,7 @@ export default class AutoGenerateShiftService {
         },
       };
     }
-    const route = await BusRoute.findById(body.routeId).lean();
+    const route = await Route.findById(body.routeId).lean();
     if (!route) throw Object.assign(new Error('Không tìm thấy tuyến xe.'), { statusCode: 404 });
 
     const shiftType = SHIFT_TYPES.has(String(body.shiftType || '').toUpperCase())
@@ -402,7 +402,7 @@ export default class AutoGenerateShiftService {
     if (!workDate || !range) warnings.push('Ngày hoặc khung giờ không hợp lệ.');
     if (!mongoose.Types.ObjectId.isValid(row.routeId)) warnings.push('Tuyến không hợp lệ.');
     const [route, driver, assistant, vehicle] = await Promise.all([
-      mongoose.Types.ObjectId.isValid(row.routeId) ? BusRoute.findById(row.routeId).lean() : null,
+      mongoose.Types.ObjectId.isValid(row.routeId) ? Route.findById(row.routeId).lean() : null,
       mongoose.Types.ObjectId.isValid(row.driverId) ? User.findOne({ _id: row.driverId, role: 'DRIVER', status: 'ACTIVE' }).lean() : null,
       mongoose.Types.ObjectId.isValid(row.assistantId) ? User.findOne({ _id: row.assistantId, role: { $in: ['CONDUCTOR', 'BUS_ASSISTANT'] }, status: 'ACTIVE' }).lean() : null,
       mongoose.Types.ObjectId.isValid(row.vehicleId) ? FleetBus.findById(row.vehicleId).lean() : null,

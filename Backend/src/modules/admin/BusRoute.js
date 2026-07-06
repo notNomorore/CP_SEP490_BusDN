@@ -403,4 +403,11 @@ const BusRouteSchema = new mongoose.Schema(
 
 BusRouteSchema.index({ routeName: 1, routeCode: 1, status: 1 });
 
-export default mongoose.model('BusRoute', BusRouteSchema);
+const Route = mongoose.models.Route || mongoose.model('Route', BusRouteSchema, 'routes');
+
+if (!mongoose.models.BusRoute) {
+  mongoose.model('BusRoute', BusRouteSchema, 'routes');
+}
+
+export { BusRouteSchema };
+export default Route;

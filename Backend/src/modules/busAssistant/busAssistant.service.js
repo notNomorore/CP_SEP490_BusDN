@@ -1,7 +1,6 @@
 import mongoose from 'mongoose';
 import { HTTP_STATUS } from '../../constants/index.js';
 import { CustomError } from '../../middleware/errorHandler.js';
-import BusRoute from '../admin/BusRoute.js';
 import TripSchedule from '../admin/TripSchedule.js';
 import Route from '../routes/Route.js';
 import AssistantShiftAssignment from '../shifts/AssistantShiftAssignment.js';
@@ -85,7 +84,7 @@ const passengerInfo = async (ticket) => {
 
 const findRoute = async (routeId) => {
   if (!mongoose.isValidObjectId(routeId)) return null;
-  return (await BusRoute.findById(routeId).lean()) || (await Route.findById(routeId).lean());
+  return Route.findById(routeId).lean();
 };
 
 const findTrip = async (tripId) => {

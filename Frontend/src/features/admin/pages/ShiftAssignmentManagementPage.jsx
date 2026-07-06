@@ -221,6 +221,11 @@ const ShiftAssignmentManagementPage = () => {
   const loadShiftsRequestRef = useRef(0);
 
   const dateRange = useMemo(() => eachDate(fromDate, toDate), [fromDate, toDate]);
+  const dateRangeError = useMemo(() => (
+    fromDate && toDate && fromDate > toDate
+      ? 'Từ ngày không được lớn hơn đến ngày.'
+      : ''
+  ), [fromDate, toDate]);
 
   const selectedAssignments = selectedShift ? assignmentMap[getId(selectedShift)] || {} : {};
 
@@ -320,9 +325,17 @@ const ShiftAssignmentManagementPage = () => {
   const loadShifts = useCallback(async () => {
     const requestId = loadShiftsRequestRef.current + 1;
     loadShiftsRequestRef.current = requestId;
+    if (dateRangeError) {
+      setLoading(false);
+      setShifts([]);
+      setAssignmentMap({});
+      setMessage(dateRangeError);
+      return;
+    }
     setLoading(true);
     setShifts([]);
     setAssignmentMap({});
+    setMessage('');
     try {
       const response = await adminService.getShifts({ from: fromDate, to: toDate });
       if (loadShiftsRequestRef.current !== requestId) return;
@@ -377,7 +390,7 @@ const ShiftAssignmentManagementPage = () => {
         setLoading(false);
       }
     }
-  }, [fromDate, rangeRefreshKey, toDate]);
+  }, [dateRangeError, fromDate, rangeRefreshKey, toDate]);
 
   useEffect(() => {
     loadStaff().catch(() => toast.error('Không thể tải danh sách nhân sự.'));
@@ -431,6 +444,7 @@ const ShiftAssignmentManagementPage = () => {
 
   const handleCreateManual = async (event) => {
     event.preventDefault();
+    if (dateRangeError) return toast.error(dateRangeError);
     const baseDates = form.applyMode === 'DAY' ? [fromDate] : dateRange;
     const targetDates = form.applyMode === 'DAY'
       ? baseDates
@@ -519,6 +533,7 @@ const ShiftAssignmentManagementPage = () => {
   };
 
   const handleAutoGenerate = async () => {
+    if (dateRangeError) return toast.error(dateRangeError);
     if (!dateRange.length) return toast.error('Khoảng ngày không hợp lệ.');
     if (!autoSelection.driverIds.length || !autoSelection.assistantIds.length) {
       return toast.error('Vui lòng chọn đủ tài xế và phụ xe đi làm.');
@@ -733,6 +748,10 @@ const ShiftAssignmentManagementPage = () => {
   };
 
   const handleCancelShiftsInRange = async () => {
+    if (dateRangeError) {
+      toast.error(dateRangeError);
+      return;
+    }
     if (!dateRange.length) {
       toast.error('Khoảng ngày không hợp lệ.');
       return;
@@ -876,11 +895,11 @@ const ShiftAssignmentManagementPage = () => {
           <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
             <label className="space-y-2">
               <span className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Từ ngày</span>
-              <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold" />
+              <input type="date" value={fromDate} max={toDate || undefined} onChange={(event) => setFromDate(event.target.value)} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold" />
             </label>
             <label className="space-y-2">
               <span className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Đến ngày</span>
-              <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold" />
+              <input type="date" value={toDate} min={fromDate || undefined} onChange={(event) => setToDate(event.target.value)} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold" />
             </label>
             <div className="flex items-end gap-2">
               <button type="button" onClick={() => setRangePreset('DAY')} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-black">Hôm nay</button>
@@ -888,6 +907,11 @@ const ShiftAssignmentManagementPage = () => {
               <button type="button" onClick={() => setRangePreset('MONTH')} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-black">Tháng</button>
             </div>
           </div>
+          {dateRangeError ? (
+            <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
+              {dateRangeError}
+            </p>
+          ) : null}
         </div>
 
         {activeView === 'ASSIGN' ? (
@@ -980,7 +1004,7 @@ const ShiftAssignmentManagementPage = () => {
                 </label>
               </div>
 
-              <button disabled={submitting} type="submit" className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-black text-white disabled:opacity-60">
+              <button disabled={submitting || Boolean(dateRangeError)} type="submit" className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-black text-white disabled:opacity-60">
                 <Save size={18} /> Kiểm tra và tạo lịch nháp
               </button>
               {manualPreviewRows.length ? (
@@ -1090,7 +1114,7 @@ const ShiftAssignmentManagementPage = () => {
                   </div>
                 </div>
               </div>
-              <button disabled={submitting || (!availableDrivers.length && !availableAssistants.length)} type="button" onClick={handleAutoGenerate} className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-300 px-5 text-sm font-black text-[#062819] disabled:opacity-60">
+              <button disabled={submitting || Boolean(dateRangeError) || (!availableDrivers.length && !availableAssistants.length)} type="button" onClick={handleAutoGenerate} className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-300 px-5 text-sm font-black text-[#062819] disabled:opacity-60">
                 <Wand2 size={18} /> Sinh ca tự động
               </button>
               {message ? <p className="mt-4 rounded-2xl bg-white/10 p-4 text-sm text-emerald-50">{message}</p> : null}
@@ -1107,7 +1131,7 @@ const ShiftAssignmentManagementPage = () => {
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 {loading ? <span className="text-sm font-bold text-emerald-700">Đang tải...</span> : null}
-                <button type="button" disabled={submitting || !dateRange.length} onClick={handleCancelShiftsInRange} className="inline-flex h-11 items-center gap-2 rounded-xl border border-rose-200 px-4 text-sm font-black text-rose-600 disabled:cursor-not-allowed disabled:opacity-50">
+                <button type="button" disabled={submitting || Boolean(dateRangeError) || !dateRange.length} onClick={handleCancelShiftsInRange} className="inline-flex h-11 items-center gap-2 rounded-xl border border-rose-200 px-4 text-sm font-black text-rose-600 disabled:cursor-not-allowed disabled:opacity-50">
                   <Trash2 size={17} /> Hủy ca trong khoảng ngày
                 </button>
               </div>

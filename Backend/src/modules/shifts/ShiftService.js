@@ -8,13 +8,14 @@ import AssistantShiftAssignment from './AssistantShiftAssignment.js';
 import VehicleShiftAssignment from './VehicleShiftAssignment.js';
 import TripShiftAssignment from './TripShiftAssignment.js';
 import ShiftAuditLog from './ShiftAuditLog.js';
+import { SHIFT_CLOSED_STATUSES, SHIFT_STATUS_VALUES } from './shift.constants.js';
 
-const SHIFT_STATUSES = new Set(['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PUBLISHED', 'ACTIVE', 'INACTIVE', 'IN_PROGRESS', 'COMPLETED', 'ABSENT', 'CANCELLED', 'ARCHIVED', 'SUMMARY_SUBMITTED']);
+const SHIFT_STATUSES = new Set(SHIFT_STATUS_VALUES);
 const SHIFT_TYPES = new Set(['MORNING', 'AFTERNOON']);
 const ASSIGNMENT_STATUSES = new Set(['ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']);
 const BLOCKING_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'];
 const ACTIVE_TRIP_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS'];
-const CLOSED_SHIFT_STATUSES = ['ARCHIVED', 'CANCELLED', 'COMPLETED', 'ABSENT'];
+const CLOSED_SHIFT_STATUSES = SHIFT_CLOSED_STATUSES;
 const MAX_DRIVER_MINUTES_PER_DAY = 8 * 60;
 const OPERATING_START_MINUTES = (5 * 60) + 30;
 const OPERATING_END_MINUTES = (18 * 60) + 30;
