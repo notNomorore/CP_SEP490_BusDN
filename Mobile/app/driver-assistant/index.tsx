@@ -15,6 +15,13 @@ import { isDriverAssistantRole } from '@/utils/roleNavigation';
 import { formatDate, formatTime, getTodayRange, getTripStatus, isTripCompleted, isTripToday, toDateInput } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
+const assignedTripsRoute = '/driver-assistant/assigned-trips' as Href;
+const shiftScheduleRoute = '/driver-assistant/shift-schedule' as Href;
+const tripDetailRoute = '/driver-assistant/trip-detail' as Href;
+const notificationsRoute = '/driver-assistant/notifications' as Href;
+const inspectionRoute = '/driver-assistant/vehicle-inspection' as Href;
+const lifecycleRoute = '/driver-assistant/trip-lifecycle' as Href;
+
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 const route = (pathname: string) => pathname as Href;
@@ -55,6 +62,15 @@ function ActionTile({
     </Pressable>
   );
 }
+
+const getAcceptanceStatus = (trip: AssignedTrip) => String(trip.acceptanceStatus || '').toUpperCase();
+
+const canAcceptTrip = (trip: AssignedTrip) => {
+  const status = getTripStatus(trip);
+  const acceptanceStatus = getAcceptanceStatus(trip);
+  return !['ACCEPTED', 'REJECTED'].includes(acceptanceStatus)
+    && !['IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'DONE'].includes(status);
+};
 
 export default function DriverBusAssistantHomeScreen() {
   const insets = useSafeAreaInsets();
@@ -108,14 +124,32 @@ export default function DriverBusAssistantHomeScreen() {
   const isDriver = user?.role === 'DRIVER';
   const displayName = user?.fullName || (isDriver ? 'Driver' : 'Bus Assistant');
 
-  const startTrip = async (trip: AssignedTrip) => {
+  const openInspection = (trip: AssignedTrip) => {
+    router.push({
+      pathname: inspectionRoute,
+      params: { trip: JSON.stringify(trip), assignmentId: trip.id },
+    } as unknown as Href);
+  };
+
+  const openLifecycle = (trip: AssignedTrip) => {
+    router.push({
+      pathname: lifecycleRoute,
+      params: { trip: JSON.stringify(trip), assignmentId: trip.id },
+    } as unknown as Href);
+  };
+
+  const acceptTrip = async (trip: AssignedTrip) => {
     setProcessingId(trip.id);
     try {
-      const updated = await scheduleOperationsApi.startTrip(trip.id);
+      const updated = await scheduleOperationsApi.acceptAssignedTrip(trip.id);
       setTrips((current) => current.map((item) => (item.id === trip.id ? updated : item)));
-      Alert.alert('Trip started', 'The trip has been started successfully.');
+      if (isDriver) {
+        openInspection(updated);
+        return;
+      }
+      Alert.alert('Trip accepted', 'The assigned trip has been accepted.');
     } catch (error) {
-      Alert.alert('Unable to start trip', getErrorMessage(error, 'Unable to start this trip.'));
+      Alert.alert('Unable to accept trip', getErrorMessage(error, 'Unable to accept this assigned trip.'));
     } finally {
       setProcessingId('');
     }
@@ -175,9 +209,68 @@ export default function DriverBusAssistantHomeScreen() {
                   <Text style={styles.nextTitle}>{nextTrip.route?.origin || 'Origin'} - {nextTrip.route?.destination || 'Destination'}</Text>
                   <Text style={styles.nextMeta}>{formatTime(nextTrip.scheduledStart)} - {nextTrip.vehicle?.code || nextTrip.vehicle?.plateNumber || 'No bus'} - {getTripStatus(nextTrip)}</Text>
                 </View>
+<<<<<<< HEAD
+                {isDriver && canAcceptTrip(nextTrip) ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={processingId === nextTrip.id}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      void acceptTrip(nextTrip);
+                    }}
+                    style={({ pressed }) => [
+                      styles.startButton,
+                      pressed && styles.pressed,
+                      processingId === nextTrip.id && styles.disabledButton,
+                    ]}
+                  >
+                    {processingId === nextTrip.id ? (
+                      <ActivityIndicator color={colors.white} size="small" />
+                    ) : (
+                      <Text style={styles.startButtonText}>ACCEPT</Text>
+                    )}
+                  </Pressable>
+                ) : isDriver && getAcceptanceStatus(nextTrip) === 'ACCEPTED' && !isTripCompleted(nextTrip) ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      if (nextTrip.inspection?.status === 'READY') {
+                        openLifecycle(nextTrip);
+                        return;
+                      }
+                      openInspection(nextTrip);
+                    }}
+                    style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.startButtonText}>
+                      {nextTrip.inspection?.status === 'READY' ? 'START' : 'INSPECT'}
+                    </Text>
+                  </Pressable>
+                ) : canAcceptTrip(nextTrip) ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={processingId === nextTrip.id}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      void acceptTrip(nextTrip);
+                    }}
+                    style={({ pressed }) => [
+                      styles.startButton,
+                      pressed && styles.pressed,
+                      processingId === nextTrip.id && styles.disabledButton,
+                    ]}
+                  >
+                    {processingId === nextTrip.id ? (
+                      <ActivityIndicator color={colors.white} size="small" />
+                    ) : (
+                      <Text style={styles.startButtonText}>ACCEPT</Text>
+                    )}
+=======
                 {isDriver ? (
                   <Pressable disabled={processingId === nextTrip.id} onPress={(event) => { event.stopPropagation(); void startTrip(nextTrip); }} style={styles.startButton}>
                     {processingId === nextTrip.id ? <ActivityIndicator color={colors.white} size="small" /> : <Text style={styles.startButtonText}>START</Text>}
+>>>>>>> c45d84418dc37ca93b4fc2a2fa5d736fdd16dc48
                   </Pressable>
                 ) : (
                   <MaterialCommunityIcons color={colors.muted} name="chevron-right" size={24} />

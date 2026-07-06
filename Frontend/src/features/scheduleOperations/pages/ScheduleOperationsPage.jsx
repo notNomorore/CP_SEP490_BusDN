@@ -79,9 +79,6 @@ const DRIVER_INCIDENT_TYPES = INCIDENT_TYPES.filter((type) => [
   'TRAFFIC_CONGESTION',
   'ACCIDENT',
   'VEHICLE_BREAKDOWN',
-  'PASSENGER_VIOLATION',
-  'PASSENGER_CONFLICT',
-  'FOUND_ITEM',
 ].includes(type.value));
 
 const BUS_ASSISTANT_INCIDENT_TYPES = INCIDENT_TYPES.filter((type) => [
@@ -111,13 +108,6 @@ const TRAFFIC_CATEGORIES = [
   { value: 'STOP_OVERLOAD', label: 'Điểm dừng quá tải' },
   { value: 'TEMPORARY_BLOCK', label: 'Đường bị chặn tạm thời' },
   { value: 'OTHER', label: 'Khác' },
-];
-
-const AFFECTED_DIRECTIONS = [
-  { value: 'CURRENT_DIRECTION', label: 'Chiều đang chạy' },
-  { value: 'OPPOSITE_DIRECTION', label: 'Chiều ngược lại' },
-  { value: 'BOTH_DIRECTIONS', label: 'Cả hai chiều' },
-  { value: 'UNKNOWN', label: 'Chưa xác định' },
 ];
 
 const PASSENGER_CONFLICT_CATEGORIES = [
@@ -1199,7 +1189,7 @@ const IncidentReportingPanel = ({
       </div>
 
       {form.type === 'TRAFFIC_CONGESTION' && (
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
           <label className="space-y-1">
             <span className="text-xs font-bold uppercase text-slate-500">Loại kẹt xe</span>
             <select
@@ -1210,19 +1200,6 @@ const IncidentReportingPanel = ({
             >
               {TRAFFIC_CATEGORIES.map((category) => (
                 <option key={category.value} value={category.value}>{category.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-1">
-            <span className="text-xs font-bold uppercase text-slate-500">Chiều ảnh hưởng</span>
-            <select
-              value={form.affectedDirection}
-              onChange={(event) => updateForm('affectedDirection', event.target.value)}
-              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
-              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
-            >
-              {AFFECTED_DIRECTIONS.map((direction) => (
-                <option key={direction.value} value={direction.value}>{direction.label}</option>
               ))}
             </select>
           </label>

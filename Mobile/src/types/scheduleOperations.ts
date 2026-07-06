@@ -7,6 +7,36 @@ export type StaffMember = {
   phoneNumber?: string;
 } | null;
 
+export type RoutePoint = {
+  stopName?: string;
+  address?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  stopOrder?: number | null;
+  arrivalOffsetMinutes?: number;
+  departureOffsetMinutes?: number;
+  isMainStation?: boolean;
+};
+
+export type TripStartLocation = {
+  latitude?: number | null;
+  longitude?: number | null;
+  accuracyMeters?: number | null;
+  capturedAt?: string | null;
+};
+
+export type VehicleInspection = {
+  id?: string;
+  inspectionCode?: string;
+  status?: string;
+  checklist?: Record<string, unknown>;
+  issueCategory?: string | null;
+  issueDescription?: string;
+  startedAt?: string | null;
+  confirmedAt?: string | null;
+  reportedAt?: string | null;
+};
+
 export type AssignedTrip = {
   id: string;
   tripId?: string | null;
@@ -43,10 +73,13 @@ export type AssignedTrip = {
   scheduledEnd?: string | null;
   actualStartAt?: string | null;
   actualEndAt?: string | null;
+  startLocation?: TripStartLocation | null;
   gpsSync?: {
     status?: string;
     retryCount?: number;
     message?: string;
+    syncedAt?: string | null;
+    lastAttemptAt?: string | null;
   };
   dutyStart?: string | null;
   checkInDeadline?: string | null;
@@ -55,17 +88,7 @@ export type AssignedTrip = {
   shiftStatus?: string;
   acceptanceStatus?: string;
   tripStatus?: string;
-  inspection?: {
-    id?: string;
-    inspectionCode?: string;
-    status?: string;
-    checklist?: Record<string, unknown>;
-    issueCategory?: string | null;
-    issueDescription?: string;
-    startedAt?: string | null;
-    confirmedAt?: string | null;
-    reportedAt?: string | null;
-  };
+  inspection?: VehicleInspection;
   dutyInstructions?: string[];
   rejectionReason?: string;
   acceptedAt?: string | null;
@@ -128,5 +151,52 @@ export type OperationNotification = {
 
 export type OperationNotificationsPayload = {
   notifications: OperationNotification[];
+  count: number;
+};
+
+export type EvidenceFile = {
+  fileName?: string;
+  originalName?: string;
+  url?: string;
+  fileUrl?: string;
+  mimeType?: string;
+  size?: number;
+  uploadedAt?: string;
+};
+
+export type OperationIncident = {
+  id: string;
+  incidentCode?: string;
+  type?: string;
+  severity?: string;
+  status?: string;
+  trip?: string | Record<string, unknown> | null;
+  assignment?: string | Record<string, unknown> | null;
+  route?: string | Record<string, unknown> | null;
+  vehicle?: string | Record<string, unknown> | null;
+  driver?: StaffMember;
+  locationText?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  estimatedDelayMinutes?: number | null;
+  trafficCategory?: string | null;
+  affectedDirection?: string | null;
+  description?: string;
+  injuriesReported?: boolean;
+  policeNotified?: boolean;
+  canContinue?: boolean;
+  requiresReplacementVehicle?: boolean;
+  passengerViolation?: Record<string, unknown> | null;
+  passengerConflict?: Record<string, unknown> | null;
+  foundItem?: Record<string, unknown> | null;
+  evidenceFiles?: EvidenceFile[];
+  reportedAt?: string | null;
+  acknowledgedAt?: string | null;
+  resolvedAt?: string | null;
+  adminNote?: string;
+};
+
+export type OperationIncidentsPayload = {
+  incidents: OperationIncident[];
   count: number;
 };

@@ -131,8 +131,8 @@ const getRouteSummary = (route) => {
   if (!route) return null;
   return {
     id: route._id?.toString(),
-    routeCode: route.routeNumber || route.routeCode || route.code || '',
-    routeName: route.name || route.routeName || '',
+    routeCode: route.routeCode || route.routeNumber || route.code || '',
+    routeName: route.routeName || route.name || '',
   };
 };
 
@@ -140,15 +140,15 @@ const normalizeStop = (stop, index = 0) => {
   if (!stop) return null;
   return {
     id: stop._id?.toString() || String(index),
-    name: stop.name || stop.stopName || '',
-    order: stop.order ?? index + 1,
-    estimatedOffsetMinutes: stop.estimatedOffsetMinutes ?? null,
+    name: stop.stopName || stop.name || '',
+    order: stop.stopOrder ?? stop.order ?? index + 1,
+    estimatedOffsetMinutes: stop.arrivalOffsetMinutes ?? stop.estimatedOffsetMinutes ?? null,
     lat: stop.latitude ?? stop.lat ?? null,
     lng: stop.longitude ?? stop.lng ?? null,
   };
 };
 
-const getRouteStops = (route) => (route?.stops || [])
+const getRouteStops = (route) => (route?.outboundRoute?.orderedStops || route?.stops || [])
   .map((stop, index) => normalizeStop(stop, index))
   .sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
 
@@ -1176,25 +1176,51 @@ export class FleetMonitoringService {
     }
 
     const route = await Route.findOneAndUpdate(
-      { routeNumber: 'DN-DEMO-01' },
+      { routeCode: 'DN-DEMO-01' },
       {
         $set: {
-          routeNumber: 'DN-DEMO-01',
-          name: 'Da Nang Demo Loop',
-          origin: 'Da Nang Railway Station',
-          destination: 'My Khe Beach',
-          distanceKm: 12,
-          estimatedDurationMinutes: 42,
-          fare: 8000,
-          status: 'ACTIVE',
-          stops: DA_NANG_POINTS.slice(0, 5).map(([latitude, longitude], index) => ({
-            name: `Demo Stop ${index + 1}`,
-            order: index + 1,
-            estimatedOffsetMinutes: index * 8,
-            latitude,
-            longitude,
-          })),
-          pathPoints: DA_NANG_POINTS.map(([latitude, longitude]) => ({ latitude, longitude })),
+          routeCode: 'DN-DEMO-01',
+          routeName: 'Da Nang Demo Loop',
+          routeType: 'URBAN',
+          operator: 'BusDN',
+          status: 'PUBLISHED',
+          routeColor: '#0f766e',
+          outboundRoute: {
+            startStation: {
+              stopName: 'Da Nang Railway Station',
+              address: 'Da Nang Railway Station',
+              latitude: DA_NANG_POINTS[0][0],
+              longitude: DA_NANG_POINTS[0][1],
+              isMainStation: true,
+            },
+            endStation: {
+              stopName: 'My Khe Beach',
+              address: 'My Khe Beach',
+              latitude: DA_NANG_POINTS[4][0],
+              longitude: DA_NANG_POINTS[4][1],
+              isMainStation: true,
+            },
+            estimatedDistanceKm: 12,
+            estimatedDurationMinutes: 42,
+            orderedStops: DA_NANG_POINTS.slice(0, 5).map(([latitude, longitude], index) => ({
+              stopName: `Demo Stop ${index + 1}`,
+              address: `Demo Stop ${index + 1}`,
+              stopOrder: index + 1,
+              arrivalOffsetMinutes: index * 8,
+              departureOffsetMinutes: index * 8,
+              latitude,
+              longitude,
+            })),
+            polylinePath: DA_NANG_POINTS.map(([latitude, longitude]) => ({ latitude, longitude })),
+          },
+          fareConfig: {
+            baseFare: 8000,
+          },
+          scheduleConfig: {
+            firstDepartureTime: '05:30',
+            lastDepartureTime: '21:00',
+            frequencyMinutes: 30,
+          },
         },
         $setOnInsert: { createdBy: actor.userId },
       },

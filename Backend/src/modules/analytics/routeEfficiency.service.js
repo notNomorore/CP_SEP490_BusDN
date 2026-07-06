@@ -95,14 +95,17 @@ const buildRouteMap = async () => {
   const routes = await readCollection('routes');
   return new Map(routes.map((route) => {
     const id = toId(route._id);
+    const outboundStops = route.outboundRoute?.orderedStops || [];
+    const startStation = route.outboundRoute?.startStation || outboundStops[0] || {};
+    const endStation = route.outboundRoute?.endStation || outboundStops[outboundStops.length - 1] || {};
     return [id, {
       _id: id,
-      name: route.name || route.routeName || route.routeNumber || route.code || id,
-      routeNumber: route.routeNumber || route.code || '',
-      distanceKm: toNumber(route.distanceKm || route.distance || route.lengthKm),
+      name: route.routeName || route.name || route.routeCode || route.routeNumber || route.code || id,
+      routeNumber: route.routeCode || route.routeNumber || route.code || '',
+      distanceKm: toNumber(route.outboundRoute?.estimatedDistanceKm || route.distanceKm || route.distance || route.lengthKm),
       status: route.status || 'UNKNOWN',
-      startPoint: route.startPoint || route.origin || route.from || '',
-      endPoint: route.endPoint || route.destination || route.to || '',
+      startPoint: startStation.stopName || route.startPoint || route.origin || route.from || '',
+      endPoint: endStation.stopName || route.endPoint || route.destination || route.to || '',
     }];
   }));
 };

@@ -4,7 +4,6 @@ import QRCode from 'qrcode';
 import { CustomError } from '../../middleware/errorHandler.js';
 import { HTTP_STATUS } from '../../constants/index.js';
 import User from '../auth/User.js';
-import Route from '../routes/Route.js';
 import RouteService from '../routes/RouteService.js';
 import Ticket from './Ticket.js';
 import MonthlyPass from './MonthlyPass.js';
@@ -238,10 +237,8 @@ const buildMonthlyPassValidationInfo = (monthlyPass) => ({
 
 export class TicketService {
   static async findRoute(routeId) {
-    await RouteService.ensureSampleRoutes();
-
     try {
-      return await Route.findOne({ _id: routeId, status: 'ACTIVE' }).lean();
+      return await RouteService.findActiveRoute(routeId, routeId);
     } catch {
       return null;
     }
@@ -792,9 +789,9 @@ export class TicketService {
   }
 
   static async buildTicketView(ticket) {
-    const route = ticket.routeId && typeof ticket.routeId === 'object'
-      ? ticket.routeId
-      : await Route.findById(ticket.routeId).lean();
+    const route = ticket.routeId && typeof ticket.routeId === 'object' && (ticket.routeId.routeCode || ticket.routeId.routeNumber)
+      ? RouteService.formatRoute(ticket.routeId)
+      : await this.findRoute(ticket.routeId);
     const passenger = ticket.passenger && typeof ticket.passenger === 'object'
       ? ticket.passenger
       : await User.findById(ticket.passenger).select('fullName email phoneNumber').lean();
@@ -1411,7 +1408,7 @@ export class TicketService {
       await this.cancelDuplicatePendingTicketsForPaidTicket(ticket);
 
       const user = await User.findById(ticket.passenger);
-      const route = await Route.findById(ticket.routeId).lean();
+      const route = await this.findRoute(ticket.routeId);
       const alreadyLogged = user?.travelHistory?.some((item) => item.ticketCode === ticket.ticketCode);
       if (user && !alreadyLogged) {
         user.travelHistory.push({

@@ -54,6 +54,18 @@ const getStoredToken = () => {
   }
 };
 
+const firstMessageFromDetails = (value) => {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value.map(firstMessageFromDetails).find(Boolean) || '';
+  }
+  if (typeof value === 'object') {
+    return value.message || Object.values(value).map(firstMessageFromDetails).find(Boolean) || '';
+  }
+  return '';
+};
+
 apiClient.interceptors.request.use(
   (config) => {
     const token = getStoredToken();
@@ -100,6 +112,20 @@ apiClient.interceptors.response.use(
     }
 
     const responseError = error.response?.data || error;
+    if (responseError && typeof responseError === 'object') {
+      const detailedMessage = firstMessageFromDetails(responseError.details || responseError.errors);
+      const genericMessages = new Set([
+        'Validation failed',
+        'Validation error',
+        'Database validation error',
+        'Trip schedule validation failed',
+      ]);
+      if (detailedMessage && (!responseError.message || genericMessages.has(responseError.message))) {
+        responseError.message = detailedMessage;
+      }
+      responseError.status = error.response?.status || responseError.status;
+      responseError.statusCode = error.response?.status || responseError.statusCode;
+    }
     if (error.response?.status === 429) {
       responseError.isRateLimited = true;
       responseError.retryAfter = error.response.headers?.['retry-after'] || responseError.retryAfter;

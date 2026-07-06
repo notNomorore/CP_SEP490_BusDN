@@ -117,7 +117,7 @@ const getRouteNameById = async () => {
   const routes = await mongoose.connection.db.collection('routes').find({}).toArray();
   return new Map(routes.map((route) => [
     String(route._id),
-    route.name || route.routeName || route.routeNumber || route.code || String(route._id),
+    route.routeName || route.name || route.routeCode || route.routeNumber || route.code || String(route._id),
   ]));
 };
 

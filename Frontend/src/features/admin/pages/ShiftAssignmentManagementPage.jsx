@@ -18,12 +18,12 @@ const MAX_WORK_MINUTES_PER_DAY = 8 * 60;
 
 const shiftTemplates = [
   { key: 'MORNING', label: 'Ca sáng', startTime: '05:30', endTime: '13:30', shiftType: 'MORNING' },
-  { key: 'AFTERNOON', label: 'Ca chiều', startTime: '13:30', endTime: '18:30', shiftType: 'AFTERNOON' },
+  { key: 'AFTERNOON', label: 'Ca chiều', startTime: '10:30', endTime: '18:30', shiftType: 'AFTERNOON' },
 ];
 
 const manualShiftTemplates = {
   MORNING: { label: 'Ca sáng', startTime: '05:30', endTime: '13:30' },
-  AFTERNOON: { label: 'Ca chiều', startTime: '13:30', endTime: '18:30' },
+  AFTERNOON: { label: 'Ca chiều', startTime: '10:30', endTime: '18:30' },
 };
 
 const weekDays = [
@@ -221,6 +221,11 @@ const ShiftAssignmentManagementPage = () => {
   const loadShiftsRequestRef = useRef(0);
 
   const dateRange = useMemo(() => eachDate(fromDate, toDate), [fromDate, toDate]);
+  const dateRangeError = useMemo(() => (
+    fromDate && toDate && fromDate > toDate
+      ? 'Từ ngày không được lớn hơn đến ngày.'
+      : ''
+  ), [fromDate, toDate]);
 
   const selectedAssignments = selectedShift ? assignmentMap[getId(selectedShift)] || {} : {};
 
@@ -246,10 +251,6 @@ const ShiftAssignmentManagementPage = () => {
   const canStaffTakeSlot = useCallback((staffId, role, workDate, template, excludeShiftId = '') => {
     if (!staffId || !workDate || !template) return false;
     const assignments = getStaffAssignmentsForDate(staffId, role, workDate, excludeShiftId);
-
-    // Nghiep vu phan ca BusDN: mot nhan vien chi nhan mot ca trong ngay.
-    // Neu da co ca sang hoac ca chieu thi khong dua vao danh sach ranh nua.
-    if (assignments.length > 0) return false;
 
     const hasTimeConflict = assignments.some(({ shift }) => shiftBlocksTemplate(shift, template));
     if (hasTimeConflict) return false;
@@ -324,9 +325,17 @@ const ShiftAssignmentManagementPage = () => {
   const loadShifts = useCallback(async () => {
     const requestId = loadShiftsRequestRef.current + 1;
     loadShiftsRequestRef.current = requestId;
+    if (dateRangeError) {
+      setLoading(false);
+      setShifts([]);
+      setAssignmentMap({});
+      setMessage(dateRangeError);
+      return;
+    }
     setLoading(true);
     setShifts([]);
     setAssignmentMap({});
+    setMessage('');
     try {
       const response = await adminService.getShifts({ from: fromDate, to: toDate });
       if (loadShiftsRequestRef.current !== requestId) return;
@@ -381,7 +390,7 @@ const ShiftAssignmentManagementPage = () => {
         setLoading(false);
       }
     }
-  }, [fromDate, rangeRefreshKey, toDate]);
+  }, [dateRangeError, fromDate, rangeRefreshKey, toDate]);
 
   useEffect(() => {
     loadStaff().catch(() => toast.error('Không thể tải danh sách nhân sự.'));
@@ -435,6 +444,7 @@ const ShiftAssignmentManagementPage = () => {
 
   const handleCreateManual = async (event) => {
     event.preventDefault();
+    if (dateRangeError) return toast.error(dateRangeError);
     const baseDates = form.applyMode === 'DAY' ? [fromDate] : dateRange;
     const targetDates = form.applyMode === 'DAY'
       ? baseDates
@@ -523,6 +533,7 @@ const ShiftAssignmentManagementPage = () => {
   };
 
   const handleAutoGenerate = async () => {
+    if (dateRangeError) return toast.error(dateRangeError);
     if (!dateRange.length) return toast.error('Khoảng ngày không hợp lệ.');
     if (!autoSelection.driverIds.length || !autoSelection.assistantIds.length) {
       return toast.error('Vui lòng chọn đủ tài xế và phụ xe đi làm.');
@@ -546,112 +557,117 @@ const ShiftAssignmentManagementPage = () => {
         assistant: new Map(),
       };
 
-      const markBusy = (role, workDate, staffId) => {
+      const markBusy = (role, workDate, staffId, template) => {
         if (!staffId) return;
-        localBusy[role].set(`${workDate}:${staffId}`, true);
+        const key = `${workDate}:${staffId}`;
+        const current = localBusy[role].get(key) || [];
+        localBusy[role].set(key, [...current, template]);
       };
 
-      const isBusyInRun = (role, workDate, staffId) => (
-        Boolean(staffId) && localBusy[role].has(`${workDate}:${staffId}`)
+      const getLocalTemplates = (role, workDate, staffId) => (
+        staffId ? localBusy[role].get(`${workDate}:${staffId}`) || [] : []
       );
 
       const canUseStaff = (staffId, role, workDate, template) => (
         Boolean(staffId)
-        && !isBusyInRun(role, workDate, staffId)
+        && !getLocalTemplates(role, workDate, staffId).some((assignedTemplate) => (
+          rangesOverlap(assignedTemplate.startTime, assignedTemplate.endTime, template.startTime, template.endTime)
+        ))
+        && getLocalTemplates(role, workDate, staffId).reduce(
+          (total, assignedTemplate) => total + getShiftDurationMinutes(assignedTemplate),
+          0,
+        ) + getShiftDurationMinutes(template) <= MAX_WORK_MINUTES_PER_DAY
         && canStaffTakeSlot(staffId, role, workDate, template)
       );
 
       let totalCandidateRows = 0;
 
-      for (const [dateIndex, workDate] of dateRange.entries()) {
-        const availableDriverQueue = selectedDrivers.filter((driver) => (
-          shiftTemplates.some((template) => canUseStaff(getId(driver), 'driver', workDate, template))
-        ));
-        const availableAssistantQueue = selectedAssistants.filter((assistant) => (
-          shiftTemplates.some((template) => canUseStaff(getId(assistant), 'assistant', workDate, template))
-        ));
+      for (const workDate of dateRange) {
+        for (let templateIndex = 0; templateIndex < shiftTemplates.length; templateIndex += 1) {
+          const template = shiftTemplates[templateIndex];
+          const buildQueue = (items, role) => {
+            const preferred = items.filter((item, itemIndex) => (
+              itemIndex % shiftTemplates.length === templateIndex
+              && canUseStaff(getId(item), role, workDate, template)
+            ));
+            const preferredIds = new Set(preferred.map((item) => getId(item)));
+            const fallback = items.filter((item) => (
+              !preferredIds.has(getId(item))
+              && canUseStaff(getId(item), role, workDate, template)
+            ));
+            return [...preferred, ...fallback];
+          };
 
-        const pairCount = Math.min(availableDriverQueue.length, availableAssistantQueue.length);
-        totalCandidateRows += pairCount;
-        if (availableDriverQueue.length !== availableAssistantQueue.length) {
-          skippedRows.push({
-            workDate,
-            reason: `Lech so luong nhan su ranh: ${availableDriverQueue.length} tai xe, ${availableAssistantQueue.length} phu xe.`,
-          });
-        }
+          const availableDriverQueue = buildQueue(selectedDrivers, 'driver');
+          const availableAssistantQueue = buildQueue(selectedAssistants, 'assistant');
+          const pairCount = Math.min(availableDriverQueue.length, availableAssistantQueue.length);
+          totalCandidateRows += pairCount;
 
-        for (let staffIndex = 0; staffIndex < pairCount; staffIndex += 1) {
-          const driver = availableDriverQueue[staffIndex];
-          const assistant = availableAssistantQueue[staffIndex];
-
-          const preferredTemplateIndex = (staffIndex + dateIndex) % shiftTemplates.length;
-          const orderedTemplates = [
-            shiftTemplates[preferredTemplateIndex],
-            ...shiftTemplates.filter((_, index) => index !== preferredTemplateIndex),
-          ];
-
-          const candidate = orderedTemplates
-            .map((template) => {
-              const driverId = driver && canUseStaff(getId(driver), 'driver', workDate, template) ? getId(driver) : '';
-              const assistantId = assistant && canUseStaff(getId(assistant), 'assistant', workDate, template) ? getId(assistant) : '';
-              return { template, driverId, assistantId };
-            })
-            .find((item) => item.driverId && item.assistantId);
-
-          if (!candidate) {
+          if (availableDriverQueue.length !== availableAssistantQueue.length) {
             skippedRows.push({
-              reason: 'Nhân sự đã kín ca trong ngày.',
               workDate,
-              driver: driver ? getStaffName(driver) : null,
-              assistant: assistant ? getStaffName(assistant) : null,
+              shift: template.label,
+              reason: `Lech so luong nhan su ranh: ${availableDriverQueue.length} tai xe, ${availableAssistantQueue.length} phu xe.`,
             });
-            continue;
           }
 
-          const { template, driverId, assistantId } = candidate;
-          const { shift, created } = await createOrReuseShift({
-            shiftCode: buildAutoShiftCode({ workDate, templateKey: template.key, driverId, assistantId }),
-            workDate,
-            startTime: template.startTime,
-            endTime: template.endTime,
-            shiftType: template.shiftType,
-            shiftName: `${template.label} ${template.startTime}-${template.endTime} #${staffIndex + 1}`,
-            description: 'Ca được hệ thống sinh tự động theo nhân sự đi làm trong ngày.',
-            status: 'PUBLISHED',
-            approvalStatus: 'PUBLISHED',
-          });
+          for (let staffIndex = 0; staffIndex < pairCount; staffIndex += 1) {
+            const driver = availableDriverQueue[staffIndex];
+            const assistant = availableAssistantQueue[staffIndex];
+            const driverId = getId(driver);
+            const assistantId = getId(assistant);
 
-          let assignedPeople = 0;
-          const assignmentErrors = [];
+            if (!driverId || !assistantId) {
+              skippedRows.push({
+                reason: 'Nhân sự đã kín ca hoặc vượt 8 giờ trong ngày.',
+                workDate,
+                driver: driver ? getStaffName(driver) : null,
+                assistant: assistant ? getStaffName(assistant) : null,
+                shift: template.label,
+              });
+              continue;
+            }
 
-          if (driverId) {
+            const { shift, created } = await createOrReuseShift({
+              shiftCode: buildAutoShiftCode({ workDate, templateKey: template.key, driverId, assistantId }),
+              workDate,
+              startTime: template.startTime,
+              endTime: template.endTime,
+              shiftType: template.shiftType,
+              shiftName: `${template.label} ${template.startTime}-${template.endTime} #${staffIndex + 1}`,
+              description: 'Ca được hệ thống sinh tự động theo nhân sự đi làm trong ngày.',
+              status: 'PUBLISHED',
+              approvalStatus: 'PUBLISHED',
+            });
+
+            let assignedPeople = 0;
+            const assignmentErrors = [];
+
             try {
               await adminService.assignDriverToSelectedShift(shift._id, { driverId });
               assignedPeople += 1;
-              markBusy('driver', workDate, driverId);
+              markBusy('driver', workDate, driverId, template);
             } catch (error) {
               assignmentErrors.push(error?.message || 'Không thể phân công tài xế.');
             }
-          }
 
-          if (assistantId) {
             try {
               await adminService.assignAssistantToSelectedShift(shift._id, { assistantId });
               assignedPeople += 1;
-              markBusy('assistant', workDate, assistantId);
+              markBusy('assistant', workDate, assistantId, template);
             } catch (error) {
               assignmentErrors.push(error?.message || 'Không thể phân công phụ xe.');
             }
-          }
 
-          if (assignedPeople === 2) {
-            createdRows.push(shift);
-            if (assignmentErrors.length) {
-              skippedRows.push({ shift, reason: assignmentErrors.join(' ') });
+            if (assignedPeople === 2) {
+              createdRows.push(shift);
+              if (assignmentErrors.length) {
+                skippedRows.push({ shift, reason: assignmentErrors.join(' ') });
+              }
+            } else {
+              if (created) await adminService.archiveShift(shift._id).catch(() => undefined);
+              skippedRows.push({ shift, reason: assignmentErrors.join(' ') || 'Không phân công được nhân sự phù hợp.' });
             }
-          } else {
-            if (created) await adminService.archiveShift(shift._id).catch(() => undefined);
-            skippedRows.push({ shift, reason: assignmentErrors.join(' ') || 'Không phân công được nhân sự phù hợp.' });
           }
         }
       }
@@ -674,7 +690,9 @@ const ShiftAssignmentManagementPage = () => {
     } finally {
       setSubmitting(false);
     }
-  };  const openEdit = async (shift) => {
+  };
+
+  const openEdit = async (shift) => {
     setSelectedShift(shift);
     setEditForm({
       startTime: shift.startTime || OPERATING_START,
@@ -730,6 +748,10 @@ const ShiftAssignmentManagementPage = () => {
   };
 
   const handleCancelShiftsInRange = async () => {
+    if (dateRangeError) {
+      toast.error(dateRangeError);
+      return;
+    }
     if (!dateRange.length) {
       toast.error('Khoảng ngày không hợp lệ.');
       return;
@@ -873,11 +895,11 @@ const ShiftAssignmentManagementPage = () => {
           <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
             <label className="space-y-2">
               <span className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Từ ngày</span>
-              <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold" />
+              <input type="date" value={fromDate} max={toDate || undefined} onChange={(event) => setFromDate(event.target.value)} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold" />
             </label>
             <label className="space-y-2">
               <span className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Đến ngày</span>
-              <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold" />
+              <input type="date" value={toDate} min={fromDate || undefined} onChange={(event) => setToDate(event.target.value)} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold" />
             </label>
             <div className="flex items-end gap-2">
               <button type="button" onClick={() => setRangePreset('DAY')} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-black">Hôm nay</button>
@@ -885,6 +907,11 @@ const ShiftAssignmentManagementPage = () => {
               <button type="button" onClick={() => setRangePreset('MONTH')} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-black">Tháng</button>
             </div>
           </div>
+          {dateRangeError ? (
+            <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
+              {dateRangeError}
+            </p>
+          ) : null}
         </div>
 
         {activeView === 'ASSIGN' ? (
@@ -977,7 +1004,7 @@ const ShiftAssignmentManagementPage = () => {
                 </label>
               </div>
 
-              <button disabled={submitting} type="submit" className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-black text-white disabled:opacity-60">
+              <button disabled={submitting || Boolean(dateRangeError)} type="submit" className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-black text-white disabled:opacity-60">
                 <Save size={18} /> Kiểm tra và tạo lịch nháp
               </button>
               {manualPreviewRows.length ? (
@@ -1087,7 +1114,7 @@ const ShiftAssignmentManagementPage = () => {
                   </div>
                 </div>
               </div>
-              <button disabled={submitting || (!availableDrivers.length && !availableAssistants.length)} type="button" onClick={handleAutoGenerate} className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-300 px-5 text-sm font-black text-[#062819] disabled:opacity-60">
+              <button disabled={submitting || Boolean(dateRangeError) || (!availableDrivers.length && !availableAssistants.length)} type="button" onClick={handleAutoGenerate} className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-300 px-5 text-sm font-black text-[#062819] disabled:opacity-60">
                 <Wand2 size={18} /> Sinh ca tự động
               </button>
               {message ? <p className="mt-4 rounded-2xl bg-white/10 p-4 text-sm text-emerald-50">{message}</p> : null}
@@ -1104,7 +1131,7 @@ const ShiftAssignmentManagementPage = () => {
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 {loading ? <span className="text-sm font-bold text-emerald-700">Đang tải...</span> : null}
-                <button type="button" disabled={submitting || !dateRange.length} onClick={handleCancelShiftsInRange} className="inline-flex h-11 items-center gap-2 rounded-xl border border-rose-200 px-4 text-sm font-black text-rose-600 disabled:cursor-not-allowed disabled:opacity-50">
+                <button type="button" disabled={submitting || Boolean(dateRangeError) || !dateRange.length} onClick={handleCancelShiftsInRange} className="inline-flex h-11 items-center gap-2 rounded-xl border border-rose-200 px-4 text-sm font-black text-rose-600 disabled:cursor-not-allowed disabled:opacity-50">
                   <Trash2 size={17} /> Hủy ca trong khoảng ngày
                 </button>
               </div>

@@ -63,7 +63,7 @@ const TripScheduleSchema = new mongoose.Schema(
   {
     scheduleCode: { type: String, required: true, unique: true, trim: true, uppercase: true },
     serviceDate: { type: Date, required: true },
-    routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'BusRoute', required: true },
+    routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
     routeCode: { type: String, trim: true, default: '' },
     routeName: { type: String, trim: true, default: '' },
     direction: { type: String, enum: ['OUTBOUND', 'INBOUND'], default: 'OUTBOUND' },

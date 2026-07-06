@@ -4,7 +4,7 @@ import { connectDatabase, disconnectDatabase } from '../src/config/database.js';
 import User from '../src/modules/auth/User.js';
 import FleetMonitoringService from '../src/modules/fleetMonitoring/fleetMonitoring.service.js';
 import FleetBus from '../src/modules/admin/FleetBus.js';
-import BusRoute from '../src/modules/admin/BusRoute.js';
+import Route from '../src/modules/routes/Route.js';
 import TripSchedule from '../src/modules/admin/TripSchedule.js';
 import VehicleIssue from '../src/modules/vehicleIssues/VehicleIssue.js';
 import MaintenanceTask from '../src/modules/vehicleIssues/MaintenanceTask.js';
@@ -43,7 +43,7 @@ const upsertStaff = async ({ email, phoneNumber, fullName, role }) => {
   });
 };
 
-const upsertBusRoute = async (adminId) => BusRoute.findOneAndUpdate(
+const upsertBusRoute = async (adminId) => Route.findOneAndUpdate(
   { routeCode: 'DN-MAINT-01' },
   {
     $set: {

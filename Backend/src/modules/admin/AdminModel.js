@@ -1,5 +1,5 @@
 import User from '../auth/User.js';
-import BusRoute from './BusRoute.js';
+import Route from '../routes/Route.js';
 import FleetBus from './FleetBus.js';
 import RouteStation from './RouteStation.js';
 import TripSchedule from './TripSchedule.js';
@@ -15,6 +15,8 @@ const PERFORMANCE_ROLES = ['DRIVER', 'BUS_ASSISTANT'];
 const ROUTE_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'routeCode', 'routeName', 'status']);
 const SCHEDULE_SORT_FIELDS = new Set(['serviceDate', 'departureTime', 'updatedAt', 'scheduleCode', 'status']);
 const ASSIGNABLE_SHIFT_STATUSES = ['ACTIVE', 'APPROVED', 'PUBLISHED'];
+const MAX_DAILY_STAFF_WORK_MINUTES = 8 * 60;
+const MIN_RESOURCE_BUFFER_MINUTES = 10;
 
 const defaultSummary = {
   totalUsers: 0,
@@ -86,6 +88,13 @@ const toMinutes = (value) => {
   return (hours * 60) + minutes;
 };
 
+const effectiveScheduleEnd = (schedule) => {
+  const explicitEnd = toMinutes(schedule.turnaroundEndTime);
+  if (explicitEnd !== null) return explicitEnd;
+  const arrival = toMinutes(schedule.expectedArrivalTime || schedule.departureTime);
+  return arrival === null ? null : Math.min(1439, arrival + MIN_RESOURCE_BUFFER_MINUTES);
+};
+
 const isTimeRangeInsideShift = ({ departureTime, expectedArrivalTime }, shift) => {
   const departure = toMinutes(departureTime);
   const arrival = toMinutes(expectedArrivalTime || departureTime);
@@ -102,11 +111,18 @@ const isTimeRangeInsideShift = ({ departureTime, expectedArrivalTime }, shift) =
 
 const scheduleTimesOverlap = (first, second) => {
   const firstStart = toMinutes(first.departureTime);
-  const firstEnd = toMinutes(first.expectedArrivalTime || first.departureTime);
+  const firstEnd = effectiveScheduleEnd(first);
   const secondStart = toMinutes(second.departureTime);
-  const secondEnd = toMinutes(second.expectedArrivalTime || second.departureTime);
+  const secondEnd = effectiveScheduleEnd(second);
   if ([firstStart, firstEnd, secondStart, secondEnd].some((value) => value === null)) return false;
   return firstStart < secondEnd && secondStart < firstEnd;
+};
+
+const getScheduleWorkMinutes = (schedule) => {
+  const start = toMinutes(schedule.departureTime);
+  const end = toMinutes(schedule.expectedArrivalTime || schedule.departureTime);
+  if (start === null || end === null || end <= start) return 0;
+  return end - start;
 };
 
 const getDateBounds = (value) => {
@@ -393,8 +409,8 @@ export default class AdminModel {
 
   static async findRoutes(options) {
     const [routes, total, summary] = await Promise.all([
-      BusRoute.find(options.filters).sort(options.sort).skip(options.skip).limit(options.limit).lean(),
-      BusRoute.countDocuments(options.filters),
+      Route.find(options.filters).sort(options.sort).skip(options.skip).limit(options.limit).lean(),
+      Route.countDocuments(options.filters),
       this.getRouteSummary(),
     ]);
 
@@ -411,7 +427,7 @@ export default class AdminModel {
   }
 
   static async getRouteSummary() {
-    const summary = await BusRoute.aggregate([
+    const summary = await Route.aggregate([
       {
         $group: {
           _id: null,
@@ -435,18 +451,18 @@ export default class AdminModel {
   }
 
   static async findRouteById(routeId) {
-    return BusRoute.findById(routeId).lean();
+    return Route.findById(routeId).lean();
   }
 
   static async createRoute(payload) {
-    const route = new BusRoute(payload);
+    const route = new Route(payload);
     await route.save();
     await this.syncRouteStationAssignments(route);
     return this.findRouteById(route._id);
   }
 
   static async updateRouteById(routeId, payload) {
-    const route = await BusRoute.findByIdAndUpdate(routeId, { $set: payload }, {
+    const route = await Route.findByIdAndUpdate(routeId, { $set: payload }, {
       new: true,
       runValidators: true,
     });
@@ -540,6 +556,10 @@ export default class AdminModel {
 
   static async findBuses() {
     return FleetBus.find({}).sort({ busCode: 1 }).lean();
+  }
+
+  static async findBusById(busId) {
+    return FleetBus.findById(busId).lean();
   }
 
   static async createBus(payload) {
@@ -685,9 +705,52 @@ export default class AdminModel {
     if (payload.assistant?.userId) orConditions.push({ 'assistant.userId': payload.assistant.userId });
     if (!orConditions.length) return [];
     const schedules = await TripSchedule.find({ ...filters, $or: orConditions })
-      .select('scheduleCode routeCode departureTime expectedArrivalTime vehicle driver assistant')
+      .select('scheduleCode routeCode departureTime expectedArrivalTime turnaroundEndTime vehicle driver assistant')
       .lean();
     return schedules.filter((schedule) => scheduleTimesOverlap(payload, schedule));
+  }
+
+  static async findStaffDailyWorkloadViolations(payload, excludeScheduleId) {
+    if (!payload.serviceDate || !payload.departureTime || !payload.expectedArrivalTime) return [];
+    const tripMinutes = getScheduleWorkMinutes(payload);
+    if (tripMinutes <= 0) return [];
+
+    const dateBounds = getDateBounds(payload.serviceDate);
+    const filters = {
+      serviceDate: dateBounds ? { $gte: dateBounds.start, $lt: dateBounds.end } : payload.serviceDate,
+      status: { $ne: 'CANCELLED' },
+      ...(excludeScheduleId ? { _id: { $ne: excludeScheduleId } } : {}),
+    };
+    const staffChecks = [
+      payload.driver?.userId ? { role: 'driver', label: 'Tài xế', userId: payload.driver.userId, condition: { 'driver.userId': payload.driver.userId } } : null,
+      payload.assistant?.userId ? { role: 'assistant', label: 'Phụ xe', userId: payload.assistant.userId, condition: { 'assistant.userId': payload.assistant.userId } } : null,
+    ].filter(Boolean);
+    if (!staffChecks.length) return [];
+
+    const schedules = await TripSchedule.find({
+      ...filters,
+      $or: staffChecks.map((check) => check.condition),
+    })
+      .select('scheduleCode departureTime expectedArrivalTime driver assistant')
+      .lean();
+
+    return staffChecks
+      .map((check) => {
+        const assignedMinutes = schedules
+          .filter((schedule) => String(schedule[check.role]?.userId || '') === String(check.userId))
+          .reduce((total, schedule) => total + getScheduleWorkMinutes(schedule), 0);
+        const totalMinutes = assignedMinutes + tripMinutes;
+        return {
+          role: check.role,
+          label: check.label,
+          userId: check.userId,
+          assignedMinutes,
+          newTripMinutes: tripMinutes,
+          totalMinutes,
+          limitMinutes: MAX_DAILY_STAFF_WORK_MINUTES,
+        };
+      })
+      .filter((violation) => violation.totalMinutes > violation.limitMinutes);
   }
 
   static async findEligibleDriverShiftAssignment(payload) {
