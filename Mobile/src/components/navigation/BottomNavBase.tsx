@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/colors';
 
-export type BottomNavKey = 'home' | 'explore' | 'tickets' | 'priority' | 'trips' | 'schedule' | 'chat' | 'support' | 'profile';
+export type BottomNavKey = 'home' | 'explore' | 'tickets' | 'priority' | 'trips' | 'schedule' | 'chat' | 'support' | 'profile' | 'validate' | 'sell' | 'revenue';
 
 export type BottomNavItemConfig = {
   key: BottomNavKey;

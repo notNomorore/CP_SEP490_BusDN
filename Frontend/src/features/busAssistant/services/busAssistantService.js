@@ -13,6 +13,9 @@ export const busAssistantService = {
       routeCode: payload.routeCode,
     })).then((response) => response.data);
   },
+  getValidationHistory(filters = {}) {
+    return apiClient.get('/tickets/validation-history', { params: params(filters) }).then((response) => response.data);
+  },
   createWalkInTicket(payload) {
     return apiClient.post('/bus-assistant/walkin-tickets', payload).then((response) => response.data);
   },

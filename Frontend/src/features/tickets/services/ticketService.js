@@ -21,6 +21,11 @@ export const ticketService = {
     return response.data;
   },
 
+  getMyTransactions: async () => {
+    const response = await apiClient.get('/tickets/transactions/me');
+    return response.data;
+  },
+
   getTicket: async (ticketId) => {
     const response = await apiClient.get(`/tickets/${ticketId}`);
     return response.data;
@@ -33,6 +38,11 @@ export const ticketService = {
 
   validateQRCode: async (payload) => {
     const response = await apiClient.post('/tickets/validate-qr', payload);
+    return response.data;
+  },
+
+  applyPromotion: async (payload) => {
+    const response = await apiClient.post('/tickets/promotions/apply', payload);
     return response.data;
   },
 

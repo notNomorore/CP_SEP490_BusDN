@@ -11,6 +11,8 @@ import MonthlyPass from './MonthlyPass.js';
 import QRCodeService from './QRCodeService.js';
 import PaymentOrder from './PaymentOrder.js';
 import PayOSService from './PayOSService.js';
+import Promotion from '../promotions/Promotion.js';
+import PromotionUsage from '../promotions/PromotionUsage.js';
 
 const PASSENGER_TYPES = new Set(['STANDARD', 'STUDENT', 'PRIORITY']);
 const MONTHLY_PASS_PRICES = {
@@ -159,6 +161,18 @@ const buildValidationResult = (result, message, data = {}) => ({
   ...data,
 });
 
+const toValidationDateRange = (dateValue) => {
+  const dateText = String(dateValue || '').match(/^\d{4}-\d{2}-\d{2}$/)
+    ? String(dateValue)
+    : formatVietnamOffsetDateTime(new Date()).slice(0, 10);
+
+  return {
+    date: dateText,
+    start: new Date(`${dateText}T00:00:00+07:00`),
+    end: new Date(`${dateText}T23:59:59.999+07:00`),
+  };
+};
+
 const buildTicketValidationInfo = (ticket, route) => ({
   ticketInfo: {
     _id: ticket._id,
@@ -274,6 +288,65 @@ export class TicketService {
     };
   }
 
+  static buildTicketDedupeKey(ticket) {
+    const serviceDateKey = ticket.serviceDate
+      ? new Date(ticket.serviceDate).toISOString().slice(0, 10)
+      : '';
+
+    return [
+      ticket.passenger,
+      ticket.routeId?._id || ticket.routeId,
+      ticket.tripId,
+      ticket.departureLocation,
+      ticket.destinationLocation,
+      ticket.passengerType,
+      ticket.ticketPrice,
+      serviceDateKey,
+      ticket.departureTime,
+    ].map((value) => String(value || '')).join('|');
+  }
+
+  static getTicketDisplayPriority(ticket) {
+    if (ticket.paymentStatus === 'PAID' && ticket.bookingStatus === 'SUCCESS' && ticket.ticketStatus !== 'CANCELLED') {
+      return 4;
+    }
+    if (ticket.paymentStatus === 'PENDING' && ticket.bookingStatus === 'PENDING' && ticket.ticketStatus !== 'CANCELLED') {
+      return 3;
+    }
+    if (ticket.ticketStatus === 'USED') {
+      return 2;
+    }
+    if (ticket.ticketStatus === 'EXPIRED') {
+      return 1;
+    }
+    return 0;
+  }
+
+  static dedupeTicketListForDisplay(tickets) {
+    const bestTicketsByKey = new Map();
+
+    tickets.forEach((ticket) => {
+      const key = this.buildTicketDedupeKey(ticket);
+      const current = bestTicketsByKey.get(key);
+      if (!current) {
+        bestTicketsByKey.set(key, ticket);
+        return;
+      }
+
+      const currentPriority = this.getTicketDisplayPriority(current);
+      const nextPriority = this.getTicketDisplayPriority(ticket);
+      const currentTime = new Date(current.updatedAt || current.purchasedAt || 0).getTime();
+      const nextTime = new Date(ticket.updatedAt || ticket.purchasedAt || 0).getTime();
+
+      if (nextPriority > currentPriority || (nextPriority === currentPriority && nextTime > currentTime)) {
+        bestTicketsByKey.set(key, ticket);
+      }
+    });
+
+    return Array.from(bestTicketsByKey.values())
+      .sort((left, right) => new Date(right.purchasedAt || 0) - new Date(left.purchasedAt || 0));
+  }
+
   static async cancelDuplicatePendingTicketsForPaidTicket(ticket) {
     if (!ticket || ticket.paymentStatus !== 'PAID' || ticket.bookingStatus !== 'SUCCESS') {
       return;
@@ -329,6 +402,171 @@ export class TicketService {
     await Promise.all(paidTickets.map((ticket) => this.cancelDuplicatePendingTicketsForPaidTicket(ticket)));
   }
 
+  static normalizePromotionCode(code) {
+    return String(code || '').trim().toUpperCase();
+  }
+
+  static calculatePromotionDiscount(promotion, amount) {
+    const originalAmount = Math.max(Number(amount) || 0, 0);
+    let discountAmount = 0;
+
+    if (promotion.discountType === 'PERCENTAGE') {
+      discountAmount = Math.round((originalAmount * Number(promotion.discountValue || 0)) / 100);
+      if (promotion.maxDiscountAmount) {
+        discountAmount = Math.min(discountAmount, Number(promotion.maxDiscountAmount));
+      }
+    } else {
+      discountAmount = Number(promotion.discountValue || 0);
+    }
+
+    discountAmount = Math.min(Math.max(Math.round(discountAmount), 0), originalAmount);
+
+    return {
+      originalAmount,
+      discountAmount,
+      finalAmount: Math.max(originalAmount - discountAmount, 0),
+    };
+  }
+
+  static async applyPromotionToAmount(userId, {
+    promotionCode,
+    ticketType,
+    routeId,
+    amount,
+    strict = true,
+  }) {
+    const code = this.normalizePromotionCode(promotionCode);
+    const originalAmount = Math.max(Number(amount) || 0, 0);
+
+    if (!code) {
+      return {
+        promotion: null,
+        promotionCode: '',
+        originalAmount,
+        discountAmount: 0,
+        finalAmount: originalAmount,
+      };
+    }
+
+    const now = new Date();
+    const promotion = await Promotion.findOne({ code });
+    const fail = (message) => {
+      if (strict) {
+        throw new CustomError(message, HTTP_STATUS.BAD_REQUEST);
+      }
+      return {
+        promotion: null,
+        promotionCode: code,
+        originalAmount,
+        discountAmount: 0,
+        finalAmount: originalAmount,
+        message,
+      };
+    };
+
+    if (!promotion) return fail('Mã khuyến mãi không tồn tại.');
+    if (promotion.status !== 'ACTIVE' || promotion.startDate > now || promotion.endDate < now) {
+      return fail('Mã khuyến mãi không còn hiệu lực.');
+    }
+    if (promotion.usageLimit && promotion.usedCount >= promotion.usageLimit) {
+      return fail('Mã khuyến mãi đã hết lượt sử dụng.');
+    }
+    if (originalAmount < Number(promotion.minOrderAmount || 0)) {
+      return fail('Đơn hàng chưa đạt giá trị tối thiểu để áp dụng mã.');
+    }
+
+    const normalizedTicketType = String(ticketType || 'ONE_WAY').trim().toUpperCase();
+    const routeObjectId = mongoose.isValidObjectId(routeId) ? new mongoose.Types.ObjectId(routeId) : null;
+    const appliesToTicketType = (
+      (normalizedTicketType === 'MONTHLY_PASS' && promotion.applicableTo === 'MONTHLY_PASS')
+      || (normalizedTicketType === 'ONE_WAY' && ['ALL_ROUTES', 'E_TICKET'].includes(promotion.applicableTo))
+      || (
+        normalizedTicketType === 'ONE_WAY'
+        && promotion.applicableTo === 'SELECTED_ROUTES'
+        && routeObjectId
+        && promotion.routeIds.some((item) => String(item) === String(routeObjectId))
+      )
+    );
+
+    if (!appliesToTicketType) {
+      return fail('Mã khuyến mãi không áp dụng cho vé hoặc tuyến này.');
+    }
+
+    const usedByUser = await PromotionUsage.countDocuments({
+      promotionId: promotion._id,
+      userId,
+      status: 'APPLIED',
+    });
+
+    if (promotion.usagePerUser && usedByUser >= promotion.usagePerUser) {
+      return fail('Bạn đã sử dụng hết lượt cho mã khuyến mãi này.');
+    }
+
+    const discount = this.calculatePromotionDiscount(promotion, originalAmount);
+    return {
+      promotion,
+      promotionId: promotion._id,
+      promotionCode: promotion.code,
+      promotionName: promotion.name,
+      discountType: promotion.discountType,
+      discountValue: promotion.discountValue,
+      ...discount,
+    };
+  }
+
+  static async previewPromotion(userId, payload = {}) {
+    const amount = Math.max(Number(payload.amount) || 0, 0);
+    const result = await this.applyPromotionToAmount(userId, {
+      promotionCode: payload.promotionCode,
+      ticketType: payload.ticketType,
+      routeId: payload.routeId,
+      amount,
+      strict: true,
+    });
+
+    return {
+      promotionId: result.promotionId,
+      promotionCode: result.promotionCode,
+      promotionName: result.promotionName,
+      discountType: result.discountType,
+      discountValue: result.discountValue,
+      originalAmount: result.originalAmount,
+      discountAmount: result.discountAmount,
+      finalAmount: result.finalAmount,
+    };
+  }
+
+  static async recordPromotionUsage({ promotionId, userId, ticketId, routeId, paymentMethod, discountAmount, originalAmount, finalAmount }) {
+    if (!promotionId || !discountAmount) {
+      return;
+    }
+
+    const existingUsage = await PromotionUsage.findOne({
+      promotionId,
+      userId,
+      ticketId,
+      status: 'APPLIED',
+    });
+
+    if (existingUsage) {
+      return;
+    }
+
+    await PromotionUsage.create({
+      promotionId,
+      userId,
+      ticketId,
+      routeId,
+      paymentMethod: paymentMethod || 'PAYOS',
+      discountAmount,
+      originalAmount,
+      finalAmount,
+      status: 'APPLIED',
+    });
+
+    await Promotion.findByIdAndUpdate(promotionId, { $inc: { usedCount: 1 } });
+  }
+
   static async purchaseOneWayTicket(userId, payload) {
     const user = await User.findById(userId);
     if (!user) {
@@ -380,7 +618,15 @@ export class TicketService {
     const serviceDateValue = String(payload.serviceDate || '').slice(0, 10);
     const tripId = `${route.routeNumber}-${serviceDateValue}-${departureTime}`;
 
-    const ticketPrice = this.calculatePrice(route, startStop, endStop);
+    const originalPrice = this.calculatePrice(route, startStop, endStop);
+    const promotion = await this.applyPromotionToAmount(userId, {
+      promotionCode: payload.promotionCode,
+      ticketType: 'ONE_WAY',
+      routeId: route._id,
+      amount: originalPrice,
+      strict: true,
+    });
+    const ticketPrice = promotion.finalAmount;
     const duplicateTicketQuery = {
       passenger: user._id,
       routeId: route._id,
@@ -389,6 +635,7 @@ export class TicketService {
       destinationLocation: endStop.name,
       passengerType,
       ticketPrice,
+      promotionCode: promotion.promotionCode || '',
       serviceDate,
       departureTime,
     };
@@ -426,6 +673,10 @@ export class TicketService {
       departureLocation: startStop.name,
       destinationLocation: endStop.name,
       passengerType,
+      originalPrice,
+      discountAmount: promotion.discountAmount,
+      promotionCode: promotion.promotionCode || '',
+      promotionId: promotion.promotionId || null,
       ticketPrice,
       paymentMethod,
       paymentStatus: 'PENDING',
@@ -472,33 +723,7 @@ export class TicketService {
       .populate('passenger', 'fullName email phoneNumber')
       .lean();
 
-    const seenPendingKeys = new Set();
-    const visibleTickets = tickets.filter((ticket) => {
-      if (ticket.paymentStatus !== 'PENDING' || ticket.bookingStatus !== 'PENDING' || ticket.ticketStatus === 'CANCELLED') {
-        return true;
-      }
-
-      const serviceDateKey = ticket.serviceDate
-        ? new Date(ticket.serviceDate).toISOString().slice(0, 10)
-        : '';
-      const pendingKey = [
-        ticket.routeId?._id || ticket.routeId,
-        ticket.tripId,
-        ticket.departureLocation,
-        ticket.destinationLocation,
-        ticket.passengerType,
-        ticket.ticketPrice,
-        serviceDateKey,
-        ticket.departureTime,
-      ].map((value) => String(value || '')).join('|');
-
-      if (seenPendingKeys.has(pendingKey)) {
-        return false;
-      }
-
-      seenPendingKeys.add(pendingKey);
-      return true;
-    });
+    const visibleTickets = this.dedupeTicketListForDisplay(tickets);
 
     return Promise.all(visibleTickets.map((ticket) => this.buildTicketView(ticket)));
   }
@@ -769,6 +994,15 @@ export class TicketService {
 
     const validityMonths = Math.max(Number(payload.validityMonths) || 1, 1);
     const expiryDate = new Date(this.addMonths(startDate, validityMonths).getTime() - 1);
+    const originalPrice = MONTHLY_PASS_PRICES[passType] * validityMonths;
+    const promotion = await this.applyPromotionToAmount(userId, {
+      promotionCode: payload.promotionCode,
+      ticketType: 'MONTHLY_PASS',
+      routeId: selectedRoute?._id,
+      amount: originalPrice,
+      strict: true,
+    });
+    const passPrice = promotion.finalAmount;
     const duplicatePendingPass = await MonthlyPass.findOne({
       passenger: user._id,
       passType,
@@ -776,13 +1010,14 @@ export class TicketService {
       passStatus: 'PENDING',
       startDate,
       expiryDate,
+      passPrice,
+      promotionCode: promotion.promotionCode || '',
     }).lean();
 
     if (duplicatePendingPass && !payload.renew) {
       throw new CustomError('Ban da co ve thang cung tuyen va thoi han dang cho xu ly.', HTTP_STATUS.CONFLICT);
     }
 
-    const passPrice = MONTHLY_PASS_PRICES[passType] * validityMonths;
     const passCode = buildPassCode();
     const issuedAt = new Date();
 
@@ -796,6 +1031,10 @@ export class TicketService {
       expiryDate,
       validFrom: startDate,
       validUntil: expiryDate,
+      originalPrice,
+      discountAmount: promotion.discountAmount,
+      promotionCode: promotion.promotionCode || '',
+      promotionId: promotion.promotionId || null,
       passPrice,
       paymentMethod,
       paymentStatus: 'PENDING',
@@ -831,11 +1070,63 @@ export class TicketService {
     return MonthlyPass.find({ passenger: userId }).sort({ purchasedAt: -1 }).lean();
   }
 
+  static async listMyTransactions(userId) {
+    await this.reconcilePendingPaymentOrders(userId);
+
+    const paidOrders = await PaymentOrder.find({
+      passenger: userId,
+      status: 'PAID',
+    })
+      .sort({ paidAt: -1, completedAt: -1, createdAt: -1 })
+      .populate({
+        path: 'ticketId',
+        populate: { path: 'routeId' },
+      })
+      .populate('monthlyPassId')
+      .lean();
+
+    return paidOrders.map((order) => {
+      const ticket = order.ticketId && typeof order.ticketId === 'object' ? order.ticketId : null;
+      const monthlyPass = order.monthlyPassId && typeof order.monthlyPassId === 'object' ? order.monthlyPassId : null;
+      const route = ticket?.routeId && typeof ticket.routeId === 'object' ? ticket.routeId : null;
+      const paidAt = order.paidAt || order.completedAt || order.updatedAt || order.createdAt;
+      const ticketDocument = ticket || monthlyPass || null;
+
+      return {
+        id: String(order._id),
+        orderCode: order.orderCode,
+        transactionCode: `PAY-${order.orderCode}`,
+        ticketType: order.ticketType,
+        ticketLabel: order.ticketType === 'MONTHLY_PASS' ? 'Monthly pass' : 'One-way ticket',
+        amount: order.amount,
+        paymentMethod: order.paymentMethod || 'PAYOS',
+        status: order.status,
+        paidAt,
+        completedAt: order.completedAt,
+        createdAt: order.createdAt,
+        ticketId: ticket?._id || null,
+        monthlyPassId: monthlyPass?._id || null,
+        ticketCode: ticket?.ticketCode || monthlyPass?.passCode || '',
+        routeCode: ticket?.routeCode || ticket?.routeNumber || monthlyPass?.routeCode || 'ALL',
+        routeName: route?.name || route?.routeName || ticket?.routeNumber || monthlyPass?.routeCode || 'All routes',
+        fromStop: ticket?.departureLocation || '',
+        toStop: ticket?.destinationLocation || '',
+        serviceDate: ticket?.serviceDate || monthlyPass?.validFrom || monthlyPass?.startDate || null,
+        ticketStatus: ticket?.ticketStatus || monthlyPass?.passStatus || '',
+        paymentStatus: ticketDocument?.paymentStatus || 'PAID',
+      };
+    });
+  }
+
   static buildPayOSOrderCode() {
     return (Date.now() * 1000) + crypto.randomInt(100, 999);
   }
 
   static async createPaymentOrder(userId, payload = {}) {
+    if (payload.ticketId) {
+      return this.createPaymentForPendingTicket(userId, payload.ticketId);
+    }
+
     const ticketType = String(payload.ticketType || '').trim().toUpperCase();
     let orderTarget;
     let amount;
@@ -979,6 +1270,10 @@ export class TicketService {
 
     if (paymentOrder?.status === 'PAID') {
       await this.completePaymentOrder(paymentOrder);
+      if (paymentOrder.status !== 'PAID') {
+        throw new CustomError('Vé này đã bị hủy nên không thể kích hoạt thanh toán.', HTTP_STATUS.BAD_REQUEST);
+      }
+
       return {
         orderCode: paymentOrder.orderCode,
         status: 'PAID',
@@ -1090,6 +1385,16 @@ export class TicketService {
       ticket.bookingStatus = 'SUCCESS';
       ticket.ticketStatus = 'ACTIVE';
       await ticket.save();
+      await this.recordPromotionUsage({
+        promotionId: ticket.promotionId,
+        userId: ticket.passenger,
+        ticketId: ticket._id,
+        routeId: ticket.routeId,
+        paymentMethod: 'PAYOS',
+        discountAmount: ticket.discountAmount,
+        originalAmount: ticket.originalPrice || ticket.ticketPrice,
+        finalAmount: ticket.ticketPrice,
+      });
       await this.cancelDuplicatePendingTicketsForPaidTicket(ticket);
 
       const user = await User.findById(ticket.passenger);
@@ -1126,6 +1431,16 @@ export class TicketService {
       monthlyPass.paymentStatus = 'PAID';
       monthlyPass.passStatus = 'ACTIVE';
       await monthlyPass.save();
+      await this.recordPromotionUsage({
+        promotionId: monthlyPass.promotionId,
+        userId: monthlyPass.passenger,
+        ticketId: monthlyPass._id,
+        routeId: monthlyPass.routeId,
+        paymentMethod: 'PAYOS',
+        discountAmount: monthlyPass.discountAmount,
+        originalAmount: monthlyPass.originalPrice || monthlyPass.passPrice,
+        finalAmount: monthlyPass.passPrice,
+      });
 
       await User.findByIdAndUpdate(monthlyPass.passenger, {
         monthlyPassStatus: 'ACTIVE',
@@ -1158,6 +1473,109 @@ export class TicketService {
         // Do not block the tickets page if PayOS is temporarily unavailable.
       }
     }));
+  }
+
+  static async getValidationHistory(validatorUserId, query = {}) {
+    const { date, start, end } = toValidationDateRange(query.date);
+    const validatorId = new mongoose.Types.ObjectId(validatorUserId);
+
+    const [tickets, monthlyPasses] = await Promise.all([
+      Ticket.find({
+        validationLogs: {
+          $elemMatch: {
+            validatedBy: validatorId,
+            result: 'VALID',
+            validatedAt: { $gte: start, $lte: end },
+          },
+        },
+      })
+        .populate('passenger', 'fullName email phoneNumber')
+        .populate('routeId')
+        .lean(),
+      MonthlyPass.find({
+        validationLogs: {
+          $elemMatch: {
+            validatedBy: validatorId,
+            result: 'VALID',
+            validatedAt: { $gte: start, $lte: end },
+          },
+        },
+      })
+        .populate('passenger', 'fullName email phoneNumber')
+        .lean(),
+    ]);
+
+    const ticketItems = tickets.flatMap((ticket) => {
+      const route = ticket.routeId && typeof ticket.routeId === 'object' ? ticket.routeId : null;
+      const validationInfo = buildTicketValidationInfo(ticket, route);
+
+      return (ticket.validationLogs || [])
+        .filter((log) => (
+          String(log.validatedBy) === String(validatorUserId)
+          && log.result === 'VALID'
+          && new Date(log.validatedAt) >= start
+          && new Date(log.validatedAt) <= end
+        ))
+        .map((log) => ({
+          ok: true,
+          result: 'VALID',
+          validationStatus: 'VALIDATED',
+          message: log.message || 'Ticket is valid for boarding.',
+          ticketType: 'ONE_WAY',
+          ticketCode: ticket.ticketCode,
+          status: ticket.ticketStatus,
+          passengerName: ticket.passenger?.fullName || 'Passenger',
+          routeCode: ticket.routeCode || ticket.routeNumber,
+          routeNumber: ticket.routeNumber,
+          tripId: log.tripId || ticket.tripId,
+          validFrom: ticket.validFrom,
+          validUntil: ticket.validUntil || ticket.expiresAt,
+          usedAt: ticket.usedAt || log.validatedAt,
+          savedAt: log.validatedAt,
+          savedDate: date,
+          ...validationInfo,
+        }));
+    });
+
+    const monthlyPassItems = monthlyPasses.flatMap((monthlyPass) => {
+      const validationInfo = buildMonthlyPassValidationInfo(monthlyPass);
+
+      return (monthlyPass.validationLogs || [])
+        .filter((log) => (
+          String(log.validatedBy) === String(validatorUserId)
+          && log.result === 'VALID'
+          && new Date(log.validatedAt) >= start
+          && new Date(log.validatedAt) <= end
+        ))
+        .map((log) => ({
+          ok: true,
+          result: 'VALID',
+          validationStatus: 'VALIDATED',
+          message: log.message || 'Monthly pass is valid for boarding.',
+          ticketType: 'MONTHLY_PASS',
+          passCode: monthlyPass.passCode,
+          ticketCode: monthlyPass.passCode,
+          status: monthlyPass.passStatus,
+          passengerName: monthlyPass.passenger?.fullName || 'Passenger',
+          passType: monthlyPass.passType,
+          routeCode: log.routeCode || monthlyPass.routeCode || 'ALL',
+          validFrom: monthlyPass.validFrom || monthlyPass.startDate,
+          validUntil: monthlyPass.validUntil || monthlyPass.expiryDate,
+          usedAt: log.validatedAt,
+          savedAt: log.validatedAt,
+          savedDate: date,
+          ...validationInfo,
+        }));
+    });
+
+    const validations = [...ticketItems, ...monthlyPassItems]
+      .sort((left, right) => new Date(right.savedAt) - new Date(left.savedAt));
+
+    return {
+      date,
+      validations,
+      count: validations.length,
+    };
   }
 
   static async syncPaymentOrderWithPayOS(paymentOrder) {
