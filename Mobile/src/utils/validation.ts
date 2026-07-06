@@ -1,4 +1,4 @@
-export const splitIdentifier = (identifier: string) => {
+﻿export const splitIdentifier = (identifier: string) => {
   const normalized = identifier.trim();
 
   if (normalized.includes('@')) {
@@ -29,11 +29,11 @@ export const getErrorMessage = (error: unknown, fallback: string) => {
 
 export const validatePassword = (password: string) => {
   const checks = [
-    { key: 'length', label: 'At least 8 characters', valid: password.length >= 8 },
-    { key: 'upper', label: 'Includes one uppercase letter', valid: /[A-Z]/.test(password) },
-    { key: 'lower', label: 'Includes one lowercase letter', valid: /[a-z]/.test(password) },
-    { key: 'number', label: 'Includes one number', valid: /[0-9]/.test(password) },
-    { key: 'special', label: 'Includes one special character (@$!%*?&)', valid: /[@$!%*?&]/.test(password) },
+    { key: 'length', label: 'Ãt nháº¥t 8 kÃ½ tá»±', valid: password.length >= 8 },
+    { key: 'upper', label: 'CÃ³ má»™t chá»¯ hoa', valid: /[A-Z]/.test(password) },
+    { key: 'lower', label: 'CÃ³ má»™t chá»¯ thÆ°á»ng', valid: /[a-z]/.test(password) },
+    { key: 'number', label: 'CÃ³ má»™t chá»¯ sá»‘', valid: /[0-9]/.test(password) },
+    { key: 'special', label: 'CÃ³ má»™t kÃ½ tá»± Ä‘áº·c biá»‡t (@$!%*?&)', valid: /[@$!%*?&]/.test(password) },
   ];
 
   return {

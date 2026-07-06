@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { router } from 'expo-router';
 
 import authStorage from '@/api/authStorage';
 import { config } from '@/constants/config';
@@ -39,6 +40,7 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && !isPublicAuthRequest) {
       await authStorage.deleteItem(AUTH_TOKEN_KEY);
       await authStorage.deleteItem(AUTH_USER_KEY);
+      router.replace('/auth/login');
     }
 
     if (!error.response) {
@@ -47,7 +49,7 @@ apiClient.interceptors.response.use(
       const baseUrl = error.config?.baseURL || config.apiBaseUrl || 'not configured';
       throw {
         ...error,
-        message: `${method} ${baseUrl}${path} failed. The BusDN server is unavailable or the device has no network connection.`,
+        message: `${method} ${baseUrl}${path} thất bại. Máy chủ BusDN không khả dụng hoặc thiết bị không có kết nối mạng.`,
       };
     }
 
