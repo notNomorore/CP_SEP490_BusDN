@@ -6,6 +6,7 @@ export const busAssistantTranslations = {
     walkInTicket: 'Walk-in Ticket',
     shiftRevenue: 'Shift Revenue',
     revenueSummary: 'Revenue Summary',
+    operationChat: 'Operation chat',
     validateQrTicket: 'Validate QR Ticket',
     cameraScannerArea: 'Camera scanner area',
     qrCode: 'QR Code',
@@ -104,6 +105,7 @@ export const busAssistantTranslations = {
     busAssistantRole: 'Bus Assistant',
   },
   vi: {
+    operationChat: 'Nhóm trò chuyện',
     appTitle: 'Phụ xe BusDN',
     appSubtitle: 'Vận hành xe buýt Đà Nẵng',
     validateQr: 'Kiểm tra QR',

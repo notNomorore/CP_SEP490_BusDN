@@ -43,7 +43,7 @@ const ShiftSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['ACTIVE', 'INACTIVE', 'ARCHIVED', 'SUMMARY_SUBMITTED'],
+      enum: ['DRAFT', 'APPROVED', 'ACTIVE', 'INACTIVE', 'ARCHIVED', 'SUMMARY_SUBMITTED'],
       default: 'ACTIVE',
     },
     description: {

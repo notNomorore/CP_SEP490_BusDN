@@ -120,12 +120,58 @@ export default class ShiftController {
     }
   }
 
+  static async archiveShifts(req, res, next) {
+    try {
+      const body = req.body || {};
+      const query = { ...req.query, ...body };
+      const hasScope = Boolean(
+        query.from
+        || query.to
+        || query.startDate
+        || query.endDate
+        || query.date
+        || query.workDate
+        || query.status
+        || query.search
+      );
+      if (!hasScope && body.confirmAll !== true) {
+        return res.status(400).json({
+          success: false,
+          message: 'Hủy toàn bộ ca làm cần confirmAll=true.',
+        });
+      }
+      const result = await ShiftService.deactivateShifts(query, req.user?.userId);
+      return res.json({
+        success: true,
+        message: `Đã hủy ${result.archivedShifts} ca làm.`,
+        ...result,
+        filters: {
+          from: query.from || query.startDate || query.date || query.workDate || '',
+          to: query.to || query.endDate || query.date || query.workDate || '',
+        },
+      });
+    } catch (error) {
+      logger.error('Archive shifts error:', error);
+      next(error);
+    }
+  }
+
   static async listAssignments(req, res, next) {
     try {
       const assignments = await ShiftService.listAssignments(req.query);
       return res.json({ success: true, message: 'Tải phân công ca làm việc thành công', ...assignments });
     } catch (error) {
       logger.error('List shift assignments error:', error);
+      next(error);
+    }
+  }
+
+  static async listAuditLogs(req, res, next) {
+    try {
+      const auditLogs = await ShiftService.listAuditLogs(req.query);
+      return res.json({ success: true, message: 'Tải lịch sử thay đổi ca làm thành công', auditLogs });
+    } catch (error) {
+      logger.error('List shift audit logs error:', error);
       next(error);
     }
   }

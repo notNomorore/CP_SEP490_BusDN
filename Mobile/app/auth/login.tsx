@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
+import { getRoleHomeRoute } from '@/utils/roleNavigation';
 
 const BRAND_GREEN = '#003120';
 const SOFT_MINT = '#ecf6f2';
@@ -34,6 +35,7 @@ export default function LoginScreen() {
   const clearError = useAuthStore((state) => state.clearError);
   const isLoading = useAuthStore((state) => state.isLoading);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const user = useAuthStore((state) => state.user);
   const error = useAuthStore((state) => state.error);
   const canSubmit = Boolean(identifier.trim() && password);
 
@@ -41,15 +43,16 @@ export default function LoginScreen() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      router.replace('/home');
+      router.replace(getRoleHomeRoute(user?.role));
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user?.role]);
 
   const handleLogin = async () => {
     clearError();
     try {
       await login(identifier.trim(), password);
-      router.replace('/home');
+      const loggedInUser = useAuthStore.getState().user;
+      router.replace(getRoleHomeRoute(loggedInUser?.role));
     } catch {
       // The auth store owns the visible API error message.
     }

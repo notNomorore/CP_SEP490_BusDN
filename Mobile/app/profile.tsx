@@ -16,6 +16,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import profileApi from '@/api/profile.api';
+import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
 import type { AuthUser, UserProfile } from '@/types/auth';
@@ -92,33 +93,6 @@ function SettingRow({
         <Text style={styles.settingText}>{label}</Text>
       </View>
       <MaterialCommunityIcons color={colors.outline} name="chevron-right" size={23} />
-    </Pressable>
-  );
-}
-
-function NavItem({
-  icon,
-  label,
-  active,
-  onPress,
-}: {
-  icon: IconName;
-  label: string;
-  active?: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={[styles.navItem, active && styles.navItemActive]}
-    >
-      <MaterialCommunityIcons
-        color={active ? '#17503a' : '#527064'}
-        name={icon}
-        size={21}
-      />
-      <Text style={[styles.navLabel, active && styles.navLabelActive]}>{label}</Text>
     </Pressable>
   );
 }
@@ -323,12 +297,7 @@ export default function ProfileScreen() {
           </View>
         </ScrollView>
 
-        <View style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-          <NavItem icon="home-outline" label="Home" onPress={() => router.replace('/home')} />
-          <NavItem icon="history" label="History" onPress={() => unavailable('History')} />
-          <NavItem icon="ticket-confirmation-outline" label="Tickets" onPress={() => unavailable('Tickets')} />
-          <NavItem active icon="account" label="Account" onPress={() => undefined} />
-        </View>
+        <RoleBottomNav active="profile" role={displayUser.role} />
       </View>
     </SafeAreaView>
   );

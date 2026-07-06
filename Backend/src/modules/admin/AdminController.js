@@ -12,6 +12,9 @@ const ALLOWED_ACCOUNT_ROLES = new Set(['DRIVER', 'CONDUCTOR', 'BUS_ASSISTANT']);
 const ALLOWED_ROUTE_STATUS = new Set(['DRAFT', 'PENDING_APPROVAL', 'PUBLISHED', 'SUSPENDED']);
 const ALLOWED_BUS_STATUS = new Set(['ACTIVE', 'INACTIVE', 'RESERVE', 'ASSIGNED', 'MAINTENANCE']);
 const ALLOWED_SCHEDULE_STATUS = new Set(['PLANNED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']);
+const ASSIGNABLE_BUS_STATUSES = new Set(['ACTIVE', 'RESERVE']);
+const LOCKED_SCHEDULE_STATUSES = new Set(['COMPLETED', 'CANCELLED']);
+const EDITABLE_SCHEDULE_STATUSES = new Set(['PLANNED', 'ASSIGNED']);
 const ALLOWED_OPERATION_NOTIFICATION_CATEGORIES = new Set(['ROUTE_UPDATE', 'SCHEDULE_CHANGE', 'EMERGENCY_INSTRUCTION', 'GENERAL']);
 const ALLOWED_OPERATION_NOTIFICATION_PRIORITIES = new Set(['LOW', 'NORMAL', 'HIGH', 'CRITICAL']);
 const ALLOWED_OPERATION_NOTIFICATION_ROLES = new Set(['DRIVER', 'BUS_ASSISTANT']);
@@ -27,6 +30,22 @@ const toMinutes = (value) => {
   const minutes = Number(match[2]);
   if (hours > 23 || minutes > 59) return null;
   return (hours * 60) + minutes;
+};
+
+const normalizeDateOnly = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      date.setHours(0, 0, 0, 0);
+      return date;
+    }
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setHours(0, 0, 0, 0);
+  return date;
 };
 
 const validateManagedUserPayload = (payload) => {
@@ -106,13 +125,24 @@ const normalizeAssignedPerson = (person = {}) => ({
   phone: String(person.phone || person.phoneNumber || '').trim(),
 });
 
+const hasCompleteTripAssignment = ({ vehicle, driver, assistant }) => (
+  Boolean(vehicle?.busId && driver?.userId && assistant?.userId)
+);
+
+const determineScheduleStatus = (payload, currentStatus = 'PLANNED') => {
+  if (['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(currentStatus)) return currentStatus;
+  return hasCompleteTripAssignment(payload) ? 'ASSIGNED' : 'PLANNED';
+};
+
+const isAssignableBus = (bus) => Boolean(bus && ASSIGNABLE_BUS_STATUSES.has(bus.status));
+
 const FIRST_BUS_DEPARTURE_TIME = '05:30';
 const LAST_BUS_DEPARTURE_TIME = '18:30';
 const FIRST_BUS_DEPARTURE_MINUTES = 5 * 60 + 30;
 const LAST_BUS_DEPARTURE_MINUTES = 18 * 60 + 30;
 
 const scheduleWeekdayToken = (date) => (
-  ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getUTCDay()]
+  ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()]
 );
 
 const getRouteScheduleMismatch = (route, serviceDate, departureTime) => {
@@ -138,9 +168,7 @@ const normalizeTripSchedulePayload = async (body = {}, userId) => {
   const vehicle = normalizeAssignedVehicle(body.vehicle);
   const driver = normalizeAssignedPerson(body.driver);
   const assistant = normalizeAssignedPerson(body.assistant);
-  const serviceDate = body.serviceDate ? new Date(body.serviceDate) : null;
-  const hasCompleteAssignment = Boolean(vehicle.busId && driver.userId && assistant.userId);
-  const requestedStatus = ALLOWED_SCHEDULE_STATUS.has(body.status) ? body.status : null;
+  const serviceDate = normalizeDateOnly(body.serviceDate);
   const routeScheduleMismatch = getRouteScheduleMismatch(route, serviceDate, body.departureTime);
 
   return {
@@ -153,9 +181,7 @@ const normalizeTripSchedulePayload = async (body = {}, userId) => {
     departureTime: String(body.departureTime || '').trim(),
     expectedArrivalTime: String(body.expectedArrivalTime || '').trim(),
     shiftLabel: String(body.shiftLabel || '').trim(),
-    status: requestedStatus === 'ASSIGNED' && !hasCompleteAssignment
-      ? 'PLANNED'
-      : requestedStatus || (hasCompleteAssignment ? 'ASSIGNED' : 'PLANNED'),
+    status: ALLOWED_SCHEDULE_STATUS.has(body.status) ? body.status : 'PLANNED',
     vehicle,
     driver,
     assistant,
@@ -174,7 +200,6 @@ const validateTripSchedulePayload = (payload) => {
   const errors = [];
   const departureMinutes = toMinutes(payload.departureTime);
   const arrivalMinutes = toMinutes(payload.expectedArrivalTime);
-  const hasCompleteAssignment = Boolean(payload.vehicle?.busId && payload.driver?.userId && payload.assistant?.userId);
   if (!payload.scheduleCode) errors.push('Schedule code is required');
   if (!payload.routeId || !isValidObjectId(payload.routeId)) errors.push('Route is required');
   if (!payload.serviceDate || Number.isNaN(payload.serviceDate.getTime())) errors.push('Service date is invalid');
@@ -188,9 +213,6 @@ const validateTripSchedulePayload = (payload) => {
   if (arrivalMinutes === null) errors.push('Expected arrival time is required in valid HH:mm format');
   if (departureMinutes !== null && arrivalMinutes !== null && arrivalMinutes <= departureMinutes) {
     errors.push('Expected arrival time must be later than departure time');
-  }
-  if (!hasCompleteAssignment && ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'].includes(payload.status)) {
-    errors.push('Vehicle, driver, and assistant are all required for an assigned schedule');
   }
   if (payload.routeScheduleMismatch && !payload.isScheduleException) {
     errors.push(payload.routeScheduleMismatch);
@@ -1038,9 +1060,11 @@ export class AdminController {
       if (payload.vehicle?.busId) {
         const bus = (await AdminModel.findBuses()).find((item) => String(item._id) === String(payload.vehicle.busId));
         if (!bus) return res.status(400).json({ success: false, message: 'Assigned vehicle not found' });
-        if (bus.status === 'MAINTENANCE') return res.status(409).json({ success: false, message: 'Vehicle is under maintenance and cannot be assigned' });
+        if (!isAssignableBus(bus)) return res.status(409).json({ success: false, message: 'Xe không sẵn sàng để phân công trong khung giờ này.' });
         payload.vehicle = normalizeAssignedVehicle(bus);
       }
+
+      payload.status = determineScheduleStatus(payload);
 
       if (payload.driver?.userId) {
         const assignment = await AdminModel.findEligibleDriverShiftAssignment(payload);
@@ -1077,6 +1101,15 @@ export class AdminController {
       const { scheduleId } = req.params;
       if (!isValidObjectId(scheduleId)) return res.status(400).json({ success: false, message: 'Invalid schedule id' });
 
+      const currentSchedule = await AdminModel.findTripScheduleById(scheduleId);
+      if (!currentSchedule) return res.status(404).json({ success: false, message: 'Trip schedule not found' });
+      if (LOCKED_SCHEDULE_STATUSES.has(currentSchedule.status)) {
+        return res.status(409).json({ success: false, message: 'Không thể chỉnh sửa phân công của lịch chuyến đã hoàn thành hoặc đã hủy.' });
+      }
+      if (!EDITABLE_SCHEDULE_STATUSES.has(currentSchedule.status) && !req.body.emergencyReason) {
+        return res.status(409).json({ success: false, message: 'Chỉ có thể chỉnh sửa lịch đang chạy khi xử lý sự cố hoặc điều phối khẩn cấp.' });
+      }
+
       const payload = await normalizeTripSchedulePayload(req.body, req.user?.userId);
       const validationErrors = validateTripSchedulePayload(payload);
       if (validationErrors.length) {
@@ -1086,9 +1119,11 @@ export class AdminController {
       if (payload.vehicle?.busId) {
         const bus = (await AdminModel.findBuses()).find((item) => String(item._id) === String(payload.vehicle.busId));
         if (!bus) return res.status(400).json({ success: false, message: 'Assigned vehicle not found' });
-        if (bus.status === 'MAINTENANCE') return res.status(409).json({ success: false, message: 'Vehicle is under maintenance and cannot be assigned' });
+        if (!isAssignableBus(bus)) return res.status(409).json({ success: false, message: 'Xe không sẵn sàng để phân công trong khung giờ này.' });
         payload.vehicle = normalizeAssignedVehicle(bus);
       }
+
+      payload.status = determineScheduleStatus(payload, currentSchedule.status);
 
       if (payload.driver?.userId) {
         const assignment = await AdminModel.findEligibleDriverShiftAssignment(payload);
@@ -1150,14 +1185,69 @@ export class AdminController {
 
       const schedule = await AdminModel.findTripScheduleById(scheduleId);
       if (!schedule) return res.status(404).json({ success: false, message: 'Không tìm thấy ca làm.' });
-      if (schedule.status === 'IN_PROGRESS') {
-        return res.status(409).json({ success: false, message: 'Không thể xóa ca đang chạy.' });
+      if (['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(schedule.status)) {
+        return res.status(409).json({ success: false, message: 'Không thể xóa lịch chuyến đang chạy, đã hoàn thành hoặc đã hủy.' });
       }
 
       await AdminModel.deleteTripScheduleById(scheduleId);
       return res.json({ success: true, message: 'Đã xóa ca làm.' });
     } catch (error) {
       logger.error('Delete trip schedule error:', error);
+      next(error);
+    }
+  }
+
+  static async deleteTripSchedules(req, res, next) {
+    try {
+      const body = req.body || {};
+      const query = { ...req.query, ...body };
+      const scheduleIds = Array.isArray(body.scheduleIds)
+        ? body.scheduleIds.filter((id) => isValidObjectId(id))
+        : [];
+
+      let filters;
+      if (scheduleIds.length) {
+        filters = { _id: { $in: scheduleIds } };
+      } else {
+        const hasScope = Boolean(
+          query.routeId
+          || query.startDate
+          || query.endDate
+          || query.serviceDate
+          || query.status
+          || query.search
+        );
+        if (!hasScope && body.confirmAll !== true) {
+          return res.status(400).json({
+            success: false,
+            message: 'Xóa toàn bộ lịch cần confirmAll=true.',
+          });
+        }
+        filters = AdminModel.buildScheduleQueryOptions(query).filters;
+      }
+
+      const deletableFilters = {
+        $and: [
+          filters,
+          { status: { $nin: ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'] } },
+        ],
+      };
+      const protectedCount = await AdminModel.countTripSchedules({
+        $and: [
+          filters,
+          { status: { $in: ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'] } },
+        ],
+      });
+      const result = await AdminModel.deleteTripSchedules(deletableFilters);
+
+      return res.json({
+        success: true,
+        message: `Đã xóa ${result.deletedCount} lịch chuyến.`,
+        ...result,
+        protectedCount,
+      });
+    } catch (error) {
+      logger.error('Delete trip schedules error:', error);
       next(error);
     }
   }
