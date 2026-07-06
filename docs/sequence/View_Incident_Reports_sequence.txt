@@ -1,0 +1,70 @@
+@startuml
+title View Incident Reports - Sequence Diagram
+
+hide footbox
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+actor Admin
+participant "Admin Web App" as AdminWebApp
+participant "IncidentController" as IncidentController
+participant "IncidentService" as IncidentService
+participant "IncidentRepository" as IncidentRepository
+database "Incident Collection" as IncidentCollection
+participant "RouteRepository" as RouteRepository
+database "Route Collection" as RouteCollection
+
+note over IncidentController, IncidentService
+Implemented as IncidentReportController and IncidentReportService
+at GET /api/admin/incidents.
+end note
+
+Admin -> AdminWebApp: 1: View incident reports
+activate AdminWebApp
+AdminWebApp -> IncidentController: 1.1: GET /api/admin/incidents
+activate IncidentController
+IncidentController -> IncidentService: 1.2: getIncidents(filters)
+activate IncidentService
+IncidentService -> IncidentRepository: 1.3: sync operational incident sources
+activate IncidentRepository
+IncidentRepository -> IncidentCollection: 1.3.1: upsert incident reports from operation incidents
+activate IncidentCollection
+IncidentCollection --> IncidentRepository: 1.3.2: synced source reports
+deactivate IncidentCollection
+IncidentRepository --> IncidentService: 1.3.3: sync complete
+deactivate IncidentRepository
+IncidentService -> IncidentRepository: 1.4: query incidents by keyword, type, status, severity, route, vehicle, date
+activate IncidentRepository
+IncidentRepository -> IncidentCollection: 1.4.1: find incidents and counts
+activate IncidentCollection
+IncidentCollection --> IncidentRepository: 1.4.2: incident list and counts
+deactivate IncidentCollection
+IncidentRepository --> IncidentService: 1.4.3: incident report data
+deactivate IncidentRepository
+IncidentService -> RouteRepository: 1.5: enrich related route, trip, vehicle
+activate RouteRepository
+RouteRepository -> RouteCollection: 1.5.1: query related records
+activate RouteCollection
+RouteCollection --> RouteRepository: 1.5.2: related info
+deactivate RouteCollection
+RouteRepository --> IncidentService: 1.5.3: enrichment data
+deactivate RouteRepository
+
+alt [invalid filter]
+    IncidentService --> IncidentController: 1.6: filter validation error
+    IncidentController --> AdminWebApp: 1.7: 400 Invalid incident filter
+else [no incidents found]
+    IncidentService --> IncidentController: 1.6: empty incidents
+    IncidentController --> AdminWebApp: 1.7: 200 No incident reports
+else [incidents available]
+    IncidentService --> IncidentController: 1.6: incidents with pagination and counts
+    IncidentController --> AdminWebApp: 1.7: 200 Incident reports
+end
+deactivate IncidentService
+deactivate IncidentController
+AdminWebApp --> Admin: 1.8: Display incident reports
+deactivate AdminWebApp
+
+@enduml

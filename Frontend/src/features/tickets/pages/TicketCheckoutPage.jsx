@@ -32,6 +32,7 @@ const buildPaymentPayload = (order) => {
       passType: order.passengerType,
       startDate: order.serviceDate,
       validityMonths: 1,
+      promotionCode: order.promotionCode || '',
     };
   }
 
@@ -43,6 +44,7 @@ const buildPaymentPayload = (order) => {
     serviceDate: order.serviceDate,
     departureTime: order.departureTime,
     passengerType: order.passengerType,
+    promotionCode: order.promotionCode || '',
   };
 };
 

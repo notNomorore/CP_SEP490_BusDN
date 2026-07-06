@@ -1,0 +1,50 @@
+@startuml
+title View Transaction History - Sequence Diagram
+
+hide footbox
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+actor Passenger
+participant "Passenger App" as PassengerApp
+participant "TransactionController" as TransactionController
+participant "TransactionService" as TransactionService
+participant "TransactionRepository" as TransactionRepository
+database "Transaction Collection" as TransactionCollection
+
+note over TransactionController, TransactionService
+Source has no dedicated passenger TransactionController/TransactionService route.
+Closest implemented history is GET /api/tickets/me in TicketController,
+which lists passenger tickets and reconciles PaymentOrder records.
+end note
+
+Passenger -> PassengerApp: 1: View transaction history
+activate PassengerApp
+PassengerApp -> TransactionController: 1.1: GET /api/transactions
+activate TransactionController
+TransactionController -> TransactionService: 1.2: getTransactionHistory(userId)
+activate TransactionService
+TransactionService -> TransactionRepository: 1.3: find transactions by passenger
+activate TransactionRepository
+TransactionRepository -> TransactionCollection: 1.3.1: query transaction records
+activate TransactionCollection
+TransactionCollection --> TransactionRepository: 1.3.2: transaction records or empty result
+deactivate TransactionCollection
+TransactionRepository --> TransactionService: 1.3.3: transaction list
+deactivate TransactionRepository
+
+alt [no transactions found]
+    TransactionService --> TransactionController: 1.4: empty transaction list
+    TransactionController --> PassengerApp: 1.5: 200 Empty result
+else [transactions available]
+    TransactionService --> TransactionController: 1.4: mapped transaction history response
+    TransactionController --> PassengerApp: 1.5: 200 Transaction history
+end
+deactivate TransactionService
+deactivate TransactionController
+PassengerApp --> Passenger: 1.6: Display transaction history
+deactivate PassengerApp
+
+@enduml

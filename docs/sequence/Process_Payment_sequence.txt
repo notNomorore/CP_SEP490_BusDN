@@ -1,0 +1,84 @@
+@startuml
+title Process Payment - Sequence Diagram
+
+hide footbox
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+actor Passenger
+participant "Passenger App" as PassengerApp
+participant "PaymentController" as PaymentController
+participant "PaymentService" as PaymentService
+participant "PaymentRepository" as PaymentRepository
+database "Payment Collection" as PaymentCollection
+participant "TicketService" as TicketService
+database "Ticket Collection" as TicketCollection
+participant "PaymentGateway" as PaymentGateway
+
+note over PaymentController, PaymentService
+Implemented as TicketController.createPayment and TicketService.createPaymentOrder.
+Payment persistence uses PaymentOrder model and PayOSService.
+end note
+
+Passenger -> PassengerApp: 1: Confirm ticket payment
+activate PassengerApp
+PassengerApp -> PaymentController: 1.1: POST /api/tickets/payments
+activate PaymentController
+PaymentController -> PaymentService: 1.2: createPaymentOrder(userId, payload)
+activate PaymentService
+PaymentService -> TicketService: 1.3: purchaseOneWayTicket or purchaseMonthlyPass
+activate TicketService
+TicketService -> TicketCollection: 1.3.1: find or create pending ticket/pass
+activate TicketCollection
+TicketCollection --> TicketService: 1.3.2: pending ticket/pass target
+deactivate TicketCollection
+TicketService --> PaymentService: 1.3.3: order target and amount
+deactivate TicketService
+PaymentService -> PaymentRepository: 1.4: find or create PaymentOrder
+activate PaymentRepository
+PaymentRepository -> PaymentCollection: 1.4.1: upsert payment order by passenger and target
+activate PaymentCollection
+PaymentCollection --> PaymentRepository: 1.4.2: payment order
+deactivate PaymentCollection
+PaymentRepository --> PaymentService: 1.4.3: payment order
+deactivate PaymentRepository
+
+alt [amount is zero]
+    PaymentService -> TicketService: 1.5: completePaymentOrder(paymentOrder)
+    activate TicketService
+    TicketService -> TicketCollection: 1.5.1: mark ticket/pass paid and active
+    activate TicketCollection
+    TicketCollection --> TicketService: 1.5.2: saved paid ticket/pass
+    deactivate TicketCollection
+    TicketService --> PaymentService: 1.5.3: payment completed
+    deactivate TicketService
+else [PayOS payment required]
+    PaymentService -> PaymentGateway: 1.5: createPaymentLink(orderCode, amount)
+    activate PaymentGateway
+    PaymentGateway --> PaymentService: 1.5.1: checkout URL and QR code
+    deactivate PaymentGateway
+    PaymentService -> PaymentRepository: 1.5.2: save PayOS link data
+    activate PaymentRepository
+    PaymentRepository -> PaymentCollection: 1.5.3: update payment order
+    activate PaymentCollection
+    PaymentCollection --> PaymentRepository: 1.5.4: saved payment order
+    deactivate PaymentCollection
+    PaymentRepository --> PaymentService: 1.5.5: saved PayOS payment
+    deactivate PaymentRepository
+end
+
+alt [payment gateway failed]
+    PaymentService --> PaymentController: 1.6: payment creation error
+    PaymentController --> PassengerApp: 1.7: 502 Cannot create payment
+else [payment QR created]
+    PaymentService --> PaymentController: 1.6: payment QR response
+    PaymentController --> PassengerApp: 1.7: 201 Payment QR created
+end
+deactivate PaymentService
+deactivate PaymentController
+PassengerApp --> Passenger: 1.8: Show QR and order status
+deactivate PassengerApp
+
+@enduml

@@ -1,0 +1,75 @@
+@startuml
+title Validate E-Ticket - Sequence Diagram
+
+hide footbox
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+actor "Bus Assistant" as BusAssistant
+participant "Bus Assistant App" as BusAssistantApp
+participant "QRValidationController" as QRValidationController
+participant "QRValidationService" as QRValidationService
+participant "QRCodeService" as QRCodeService
+participant "TicketRepository" as TicketRepository
+database "Ticket Collection" as TicketCollection
+participant "AuditLogger" as AuditLogger
+database "Audit Log Collection" as AuditLogCollection
+
+note over QRValidationController, QRValidationService
+Passenger-facing validation endpoint is implemented as TicketController.validateQRCode
+and TicketService.validateQRCode at POST /api/tickets/validate-qr.
+end note
+
+BusAssistant -> BusAssistantApp: 1: Scan E-ticket QR
+activate BusAssistantApp
+BusAssistantApp -> QRValidationController: 1.1: POST /api/tickets/validate-qr
+activate QRValidationController
+QRValidationController -> QRValidationService: 1.2: validateQRCode(assistantId, qrPayload)
+activate QRValidationService
+QRValidationService -> QRCodeService: 1.3: decode and verify signed payload
+activate QRCodeService
+QRCodeService --> QRValidationService: 1.3.1: decoded QR data or invalid signature
+deactivate QRCodeService
+QRValidationService -> TicketRepository: 1.4: find ticket or monthly pass by code
+activate TicketRepository
+TicketRepository -> TicketCollection: 1.4.1: query ticket/pass record
+activate TicketCollection
+TicketCollection --> TicketRepository: 1.4.2: ticket/pass record or empty
+deactivate TicketCollection
+TicketRepository --> QRValidationService: 1.4.3: validation target
+deactivate TicketRepository
+
+alt [QR invalid]
+    QRValidationService --> QRValidationController: 1.5: INVALID_QR result
+    QRValidationController --> BusAssistantApp: 1.6: 200 Invalid QR
+else [ticket expired or already used]
+    QRValidationService --> QRValidationController: 1.5: EXPIRED or ALREADY_USED result
+    QRValidationController --> BusAssistantApp: 1.6: 200 Ticket not valid
+else [ticket valid]
+    QRValidationService -> TicketRepository: 1.5: mark ticket used and append validation log
+    activate TicketRepository
+    TicketRepository -> TicketCollection: 1.5.1: save usedAt, validatedBy, validationLogs
+    activate TicketCollection
+    TicketCollection --> TicketRepository: 1.5.2: updated ticket
+    deactivate TicketCollection
+    TicketRepository --> QRValidationService: 1.5.3: saved validation
+    deactivate TicketRepository
+    QRValidationService -> AuditLogger: 1.6: record ticket validation when using bus-assistant flow
+    activate AuditLogger
+    AuditLogger -> AuditLogCollection: 1.6.1: insert audit log
+    activate AuditLogCollection
+    AuditLogCollection --> AuditLogger: 1.6.2: audit saved
+    deactivate AuditLogCollection
+    AuditLogger --> QRValidationService: 1.6.3: logged
+    deactivate AuditLogger
+    QRValidationService --> QRValidationController: 1.7: VALID result
+    QRValidationController --> BusAssistantApp: 1.8: 200 Ticket validated
+end
+deactivate QRValidationService
+deactivate QRValidationController
+BusAssistantApp --> BusAssistant: 1.9: Show validation result
+deactivate BusAssistantApp
+
+@enduml

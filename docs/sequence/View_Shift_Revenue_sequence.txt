@@ -1,0 +1,62 @@
+@startuml
+title View Shift Revenue - Sequence Diagram
+
+hide footbox
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+actor "Bus Assistant" as BusAssistant
+participant "Bus Assistant App" as BusAssistantApp
+participant "ShiftRevenueController" as ShiftRevenueController
+participant "ShiftRevenueService" as ShiftRevenueService
+participant "ShiftRevenueRepository" as ShiftRevenueRepository
+database "Shift Revenue Collection" as ShiftRevenueCollection
+participant "TransactionRepository" as TransactionRepository
+database "Transaction Collection" as TransactionCollection
+
+note over ShiftRevenueController, ShiftRevenueService
+Implemented as BusAssistantController.getShiftRevenue and BusAssistantService.getShiftRevenue.
+Revenue is built from completed Transaction records plus boarding counts.
+end note
+
+BusAssistant -> BusAssistantApp: 1: View shift revenue
+activate BusAssistantApp
+BusAssistantApp -> ShiftRevenueController: 1.1: GET /api/bus-assistant/shift-revenue
+activate ShiftRevenueController
+ShiftRevenueController -> ShiftRevenueService: 1.2: getShiftRevenue(filters, assistant)
+activate ShiftRevenueService
+ShiftRevenueService -> ShiftRevenueRepository: 1.3: find assigned shift
+activate ShiftRevenueRepository
+ShiftRevenueRepository -> ShiftRevenueCollection: 1.3.1: query shift assignment and summary context
+activate ShiftRevenueCollection
+ShiftRevenueCollection --> ShiftRevenueRepository: 1.3.2: shift context or none
+deactivate ShiftRevenueCollection
+ShiftRevenueRepository --> ShiftRevenueService: 1.3.3: assigned shift
+deactivate ShiftRevenueRepository
+ShiftRevenueService -> TransactionRepository: 1.4: aggregate completed shift transactions
+activate TransactionRepository
+TransactionRepository -> TransactionCollection: 1.4.1: query by assistant, shift, route, date
+activate TransactionCollection
+TransactionCollection --> TransactionRepository: 1.4.2: completed transaction records
+deactivate TransactionCollection
+TransactionRepository --> ShiftRevenueService: 1.4.3: cash, e-payment, ticket counts
+deactivate TransactionRepository
+
+alt [no shift found]
+    ShiftRevenueService --> ShiftRevenueController: 1.5: shift not assigned
+    ShiftRevenueController --> BusAssistantApp: 1.6: 403 Shift not found
+else [no revenue data]
+    ShiftRevenueService --> ShiftRevenueController: 1.5: zero revenue summary
+    ShiftRevenueController --> BusAssistantApp: 1.6: 200 Empty shift revenue
+else [revenue data available]
+    ShiftRevenueService --> ShiftRevenueController: 1.5: shift revenue response
+    ShiftRevenueController --> BusAssistantApp: 1.6: 200 Revenue totals and breakdown
+end
+deactivate ShiftRevenueService
+deactivate ShiftRevenueController
+BusAssistantApp --> BusAssistant: 1.7: Display shift revenue
+deactivate BusAssistantApp
+
+@enduml

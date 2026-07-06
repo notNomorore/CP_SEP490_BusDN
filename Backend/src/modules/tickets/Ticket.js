@@ -35,6 +35,10 @@ const TicketSchema = new mongoose.Schema(
       required: true,
     },
     seatNumber: { type: String, trim: true, uppercase: true, default: '' },
+    originalPrice: { type: Number, min: 0, default: 0 },
+    discountAmount: { type: Number, min: 0, default: 0 },
+    promotionCode: { type: String, trim: true, uppercase: true, default: '' },
+    promotionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Promotion', default: null },
     ticketPrice: { type: Number, required: true, min: 0 },
     paymentMethod: {
       type: String,

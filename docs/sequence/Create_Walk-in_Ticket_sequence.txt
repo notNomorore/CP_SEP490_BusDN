@@ -1,0 +1,69 @@
+@startuml
+title Create Walk-in Ticket - Sequence Diagram
+
+hide footbox
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+actor "Bus Assistant" as BusAssistant
+participant "Bus Assistant App" as BusAssistantApp
+participant "WalkInTicketController" as WalkInTicketController
+participant "WalkInTicketService" as WalkInTicketService
+participant "RouteRepository" as RouteRepository
+database "Route Collection" as RouteCollection
+participant "WalkInTicketRepository" as WalkInTicketRepository
+database "Walk-in Ticket Collection" as WalkInTicketCollection
+participant "TransactionRepository" as TransactionRepository
+database "Transaction Collection" as TransactionCollection
+
+note over WalkInTicketController, WalkInTicketService
+Implemented for bus assistant as BusAssistantController.createWalkInTicket
+and BusAssistantService.createWalkInTicket at POST /api/bus-assistant/walkin-tickets.
+end note
+
+BusAssistant -> BusAssistantApp: 1: Create cash walk-in ticket
+activate BusAssistantApp
+BusAssistantApp -> WalkInTicketController: 1.1: POST /api/bus-assistant/walkin-tickets
+activate WalkInTicketController
+WalkInTicketController -> WalkInTicketService: 1.2: createWalkInTicket(payload, assistant)
+activate WalkInTicketService
+WalkInTicketService -> RouteRepository: 1.3: validate active route and trip
+activate RouteRepository
+RouteRepository -> RouteCollection: 1.3.1: query route/trip records
+activate RouteCollection
+RouteCollection --> RouteRepository: 1.3.2: active route/trip or missing data
+deactivate RouteCollection
+RouteRepository --> WalkInTicketService: 1.3.3: route/trip validation result
+deactivate RouteRepository
+
+alt [missing fare or invalid route/trip]
+    WalkInTicketService --> WalkInTicketController: 1.4: validation failed
+    WalkInTicketController --> BusAssistantApp: 1.5: 400 Cannot create ticket
+else [walk-in ticket can be created]
+    WalkInTicketService -> WalkInTicketRepository: 1.4: create completed walk-in ticket
+    activate WalkInTicketRepository
+    WalkInTicketRepository -> WalkInTicketCollection: 1.4.1: insert ticket with fare and passenger count
+    activate WalkInTicketCollection
+    WalkInTicketCollection --> WalkInTicketRepository: 1.4.2: saved walk-in ticket
+    deactivate WalkInTicketCollection
+    WalkInTicketRepository --> WalkInTicketService: 1.4.3: ticketData
+    deactivate WalkInTicketRepository
+    WalkInTicketService -> TransactionRepository: 1.5: create completed cash transaction
+    activate TransactionRepository
+    TransactionRepository -> TransactionCollection: 1.5.1: insert transaction
+    activate TransactionCollection
+    TransactionCollection --> TransactionRepository: 1.5.2: saved transaction
+    deactivate TransactionCollection
+    TransactionRepository --> WalkInTicketService: 1.5.3: transactionData
+    deactivate TransactionRepository
+    WalkInTicketService --> WalkInTicketController: 1.6: ticket and transaction response
+    WalkInTicketController --> BusAssistantApp: 1.7: 201 Walk-in ticket created
+end
+deactivate WalkInTicketService
+deactivate WalkInTicketController
+BusAssistantApp --> BusAssistant: 1.8: Show ticket receipt
+deactivate BusAssistantApp
+
+@enduml

@@ -11,6 +11,8 @@ import MonthlyPass from './MonthlyPass.js';
 import QRCodeService from './QRCodeService.js';
 import PaymentOrder from './PaymentOrder.js';
 import PayOSService from './PayOSService.js';
+import Promotion from '../promotions/Promotion.js';
+import PromotionUsage from '../promotions/PromotionUsage.js';
 
 const PASSENGER_TYPES = new Set(['STANDARD', 'STUDENT', 'PRIORITY']);
 const MONTHLY_PASS_PRICES = {
@@ -329,6 +331,171 @@ export class TicketService {
     await Promise.all(paidTickets.map((ticket) => this.cancelDuplicatePendingTicketsForPaidTicket(ticket)));
   }
 
+  static normalizePromotionCode(code) {
+    return String(code || '').trim().toUpperCase();
+  }
+
+  static calculatePromotionDiscount(promotion, amount) {
+    const originalAmount = Math.max(Number(amount) || 0, 0);
+    let discountAmount = 0;
+
+    if (promotion.discountType === 'PERCENTAGE') {
+      discountAmount = Math.round((originalAmount * Number(promotion.discountValue || 0)) / 100);
+      if (promotion.maxDiscountAmount) {
+        discountAmount = Math.min(discountAmount, Number(promotion.maxDiscountAmount));
+      }
+    } else {
+      discountAmount = Number(promotion.discountValue || 0);
+    }
+
+    discountAmount = Math.min(Math.max(Math.round(discountAmount), 0), originalAmount);
+
+    return {
+      originalAmount,
+      discountAmount,
+      finalAmount: Math.max(originalAmount - discountAmount, 0),
+    };
+  }
+
+  static async applyPromotionToAmount(userId, {
+    promotionCode,
+    ticketType,
+    routeId,
+    amount,
+    strict = true,
+  }) {
+    const code = this.normalizePromotionCode(promotionCode);
+    const originalAmount = Math.max(Number(amount) || 0, 0);
+
+    if (!code) {
+      return {
+        promotion: null,
+        promotionCode: '',
+        originalAmount,
+        discountAmount: 0,
+        finalAmount: originalAmount,
+      };
+    }
+
+    const now = new Date();
+    const promotion = await Promotion.findOne({ code });
+    const fail = (message) => {
+      if (strict) {
+        throw new CustomError(message, HTTP_STATUS.BAD_REQUEST);
+      }
+      return {
+        promotion: null,
+        promotionCode: code,
+        originalAmount,
+        discountAmount: 0,
+        finalAmount: originalAmount,
+        message,
+      };
+    };
+
+    if (!promotion) return fail('Mã khuyến mãi không tồn tại.');
+    if (promotion.status !== 'ACTIVE' || promotion.startDate > now || promotion.endDate < now) {
+      return fail('Mã khuyến mãi không còn hiệu lực.');
+    }
+    if (promotion.usageLimit && promotion.usedCount >= promotion.usageLimit) {
+      return fail('Mã khuyến mãi đã hết lượt sử dụng.');
+    }
+    if (originalAmount < Number(promotion.minOrderAmount || 0)) {
+      return fail('Đơn hàng chưa đạt giá trị tối thiểu để áp dụng mã.');
+    }
+
+    const normalizedTicketType = String(ticketType || 'ONE_WAY').trim().toUpperCase();
+    const routeObjectId = mongoose.isValidObjectId(routeId) ? new mongoose.Types.ObjectId(routeId) : null;
+    const appliesToTicketType = (
+      (normalizedTicketType === 'MONTHLY_PASS' && promotion.applicableTo === 'MONTHLY_PASS')
+      || (normalizedTicketType === 'ONE_WAY' && ['ALL_ROUTES', 'E_TICKET'].includes(promotion.applicableTo))
+      || (
+        normalizedTicketType === 'ONE_WAY'
+        && promotion.applicableTo === 'SELECTED_ROUTES'
+        && routeObjectId
+        && promotion.routeIds.some((item) => String(item) === String(routeObjectId))
+      )
+    );
+
+    if (!appliesToTicketType) {
+      return fail('Mã khuyến mãi không áp dụng cho vé hoặc tuyến này.');
+    }
+
+    const usedByUser = await PromotionUsage.countDocuments({
+      promotionId: promotion._id,
+      userId,
+      status: 'APPLIED',
+    });
+
+    if (promotion.usagePerUser && usedByUser >= promotion.usagePerUser) {
+      return fail('Bạn đã sử dụng hết lượt cho mã khuyến mãi này.');
+    }
+
+    const discount = this.calculatePromotionDiscount(promotion, originalAmount);
+    return {
+      promotion,
+      promotionId: promotion._id,
+      promotionCode: promotion.code,
+      promotionName: promotion.name,
+      discountType: promotion.discountType,
+      discountValue: promotion.discountValue,
+      ...discount,
+    };
+  }
+
+  static async previewPromotion(userId, payload = {}) {
+    const amount = Math.max(Number(payload.amount) || 0, 0);
+    const result = await this.applyPromotionToAmount(userId, {
+      promotionCode: payload.promotionCode,
+      ticketType: payload.ticketType,
+      routeId: payload.routeId,
+      amount,
+      strict: true,
+    });
+
+    return {
+      promotionId: result.promotionId,
+      promotionCode: result.promotionCode,
+      promotionName: result.promotionName,
+      discountType: result.discountType,
+      discountValue: result.discountValue,
+      originalAmount: result.originalAmount,
+      discountAmount: result.discountAmount,
+      finalAmount: result.finalAmount,
+    };
+  }
+
+  static async recordPromotionUsage({ promotionId, userId, ticketId, routeId, paymentMethod, discountAmount, originalAmount, finalAmount }) {
+    if (!promotionId || !discountAmount) {
+      return;
+    }
+
+    const existingUsage = await PromotionUsage.findOne({
+      promotionId,
+      userId,
+      ticketId,
+      status: 'APPLIED',
+    });
+
+    if (existingUsage) {
+      return;
+    }
+
+    await PromotionUsage.create({
+      promotionId,
+      userId,
+      ticketId,
+      routeId,
+      paymentMethod: paymentMethod || 'PAYOS',
+      discountAmount,
+      originalAmount,
+      finalAmount,
+      status: 'APPLIED',
+    });
+
+    await Promotion.findByIdAndUpdate(promotionId, { $inc: { usedCount: 1 } });
+  }
+
   static async purchaseOneWayTicket(userId, payload) {
     const user = await User.findById(userId);
     if (!user) {
@@ -380,7 +547,15 @@ export class TicketService {
     const serviceDateValue = String(payload.serviceDate || '').slice(0, 10);
     const tripId = `${route.routeNumber}-${serviceDateValue}-${departureTime}`;
 
-    const ticketPrice = this.calculatePrice(route, startStop, endStop);
+    const originalPrice = this.calculatePrice(route, startStop, endStop);
+    const promotion = await this.applyPromotionToAmount(userId, {
+      promotionCode: payload.promotionCode,
+      ticketType: 'ONE_WAY',
+      routeId: route._id,
+      amount: originalPrice,
+      strict: true,
+    });
+    const ticketPrice = promotion.finalAmount;
     const duplicateTicketQuery = {
       passenger: user._id,
       routeId: route._id,
@@ -389,6 +564,7 @@ export class TicketService {
       destinationLocation: endStop.name,
       passengerType,
       ticketPrice,
+      promotionCode: promotion.promotionCode || '',
       serviceDate,
       departureTime,
     };
@@ -426,6 +602,10 @@ export class TicketService {
       departureLocation: startStop.name,
       destinationLocation: endStop.name,
       passengerType,
+      originalPrice,
+      discountAmount: promotion.discountAmount,
+      promotionCode: promotion.promotionCode || '',
+      promotionId: promotion.promotionId || null,
       ticketPrice,
       paymentMethod,
       paymentStatus: 'PENDING',
@@ -769,6 +949,15 @@ export class TicketService {
 
     const validityMonths = Math.max(Number(payload.validityMonths) || 1, 1);
     const expiryDate = new Date(this.addMonths(startDate, validityMonths).getTime() - 1);
+    const originalPrice = MONTHLY_PASS_PRICES[passType] * validityMonths;
+    const promotion = await this.applyPromotionToAmount(userId, {
+      promotionCode: payload.promotionCode,
+      ticketType: 'MONTHLY_PASS',
+      routeId: selectedRoute?._id,
+      amount: originalPrice,
+      strict: true,
+    });
+    const passPrice = promotion.finalAmount;
     const duplicatePendingPass = await MonthlyPass.findOne({
       passenger: user._id,
       passType,
@@ -776,13 +965,14 @@ export class TicketService {
       passStatus: 'PENDING',
       startDate,
       expiryDate,
+      passPrice,
+      promotionCode: promotion.promotionCode || '',
     }).lean();
 
     if (duplicatePendingPass && !payload.renew) {
       throw new CustomError('Ban da co ve thang cung tuyen va thoi han dang cho xu ly.', HTTP_STATUS.CONFLICT);
     }
 
-    const passPrice = MONTHLY_PASS_PRICES[passType] * validityMonths;
     const passCode = buildPassCode();
     const issuedAt = new Date();
 
@@ -796,6 +986,10 @@ export class TicketService {
       expiryDate,
       validFrom: startDate,
       validUntil: expiryDate,
+      originalPrice,
+      discountAmount: promotion.discountAmount,
+      promotionCode: promotion.promotionCode || '',
+      promotionId: promotion.promotionId || null,
       passPrice,
       paymentMethod,
       paymentStatus: 'PENDING',
@@ -1090,6 +1284,16 @@ export class TicketService {
       ticket.bookingStatus = 'SUCCESS';
       ticket.ticketStatus = 'ACTIVE';
       await ticket.save();
+      await this.recordPromotionUsage({
+        promotionId: ticket.promotionId,
+        userId: ticket.passenger,
+        ticketId: ticket._id,
+        routeId: ticket.routeId,
+        paymentMethod: 'PAYOS',
+        discountAmount: ticket.discountAmount,
+        originalAmount: ticket.originalPrice || ticket.ticketPrice,
+        finalAmount: ticket.ticketPrice,
+      });
       await this.cancelDuplicatePendingTicketsForPaidTicket(ticket);
 
       const user = await User.findById(ticket.passenger);
@@ -1126,6 +1330,16 @@ export class TicketService {
       monthlyPass.paymentStatus = 'PAID';
       monthlyPass.passStatus = 'ACTIVE';
       await monthlyPass.save();
+      await this.recordPromotionUsage({
+        promotionId: monthlyPass.promotionId,
+        userId: monthlyPass.passenger,
+        ticketId: monthlyPass._id,
+        routeId: monthlyPass.routeId,
+        paymentMethod: 'PAYOS',
+        discountAmount: monthlyPass.discountAmount,
+        originalAmount: monthlyPass.originalPrice || monthlyPass.passPrice,
+        finalAmount: monthlyPass.passPrice,
+      });
 
       await User.findByIdAndUpdate(monthlyPass.passenger, {
         monthlyPassStatus: 'ACTIVE',

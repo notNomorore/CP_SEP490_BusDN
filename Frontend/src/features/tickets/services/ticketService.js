@@ -36,6 +36,11 @@ export const ticketService = {
     return response.data;
   },
 
+  applyPromotion: async (payload) => {
+    const response = await apiClient.post('/tickets/promotions/apply', payload);
+    return response.data;
+  },
+
   createPayment: async (payload) => {
     const response = await apiClient.post('/tickets/payments', payload);
     return response.data;

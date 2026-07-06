@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowRight, BusFront, Clock3, CreditCard, LoaderCircle, Map, Ticket } from 'lucide-react';
+import { ArrowRight, BusFront, Clock3, CreditCard, LoaderCircle, Map, Ticket, X } from 'lucide-react';
 import Header from '../../../shared/components/navigation/Header.jsx';
 import routeService from '../../routes/services/routeService.js';
+import ticketService from '../services/ticketService.js';
 
 const getVietnamDate = () => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Ho_Chi_Minh',
@@ -23,6 +24,12 @@ const formatCurrency = (value) => new Intl.NumberFormat('vi-VN', {
   currency: 'VND',
   maximumFractionDigits: 0,
 }).format(Math.max(Math.round((Number(value) || 0) / 1000) * 1000, 0));
+
+const roundFare = (value) => {
+  const amount = Number(value) || 0;
+  if (amount <= 0) return 0;
+  return Math.max(Math.round(amount / 1000) * 1000, 1000);
+};
 
 const passengerTypeLabel = (type) => ({
   STANDARD: 'Phổ thông',
@@ -47,6 +54,10 @@ const TicketPurchasePage = () => {
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(true);
   const [mode, setMode] = useState('ONE_WAY');
   const [error, setError] = useState('');
+  const [promotionCode, setPromotionCode] = useState('');
+  const [appliedPromotion, setAppliedPromotion] = useState(null);
+  const [promotionError, setPromotionError] = useState('');
+  const [isApplyingPromotion, setIsApplyingPromotion] = useState(false);
   const currentMonth = new Date().getMonth() + 1;
   const currentYear = new Date().getFullYear();
   const [form, setForm] = useState({
@@ -106,9 +117,71 @@ const TicketPurchasePage = () => {
     STUDENT: 120000,
     PRIORITY: 0,
   }[form.passengerType] || 250000;
-  const estimatedPrice = mode === 'MONTHLY_PASS' ? monthlyPrice : selectedRoute?.fare || 7000;
+  const routeStops = selectedRoute?.stops || [];
+  const departureStop = routeStops.find((stop) => stop.name === form.departureLocation);
+  const arrivalStop = routeStops.find((stop) => stop.name === form.destinationLocation);
+  const oneWayEstimatedPrice = useMemo(() => {
+    if (!selectedRoute || !departureStop || !arrivalStop || Number(departureStop.order) >= Number(arrivalStop.order)) {
+      return selectedRoute?.fare || 7000;
+    }
+
+    const routeStopCount = Math.max((selectedRoute.stops || []).length - 1, 1);
+    const stopSpan = Math.max(Number(arrivalStop.order) - Number(departureStop.order), 1);
+    const proportionalFare = (Number(selectedRoute.fare || 0) / routeStopCount) * stopSpan;
+    const minimumFare = Number(selectedRoute.fare || 0) * 0.35;
+    return roundFare(Math.max(proportionalFare, minimumFare));
+  }, [arrivalStop, departureStop, selectedRoute]);
+  const baseEstimatedPrice = mode === 'MONTHLY_PASS' ? monthlyPrice : oneWayEstimatedPrice;
+  const estimatedPrice = appliedPromotion?.finalAmount ?? baseEstimatedPrice;
+  const discountAmount = appliedPromotion?.discountAmount || 0;
+
+  useEffect(() => {
+    setAppliedPromotion(null);
+    setPromotionError('');
+  }, [
+    mode,
+    selectedRoute?.id,
+    form.departureLocation,
+    form.destinationLocation,
+    form.passengerType,
+    form.month,
+    form.year,
+    baseEstimatedPrice,
+  ]);
 
   const updateForm = (updates) => setForm((current) => ({ ...current, ...updates }));
+
+  const clearPromotion = () => {
+    setAppliedPromotion(null);
+    setPromotionError('');
+    setPromotionCode('');
+  };
+
+  const handleApplyPromotion = async () => {
+    const code = promotionCode.trim().toUpperCase();
+    if (!code) {
+      setPromotionError('Vui lòng nhập mã khuyến mãi.');
+      return;
+    }
+
+    setIsApplyingPromotion(true);
+    setPromotionError('');
+    try {
+      const promotion = await ticketService.applyPromotion({
+        promotionCode: code,
+        ticketType: mode,
+        routeId: selectedRoute?.id || selectedRoute?._id || '',
+        amount: baseEstimatedPrice,
+      });
+      setAppliedPromotion(promotion);
+      setPromotionCode(promotion.promotionCode || code);
+    } catch (err) {
+      setAppliedPromotion(null);
+      setPromotionError(err?.message || 'Không thể áp dụng mã khuyến mãi.');
+    } finally {
+      setIsApplyingPromotion(false);
+    }
+  };
 
   const handleSubmit = (event) => {
     event.preventDefault();
@@ -169,6 +242,10 @@ const TicketPurchasePage = () => {
       departureTime: mode === 'ONE_WAY' ? form.departureTime : '',
       passengerType: form.passengerType,
       passengerTypeLabel: passengerTypeLabel(form.passengerType),
+      originalPrice: baseEstimatedPrice,
+      discountAmount,
+      promotionCode: appliedPromotion?.promotionCode || '',
+      promotionName: appliedPromotion?.promotionName || '',
       price: estimatedPrice,
     };
 
@@ -276,6 +353,44 @@ const TicketPurchasePage = () => {
                 </select>
               </label>
 
+              <div className="rounded-2xl border border-outline-variant/50 bg-surface px-4 py-4 sm:col-span-2">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <label className="flex-1 text-sm font-bold">
+                    Mã khuyến mãi
+                    <input
+                      value={promotionCode}
+                      onChange={(event) => {
+                        setPromotionCode(event.target.value.toUpperCase());
+                        setAppliedPromotion(null);
+                        setPromotionError('');
+                      }}
+                      placeholder="Nhập mã khuyến mãi"
+                      className="mt-2 w-full rounded-xl border border-outline-variant/50 bg-white px-4 py-3 uppercase"
+                    />
+                  </label>
+                  <div className="flex gap-2">
+                    {appliedPromotion ? (
+                      <button type="button" onClick={clearPromotion} className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-outline-variant bg-white text-primary hover:bg-surface-container-low" aria-label="Xóa mã khuyến mãi">
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                    <button type="button" onClick={handleApplyPromotion} disabled={isApplyingPromotion || !promotionCode.trim()} className="inline-flex h-12 items-center justify-center rounded-full bg-secondary px-5 text-sm font-black text-white hover:bg-secondary-fixed-dim disabled:cursor-not-allowed disabled:opacity-50">
+                      {isApplyingPromotion ? <LoaderCircle className="h-4 w-4 animate-spin" /> : 'Áp dụng'}
+                    </button>
+                  </div>
+                </div>
+                {appliedPromotion ? (
+                  <div className="mt-3 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
+                    Đã áp dụng {appliedPromotion.promotionCode}. Giảm {formatCurrency(appliedPromotion.discountAmount)}.
+                  </div>
+                ) : null}
+                {promotionError ? (
+                  <div className="mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                    {promotionError}
+                  </div>
+                ) : null}
+              </div>
+
               {error ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 sm:col-span-2">{error}</div> : null}
 
               <div className="flex flex-col gap-3 pt-2 sm:col-span-2 sm:flex-row">
@@ -317,7 +432,13 @@ const TicketPurchasePage = () => {
                   <div className="rounded-2xl bg-surface px-4 py-3">
                     <CreditCard className="h-5 w-5 text-secondary" />
                     <p className="mt-2 text-xs text-on-surface-variant">Giá dự kiến</p>
+                    {discountAmount > 0 ? (
+                      <p className="text-xs font-bold text-on-surface-variant line-through">{formatCurrency(baseEstimatedPrice)}</p>
+                    ) : null}
                     <p className="font-black text-primary">{formatCurrency(estimatedPrice)}</p>
+                    {discountAmount > 0 ? (
+                      <p className="mt-1 text-xs font-bold text-emerald-700">Giảm {formatCurrency(discountAmount)}</p>
+                    ) : null}
                   </div>
                 </div>
                 <div className="rounded-2xl bg-primary-fixed p-4 text-sm text-on-primary-fixed">

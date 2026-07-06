@@ -36,6 +36,11 @@ export class TicketController {
     return res.success(result, result.message || 'Ticket validated successfully');
   }
 
+  static async previewPromotion(req, res) {
+    const promotion = await TicketService.previewPromotion(req.user.userId, req.body);
+    return res.success(promotion, 'Promotion applied successfully');
+  }
+
   static async createPayment(req, res) {
     const payment = await TicketService.createPaymentOrder(req.user.userId, req.body);
     return res.success(payment, 'Payment QR created successfully', 201);

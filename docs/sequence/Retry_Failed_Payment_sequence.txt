@@ -1,0 +1,83 @@
+@startuml
+title Retry Failed Payment - Sequence Diagram
+
+hide footbox
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+actor Passenger
+participant "Passenger App" as PassengerApp
+participant "PaymentController" as PaymentController
+participant "PaymentService" as PaymentService
+participant "PaymentRepository" as PaymentRepository
+database "Payment Collection" as PaymentCollection
+participant "TicketRepository" as TicketRepository
+database "Ticket Collection" as TicketCollection
+participant "PaymentGateway" as PaymentGateway
+
+note over PaymentController, PaymentService
+Implemented as POST /api/tickets/:ticketId/payment and TicketService.createPaymentForPendingTicket.
+The flow reuses an existing pending PaymentOrder or creates a new one for the same pending ticket.
+end note
+
+Passenger -> PassengerApp: 1: Retry failed payment
+activate PassengerApp
+PassengerApp -> PaymentController: 1.1: POST /api/tickets/{ticketId}/payment
+activate PaymentController
+PaymentController -> PaymentService: 1.2: createPaymentForPendingTicket(userId, ticketId)
+activate PaymentService
+PaymentService -> TicketRepository: 1.3: find pending ticket by id and passenger
+activate TicketRepository
+TicketRepository -> TicketCollection: 1.3.1: query pending ticket
+activate TicketCollection
+TicketCollection --> TicketRepository: 1.3.2: ticket or not found
+deactivate TicketCollection
+TicketRepository --> PaymentService: 1.3.3: pending ticket result
+deactivate TicketRepository
+PaymentService -> PaymentRepository: 1.4: find latest PENDING or PAID order for ticket
+activate PaymentRepository
+PaymentRepository -> PaymentCollection: 1.4.1: query PaymentOrder
+activate PaymentCollection
+PaymentCollection --> PaymentRepository: 1.4.2: existing order or empty
+deactivate PaymentCollection
+PaymentRepository --> PaymentService: 1.4.3: payment order result
+deactivate PaymentRepository
+
+alt [ticket not found]
+    PaymentService --> PaymentController: 1.5: pending ticket not found
+    PaymentController --> PassengerApp: 1.6: 404 Ticket not found
+else [existing order already paid]
+    PaymentService -> TicketRepository: 1.5: activate ticket without duplicate booking
+    activate TicketRepository
+    TicketRepository -> TicketCollection: 1.5.1: mark ticket paid and active
+    activate TicketCollection
+    TicketCollection --> TicketRepository: 1.5.2: updated ticket
+    deactivate TicketCollection
+    TicketRepository --> PaymentService: 1.5.3: ticket activated
+    deactivate TicketRepository
+    PaymentService --> PaymentController: 1.6: paid response
+    PaymentController --> PassengerApp: 1.7: 201 Payment completed
+else [retry payment needed]
+    PaymentService -> PaymentGateway: 1.5: createPaymentLink for same ticket
+    activate PaymentGateway
+    PaymentGateway --> PaymentService: 1.5.1: checkout URL and QR code
+    deactivate PaymentGateway
+    PaymentService -> PaymentRepository: 1.5.2: save retry PaymentOrder
+    activate PaymentRepository
+    PaymentRepository -> PaymentCollection: 1.5.3: create or update order
+    activate PaymentCollection
+    PaymentCollection --> PaymentRepository: 1.5.4: saved order
+    deactivate PaymentCollection
+    PaymentRepository --> PaymentService: 1.5.5: retry order
+    deactivate PaymentRepository
+    PaymentService --> PaymentController: 1.6: retry QR response
+    PaymentController --> PassengerApp: 1.7: 201 Payment QR created
+end
+deactivate PaymentService
+deactivate PaymentController
+PassengerApp --> Passenger: 1.8: Display retry result
+deactivate PassengerApp
+
+@enduml
