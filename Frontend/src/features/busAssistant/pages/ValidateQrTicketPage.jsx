@@ -42,6 +42,24 @@ const getValidationStatus = (result) => (
 );
 
 const isValidResult = (result) => result?.ok || getValidationStatus(result) === 'VALID' || getValidationStatus(result) === 'VALIDATED';
+const toDateKey = (value = new Date()) => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const addDateDays = (dateKey, days) => {
+  const date = new Date(`${dateKey}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return toDateKey();
+  date.setDate(date.getDate() + days);
+  return toDateKey(date);
+};
 
 const waitForNextFrame = () => new Promise((resolve) => {
   window.requestAnimationFrame(() => resolve());
@@ -73,7 +91,8 @@ const ValidateQrTicketPage = () => {
   const scannerRef = useRef(null);
   const scanControlsRef = useRef(null);
   const [form, setForm] = useState({ qrCode: '', ticketCode: '' });
-  const [recent, setRecent] = useState([]);
+  const [historyDate, setHistoryDate] = useState(() => toDateKey());
+  const [history, setHistory] = useState([]);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -95,6 +114,19 @@ const ValidateQrTicketPage = () => {
   }, []);
 
   useEffect(() => () => stopCamera(), [stopCamera]);
+
+  const loadHistory = useCallback(async (dateKey) => {
+    try {
+      const data = await busAssistantService.getValidationHistory({ date: dateKey });
+      setHistory(data.validations || []);
+    } catch {
+      setHistory([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHistory(historyDate);
+  }, [historyDate, loadHistory]);
 
   const getScanner = useCallback(async () => {
     if (scannerRef.current) return scannerRef.current;
@@ -121,13 +153,20 @@ const ValidateQrTicketPage = () => {
     try {
       const data = await busAssistantService.validateETicket({ qrCode });
       setResult(data);
-      setRecent((items) => [data, ...items].slice(0, 6));
+      if (isValidResult(data)) {
+        const today = toDateKey();
+        if (historyDate === today) {
+          loadHistory(today);
+        } else {
+          setHistoryDate(today);
+        }
+      }
     } catch (err) {
       setError(translateBusAssistantError(err, language, 'Invalid QR code'));
     } finally {
       setLoading(false);
     }
-  }, [language]);
+  }, [historyDate, language, loadHistory]);
 
   const handleDetectedQr = useCallback((qrCode) => {
     const nextForm = { ...form, qrCode, ticketCode: '' };
@@ -320,13 +359,57 @@ const ValidateQrTicketPage = () => {
           ) : <p className="text-sm text-slate-400">{t.noValidationYet}</p>}
         </Panel>
         <Panel title={t.recentValidations}>
-          <div className="space-y-2">
-            {recent.length ? recent.map((item, index) => (
-              <div key={`${getDisplayTicket(item).ticketCode || getDisplayTicket(item)._id || index}-${index}`} className="rounded border border-white/10 bg-white/5 px-3 py-2 text-sm">
-                <p className="font-medium">{getDisplayTicket(item).ticketCode || getDisplayTicket(item).passCode || getDisplayTicket(item)._id}</p>
-                <p className="text-slate-400">{getDisplayPassenger(item).fullName || item.passengerName || t.passengerFallback} - {getValidationStatus(item)}</p>
-              </div>
-            )) : <p className="text-sm text-slate-400">{t.noRecentValidations}</p>}
+          <div className="space-y-3">
+            <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto]">
+              <button
+                type="button"
+                onClick={() => setHistoryDate((current) => addDateDays(current, -1))}
+                className={isDarkMode
+                  ? 'rounded border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-100 hover:border-emerald-300/50'
+                  : 'rounded border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-emerald-400'}
+                aria-label="Previous day"
+              >
+                Prev
+              </button>
+              <input
+                className={inputClass}
+                type="date"
+                value={historyDate}
+                onChange={(event) => setHistoryDate(event.target.value || toDateKey())}
+                aria-label="Validation history date"
+              />
+              <button
+                type="button"
+                onClick={() => setHistoryDate((current) => addDateDays(current, 1))}
+                className={isDarkMode
+                  ? 'rounded border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-100 hover:border-emerald-300/50'
+                  : 'rounded border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-emerald-400'}
+                aria-label="Next day"
+              >
+                Next
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryDate(toDateKey())}
+                className="rounded bg-emerald-400 px-3 py-2 text-sm font-bold text-slate-950 hover:bg-emerald-300"
+              >
+                Today
+              </button>
+            </div>
+            <p className="text-xs font-semibold text-slate-400">{history.length} successful validation(s) on this date.</p>
+            {history.length ? history.map((item, index) => {
+              const ticket = getDisplayTicket(item);
+              const passenger = getDisplayPassenger(item);
+              const route = getDisplayRoute(item);
+
+              return (
+                <div key={`${item.savedAt || ticket.ticketCode || ticket._id || index}-${index}`} className={isDarkMode ? 'rounded border border-white/10 bg-white/5 px-3 py-2 text-sm' : 'rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm'}>
+                  <p className="font-medium">{ticket.ticketCode || ticket.passCode || ticket._id}</p>
+                  <p className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>{formatDateTime(item.savedAt)} - {passenger.fullName || item.passengerName || t.passengerFallback} - {getValidationStatus(item)}</p>
+                  <p className={isDarkMode ? 'text-slate-500' : 'text-slate-500'}>{route.name || route.routeCode || ticket.routeCode || 'N/A'}</p>
+                </div>
+              );
+            }) : <p className="text-sm text-slate-400">No successful validations saved for this date.</p>}
           </div>
         </Panel>
       </div>

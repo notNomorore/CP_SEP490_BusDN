@@ -136,3 +136,12 @@ export type RevenueSummaryResult = {
   reconciliationStatus?: string;
   message?: string;
 };
+
+export type ValidationHistoryPayload = {
+  date: string;
+  count: number;
+  validations: Array<TicketValidationResult & {
+    savedAt?: string;
+    savedDate?: string;
+  }>;
+};

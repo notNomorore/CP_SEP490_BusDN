@@ -36,6 +36,11 @@ export class TicketController {
     return res.success(result, result.message || 'Ticket validated successfully');
   }
 
+  static async getValidationHistory(req, res) {
+    const result = await TicketService.getValidationHistory(req.user.userId, req.query);
+    return res.success(result, 'Validation history retrieved successfully');
+  }
+
   static async previewPromotion(req, res) {
     const promotion = await TicketService.previewPromotion(req.user.userId, req.body);
     return res.success(promotion, 'Promotion applied successfully');
@@ -49,6 +54,18 @@ export class TicketController {
   static async getPaymentStatus(req, res) {
     const payment = await TicketService.getPaymentOrderStatus(req.user.userId, req.params.orderCode);
     return res.success(payment, 'Payment status retrieved successfully');
+  }
+
+  static async listMyTransactions(req, res) {
+    const transactions = await TicketService.listMyTransactions(req.user.userId);
+    return res.success(
+      {
+        transactions,
+        count: transactions.length,
+        totalPaid: transactions.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+      },
+      'Paid transactions retrieved successfully'
+    );
   }
 
   static async createPendingTicketPayment(req, res) {

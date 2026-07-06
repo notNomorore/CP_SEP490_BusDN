@@ -25,6 +25,13 @@ const ticketTypeLabel = (type) => ({
 }[type] || 'Vé một lượt');
 
 const buildPaymentPayload = (order) => {
+  if (order.ticketId || order.sourceTicketId) {
+    return {
+      ticketType: 'ONE_WAY',
+      ticketId: order.ticketId || order.sourceTicketId,
+    };
+  }
+
   if (order.ticketType === 'MONTHLY_PASS') {
     return {
       ticketType: 'MONTHLY_PASS',
@@ -94,7 +101,9 @@ const TicketCheckoutPage = () => {
     setIsCreatingPayment(true);
     setError('');
     try {
-      const nextPayment = await ticketService.createPayment(paymentPayload);
+      const nextPayment = paymentPayload.ticketId
+        ? await ticketService.createPendingTicketPayment(paymentPayload.ticketId)
+        : await ticketService.createPayment(paymentPayload);
       setPayment(nextPayment);
 
       if (nextPayment.status === 'PAID') {

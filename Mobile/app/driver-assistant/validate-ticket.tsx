@@ -1,5 +1,4 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -18,12 +17,10 @@ import { formatTime, getTodayRange, getTripStatus, isTripCompleted, toDateInput 
 import { getErrorMessage } from '@/utils/validation';
 
 type ValidationHistoryItem = TicketValidationResult & {
-  savedAt: string;
-  savedDate: string;
+  savedAt?: string;
+  savedDate?: string;
 };
 
-const VALIDATION_HISTORY_KEY_PREFIX = 'busAssistant.validationHistory';
-const historyKey = (dateKey: string) => `${VALIDATION_HISTORY_KEY_PREFIX}.${dateKey}`;
 const money = (value?: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
 const tripIdOf = (trip?: AssignedTrip | null) => String(trip?.tripId || '');
 
@@ -68,35 +65,6 @@ const addDateDays = (dateKey: string, days: number) => {
   if (Number.isNaN(date.getTime())) return toDateInput();
   date.setDate(date.getDate() + days);
   return toDateInput(date);
-};
-
-const loadHistoryByDate = async (dateKey: string): Promise<ValidationHistoryItem[]> => {
-  const raw = await AsyncStorage.getItem(historyKey(dateKey));
-  if (!raw) return [];
-
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveSuccessfulValidation = async (result: TicketValidationResult) => {
-  if (!isValidResult(result)) return null;
-
-  const savedAt = new Date().toISOString();
-  const savedDate = toDateInput(savedAt);
-  const item: ValidationHistoryItem = {
-    ...result,
-    savedAt,
-    savedDate,
-  };
-
-  const currentItems = await loadHistoryByDate(savedDate);
-  const nextItems = [item, ...currentItems].slice(0, 100);
-  await AsyncStorage.setItem(historyKey(savedDate), JSON.stringify(nextItems));
-  return item;
 };
 
 function TripChip({ trip, active, onPress }: { trip: AssignedTrip; active: boolean; onPress: () => void }) {
@@ -162,8 +130,8 @@ export default function ValidateTicketScreen() {
   const loadHistory = useCallback(async (dateKey: string) => {
     setIsLoadingHistory(true);
     try {
-      const items = await loadHistoryByDate(dateKey);
-      setHistory(items);
+      const payload = await busAssistantApi.getValidationHistory({ date: dateKey });
+      setHistory(payload.validations || []);
     } catch {
       setHistory([]);
     } finally {
@@ -192,12 +160,12 @@ export default function ValidateTicketScreen() {
         routeCode: selectedTrip?.route?.routeNumber || undefined,
       });
       setResult(data);
-      const savedItem = await saveSuccessfulValidation(data);
-      if (savedItem) {
-        if (savedItem.savedDate === historyDate) {
-          setHistory((items) => [savedItem, ...items].slice(0, 100));
+      if (isValidResult(data)) {
+        const today = toDateInput();
+        if (historyDate === today) {
+          await loadHistory(today);
         } else {
-          setHistoryDate(savedItem.savedDate);
+          setHistoryDate(today);
         }
       }
       setQrCode('');
@@ -207,7 +175,7 @@ export default function ValidateTicketScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [historyDate, selectedTrip]);
+  }, [historyDate, loadHistory, selectedTrip]);
 
   const validateTicket = () => {
     void validateTicketCode(qrCode);

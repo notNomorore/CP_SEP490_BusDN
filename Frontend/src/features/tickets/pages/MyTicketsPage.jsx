@@ -99,6 +99,8 @@ const isPendingPaymentTicket = (ticket) => (
 );
 
 const buildCheckoutOrderFromTicket = (ticket) => ({
+  ticketId: ticket.id,
+  sourceTicketId: ticket.id,
   ticketType: 'ONE_WAY',
   route: {
     id: ticket.routeId?._id || ticket.routeId || ticket.route?.id || ticket.route?._id,

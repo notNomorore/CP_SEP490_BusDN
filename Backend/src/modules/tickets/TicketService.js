@@ -161,6 +161,18 @@ const buildValidationResult = (result, message, data = {}) => ({
   ...data,
 });
 
+const toValidationDateRange = (dateValue) => {
+  const dateText = String(dateValue || '').match(/^\d{4}-\d{2}-\d{2}$/)
+    ? String(dateValue)
+    : formatVietnamOffsetDateTime(new Date()).slice(0, 10);
+
+  return {
+    date: dateText,
+    start: new Date(`${dateText}T00:00:00+07:00`),
+    end: new Date(`${dateText}T23:59:59.999+07:00`),
+  };
+};
+
 const buildTicketValidationInfo = (ticket, route) => ({
   ticketInfo: {
     _id: ticket._id,
@@ -274,6 +286,65 @@ export class TicketService {
       serviceDate: ticket.serviceDate,
       departureTime: ticket.departureTime,
     };
+  }
+
+  static buildTicketDedupeKey(ticket) {
+    const serviceDateKey = ticket.serviceDate
+      ? new Date(ticket.serviceDate).toISOString().slice(0, 10)
+      : '';
+
+    return [
+      ticket.passenger,
+      ticket.routeId?._id || ticket.routeId,
+      ticket.tripId,
+      ticket.departureLocation,
+      ticket.destinationLocation,
+      ticket.passengerType,
+      ticket.ticketPrice,
+      serviceDateKey,
+      ticket.departureTime,
+    ].map((value) => String(value || '')).join('|');
+  }
+
+  static getTicketDisplayPriority(ticket) {
+    if (ticket.paymentStatus === 'PAID' && ticket.bookingStatus === 'SUCCESS' && ticket.ticketStatus !== 'CANCELLED') {
+      return 4;
+    }
+    if (ticket.paymentStatus === 'PENDING' && ticket.bookingStatus === 'PENDING' && ticket.ticketStatus !== 'CANCELLED') {
+      return 3;
+    }
+    if (ticket.ticketStatus === 'USED') {
+      return 2;
+    }
+    if (ticket.ticketStatus === 'EXPIRED') {
+      return 1;
+    }
+    return 0;
+  }
+
+  static dedupeTicketListForDisplay(tickets) {
+    const bestTicketsByKey = new Map();
+
+    tickets.forEach((ticket) => {
+      const key = this.buildTicketDedupeKey(ticket);
+      const current = bestTicketsByKey.get(key);
+      if (!current) {
+        bestTicketsByKey.set(key, ticket);
+        return;
+      }
+
+      const currentPriority = this.getTicketDisplayPriority(current);
+      const nextPriority = this.getTicketDisplayPriority(ticket);
+      const currentTime = new Date(current.updatedAt || current.purchasedAt || 0).getTime();
+      const nextTime = new Date(ticket.updatedAt || ticket.purchasedAt || 0).getTime();
+
+      if (nextPriority > currentPriority || (nextPriority === currentPriority && nextTime > currentTime)) {
+        bestTicketsByKey.set(key, ticket);
+      }
+    });
+
+    return Array.from(bestTicketsByKey.values())
+      .sort((left, right) => new Date(right.purchasedAt || 0) - new Date(left.purchasedAt || 0));
   }
 
   static async cancelDuplicatePendingTicketsForPaidTicket(ticket) {
@@ -652,33 +723,7 @@ export class TicketService {
       .populate('passenger', 'fullName email phoneNumber')
       .lean();
 
-    const seenPendingKeys = new Set();
-    const visibleTickets = tickets.filter((ticket) => {
-      if (ticket.paymentStatus !== 'PENDING' || ticket.bookingStatus !== 'PENDING' || ticket.ticketStatus === 'CANCELLED') {
-        return true;
-      }
-
-      const serviceDateKey = ticket.serviceDate
-        ? new Date(ticket.serviceDate).toISOString().slice(0, 10)
-        : '';
-      const pendingKey = [
-        ticket.routeId?._id || ticket.routeId,
-        ticket.tripId,
-        ticket.departureLocation,
-        ticket.destinationLocation,
-        ticket.passengerType,
-        ticket.ticketPrice,
-        serviceDateKey,
-        ticket.departureTime,
-      ].map((value) => String(value || '')).join('|');
-
-      if (seenPendingKeys.has(pendingKey)) {
-        return false;
-      }
-
-      seenPendingKeys.add(pendingKey);
-      return true;
-    });
+    const visibleTickets = this.dedupeTicketListForDisplay(tickets);
 
     return Promise.all(visibleTickets.map((ticket) => this.buildTicketView(ticket)));
   }
@@ -1025,11 +1070,63 @@ export class TicketService {
     return MonthlyPass.find({ passenger: userId }).sort({ purchasedAt: -1 }).lean();
   }
 
+  static async listMyTransactions(userId) {
+    await this.reconcilePendingPaymentOrders(userId);
+
+    const paidOrders = await PaymentOrder.find({
+      passenger: userId,
+      status: 'PAID',
+    })
+      .sort({ paidAt: -1, completedAt: -1, createdAt: -1 })
+      .populate({
+        path: 'ticketId',
+        populate: { path: 'routeId' },
+      })
+      .populate('monthlyPassId')
+      .lean();
+
+    return paidOrders.map((order) => {
+      const ticket = order.ticketId && typeof order.ticketId === 'object' ? order.ticketId : null;
+      const monthlyPass = order.monthlyPassId && typeof order.monthlyPassId === 'object' ? order.monthlyPassId : null;
+      const route = ticket?.routeId && typeof ticket.routeId === 'object' ? ticket.routeId : null;
+      const paidAt = order.paidAt || order.completedAt || order.updatedAt || order.createdAt;
+      const ticketDocument = ticket || monthlyPass || null;
+
+      return {
+        id: String(order._id),
+        orderCode: order.orderCode,
+        transactionCode: `PAY-${order.orderCode}`,
+        ticketType: order.ticketType,
+        ticketLabel: order.ticketType === 'MONTHLY_PASS' ? 'Monthly pass' : 'One-way ticket',
+        amount: order.amount,
+        paymentMethod: order.paymentMethod || 'PAYOS',
+        status: order.status,
+        paidAt,
+        completedAt: order.completedAt,
+        createdAt: order.createdAt,
+        ticketId: ticket?._id || null,
+        monthlyPassId: monthlyPass?._id || null,
+        ticketCode: ticket?.ticketCode || monthlyPass?.passCode || '',
+        routeCode: ticket?.routeCode || ticket?.routeNumber || monthlyPass?.routeCode || 'ALL',
+        routeName: route?.name || route?.routeName || ticket?.routeNumber || monthlyPass?.routeCode || 'All routes',
+        fromStop: ticket?.departureLocation || '',
+        toStop: ticket?.destinationLocation || '',
+        serviceDate: ticket?.serviceDate || monthlyPass?.validFrom || monthlyPass?.startDate || null,
+        ticketStatus: ticket?.ticketStatus || monthlyPass?.passStatus || '',
+        paymentStatus: ticketDocument?.paymentStatus || 'PAID',
+      };
+    });
+  }
+
   static buildPayOSOrderCode() {
     return (Date.now() * 1000) + crypto.randomInt(100, 999);
   }
 
   static async createPaymentOrder(userId, payload = {}) {
+    if (payload.ticketId) {
+      return this.createPaymentForPendingTicket(userId, payload.ticketId);
+    }
+
     const ticketType = String(payload.ticketType || '').trim().toUpperCase();
     let orderTarget;
     let amount;
@@ -1173,6 +1270,10 @@ export class TicketService {
 
     if (paymentOrder?.status === 'PAID') {
       await this.completePaymentOrder(paymentOrder);
+      if (paymentOrder.status !== 'PAID') {
+        throw new CustomError('Vé này đã bị hủy nên không thể kích hoạt thanh toán.', HTTP_STATUS.BAD_REQUEST);
+      }
+
       return {
         orderCode: paymentOrder.orderCode,
         status: 'PAID',
@@ -1372,6 +1473,109 @@ export class TicketService {
         // Do not block the tickets page if PayOS is temporarily unavailable.
       }
     }));
+  }
+
+  static async getValidationHistory(validatorUserId, query = {}) {
+    const { date, start, end } = toValidationDateRange(query.date);
+    const validatorId = new mongoose.Types.ObjectId(validatorUserId);
+
+    const [tickets, monthlyPasses] = await Promise.all([
+      Ticket.find({
+        validationLogs: {
+          $elemMatch: {
+            validatedBy: validatorId,
+            result: 'VALID',
+            validatedAt: { $gte: start, $lte: end },
+          },
+        },
+      })
+        .populate('passenger', 'fullName email phoneNumber')
+        .populate('routeId')
+        .lean(),
+      MonthlyPass.find({
+        validationLogs: {
+          $elemMatch: {
+            validatedBy: validatorId,
+            result: 'VALID',
+            validatedAt: { $gte: start, $lte: end },
+          },
+        },
+      })
+        .populate('passenger', 'fullName email phoneNumber')
+        .lean(),
+    ]);
+
+    const ticketItems = tickets.flatMap((ticket) => {
+      const route = ticket.routeId && typeof ticket.routeId === 'object' ? ticket.routeId : null;
+      const validationInfo = buildTicketValidationInfo(ticket, route);
+
+      return (ticket.validationLogs || [])
+        .filter((log) => (
+          String(log.validatedBy) === String(validatorUserId)
+          && log.result === 'VALID'
+          && new Date(log.validatedAt) >= start
+          && new Date(log.validatedAt) <= end
+        ))
+        .map((log) => ({
+          ok: true,
+          result: 'VALID',
+          validationStatus: 'VALIDATED',
+          message: log.message || 'Ticket is valid for boarding.',
+          ticketType: 'ONE_WAY',
+          ticketCode: ticket.ticketCode,
+          status: ticket.ticketStatus,
+          passengerName: ticket.passenger?.fullName || 'Passenger',
+          routeCode: ticket.routeCode || ticket.routeNumber,
+          routeNumber: ticket.routeNumber,
+          tripId: log.tripId || ticket.tripId,
+          validFrom: ticket.validFrom,
+          validUntil: ticket.validUntil || ticket.expiresAt,
+          usedAt: ticket.usedAt || log.validatedAt,
+          savedAt: log.validatedAt,
+          savedDate: date,
+          ...validationInfo,
+        }));
+    });
+
+    const monthlyPassItems = monthlyPasses.flatMap((monthlyPass) => {
+      const validationInfo = buildMonthlyPassValidationInfo(monthlyPass);
+
+      return (monthlyPass.validationLogs || [])
+        .filter((log) => (
+          String(log.validatedBy) === String(validatorUserId)
+          && log.result === 'VALID'
+          && new Date(log.validatedAt) >= start
+          && new Date(log.validatedAt) <= end
+        ))
+        .map((log) => ({
+          ok: true,
+          result: 'VALID',
+          validationStatus: 'VALIDATED',
+          message: log.message || 'Monthly pass is valid for boarding.',
+          ticketType: 'MONTHLY_PASS',
+          passCode: monthlyPass.passCode,
+          ticketCode: monthlyPass.passCode,
+          status: monthlyPass.passStatus,
+          passengerName: monthlyPass.passenger?.fullName || 'Passenger',
+          passType: monthlyPass.passType,
+          routeCode: log.routeCode || monthlyPass.routeCode || 'ALL',
+          validFrom: monthlyPass.validFrom || monthlyPass.startDate,
+          validUntil: monthlyPass.validUntil || monthlyPass.expiryDate,
+          usedAt: log.validatedAt,
+          savedAt: log.validatedAt,
+          savedDate: date,
+          ...validationInfo,
+        }));
+    });
+
+    const validations = [...ticketItems, ...monthlyPassItems]
+      .sort((left, right) => new Date(right.savedAt) - new Date(left.savedAt));
+
+    return {
+      date,
+      validations,
+      count: validations.length,
+    };
   }
 
   static async syncPaymentOrderWithPayOS(paymentOrder) {

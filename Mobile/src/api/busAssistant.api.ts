@@ -5,6 +5,7 @@ import type {
   ShiftRevenue,
   TicketValidationResult,
   ValidateTicketPayload,
+  ValidationHistoryPayload,
   WalkInTicketPayload,
   WalkInTicketResult,
 } from '@/types/busAssistant';
@@ -21,6 +22,11 @@ export const busAssistantApi = {
       routeId: payload.routeId,
       routeCode: payload.routeCode,
     })) as unknown as ApiEnvelope<TicketValidationResult>;
+    return response.data;
+  },
+
+  getValidationHistory: async (params: { date?: string } = {}): Promise<ValidationHistoryPayload> => {
+    const response = await apiClient.get('/tickets/validation-history', { params: cleanParams(params) }) as unknown as ApiEnvelope<ValidationHistoryPayload>;
     return response.data;
   },
 
