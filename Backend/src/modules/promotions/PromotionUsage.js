@@ -26,6 +26,12 @@ const PromotionUsageSchema = new mongoose.Schema(
       ref: 'Ticket',
       default: null,
     },
+    ticketType: {
+      type: String,
+      enum: ['ONE_WAY', 'MONTHLY_PASS'],
+      default: 'ONE_WAY',
+      index: true,
+    },
     routeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Route',
@@ -72,5 +78,9 @@ const PromotionUsageSchema = new mongoose.Schema(
 
 PromotionUsageSchema.index({ promotionId: 1, usedAt: -1 });
 PromotionUsageSchema.index({ promotionId: 1, userId: 1, status: 1 });
+PromotionUsageSchema.index(
+  { promotionId: 1, userId: 1, ticketId: 1, status: 1 },
+  { unique: true, partialFilterExpression: { status: 'APPLIED', ticketId: { $exists: true } } }
+);
 
 export default mongoose.model('PromotionUsage', PromotionUsageSchema);

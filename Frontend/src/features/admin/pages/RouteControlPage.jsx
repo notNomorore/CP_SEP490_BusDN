@@ -71,7 +71,7 @@ const createEmptyRoute = () => ({
   inboundRoute: createEmptyDirection(),
   scheduleConfig: {
     firstDepartureTime: '05:30',
-    lastDepartureTime: '22:00',
+    lastDepartureTime: '18:30',
     frequencyMinutes: 12,
     operatingDays: [...operatingDayOptions],
     holidaySchedule: '',
@@ -91,7 +91,7 @@ const createEmptyRoute = () => ({
     assignedBuses: [],
     assignedDrivers: [],
     assistantStaff: [],
-    shiftSchedule: 'Ca sớm: 05:30-13:30 | Ca muộn: 13:30-22:30',
+    shiftSchedule: 'Ca sáng: 05:30-09:30 | Ca chiều: 13:30-17:30',
   },
 });
 

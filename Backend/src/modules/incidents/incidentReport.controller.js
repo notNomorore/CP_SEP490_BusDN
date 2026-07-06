@@ -43,6 +43,15 @@ export class IncidentReportController {
     return res.success(incident, 'Trip assistant reassigned successfully');
   }
 
+  static async reassignTripStaff(req, res) {
+    const incident = await IncidentReportService.reassignTripStaff(
+      req.params.id,
+      req.body,
+      req.user
+    );
+    return res.success(incident, 'Trip staff reassigned successfully');
+  }
+
   static async getOverviewStatistics(req, res) {
     const statistics = await IncidentReportService.getOverviewStatistics();
     return res.success(statistics, 'Incident overview statistics retrieved successfully');

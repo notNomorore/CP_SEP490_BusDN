@@ -33,6 +33,7 @@ router.get('/trip-schedules', AdminController.listTripSchedules);
 router.post('/trip-schedules/generate-preview', AdminController.generateTripSchedulePreview);
 router.post('/trip-schedules/confirm-generated', AdminController.confirmGeneratedTripSchedules);
 router.post('/trip-schedules', AdminController.createTripSchedule);
+router.delete('/trip-schedules', AdminController.deleteTripSchedules);
 router.put('/trip-schedules/:scheduleId', AdminController.updateTripSchedule);
 router.get('/operation-notifications', AdminController.listOperationNotifications);
 router.post('/operation-notifications', AdminController.createOperationNotification);

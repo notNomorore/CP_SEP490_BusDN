@@ -8,6 +8,7 @@ export const PROMOTION_APPLICABLE_TO = [
   'E_TICKET',
 ];
 export const PROMOTION_STATUS = ['ACTIVE', 'INACTIVE', 'EXPIRED'];
+export const PROMOTION_NOTIFICATION_STATUS = ['pending', 'sent', 'cancelled', 'failed'];
 
 const PromotionSchema = new mongoose.Schema(
   {
@@ -88,6 +89,35 @@ const PromotionSchema = new mongoose.Schema(
       default: 'ACTIVE',
       index: true,
     },
+    notifyPassengers: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    notificationScheduledAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    notificationStatus: {
+      type: String,
+      enum: PROMOTION_NOTIFICATION_STATUS,
+      default: 'cancelled',
+      index: true,
+    },
+    notificationSentAt: {
+      type: Date,
+      default: null,
+    },
+    notificationJobLastCheckedAt: {
+      type: Date,
+      default: null,
+    },
+    notificationTarget: {
+      type: String,
+      enum: ['all_passengers'],
+      default: 'all_passengers',
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -117,6 +147,13 @@ PromotionSchema.pre('validate', function normalizePromotion(next) {
     this.description = this.description.trim();
   }
 
+  if (!this.notifyPassengers) {
+    this.notificationScheduledAt = null;
+    this.notificationStatus = this.notificationStatus === 'sent' ? 'sent' : 'cancelled';
+  } else if (!this.notificationStatus || this.notificationStatus === 'cancelled') {
+    this.notificationStatus = 'pending';
+  }
+
   if (this.applicableTo !== 'SELECTED_ROUTES') {
     this.routeIds = [];
   }
@@ -136,5 +173,6 @@ PromotionSchema.methods.isCurrentlyUsable = function isCurrentlyUsable(now = new
 PromotionSchema.index({ status: 1, startDate: 1, endDate: 1 });
 PromotionSchema.index({ discountType: 1, createdAt: -1 });
 PromotionSchema.index({ applicableTo: 1 });
+PromotionSchema.index({ notifyPassengers: 1, notificationStatus: 1, notificationScheduledAt: 1 });
 
 export default mongoose.model('Promotion', PromotionSchema);

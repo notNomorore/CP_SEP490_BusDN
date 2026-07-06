@@ -1,5 +1,4 @@
 import Route from './Route.js';
-import BusRoute from '../admin/BusRoute.js';
 
 const sampleRoutes = [
   {
@@ -264,7 +263,7 @@ const sampleRoutes = [
       { latitude: 16.0610, longitude: 108.2325 },
       { latitude: 16.0590, longitude: 108.2355 },
     ],
-    operatingHours: { firstDeparture: '06:00', lastDeparture: '22:30', frequencyMinutes: 15 },
+    operatingHours: { firstDeparture: '05:30', lastDeparture: '18:30', frequencyMinutes: 15 },
   },
   {
     routeNumber: 'DN07',
@@ -508,15 +507,7 @@ const calculateDistanceKm = (start, end) => {
 
 export class RouteService {
   static async ensureSampleRoutes() {
-    await Route.deleteMany({ routeNumber: /^DN-DEMO/i });
-
-    for (const route of sampleRoutes) {
-      await Route.updateOne(
-        { routeNumber: route.routeNumber },
-        { $set: route },
-        { upsert: true }
-      );
-    }
+    return sampleRoutes.length;
   }
 
   static buildSearchQuery({ q, from, to }) {
@@ -604,26 +595,20 @@ export class RouteService {
   static async searchRoutes(params) {
     await this.ensureSampleRoutes();
 
-    const query = this.buildSearchQuery(params);
     const managedQuery = this.buildManagedSearchQuery(params);
-    const [routes, managedRoutes] = await Promise.all([
-      Route.find(query)
-        .sort({ routeNumber: 1 })
-        .limit(50)
-        .lean(),
-      BusRoute.find(managedQuery)
-        .sort({ routeCode: 1 })
-        .limit(50)
-        .lean(),
-    ]);
+    const managedRoutes = await Route.find(managedQuery)
+      .sort({ routeCode: 1 })
+      .limit(50)
+      .lean();
 
-    return [
-      ...managedRoutes.map((route) => this.formatManagedRoute(route)),
-      ...routes.map((route) => this.formatRoute(route)),
-    ];
+    return managedRoutes.map((route) => this.formatManagedRoute(route));
   }
 
   static formatRoute(route) {
+    if (route.routeCode || route.routeName || route.outboundRoute || route.fareConfig || route.scheduleConfig) {
+      return this.formatManagedRoute(route);
+    }
+
     return {
       id: route._id || route.id,
       routeNumber: route.routeNumber,
@@ -676,37 +661,19 @@ export class RouteService {
   static async findActiveRoute(routeId, routeNumber = routeId) {
     await this.ensureSampleRoutes();
 
-    let route = null;
-
-    if (routeId) {
-      try {
-        route = await Route.findOne({ _id: routeId, status: 'ACTIVE' }).lean();
-      } catch {
-        route = null;
-      }
-    }
-
-    if (!route && routeNumber) {
-      route = await Route.findOne({ routeNumber, status: 'ACTIVE' }).lean();
-    }
-
-    if (route) {
-      return route;
-    }
-
     let managedRoute = null;
 
     if (routeId) {
       try {
-        managedRoute = await BusRoute.findOne({ _id: routeId, status: 'PUBLISHED' }).lean();
+        managedRoute = await Route.findOne({ _id: routeId, status: 'PUBLISHED' }).lean();
       } catch {
         managedRoute = null;
       }
     }
 
     if (!managedRoute && routeNumber) {
-      managedRoute = await BusRoute.findOne({
-        routeCode: routeNumber,
+      managedRoute = await Route.findOne({
+        routeCode: String(routeNumber).toUpperCase(),
         status: 'PUBLISHED',
       }).lean();
     }
@@ -734,14 +701,8 @@ export class RouteService {
       throw new Error('Invalid latitude or longitude');
     }
 
-    const [legacyRoutes, managedRoutes] = await Promise.all([
-      Route.find({ status: 'ACTIVE' }).sort({ routeNumber: 1 }).lean(),
-      BusRoute.find({ status: 'PUBLISHED' }).sort({ routeCode: 1 }).lean(),
-    ]);
-    const routes = [
-      ...managedRoutes.map((route) => this.formatManagedRoute(route)),
-      ...legacyRoutes.map((route) => this.formatRoute(route)),
-    ];
+    const managedRoutes = await Route.find({ status: 'PUBLISHED' }).sort({ routeCode: 1 }).lean();
+    const routes = managedRoutes.map((route) => this.formatManagedRoute(route));
     const nearbyStops = [];
     const suggestedRouteMap = new Map();
 
@@ -851,14 +812,8 @@ export class RouteService {
     }
 
     const normalizedPreference = this.normalizePreference(preference);
-    const [legacyRoutes, managedRoutes] = await Promise.all([
-      Route.find({ status: 'ACTIVE' }).sort({ routeNumber: 1 }).lean(),
-      BusRoute.find({ status: 'PUBLISHED' }).sort({ routeCode: 1 }).lean(),
-    ]);
-    const routes = [
-      ...managedRoutes.map((route) => this.formatManagedRoute(route)),
-      ...legacyRoutes.map((route) => this.formatRoute(route)),
-    ];
+    const managedRoutes = await Route.find({ status: 'PUBLISHED' }).sort({ routeCode: 1 }).lean();
+    const routes = managedRoutes.map((route) => this.formatManagedRoute(route));
     const candidates = [];
 
     for (const route of routes) {

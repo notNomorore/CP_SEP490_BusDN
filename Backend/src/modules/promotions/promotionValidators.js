@@ -15,6 +15,11 @@ const isValidDate = (value) => {
 
 const isPositiveNumber = (value) => typeof value === 'number' && Number.isFinite(value) && value > 0;
 const isNonNegativeNumber = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+const endOfDay = (value) => {
+  const date = new Date(value);
+  date.setHours(23, 59, 59, 999);
+  return date;
+};
 
 const validatePromotionPayload = (body, { partial = false } = {}) => {
   const errors = {};
@@ -106,6 +111,29 @@ const validatePromotionPayload = (body, { partial = false } = {}) => {
 
   if (body.status !== undefined && !PROMOTION_STATUS.includes(body.status)) {
     errors.status = 'Invalid promotion status';
+  }
+
+  if (body.notifyPassengers !== undefined && typeof body.notifyPassengers !== 'boolean') {
+    errors.notifyPassengers = 'Notify passengers must be true or false';
+  }
+
+  if (body.notificationScheduledAt) {
+    if (!isValidDate(body.notificationScheduledAt)) {
+      errors.notificationScheduledAt = 'Invalid notification time';
+    } else {
+      const scheduledAt = new Date(body.notificationScheduledAt);
+      if (scheduledAt <= new Date()) {
+        errors.notificationScheduledAt = 'Notification time cannot be in the past';
+      } else if (isValidDate(body.startDate) && scheduledAt < new Date(body.startDate)) {
+        errors.notificationScheduledAt = 'Notification time must be within promotion validity period';
+      } else if (isValidDate(body.endDate) && scheduledAt > endOfDay(body.endDate)) {
+        errors.notificationScheduledAt = 'Notification time must be within promotion validity period';
+      }
+    }
+  }
+
+  if (body.notifyPassengers === true && !body.notificationScheduledAt) {
+    errors.notificationScheduledAt = 'Notification time is required';
   }
 
   return errors;

@@ -12,6 +12,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    cacheDir: '.vite',
     server: {
       port: 5173,
       strictPort: false,

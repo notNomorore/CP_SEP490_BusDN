@@ -222,6 +222,10 @@ export class AuthService {
       throw new Error('User account not verified');
     }
 
+    if (user.status === 'INACTIVE') {
+      throw new Error('User account is inactive');
+    }
+
     // Locked accounts must receive a clear lock message with the lock reason.
     if (user.accountLock?.isLocked || user.status === 'LOCKED') {
       const hasExpiry = Boolean(user.accountLock?.lockedUntil);

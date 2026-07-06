@@ -10,6 +10,8 @@ const formatStaff = (staff) => (
 );
 
 const normalizeGeoPoint = (point = {}) => ({
+  id: point.stationId || point._id || null,
+  stationId: point.stationId || point._id || null,
   stopName: point.stopName || '',
   address: point.address || '',
   latitude: Number(point.latitude),
@@ -202,6 +204,7 @@ export const ShiftAssignmentResponseDTO = {
 
     return ({
     id: assignment._id,
+    tripId: trip._id || assignment.trip || null,
     shiftCode: assignment.shiftCode,
     tripCode: trip.scheduleCode || assignment.tripCode,
     actorRole: resolvedActorRole,
@@ -238,6 +241,32 @@ export const ShiftAssignmentResponseDTO = {
     inspection,
     notes: assignment.notes,
     });
+  },
+};
+
+export const StaffShiftScheduleResponseDTO = {
+  format: (assignment) => {
+    const shift = assignment.shift || assignment.shiftId || {};
+    const route = shift.routeId || {};
+
+    return {
+      id: assignment._id,
+      assignmentStatus: assignment.status || 'ASSIGNED',
+      workDate: assignment.workDate || shift.workDate,
+      shiftCode: shift.shiftCode || '',
+      shiftName: shift.shiftName || 'Ca làm việc',
+      shiftType: shift.shiftType || 'CUSTOM',
+      startTime: shift.startTime || '',
+      endTime: shift.endTime || '',
+      description: shift.description || '',
+      route: route && route._id
+        ? {
+          id: route._id,
+          routeCode: route.routeCode || '',
+          routeName: route.routeName || '',
+        }
+        : null,
+    };
   },
 };
 

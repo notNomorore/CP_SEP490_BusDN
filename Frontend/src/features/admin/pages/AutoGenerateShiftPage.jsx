@@ -20,8 +20,8 @@ const initialForm = {
   shiftType: 'MORNING',
   startTime: '05:30',
   endTime: '13:30',
-  tripSelectionMode: 'NUMBER',
-  numberOfTrips: 1,
+  tripSelectionMode: 'ALL',
+  numberOfTrips: 0,
   tripIds: [],
   autoAssignVehicle: true,
   autoAssignDriver: true,
@@ -30,9 +30,9 @@ const initialForm = {
 
 const shiftTimes = {
   MORNING: ['05:30', '13:30'],
-  AFTERNOON: ['13:30', '17:30'],
+  AFTERNOON: ['10:30', '18:30'],
   EVENING: ['17:30', '22:00'],
-  FULL_DAY: ['05:30', '17:30'],
+  FULL_DAY: ['05:30', '18:30'],
 };
 
 const statusLabels = {
@@ -57,7 +57,7 @@ const buildFormSignature = (form) => JSON.stringify({
   startTime: form.startTime,
   endTime: form.endTime,
   tripSelectionMode: form.tripSelectionMode,
-  numberOfTrips: Number(form.numberOfTrips || 0),
+  numberOfTrips: form.tripSelectionMode === 'NUMBER' ? Number(form.numberOfTrips || 0) : 0,
   tripIds: [...(form.tripIds || [])].sort(),
   autoAssignVehicle: form.autoAssignVehicle,
   autoAssignDriver: form.autoAssignDriver,
@@ -300,7 +300,8 @@ const AutoGenerateShiftPage = () => {
             </label>
             <div className="xl:col-span-3">
               <span className={`mb-2 block text-xs font-bold uppercase ${mutedClass}`}>Phân công chuyến</span>
-              <div className="flex min-h-11 items-center gap-4">
+              <div className="flex min-h-11 flex-wrap items-center gap-4">
+                <label className="flex items-center gap-2 text-sm font-bold"><input type="radio" checked={form.tripSelectionMode === 'ALL'} onChange={() => updateForm({ tripSelectionMode: 'ALL', numberOfTrips: 0, tripIds: [] })} /> Toàn bộ chuyến trong ca</label>
                 <label className="flex items-center gap-2 text-sm font-bold"><input type="radio" checked={form.tripSelectionMode === 'NUMBER'} onChange={() => updateForm({ tripSelectionMode: 'NUMBER', tripIds: [] })} /> Theo số chuyến</label>
                 <label className="flex items-center gap-2 text-sm font-bold"><input type="radio" checked={form.tripSelectionMode === 'TRIPS'} onChange={() => updateForm({ tripSelectionMode: 'TRIPS' })} /> Chọn chuyến cụ thể</label>
                 {form.tripSelectionMode === 'NUMBER' ? <input type="number" min="1" className={`${inputClass} max-w-28`} value={form.numberOfTrips} onChange={(event) => updateForm({ numberOfTrips: event.target.value })} /> : null}

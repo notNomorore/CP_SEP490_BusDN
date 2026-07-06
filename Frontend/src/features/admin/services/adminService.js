@@ -98,6 +98,9 @@ export const adminService = {
   deleteTripSchedule: async (scheduleId) => {
     return apiClient.delete(`/admin/trip-schedules/${scheduleId}`);
   },
+  deleteTripSchedules: async (data = {}) => {
+    return apiClient.delete('/admin/trip-schedules', { data });
+  },
   getShifts: async (params = {}) => {
     return apiClient.get('/admin/shifts', { params });
   },
@@ -124,6 +127,9 @@ export const adminService = {
   },
   archiveShift: async (shiftId) => {
     return apiClient.delete(`/admin/shifts/${shiftId}`);
+  },
+  archiveShifts: async (data = {}) => {
+    return apiClient.delete('/admin/shifts', { data });
   },
   getShiftAssignments: async (params = {}) => {
     return apiClient.get('/admin/shift-assignments', { params });

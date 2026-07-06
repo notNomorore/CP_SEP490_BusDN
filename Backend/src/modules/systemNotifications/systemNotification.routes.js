@@ -11,7 +11,15 @@ import {
 
 const router = express.Router();
 
-router.use(authMiddleware, authorizeRole('ADMIN'));
+router.use(authMiddleware);
+
+router.get(
+  '/me',
+  validateRequest(validateNotificationListQuery, 'query'),
+  asyncHandler(SystemNotificationController.listMine)
+);
+
+router.use(authorizeRole('ADMIN'));
 
 router.post(
   '/broadcast',

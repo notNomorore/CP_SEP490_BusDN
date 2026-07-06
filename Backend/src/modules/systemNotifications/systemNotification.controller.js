@@ -2,6 +2,18 @@ import ApiResponse from '../../utils/response.js';
 import SystemNotificationService from './systemNotification.service.js';
 
 export class SystemNotificationController {
+  static async listMine(req, res) {
+    const result = await SystemNotificationService.listMyNotifications(req.user, req.query);
+    return res.apiResponse(
+      ApiResponse.success(
+        result.items,
+        'My notifications retrieved successfully',
+        200,
+        result.pagination
+      )
+    );
+  }
+
   static async broadcast(req, res) {
     const notification = await SystemNotificationService.createBroadcastNotification(
       req.body,

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import toast from 'react-hot-toast';
 import 'leaflet/dist/leaflet.css';
@@ -27,7 +27,6 @@ const operationSections = [
 ];
 
 operationSections.push({ key: 'scheduling', label: 'Điều phối lịch chuyến', hint: 'Tạo lịch, gán xe và nhân sự theo chuyến' });
-operationSections.push({ key: 'shift-list', label: 'Danh sách ca làm', hint: 'Xem, chỉnh sửa và xóa các ca đã tạo' });
 
 const busStatusLabels = {
   ACTIVE: 'Đang hoạt động',
@@ -36,6 +35,7 @@ const busStatusLabels = {
 };
 const BUS_CAPACITY_MIN = 15;
 const BUS_CAPACITY_MAX = 25;
+const ASSIGNABLE_BUS_STATUSES = new Set(['ACTIVE', 'RESERVE']);
 
 const busStatusOverview = {
   ACTIVE: {
@@ -219,15 +219,54 @@ const isTimeRangeInsideShift = ({ departureTime, expectedArrivalTime }, shift) =
     && arrival <= shiftEnd;
 };
 
+const ASSIGNABLE_SHIFT_STATUSES = new Set(['ACTIVE', 'APPROVED', 'PUBLISHED']);
+const MAX_DAILY_STAFF_WORK_MINUTES = 8 * 60;
+const MIN_RESOURCE_BUFFER_MINUTES = 10;
+
 const hasEligibleShiftAssignment = (resourceId, assignments, form, resourceKey) => assignments.some((assignment) => {
   const assignedResource = assignment?.[resourceKey];
   const assignedResourceId = typeof assignedResource === 'object' ? assignedResource?._id : assignedResource;
   return String(assignedResourceId || '') === String(resourceId || '')
     && ['ASSIGNED', 'IN_PROGRESS'].includes(assignment?.status)
     && isSameDateInputValue(assignment?.workDate, form.serviceDate)
-    && assignment?.shiftId?.status === 'ACTIVE'
+    && ASSIGNABLE_SHIFT_STATUSES.has(assignment?.shiftId?.status)
     && isTimeRangeInsideShift(form, assignment.shiftId);
 });
+
+const getAssignmentId = (assignment, assignmentKey) => {
+  const value = assignment?.[assignmentKey]?.[assignmentKey === 'vehicle' ? 'busId' : 'userId'];
+  return typeof value === 'object' && value !== null ? value._id : value;
+};
+
+const getTripWorkMinutes = (schedule) => {
+  const start = parseClockToMinutes(schedule.departureTime);
+  const end = parseClockToMinutes(schedule.expectedArrivalTime || schedule.departureTime);
+  return start !== null && end !== null && end > start ? end - start : 0;
+};
+
+const hasDailyStaffWorkloadCapacity = (resourceId, schedules, assignmentKey, form, excludeScheduleId = '') => {
+  if (!resourceId || !form.serviceDate || !form.departureTime || !form.expectedArrivalTime) return true;
+  const newTripMinutes = getTripWorkMinutes(form);
+  if (!newTripMinutes) return true;
+  const assignedMinutes = schedules
+    .filter((schedule) => (
+      String(schedule._id || '') !== String(excludeScheduleId || '')
+      && schedule.status !== 'CANCELLED'
+      && isSameDateInputValue(schedule.serviceDate, form.serviceDate)
+      && String(getAssignmentId(schedule, assignmentKey) || '') === String(resourceId || '')
+    ))
+    .reduce((total, schedule) => total + getTripWorkMinutes(schedule), 0);
+  return assignedMinutes + newTripMinutes <= MAX_DAILY_STAFF_WORK_MINUTES;
+};
+
+const isAssignableBus = (bus) => ASSIGNABLE_BUS_STATUSES.has(bus?.status);
+
+const determineScheduleStatus = ({ busId, driverId, assistantId }, currentStatus = 'PLANNED') => {
+  if (['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(currentStatus)) return currentStatus;
+  return busId && driverId && assistantId ? 'ASSIGNED' : 'PLANNED';
+};
+
+const isScheduleDeleteLocked = (schedule) => ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(schedule?.status);
 
 const scheduleTimeRangesOverlap = (first, second) => {
   const firstStart = parseClockToMinutes(first.departureTime);
@@ -544,8 +583,8 @@ const ScheduleListPanel = ({ onDeleteSchedule, onEditSchedule, onEmergencyReassi
   <div className="rounded-2xl border border-slate-200 bg-white p-4 text-slate-900">
     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
       <div>
-        <h2 className="text-lg font-black text-slate-950">Danh sách ca làm</h2>
-        <p className="mt-1 text-xs leading-5 text-slate-500">Xem, chỉnh sửa hoặc xóa từng ca trong lịch điều phối tuyến.</p>
+        <h2 className="text-lg font-black text-slate-950">Danh sách lịch chuyến</h2>
+        <p className="mt-1 text-xs leading-5 text-slate-500">Xem, chỉnh sửa hoặc xóa từng lịch chuyến đã điều phối.</p>
       </div>
       <div className="flex flex-wrap items-end gap-2">
         <label>
@@ -574,7 +613,7 @@ const ScheduleListPanel = ({ onDeleteSchedule, onEditSchedule, onEmergencyReassi
           </button>
         ) : null}
         <span className="h-10 rounded-full bg-emerald-50 px-3 py-2.5 text-xs font-bold text-emerald-700">
-          {filteredSchedules.length}{serviceDateFilter ? ` / ${schedules.length}` : ''} ca
+          {filteredSchedules.length}{serviceDateFilter ? ` / ${schedules.length}` : ''} lịch
         </span>
       </div>
     </div>
@@ -582,7 +621,7 @@ const ScheduleListPanel = ({ onDeleteSchedule, onEditSchedule, onEmergencyReassi
       <table className="w-full min-w-[1320px] border-collapse text-left text-xs">
         <thead className="sticky top-0 z-10 bg-slate-100 text-slate-600">
           <tr>
-            {['Mã ca', 'Tuyến', 'Ngày', 'Thời gian', 'Ca', 'Chiều', 'Xe', 'Tài xế', 'Phụ xe', 'Trạng thái', 'Ghi chú', 'Thao tác'].map((label) => (
+            {['Mã lịch', 'Tuyến', 'Ngày', 'Thời gian', 'Ca', 'Chiều', 'Xe', 'Tài xế', 'Phụ xe', 'Trạng thái', 'Ghi chú', 'Thao tác'].map((label) => (
               <th key={label} className="border-b border-slate-200 px-3 py-3 font-black uppercase">{label}</th>
             ))}
           </tr>
@@ -611,7 +650,7 @@ const ScheduleListPanel = ({ onDeleteSchedule, onEditSchedule, onEmergencyReassi
                   <div className="flex gap-2">
                     <button type="button" onClick={(event) => { event.stopPropagation(); onEmergencyReassign(schedule); }} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 font-bold text-amber-700 hover:bg-amber-100">Khẩn cấp</button>
                     <button type="button" onClick={(event) => { event.stopPropagation(); onEditSchedule(schedule); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-bold hover:border-emerald-300">Sửa</button>
-                    <button type="button" disabled={schedule.status === 'IN_PROGRESS'} onClick={(event) => { event.stopPropagation(); onDeleteSchedule(schedule); }} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 font-bold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40">Xóa</button>
+                    <button type="button" disabled={isScheduleDeleteLocked(schedule)} onClick={(event) => { event.stopPropagation(); onDeleteSchedule(schedule); }} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 font-bold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40">Xóa</button>
                   </div>
                 </td>
               </tr>
@@ -621,7 +660,7 @@ const ScheduleListPanel = ({ onDeleteSchedule, onEditSchedule, onEmergencyReassi
       </table>
       {!filteredSchedules.length ? (
         <div className="p-6 text-center text-sm text-slate-500">
-          {serviceDateFilter ? `Không có ca làm trong ngày ${serviceDateFilter}.` : 'Chưa có ca làm.'}
+          {serviceDateFilter ? `Không có lịch chuyến trong ngày ${serviceDateFilter}.` : 'Chưa có lịch chuyến.'}
         </div>
       ) : null}
     </div>
@@ -769,8 +808,10 @@ const loadAllTripSchedules = async () => {
 const entityId = (value) => (typeof value === 'object' && value !== null ? value._id : value) || '';
 
 const EmergencyReassignmentModal = ({
+  assistantShiftAssignments,
   assistantStaff,
   buses,
+  driverShiftAssignments,
   drivers,
   onClose,
   onSaved,
@@ -810,16 +851,39 @@ const EmergencyReassignmentModal = ({
   const currentBusId = entityId(schedule.vehicle?.busId);
   const currentDriverId = entityId(schedule.driver?.userId);
   const currentAssistantId = entityId(schedule.assistant?.userId);
+  const scheduleWorkloadForm = {
+    serviceDate: toDateInputValue(schedule.serviceDate),
+    departureTime: schedule.departureTime,
+    expectedArrivalTime: schedule.expectedArrivalTime,
+  };
 
   const availableBuses = buses.filter((bus) => (
-    bus.status !== 'MAINTENANCE'
+    isAssignableBus(bus)
     && (String(bus._id) === String(currentBusId) || !isBusyAtScheduleTime(bus._id, 'vehicle'))
   ));
   const availableDrivers = drivers.filter((driver) => (
-    String(driver._id) === String(currentDriverId) || !isBusyAtScheduleTime(driver._id, 'driver')
+    String(driver._id) === String(currentDriverId)
+    || (
+      !isBusyAtScheduleTime(driver._id, 'driver')
+      && hasDailyStaffWorkloadCapacity(driver._id, schedules, 'driver', scheduleWorkloadForm, schedule._id)
+      && hasEligibleShiftAssignment(driver._id, driverShiftAssignments, {
+        serviceDate: toDateInputValue(schedule.serviceDate),
+        departureTime: schedule.departureTime,
+        expectedArrivalTime: schedule.expectedArrivalTime,
+      }, 'driverId')
+    )
   ));
   const availableAssistants = assistantStaff.filter((staff) => (
-    String(staff._id) === String(currentAssistantId) || !isBusyAtScheduleTime(staff._id, 'assistant')
+    String(staff._id) === String(currentAssistantId)
+    || (
+      !isBusyAtScheduleTime(staff._id, 'assistant')
+      && hasDailyStaffWorkloadCapacity(staff._id, schedules, 'assistant', scheduleWorkloadForm, schedule._id)
+      && hasEligibleShiftAssignment(staff._id, assistantShiftAssignments, {
+        serviceDate: toDateInputValue(schedule.serviceDate),
+        departureTime: schedule.departureTime,
+        expectedArrivalTime: schedule.expectedArrivalTime,
+      }, 'assistantId')
+    )
   ));
   const inputClassName = 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-amber-300';
 
@@ -854,7 +918,6 @@ const EmergencyReassignmentModal = ({
       return;
     }
 
-    const hasCompleteAssignment = Boolean(form.busId && form.driverId && form.assistantId);
     const payload = {
       scheduleCode: schedule.scheduleCode,
       serviceDate: toDateInputValue(schedule.serviceDate),
@@ -863,9 +926,7 @@ const EmergencyReassignmentModal = ({
       departureTime: schedule.departureTime,
       expectedArrivalTime: schedule.expectedArrivalTime,
       shiftLabel: schedule.shiftLabel || '',
-      status: hasCompleteAssignment && schedule.status === 'PLANNED'
-        ? 'ASSIGNED'
-        : (schedule.status === 'ASSIGNED' && !hasCompleteAssignment ? 'PLANNED' : schedule.status),
+      status: determineScheduleStatus(form, schedule.status),
       vehicle: toAssignedVehicle(form.busId, buses),
       driver: toAssignedPerson(form.driverId, drivers),
       assistant: toAssignedPerson(form.assistantId, assistantStaff),
@@ -960,12 +1021,15 @@ const FrequencyScheduleModal = ({ onClose, onSaved, routes }) => {
     replaceScheduled: false,
   });
   const [rows, setRows] = useState([]);
+  const [summary, setSummary] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('');
   const selectedRoute = routes.find((route) => String(route._id) === String(form.routeId));
+  const hasIncompleteRows = rows.some((row) => !row.vehicle?.busId || !row.driver?.userId || !row.assistant?.userId);
 
   const selectRoute = (routeId) => {
     setRows([]);
+    setSummary(null);
     setForm((current) => ({
       ...current,
       routeId,
@@ -979,6 +1043,7 @@ const FrequencyScheduleModal = ({ onClose, onSaved, routes }) => {
     try {
       const response = await adminService.generateTripSchedulePreview(form);
       setRows(response.rows || []);
+      setSummary(response.summary || null);
       if (!response.rows?.length) setMessage('Không có ngày hoạt động trong khoảng đã chọn.');
     } catch (error) {
       setMessage(error?.message || 'Không thể sinh lịch theo tần suất tuyến.');
@@ -988,6 +1053,10 @@ const FrequencyScheduleModal = ({ onClose, onSaved, routes }) => {
   };
 
   const confirm = async () => {
+    if (hasIncompleteRows) {
+      setMessage('Còn chuyến chưa đủ xe, tài xế hoặc phụ xe. Hãy xóa các dòng cảnh báo hoặc bổ sung ca làm trước khi lưu.');
+      return;
+    }
     setIsLoading(true);
     try {
       const response = await adminService.confirmGeneratedTripSchedules(rows, form.replaceScheduled);
@@ -1016,9 +1085,9 @@ const FrequencyScheduleModal = ({ onClose, onSaved, routes }) => {
             {selectedRoute ? (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <span><strong className="block text-xs uppercase text-emerald-700">Khung giờ</strong>{FIRST_BUS_DEPARTURE_TIME} - {LAST_BUS_DEPARTURE_TIME}</span>
-                <span><strong className="block text-xs uppercase text-emerald-700">Cao điểm</strong>{selectedRoute.scheduleConfig?.peakFrequencyMinutes || 0} phút/chuyến</span>
-                <span><strong className="block text-xs uppercase text-emerald-700">Thấp điểm</strong>{selectedRoute.scheduleConfig?.offPeakFrequencyMinutes || 0} phút/chuyến</span>
-                <span><strong className="block text-xs uppercase text-emerald-700">Nghỉ đầu cuối</strong>{selectedRoute.scheduleConfig?.layoverMinutes || 0} phút</span>
+                <span><strong className="block text-xs uppercase text-emerald-700">Cao điểm</strong>{selectedRoute.scheduleConfig?.peakFrequencyMinutes || selectedRoute.scheduleConfig?.frequencyMinutes || 0} phút/chuyến</span>
+                <span><strong className="block text-xs uppercase text-emerald-700">Thấp điểm</strong>{selectedRoute.scheduleConfig?.offPeakFrequencyMinutes || selectedRoute.scheduleConfig?.frequencyMinutes || selectedRoute.scheduleConfig?.peakFrequencyMinutes || 0} phút/chuyến</span>
+                <span><strong className="block text-xs uppercase text-emerald-700">Nghỉ đầu cuối</strong>{Math.max(MIN_RESOURCE_BUFFER_MINUTES, Number(selectedRoute.scheduleConfig?.layoverMinutes || 0))} phút</span>
               </div>
             ) : 'Chọn tuyến để xem cấu hình.'}
             {selectedRoute ? <p className="mt-3 text-xs text-emerald-700">Cao điểm: 06:30–08:30 và 16:30–18:30. Các giờ còn lại áp dụng tần suất thấp điểm.</p> : null}
@@ -1030,7 +1099,23 @@ const FrequencyScheduleModal = ({ onClose, onSaved, routes }) => {
         </div>
         <div className="mt-4 flex gap-2"><button type="button" disabled={isLoading} onClick={generate} className="rounded-lg bg-violet-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{rows.length ? 'Sinh lại' : 'Sinh lịch'}</button><button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-bold">Đóng</button></div>
         {message ? <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{message}</div> : null}
-        {rows.length ? <div className="mt-5"><div className="mb-3 flex justify-between"><h3 className="font-black">Bản xem trước</h3><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold">{rows.length} chuyến · {rows.filter((row) => row.shiftLabel === 'MORNING').length} sáng · {rows.filter((row) => row.shiftLabel === 'AFTERNOON').length} chiều</span></div><div className="max-h-96 overflow-auto rounded-lg border border-slate-200"><table className="min-w-[1120px] w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr>{['Ngày', 'Mã lịch', 'Ca', 'Chiều', 'Xuất bến', 'Đến', 'Xe', 'Tài xế', 'Phụ xe', 'Cảnh báo', ''].map((item) => <th key={item} className="px-3 py-3 font-black uppercase text-slate-500">{item}</th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.previewId} className="border-t border-slate-200"><td className="px-3 py-3">{row.serviceDate}</td><td className="px-3 py-3 font-bold">{row.scheduleCode}</td><td className="px-3 py-3 font-bold">{scheduleShiftLabels[row.shiftLabel] || '-'}</td><td className="px-3 py-3">{scheduleDirectionLabels[row.direction]}</td><td className="px-3 py-3">{row.departureTime}</td><td className="px-3 py-3">{row.expectedArrivalTime}</td><td className="px-3 py-3">{row.vehicle?.busCode || 'Chưa gán'}</td><td className="px-3 py-3">{row.driver?.fullName || 'Chưa gán'}</td><td className="px-3 py-3">{row.assistant?.fullName || 'Chưa gán'}</td><td className="px-3 py-3 text-amber-700">{row.warnings?.join(' ') || 'Hợp lệ'}</td><td className="px-3 py-3"><button type="button" onClick={() => setRows((current) => current.filter((item) => item.previewId !== row.previewId))} className="text-rose-600">Xóa</button></td></tr>)}</tbody></table></div><div className="mt-4 flex justify-end"><button type="button" disabled={isLoading} onClick={confirm} className="rounded-lg bg-emerald-500 px-5 py-3 text-sm font-black text-emerald-950 disabled:opacity-50">Xác nhận tạo lịch</button></div></div> : null}
+        {summary ? (
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            {[
+              ['Chạy song song cao nhất', summary.maxConcurrentTrips || 0, `Có ${summary.assignableVehicles || 0} xe khả dụng`],
+              ['Thiếu tài xế', summary.missingDrivers || 0, `Có ${summary.availableDrivers || 0} tài xế có ca`],
+              ['Thiếu phụ xe', summary.missingAssistants || 0, `Có ${summary.availableAssistants || 0} phụ xe có ca`],
+              ['Thiếu xe', summary.missingVehicles || 0, `${summary.assignedTrips || 0}/${summary.totalTrips || 0} chuyến đủ phân công`],
+            ].map(([label, value, hint]) => (
+              <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+                <span className="block text-xs font-black uppercase text-slate-500">{label}</span>
+                <strong className="mt-1 block text-2xl text-slate-950">{value}</strong>
+                <span className="mt-1 block text-xs font-semibold text-slate-500">{hint}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {rows.length ? <div className="mt-5"><div className="mb-3 flex justify-between"><h3 className="font-black">Bản xem trước</h3><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold">{rows.length} chuyến · {rows.filter((row) => row.shiftLabel === 'MORNING').length} sáng · {rows.filter((row) => row.shiftLabel === 'AFTERNOON').length} chiều</span></div>{hasIncompleteRows ? <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">Chỉ lưu được lịch đã đủ xe, tài xế và phụ xe. Các dòng còn cảnh báo cần xóa hoặc bổ sung ca làm trước.</div> : null}<div className="max-h-96 overflow-auto rounded-lg border border-slate-200"><table className="min-w-[1200px] w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr>{['Ngày', 'Mã lịch', 'Ca', 'Chiều', 'Xuất bến', 'Đến', 'Rảnh lại', 'Xe', 'Tài xế', 'Phụ xe', 'Cảnh báo', ''].map((item) => <th key={item} className="px-3 py-3 font-black uppercase text-slate-500">{item}</th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.previewId} className="border-t border-slate-200"><td className="px-3 py-3">{row.serviceDate}</td><td className="px-3 py-3 font-bold">{row.scheduleCode}</td><td className="px-3 py-3 font-bold">{scheduleShiftLabels[row.shiftLabel] || '-'}</td><td className="px-3 py-3">{scheduleDirectionLabels[row.direction]}</td><td className="px-3 py-3">{row.departureTime}</td><td className="px-3 py-3">{row.expectedArrivalTime}</td><td className="px-3 py-3">{row.turnaroundEndTime || row.expectedArrivalTime}</td><td className="px-3 py-3">{row.vehicle?.busCode || 'Chưa gán'}</td><td className="px-3 py-3">{row.driver?.fullName || 'Chưa gán'}</td><td className="px-3 py-3">{row.assistant?.fullName || 'Chưa gán'}</td><td className="px-3 py-3 text-amber-700">{row.warnings?.join(' ') || 'Hợp lệ'}</td><td className="px-3 py-3"><button type="button" onClick={() => setRows((current) => current.filter((item) => item.previewId !== row.previewId))} className="text-rose-600">Xóa</button></td></tr>)}</tbody></table></div><div className="mt-4 flex justify-end"><button type="button" disabled={isLoading || hasIncompleteRows} onClick={confirm} className="rounded-lg bg-emerald-500 px-5 py-3 text-sm font-black text-emerald-950 disabled:opacity-50">Xác nhận tạo lịch</button></div></div> : null}
       </div>
     </div>
   );
@@ -1053,9 +1138,9 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
   )), [editingScheduleId, form, schedules]);
   const availableBuses = useMemo(() => {
     if (!form.serviceDate || !form.departureTime || !form.expectedArrivalTime) {
-      return buses.filter((bus) => bus.status !== 'MAINTENANCE');
+      return buses.filter(isAssignableBus);
     }
-    return buses.filter((bus) => bus.status !== 'MAINTENANCE' && !isResourceBusy(bus._id, 'vehicle'));
+    return buses.filter((bus) => isAssignableBus(bus) && !isResourceBusy(bus._id, 'vehicle'));
   }, [buses, form, isResourceBusy]);
   const selectedRoute = useMemo(() => routes.find((route) => String(route._id) === String(form.routeId)), [form.routeId, routes]);
   const routeScheduleMismatch = useMemo(
@@ -1091,16 +1176,18 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
     if (!form.serviceDate || !form.departureTime || !form.expectedArrivalTime) return [];
     return drivers.filter((driver) => (
       !isResourceBusy(driver._id, 'driver')
+      && hasDailyStaffWorkloadCapacity(driver._id, schedules, 'driver', form, editingScheduleId)
       && hasEligibleShiftAssignment(driver._id, driverShiftAssignments, form, 'driverId')
     ));
-  }, [driverShiftAssignments, drivers, form, isResourceBusy]);
+  }, [driverShiftAssignments, drivers, editingScheduleId, form, isResourceBusy, schedules]);
   const availableAssistants = useMemo(() => {
     if (!form.serviceDate || !form.departureTime || !form.expectedArrivalTime) return [];
     return assistantStaff.filter((assistant) => (
       !isResourceBusy(assistant._id, 'assistant')
+      && hasDailyStaffWorkloadCapacity(assistant._id, schedules, 'assistant', form, editingScheduleId)
       && hasEligibleShiftAssignment(assistant._id, assistantShiftAssignments, form, 'assistantId')
     ));
-  }, [assistantShiftAssignments, assistantStaff, form, isResourceBusy]);
+  }, [assistantShiftAssignments, assistantStaff, editingScheduleId, form, isResourceBusy, schedules]);
 
   useEffect(() => {
     if (!estimatedDurationMinutes || !form.departureTime) return;
@@ -1135,6 +1222,7 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
   };
 
   const updateForm = (patch) => {
+    setMessage('');
     setForm((current) => {
       const next = { ...current, ...patch };
       const route = routes.find((item) => String(item._id) === String(next.routeId));
@@ -1197,6 +1285,18 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
       setMessage(`Trùng phân công với lịch ${assignmentConflict.scheduleCode} lúc ${assignmentConflict.departureTime}. Vui lòng đổi xe, tài xế, phụ xe hoặc giờ xuất bến.`);
       return;
     }
+    if (form.busId && !availableBuses.some((bus) => String(bus._id) === String(form.busId))) {
+      setMessage('Xe đã có lịch trùng giờ hoặc không khả dụng.');
+      return;
+    }
+    if (form.driverId && !availableDrivers.some((driver) => String(driver._id) === String(form.driverId))) {
+      setMessage('Tài xế không có ca làm phù hợp hoặc đã bận trong thời gian chuyến.');
+      return;
+    }
+    if (form.assistantId && !availableAssistants.some((assistant) => String(assistant._id) === String(form.assistantId))) {
+      setMessage('Phụ xe không có ca làm phù hợp hoặc đã bận trong thời gian chuyến.');
+      return;
+    }
     if (scheduleHardLimitError) {
       setMessage(scheduleHardLimitError);
       return;
@@ -1205,7 +1305,6 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
       setMessage('Chuyến nằm ngoài cấu hình tuyến. Cần xác nhận đây là chuyến ngoại lệ và nhập lý do.');
       return;
     }
-    const hasCompleteAssignment = Boolean(form.busId && form.driverId && form.assistantId);
     const payload = {
       scheduleCode: form.scheduleCode,
       serviceDate: form.serviceDate,
@@ -1214,7 +1313,7 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
       departureTime: form.departureTime,
       expectedArrivalTime: form.expectedArrivalTime,
       shiftLabel: form.shiftLabel,
-      status: hasCompleteAssignment && form.status === 'PLANNED' ? 'ASSIGNED' : (form.status === 'ASSIGNED' ? 'PLANNED' : form.status),
+      status: determineScheduleStatus(form, form.status),
       vehicle: toAssignedVehicle(form.busId, availableBuses),
       driver: toAssignedPerson(form.driverId, drivers),
       assistant: toAssignedPerson(form.assistantId, assistantStaff),
@@ -1310,7 +1409,7 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
               {availableDrivers.map((driver) => <option key={driver._id} value={driver._id}>{driver.fullName}{driver.phone ? ` - ${driver.phone}` : ''}</option>)}
             </select>
             {form.serviceDate && form.departureTime && form.expectedArrivalTime && !availableDrivers.length ? (
-              <span className="mt-1 block text-xs font-semibold text-amber-600">Khong co tai xe co ca lam phu hop hoac tai xe da ban trong khung gio nay.</span>
+              <span className="mt-1 block text-xs font-semibold text-amber-600">Không có tài xế có ca đã công bố/phê duyệt bao phủ chuyến hoặc tài xế đã bận trong khung giờ này.</span>
             ) : null}
           </label>
           <label>
@@ -1320,7 +1419,7 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
               {availableAssistants.map((staff) => <option key={staff._id} value={staff._id}>{staff.fullName}{staff.phone ? ` - ${staff.phone}` : ''}</option>)}
             </select>
             {form.serviceDate && form.departureTime && form.expectedArrivalTime && !availableAssistants.length ? (
-              <span className="mt-1 block text-xs font-semibold text-amber-600">Không có phụ xe rảnh trong khung giờ này.</span>
+              <span className="mt-1 block text-xs font-semibold text-amber-600">Không có phụ xe có ca đã công bố/phê duyệt bao phủ chuyến hoặc phụ xe đã bận trong khung giờ này.</span>
             ) : null}
           </label>
         </div>
@@ -1372,15 +1471,24 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
         {message ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">{message}</div> : null}
       </form>
 
-      <div className="hidden">
-        {schedules.map((schedule) => (
-          <button key={schedule._id} type="button" onClick={() => editSchedule(schedule)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm hover:border-emerald-300">
-            <span className="block font-black text-slate-900">{schedule.scheduleCode} - {schedule.routeCode} - {schedule.departureTime}{schedule.expectedArrivalTime ? ` đến ${schedule.expectedArrivalTime}` : ''}</span>
-            <span className="mt-1 block text-xs text-slate-500">{toDateInputValue(schedule.serviceDate)} | {scheduleDirectionLabels[schedule.direction] || schedule.direction} | {scheduleStatusLabels[schedule.status] || schedule.status}</span>
-            <span className="mt-1 block text-xs text-slate-500">{schedule.vehicle?.busCode || 'Chưa gán xe'} | {schedule.driver?.fullName || 'Chưa gán tài xế'} | {schedule.assistant?.fullName || 'Chưa gán phụ xe'}</span>
-          </button>
-        ))}
-        {!schedules.length ? <div className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">Chưa có lịch chuyến.</div> : null}
+      <div className="mt-5 border-t border-slate-100 pt-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="font-black text-slate-950">Lịch chuyến đã phân công</h3>
+            <p className="mt-1 text-xs text-slate-500">Chọn một lịch để sửa nhanh ở form phía trên.</p>
+          </div>
+          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">{schedules.length} lịch</span>
+        </div>
+        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+          {schedules.map((schedule) => (
+            <button key={schedule._id} type="button" onClick={() => editSchedule(schedule)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-left text-sm hover:border-emerald-300 hover:bg-emerald-50">
+              <span className="block font-black text-slate-900">{schedule.scheduleCode} - {schedule.routeCode} - {schedule.departureTime}{schedule.expectedArrivalTime ? ` đến ${schedule.expectedArrivalTime}` : ''}</span>
+              <span className="mt-1 block text-xs text-slate-500">{toDateInputValue(schedule.serviceDate)} | {scheduleDirectionLabels[schedule.direction] || schedule.direction} | {scheduleStatusLabels[schedule.status] || schedule.status}</span>
+              <span className="mt-1 block text-xs text-slate-500">{schedule.vehicle?.busCode || 'Chưa gán xe'} | {schedule.driver?.fullName || 'Chưa gán tài xế'} | {schedule.assistant?.fullName || 'Chưa gán phụ xe'}</span>
+            </button>
+          ))}
+          {!schedules.length ? <div className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">Chưa có lịch chuyến.</div> : null}
+        </div>
       </div>
     </div>
   );
@@ -1972,6 +2080,24 @@ const RouteWorkflowPage = () => {
     }
   };
 
+  const deleteAllSchedules = async () => {
+    const confirmed = window.confirm('Xóa toàn bộ lịch chuyến chưa chạy/chưa hoàn thành? Các lịch đang chạy, đã hoàn thành hoặc đã hủy sẽ được giữ lại.');
+    if (!confirmed) return;
+    try {
+      const response = await adminService.deleteTripSchedules({ confirmAll: true });
+      setScheduleForEditing(null);
+      setEmergencySchedule(null);
+      setSelectedSchedule(null);
+      toast.success(`Đã xóa ${response.deletedCount || 0} lịch chuyến.`);
+      if (response.protectedCount) {
+        toast(`Giữ lại ${response.protectedCount} lịch đang chạy/đã hoàn thành/đã hủy.`);
+      }
+      await loadData();
+    } catch (deleteError) {
+      setError(deleteError?.message || 'Không thể xóa toàn bộ lịch chuyến.');
+    }
+  };
+
   const openRoute = async (routeId) => {
     try {
       const response = await adminService.getRouteDetail(routeId);
@@ -2157,6 +2283,21 @@ const RouteWorkflowPage = () => {
                 </div>
               </aside>
               </div>
+              <ScheduleListPanel
+                onDeleteSchedule={deleteSchedule}
+                onEditSchedule={(schedule) => {
+                  setScheduleForEditing(schedule);
+                  setSelectedSchedule(schedule);
+                }}
+                onEmergencyReassign={(schedule) => {
+                  setEmergencySchedule(schedule);
+                  setSelectedSchedule(schedule);
+                }}
+                onSelectSchedule={setSelectedSchedule}
+                routes={routes}
+                schedules={schedules}
+                selectedScheduleId={selectedSchedule?._id}
+              />
             </section>
           ) : null}
 
@@ -2236,47 +2377,26 @@ const RouteWorkflowPage = () => {
                     </div>
                   ))}
                 </div>
+                <button type="button" onClick={deleteAllSchedules} className="mt-4 inline-flex w-full items-center justify-center rounded-xl border border-rose-200 px-4 py-3 text-sm font-black text-rose-600 hover:bg-rose-50">
+                  Xóa toàn bộ lịch
+                </button>
               </aside>
               </div>
             </section>
           ) : null}
-
-          {activeOperationSection === 'shift-list' ? (
-            <section className="mb-5 grid gap-5">
-                <ScheduleListPanel
-                  onDeleteSchedule={deleteSchedule}
-                  onEditSchedule={(schedule) => {
-                    setScheduleForEditing(schedule);
-                    setActiveOperationSection('scheduling');
-                  }}
-                  onEmergencyReassign={(schedule) => {
-                    setEmergencySchedule(schedule);
-                  }}
-                  onSelectSchedule={setSelectedSchedule}
-                  routes={routes}
-                  schedules={schedules}
-                  selectedScheduleId={selectedSchedule?._id}
-                />
-            </section>
-          ) : null}
         </div>
       </main>
-      <EmergencyReassignmentModal
-        assistantStaff={assistantStaff}
-        buses={buses}
-        drivers={drivers}
+        <EmergencyReassignmentModal
+          assistantShiftAssignments={assistantShiftAssignments}
+          assistantStaff={assistantStaff}
+          buses={buses}
+          driverShiftAssignments={driverShiftAssignments}
+          drivers={drivers}
         onClose={() => setEmergencySchedule(null)}
         onSaved={loadData}
         schedule={emergencySchedule}
         schedules={schedules}
       />
-      {activeOperationSection === 'shift-list' ? (
-        <ScheduleRouteDetailModal
-          onClose={() => setSelectedSchedule(null)}
-          routes={routes}
-          schedule={selectedSchedule}
-        />
-      ) : null}
     </div>
   );
 };

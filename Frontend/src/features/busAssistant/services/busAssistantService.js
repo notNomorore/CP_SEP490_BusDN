@@ -6,7 +6,15 @@ const params = (values = {}) => Object.fromEntries(
 
 export const busAssistantService = {
   validateETicket(payload) {
-    return apiClient.post('/bus-assistant/tickets/validate', payload).then((response) => response.data);
+    return apiClient.post('/tickets/validate-qr', params({
+      qrPayload: payload.qrCode || payload.qrPayload || payload.code,
+      tripId: payload.tripId,
+      routeId: payload.routeId,
+      routeCode: payload.routeCode,
+    })).then((response) => response.data);
+  },
+  getValidationHistory(filters = {}) {
+    return apiClient.get('/tickets/validation-history', { params: params(filters) }).then((response) => response.data);
   },
   createWalkInTicket(payload) {
     return apiClient.post('/bus-assistant/walkin-tickets', payload).then((response) => response.data);

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { io } from 'socket.io-client';
 import fleetMonitoringService from '../services/fleetMonitoringService.js';
+import { acquireFleetSocket, releaseFleetSocket } from '../services/fleetSocket.js';
 import toast from '../../../../shared/utils/toast.js';
 import { ReplacementVehicleModal } from '../../vehicleReassignments';
 
@@ -13,12 +13,6 @@ const STATUS_META = {
   delayed: { label: 'Delayed', tone: 'bg-amber-100 text-amber-800', icon: 'schedule' },
   incident: { label: 'Incident', tone: 'bg-red-100 text-red-700', icon: 'warning' },
   lost_signal: { label: 'Lost signal', tone: 'bg-zinc-200 text-zinc-700', icon: 'signal_disconnected' },
-};
-
-const getApiOrigin = () => {
-  const configured = import.meta.env.VITE_API_URL?.trim();
-  if (configured) return configured.replace(/\/$/, '');
-  return 'http://localhost:3000';
 };
 
 const formatDateTime = (value) => {
@@ -211,7 +205,6 @@ const AdminActiveTripsPage = () => {
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
-  const socketRef = useRef(null);
   const loadTripsRef = useRef(null);
 
   const loadTrips = useCallback(async () => {
@@ -235,28 +228,33 @@ const AdminActiveTripsPage = () => {
   }, [loadTrips]);
 
   useEffect(() => {
-    const token = localStorage.getItem('authToken');
-    const socket = io(getApiOrigin(), {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
+    const socket = acquireFleetSocket();
+    const handleConnect = () => {
       setSocketConnected(true);
       socket.emit('admin:fleet:subscribe');
-    });
-    socket.on('disconnect', () => setSocketConnected(false));
-    socket.on('connect_error', () => setSocketConnected(false));
-    socket.on('server:fleet:locationUpdated', () => loadTripsRef.current?.().catch(() => {}));
-    socket.on('server:trip:statusUpdated', () => loadTripsRef.current?.().catch(() => {}));
-    socket.on('server:incident:new', () => loadTripsRef.current?.().catch(() => {}));
-    socket.on('server:trip:vehicleReassigned', () => loadTripsRef.current?.().catch(() => {}));
+    };
+    const handleDisconnect = () => setSocketConnected(false);
+    const reloadTrips = () => loadTripsRef.current?.().catch(() => {});
+
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('connect_error', handleDisconnect);
+    socket.on('server:fleet:locationUpdated', reloadTrips);
+    socket.on('server:trip:statusUpdated', reloadTrips);
+    socket.on('server:incident:new', reloadTrips);
+    socket.on('server:trip:vehicleReassigned', reloadTrips);
+    if (socket.connected) handleConnect();
 
     return () => {
-      socket.emit('admin:fleet:unsubscribe');
-      socket.disconnect();
-      socketRef.current = null;
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('connect_error', handleDisconnect);
+      socket.off('server:fleet:locationUpdated', reloadTrips);
+      socket.off('server:trip:statusUpdated', reloadTrips);
+      socket.off('server:incident:new', reloadTrips);
+      socket.off('server:trip:vehicleReassigned', reloadTrips);
+      setSocketConnected(false);
+      releaseFleetSocket();
     };
   }, []);
 
