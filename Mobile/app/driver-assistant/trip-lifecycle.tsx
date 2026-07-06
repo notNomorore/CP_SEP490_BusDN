@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, type Href } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -713,9 +713,25 @@ export default function TripLifecycleScreen() {
     try {
       const updated = await scheduleOperationsApi.completeTrip(assignmentId);
       setTrip(updated);
-      Alert.alert('UC45 completed', 'Trip has been completed.');
+      router.replace({
+        pathname: '/driver-assistant/trip-completed',
+        params: { assignmentId: updated.id || assignmentId, trip: JSON.stringify(updated) },
+      } as unknown as Href);
     } catch (error) {
-      Alert.alert('Khong the hoan thanh chuyen', getErrorMessage(error, 'Unable to complete this trip.'));
+      const message = getErrorMessage(error, 'Unable to complete this trip.');
+      if (message.toLowerCase().includes('already') && message.toLowerCase().includes('completed')) {
+        const completedTrip = {
+          ...trip,
+          tripStatus: 'COMPLETED',
+          actualEndAt: trip?.actualEndAt || new Date().toISOString(),
+        };
+        router.replace({
+          pathname: '/driver-assistant/trip-completed',
+          params: { assignmentId, trip: JSON.stringify(completedTrip) },
+        } as unknown as Href);
+        return;
+      }
+      Alert.alert('Khong the hoan thanh chuyen', message);
     } finally {
       setProcessingAction('');
     }

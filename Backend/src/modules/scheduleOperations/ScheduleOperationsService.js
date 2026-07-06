@@ -570,18 +570,18 @@ export class ScheduleOperationsService {
       }
     );
 
-    if (role === 'BUS_ASSISTANT') {
-      await this.resolveAssistantReassignmentIncident(trip._id, userId);
+    if (['DRIVER', 'BUS_ASSISTANT'].includes(role)) {
+      await this.resolveStaffReassignmentIncident(trip._id, userId, role);
     }
 
     const updatedSchedule = await TripSchedule.findById(trip._id).populate('routeId');
     return buildTripScheduleAssignment(updatedSchedule, role);
   }
 
-  static async resolveAssistantReassignmentIncident(tripId, assistantId) {
+  static async resolveStaffReassignmentIncident(tripId, staffId, role) {
     const incident = await IncidentReport.findOne({
       incidentType: 'TRIP_REJECTION',
-      reporterRole: 'BUS_ASSISTANT',
+      reporterRole: role,
       tripId,
       status: 'IN_PROGRESS',
       handlingAction: 'REASSIGN_TRIP',
@@ -591,18 +591,19 @@ export class ScheduleOperationsService {
       return;
     }
 
-    const [assistant, schedule] = await Promise.all([
-      User.findById(assistantId).select('fullName role').lean(),
+    const [staff, schedule] = await Promise.all([
+      User.findById(staffId).select('fullName role').lean(),
       TripSchedule.findById(tripId).select('scheduleCode routeName routeCode vehicle routeId').lean(),
     ]);
 
     const previousStatus = incident.status;
-    const assistantName = assistant?.fullName || 'Phụ xe thay thế';
-    const resolutionSummary = `Phụ xe thay thế ${assistantName} đã tiếp nhận chuyến. Sự cố phân công đã được xử lý.`;
+    const staffRoleLabel = role === 'DRIVER' ? 'Tài xế' : 'Phụ xe';
+    const staffName = staff?.fullName || `${staffRoleLabel} thay thế`;
+    const resolutionSummary = `${staffRoleLabel} thay thế ${staffName} đã tiếp nhận chuyến. Sự cố phân công đã được xử lý.`;
 
     incident.status = 'RESOLVED';
     incident.resolutionSummary = resolutionSummary;
-    incident.resolvedBy = assistantId;
+    incident.resolvedBy = staffId;
     incident.resolvedAt = new Date();
     incident.statusHistory.push({
       fromStatus: previousStatus,
@@ -611,7 +612,7 @@ export class ScheduleOperationsService {
       resolutionSummary,
       handlingAction: 'REASSIGN_TRIP',
       responsibleUnit: incident.responsibleUnit || 'OPERATION_CENTER',
-      changedBy: assistantId,
+      changedBy: staffId,
       changedAt: new Date(),
     });
     await incident.save();
@@ -649,7 +650,7 @@ export class ScheduleOperationsService {
           activeFrom: new Date(),
           expiresAt: null,
           status: 'ACTIVE',
-          createdBy: assistantId,
+          createdBy: staffId,
           sourceType: 'INCIDENT_REPORT_STATUS',
           sourceId: incident._id,
           metadata: {
@@ -662,8 +663,9 @@ export class ScheduleOperationsService {
             initialStatusLabel: 'Đang xử lý',
             handlingAction: 'REASSIGN_TRIP',
             handlingActionLabel: 'Điều phối lại chuyến / nhân sự',
-            replacementAssistantId: assistantId,
-            replacementAssistantName: assistantName,
+            replacementStaffId: staffId,
+            replacementStaffName: staffName,
+            replacementRole: role,
             scheduleCode: schedule?.scheduleCode || '',
             resolutionSummary,
           },
@@ -678,17 +680,18 @@ export class ScheduleOperationsService {
 
     await OperationNotification.findOneAndUpdate(
       {
-        sourceType: 'ASSISTANT_REASSIGNMENT',
+        sourceType: role === 'DRIVER' ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT',
         sourceId: incident._id,
       },
       {
         $set: {
           status: 'ARCHIVED',
           metadata: {
-            notificationKind: 'ASSISTANT_REASSIGNMENT',
+            notificationKind: role === 'DRIVER' ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT',
             incidentId: incident._id,
             tripId,
-            replacementAssistantId: assistantId,
+            replacementStaffId: staffId,
+            replacementRole: role,
             acceptedAt: new Date(),
           },
         },
@@ -768,19 +771,22 @@ export class ScheduleOperationsService {
       `Lý do: ${reason}`,
     ].join('\n');
 
-    if (role === 'BUS_ASSISTANT') {
+    if (['DRIVER', 'BUS_ASSISTANT'].includes(role)) {
       const existingReassignmentReport = await IncidentReport.findOne({
         tripId: trip._id,
         incidentType: 'TRIP_REJECTION',
-        reporterRole: 'BUS_ASSISTANT',
+        reporterRole: role,
         handlingAction: 'REASSIGN_TRIP',
         status: 'IN_PROGRESS',
       });
 
       if (existingReassignmentReport) {
         const previousStatus = existingReassignmentReport.status;
-        const rejectedAssistantName = assignment.busAssistant?.fullName || reporterLabel;
-        const resetNote = `Phụ xe thay thế ${rejectedAssistantName} đã từ chối chuyến. Lý do: ${reason}. Vui lòng phân công phụ xe khác.`;
+        const rejectedStaffName = role === 'DRIVER'
+          ? assignment.driver?.fullName || reporterLabel
+          : assignment.busAssistant?.fullName || reporterLabel;
+        const replacementLabel = role === 'DRIVER' ? 'Tài xế' : 'Phụ xe';
+        const resetNote = `${replacementLabel} thay thế ${rejectedStaffName} đã từ chối chuyến. Lý do: ${reason}. Vui lòng phân công ${replacementLabel.toLowerCase()} khác.`;
 
         existingReassignmentReport.reporterId = userId;
         existingReassignmentReport.title = title;
@@ -806,7 +812,7 @@ export class ScheduleOperationsService {
 
         await OperationNotification.findOneAndUpdate(
           {
-            sourceType: 'ASSISTANT_REASSIGNMENT',
+            sourceType: role === 'DRIVER' ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT',
             sourceId: existingReassignmentReport._id,
           },
           {
@@ -814,9 +820,10 @@ export class ScheduleOperationsService {
               status: 'ARCHIVED',
               expiresAt: new Date(),
               metadata: {
-                notificationKind: 'ASSISTANT_REASSIGNMENT',
+                notificationKind: role === 'DRIVER' ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT',
                 incidentId: existingReassignmentReport._id,
                 rejectedBy: userId,
+                rejectedRole: role,
                 rejectionReason: reason,
               },
             },

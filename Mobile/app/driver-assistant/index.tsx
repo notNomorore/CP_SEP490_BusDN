@@ -302,7 +302,7 @@ export default function DriverBusAssistantHomeScreen() {
                       <Text style={styles.startButtonText}>ACCEPT</Text>
                     )}
                   </Pressable>
-                ) : isDriver && getAcceptanceStatus(nextTrip) === 'ACCEPTED' ? (
+                ) : isDriver && getAcceptanceStatus(nextTrip) === 'ACCEPTED' && !isTripCompleted(nextTrip) ? (
                   <Pressable
                     accessibilityRole="button"
                     onPress={(event) => {
