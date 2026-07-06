@@ -198,7 +198,7 @@ const getOperationalDurationMinutes = (direction) => {
   const distanceKm = Math.max(0, Number(direction?.estimatedDistanceKm || 0));
   const stopCount = Array.isArray(direction?.orderedStops) ? direction.orderedStops.length : 0;
   const urbanBusDuration = distanceKm > 0
-    ? Math.ceil((distanceKm / 22) * 60 + Math.max(0, stopCount - 2) * 0.75)
+    ? Math.ceil((distanceKm / 20) * 60 + Math.max(0, stopCount - 2) * 0.75)
     : 0;
   return Math.min(80, Math.max(60, configuredDuration, urbanBusDuration));
 };
