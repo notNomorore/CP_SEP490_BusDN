@@ -8,6 +8,7 @@ import { createApp } from './app.js';
 import logger from './utils/logger.js';
 import registerFleetOperationSockets from './modules/fleetOperations/fleetOperations.socket.js';
 import registerOperationChatSockets from './modules/operationChat/operationChat.socket.js';
+import startPromotionNotificationScheduler from './modules/promotions/promotionNotificationScheduler.js';
 
 let isConnectingDatabase = false;
 
@@ -58,6 +59,7 @@ const startServer = async () => {
     });
 
     app.io = io;
+    let stopPromotionNotificationScheduler = null;
 
     const gracefulShutdown = async (signal) => {
       logger.warn(`${signal} received, starting graceful shutdown...`);
@@ -66,6 +68,9 @@ const startServer = async () => {
         logger.info('HTTP server closed');
 
         try {
+          if (stopPromotionNotificationScheduler) {
+            stopPromotionNotificationScheduler();
+          }
           await disconnectDatabase();
           logger.info('Database disconnected');
         } catch (error) {
@@ -99,6 +104,7 @@ const startServer = async () => {
     // requests. With Mongoose buffering disabled, listening first creates a
     // startup race where route requests fail before the connection is ready.
     await connectDatabaseWithRetry();
+    stopPromotionNotificationScheduler = startPromotionNotificationScheduler({ io });
 
     server.listen(config.port, config.host, () => {
       logger.info(`Server running at http://${config.host}:${config.port}`);

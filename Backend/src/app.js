@@ -135,6 +135,7 @@ export const createApp = () => {
   app.use('/api/admin', passengerComplianceRoutes);
   app.use('/api/admin/fleet', fleetMonitoringRoutes);
   app.use('/api/admin/notifications', systemNotificationRoutes);
+  app.use('/api/notifications', systemNotificationRoutes);
   app.use('/api/admin/vehicle-issues', vehicleIssueRoutes);
   app.use('/api/admin/maintenance', maintenanceApprovalRoutes);
   app.use('/api/admin', vehicleReassignmentRoutes);

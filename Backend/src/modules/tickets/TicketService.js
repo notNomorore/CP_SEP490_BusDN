@@ -536,33 +536,45 @@ export class TicketService {
     };
   }
 
-  static async recordPromotionUsage({ promotionId, userId, ticketId, routeId, paymentMethod, discountAmount, originalAmount, finalAmount }) {
+  static async recordPromotionUsage({ promotionId, userId, ticketId, routeId, ticketType, paymentMethod, discountAmount, originalAmount, finalAmount }) {
     if (!promotionId || !discountAmount) {
       return;
     }
 
-    const existingUsage = await PromotionUsage.findOne({
+    const usageFilter = {
       promotionId,
       userId,
       ticketId,
       status: 'APPLIED',
-    });
+    };
 
-    if (existingUsage) {
+    const usageResult = await PromotionUsage.findOneAndUpdate(
+      usageFilter,
+      {
+        $setOnInsert: {
+          promotionId,
+          userId,
+          ticketId,
+          routeId,
+          ticketType: ticketType || 'ONE_WAY',
+          paymentMethod: paymentMethod || 'PAYOS',
+          discountAmount,
+          originalAmount,
+          finalAmount,
+          status: 'APPLIED',
+          usedAt: new Date(),
+        },
+      },
+      {
+        upsert: true,
+        new: false,
+        includeResultMetadata: true,
+      }
+    );
+
+    if (usageResult?.lastErrorObject?.updatedExisting) {
       return;
     }
-
-    await PromotionUsage.create({
-      promotionId,
-      userId,
-      ticketId,
-      routeId,
-      paymentMethod: paymentMethod || 'PAYOS',
-      discountAmount,
-      originalAmount,
-      finalAmount,
-      status: 'APPLIED',
-    });
 
     await Promotion.findByIdAndUpdate(promotionId, { $inc: { usedCount: 1 } });
   }
@@ -1390,6 +1402,7 @@ export class TicketService {
         userId: ticket.passenger,
         ticketId: ticket._id,
         routeId: ticket.routeId,
+        ticketType: 'ONE_WAY',
         paymentMethod: 'PAYOS',
         discountAmount: ticket.discountAmount,
         originalAmount: ticket.originalPrice || ticket.ticketPrice,
@@ -1436,6 +1449,7 @@ export class TicketService {
         userId: monthlyPass.passenger,
         ticketId: monthlyPass._id,
         routeId: monthlyPass.routeId,
+        ticketType: 'MONTHLY_PASS',
         paymentMethod: 'PAYOS',
         discountAmount: monthlyPass.discountAmount,
         originalAmount: monthlyPass.originalPrice || monthlyPass.passPrice,

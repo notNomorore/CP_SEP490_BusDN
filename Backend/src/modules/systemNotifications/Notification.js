@@ -77,6 +77,39 @@ const NotificationSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    relatedPromotionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Promotion',
+      default: null,
+      index: true,
+    },
+    promotionCode: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: '',
+      index: true,
+    },
+    actionUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    sourceType: {
+      type: String,
+      trim: true,
+      default: '',
+      index: true,
+    },
+    sourceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      index: true,
+    },
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
     userIds: {
       type: [mongoose.Schema.Types.ObjectId],
       ref: 'User',
@@ -144,5 +177,9 @@ NotificationSchema.pre('validate', function normalizeNotification(next) {
 NotificationSchema.index({ status: 1, scheduledAt: 1 });
 NotificationSchema.index({ createdAt: -1 });
 NotificationSchema.index({ targetAudience: 1, createdAt: -1 });
+NotificationSchema.index(
+  { type: 1, relatedPromotionId: 1 },
+  { unique: true, partialFilterExpression: { type: 'promotion', relatedPromotionId: { $type: 'objectId' } } }
+);
 
 export default mongoose.model('Notification', NotificationSchema);

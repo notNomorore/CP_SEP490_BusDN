@@ -81,6 +81,8 @@ const groupEvents = (events, keyBuilder, mapper = {}) => {
     const current = groups.get(key) || {
       key,
       revenue: 0,
+      grossRevenue: 0,
+      discountAmount: 0,
       ticketsSold: 0,
       transactions: 0,
       refunds: 0,
@@ -89,6 +91,8 @@ const groupEvents = (events, keyBuilder, mapper = {}) => {
     };
 
     current.revenue += event.netRevenue;
+    current.grossRevenue += event.grossRevenue;
+    current.discountAmount += event.discountAmount;
     current.ticketsSold += event.ticketCount;
     current.transactions += event.transactionCount;
     current.refunds += event.refundAmount;
@@ -260,6 +264,8 @@ const calculateGrowthRate = (events, query) => {
 
 const buildRevenueReport = (events, query) => {
   const totalRevenue = events.reduce((total, event) => total + event.netRevenue, 0);
+  const grossRevenue = events.reduce((total, event) => total + event.grossRevenue, 0);
+  const totalDiscountAmount = events.reduce((total, event) => total + event.discountAmount, 0);
   const totalTicketsSold = events.reduce((total, event) => total + event.ticketCount, 0);
   const totalTransactions = events.reduce((total, event) => total + event.transactionCount, 0);
   const totalRefunds = events.reduce((total, event) => total + event.refundAmount, 0);
@@ -278,6 +284,8 @@ const buildRevenueReport = (events, query) => {
   }).sort((left, right) => right.key.localeCompare(left.key)).map((item) => ({
     date: item.key,
     revenue: item.revenue,
+    grossRevenue: item.grossRevenue,
+    discountAmount: item.discountAmount,
     ticketsSold: item.ticketsSold,
     transactions: item.transactions,
   }));
@@ -285,6 +293,8 @@ const buildRevenueReport = (events, query) => {
   const revenueByRoute = groupEvents(events, routeLabel).map((item) => ({
     route: item.key,
     revenue: item.revenue,
+    grossRevenue: item.grossRevenue,
+    discountAmount: item.discountAmount,
     ticketsSold: item.ticketsSold,
     transactions: item.transactions,
   }));
@@ -292,6 +302,8 @@ const buildRevenueReport = (events, query) => {
   const revenueByPaymentMethod = groupEvents(events, (event) => event.paymentMethod).map((item) => ({
     paymentMethod: item.key,
     revenue: item.revenue,
+    grossRevenue: item.grossRevenue,
+    discountAmount: item.discountAmount,
     transactions: item.transactions,
   }));
 
@@ -301,12 +313,16 @@ const buildRevenueReport = (events, query) => {
     paymentMethod: event.paymentMethod,
     ticketType: event.ticketType,
     ticketsSold: event.ticketCount,
+    grossRevenue: event.grossRevenue,
+    discountAmount: event.discountAmount,
     netRevenue: event.netRevenue,
     refundAmount: event.refundAmount,
   }));
 
   return {
     totalRevenue,
+    grossRevenue,
+    totalDiscountAmount,
     totalTicketsSold,
     totalTransactions,
     averageTicketPrice,
