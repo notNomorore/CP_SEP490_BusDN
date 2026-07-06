@@ -209,7 +209,6 @@ export default function DriverBusAssistantHomeScreen() {
                   <Text style={styles.nextTitle}>{nextTrip.route?.origin || 'Origin'} - {nextTrip.route?.destination || 'Destination'}</Text>
                   <Text style={styles.nextMeta}>{formatTime(nextTrip.scheduledStart)} - {nextTrip.vehicle?.code || nextTrip.vehicle?.plateNumber || 'No bus'} - {getTripStatus(nextTrip)}</Text>
                 </View>
-<<<<<<< HEAD
                 {isDriver && canAcceptTrip(nextTrip) ? (
                   <Pressable
                     accessibilityRole="button"
@@ -266,11 +265,6 @@ export default function DriverBusAssistantHomeScreen() {
                     ) : (
                       <Text style={styles.startButtonText}>ACCEPT</Text>
                     )}
-=======
-                {isDriver ? (
-                  <Pressable disabled={processingId === nextTrip.id} onPress={(event) => { event.stopPropagation(); void startTrip(nextTrip); }} style={styles.startButton}>
-                    {processingId === nextTrip.id ? <ActivityIndicator color={colors.white} size="small" /> : <Text style={styles.startButtonText}>START</Text>}
->>>>>>> c45d84418dc37ca93b4fc2a2fa5d736fdd16dc48
                   </Pressable>
                 ) : (
                   <MaterialCommunityIcons color={colors.muted} name="chevron-right" size={24} />
@@ -334,6 +328,7 @@ const styles = StyleSheet.create({
   nextTitle: { marginTop: 3, color: colors.text, fontSize: 15, fontWeight: '900' },
   nextMeta: { marginTop: 3, color: colors.muted, fontSize: 12, fontWeight: '700' },
   startButton: { minWidth: 72, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: colors.accent, paddingHorizontal: 14 },
+  disabledButton: { opacity: 0.55 },
   startButtonText: { color: colors.white, fontSize: 12, fontWeight: '900' },
   actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 18 },
   actionTile: { width: '48%', minHeight: 156, justifyContent: 'space-between', borderRadius: 22, borderWidth: 1, borderColor: '#e1e2e5', backgroundColor: colors.card, padding: 16 },
