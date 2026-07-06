@@ -76,7 +76,10 @@ export const getTripRouteLabel = (trip: AssignedTrip) => (
   trip.route?.routeNumber || trip.route?.name || trip.tripCode || 'Unassigned route'
 );
 
-export const getTripStatus = (trip: AssignedTrip) => trip.tripStatus || trip.shiftStatus || trip.acceptanceStatus || 'SCHEDULED';
+export const getTripStatus = (trip: AssignedTrip) => {
+  if (trip.actualEndAt) return 'COMPLETED';
+  return trip.tripStatus || trip.shiftStatus || trip.acceptanceStatus || 'SCHEDULED';
+};
 
 export const getShiftStatus = (shift: ShiftSchedule) => shift.assignmentStatus || 'ASSIGNED';
 
@@ -87,7 +90,8 @@ export const isTripUpcoming = (trip: AssignedTrip) => {
   return Boolean(start && start > new Date() && !['COMPLETED', 'CANCELLED'].includes(getTripStatus(trip)));
 };
 
-export const isTripCompleted = (trip: AssignedTrip) => ['COMPLETED', 'DONE'].includes(getTripStatus(trip));
+export const isTripCompleted = (trip: AssignedTrip) => Boolean(trip.actualEndAt)
+  || ['COMPLETED', 'DONE'].includes(getTripStatus(trip));
 
 export const isTripDelayed = (trip: AssignedTrip) => ['DELAYED', 'LATE'].includes(getTripStatus(trip)) || trip.gpsSync?.status === 'DELAYED';
 

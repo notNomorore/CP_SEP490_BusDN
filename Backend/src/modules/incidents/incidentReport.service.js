@@ -249,6 +249,13 @@ const buildAssignedAssistant = (assistant) => ({
   phone: assistant.phoneNumber || assistant.phone || '',
 });
 
+const buildAssignedDriver = (driver) => ({
+  userId: driver._id,
+  fullName: driver.fullName,
+  role: driver.role,
+  phone: driver.phoneNumber || driver.phone || '',
+});
+
 const buildTripRouteLabel = (trip = {}) => (
   trip.routeName || trip.routeCode || trip.routeId?.routeName || trip.routeId?.name || 'Chưa có tuyến'
 );
@@ -781,6 +788,216 @@ export class IncidentReportService {
         tripId: trip._id,
         previousAssistantId: previousAssistant?.userId || null,
         replacementAssistantId: assistant._id,
+      },
+    });
+
+    return this.getIncidentById(id, actor);
+  }
+
+  static async reassignTripStaff(id, payload, actor) {
+    const staffId = payload?.staffId || payload?.driverId || payload?.assistantId;
+    const adminNote = String(payload?.adminNote || '').trim();
+
+    if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(staffId)) {
+      throw new CustomError('Invalid incident or replacement staff id', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const incident = await IncidentReport.findById(id);
+    if (!incident) {
+      throw new CustomError('Incident report not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    if (incident.incidentType !== 'TRIP_REJECTION' || !['DRIVER', 'BUS_ASSISTANT'].includes(incident.reporterRole)) {
+      throw new CustomError('Only driver or bus assistant trip rejection reports can be reassigned here', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    if (['RESOLVED', 'REJECTED'].includes(incident.status)) {
+      throw new CustomError('Closed incident reports cannot be reassigned', HTTP_STATUS.CONFLICT);
+    }
+
+    if (!incident.tripId) {
+      throw new CustomError('This incident is not linked to a trip schedule', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const isDriverReplacement = incident.reporterRole === 'DRIVER';
+    const staffQuery = isDriverReplacement
+      ? { _id: staffId, role: 'DRIVER', status: 'ACTIVE' }
+      : { _id: staffId, role: { $in: ['BUS_ASSISTANT', 'CONDUCTOR'] }, status: 'ACTIVE' };
+
+    const [trip, staff] = await Promise.all([
+      TripSchedule.findById(incident.tripId),
+      User.findOne(staffQuery).lean(),
+    ]);
+
+    if (!trip) {
+      throw new CustomError('Linked trip schedule not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    if (!staff) {
+      throw new CustomError(
+        isDriverReplacement ? 'Replacement driver is not available' : 'Replacement bus assistant is not available',
+        HTTP_STATUS.NOT_FOUND
+      );
+    }
+
+    const currentStaffId = isDriverReplacement ? trip.driver?.userId : trip.assistant?.userId;
+    if (currentStaffId && String(currentStaffId) === String(staff._id)) {
+      throw new CustomError(
+        isDriverReplacement
+          ? 'Replacement driver must be different from the rejected driver'
+          : 'Replacement assistant must be different from the rejected assistant',
+        HTTP_STATUS.CONFLICT
+      );
+    }
+
+    const dateRange = buildServiceDateRange(trip.serviceDate);
+    const actorPath = isDriverReplacement ? 'driver.userId' : 'assistant.userId';
+    const sameDayAssignments = await TripSchedule.find({
+      _id: { $ne: trip._id },
+      ...(dateRange ? { serviceDate: { $gte: dateRange.start, $lt: dateRange.end } } : { serviceDate: trip.serviceDate }),
+      status: { $ne: 'CANCELLED' },
+      [actorPath]: staff._id,
+    }).select('scheduleCode routeName departureTime expectedArrivalTime').lean();
+
+    const conflict = sameDayAssignments.find((schedule) => timeRangesOverlap(
+      trip.departureTime,
+      trip.expectedArrivalTime,
+      schedule.departureTime,
+      schedule.expectedArrivalTime
+    ));
+
+    if (conflict) {
+      throw new CustomError(
+        `${isDriverReplacement ? 'Replacement driver' : 'Replacement assistant'} is already assigned to ${conflict.scheduleCode}`,
+        HTTP_STATUS.CONFLICT
+      );
+    }
+
+    const previousStatus = incident.status;
+    const previousStaff = isDriverReplacement ? trip.driver : trip.assistant;
+    const nextStaff = isDriverReplacement ? buildAssignedDriver(staff) : buildAssignedAssistant(staff);
+    const staffLabel = isDriverReplacement ? 'tài xế' : 'phụ xe';
+    const note = adminNote || `Đã phân công ${staffLabel} thay thế: ${staff.fullName}. Chờ nhân sự mới xác nhận chuyến.`;
+
+    if (isDriverReplacement) {
+      trip.driver = nextStaff;
+      trip.driverAcceptance = {
+        status: 'PENDING',
+        respondedAt: null,
+        rejectionReason: '',
+      };
+    } else {
+      trip.assistant = nextStaff;
+      trip.assistantAcceptance = {
+        status: 'PENDING',
+        respondedAt: null,
+        rejectionReason: '',
+      };
+    }
+    trip.status = trip.status === 'PLANNED' ? 'ASSIGNED' : trip.status;
+    trip.updatedBy = actor?.userId || trip.updatedBy;
+    trip.emergencyHistory.push({
+      reason: note,
+      changedBy: actor?.userId,
+      previousVehicle: trip.vehicle,
+      previousDriver: isDriverReplacement ? previousStaff : trip.driver,
+      previousAssistant: isDriverReplacement ? trip.assistant : previousStaff,
+    });
+    await trip.save();
+
+    incident.status = 'IN_PROGRESS';
+    incident.handlingAction = 'REASSIGN_TRIP';
+    incident.responsibleUnit = 'OPERATION_CENTER';
+    incident.adminNote = note;
+    incident.resolutionSummary = '';
+    incident.resolvedBy = null;
+    incident.resolvedAt = null;
+    incident.statusHistory.push({
+      fromStatus: previousStatus,
+      toStatus: 'IN_PROGRESS',
+      adminNote: note,
+      resolutionSummary: '',
+      handlingAction: 'REASSIGN_TRIP',
+      responsibleUnit: 'OPERATION_CENTER',
+      changedBy: actor.userId,
+      changedAt: new Date(),
+    });
+    await incident.save();
+
+    if (incident.sourceModule === 'SCHEDULE_OPERATIONS' && incident.sourceId) {
+      await OperationIncident.findByIdAndUpdate(incident.sourceId, {
+        status: 'ACKNOWLEDGED',
+        adminNote: note,
+        acknowledgedAt: new Date(),
+        resolvedAt: null,
+      });
+    }
+
+    await createReporterStatusNotification({
+      incident,
+      previousStatus,
+      nextStatus: 'IN_PROGRESS',
+      adminNote: note,
+      handlingAction: 'REASSIGN_TRIP',
+      resolutionSummary: '',
+      actorId: actor?.userId,
+    });
+
+    const sourceType = isDriverReplacement ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT';
+    await OperationNotification.findOneAndUpdate(
+      {
+        sourceType,
+        sourceId: incident._id,
+      },
+      {
+        $set: {
+          title: `Bạn được phân công chuyến ${trip.scheduleCode}`,
+          message: [
+            `Admin đã phân công bạn thay thế ${staffLabel} cho chuyến ${trip.scheduleCode}.`,
+            `Tuyến: ${buildTripRouteLabel(trip)}.`,
+            `Xe: ${buildTripVehicleLabel(trip)}.`,
+            'Vui lòng vào lịch vận hành để tiếp nhận hoặc từ chối chuyến.',
+          ].join('\n'),
+          category: 'SCHEDULE_CHANGE',
+          priority: 'HIGH',
+          targetRoles: [isDriverReplacement ? 'DRIVER' : 'BUS_ASSISTANT'],
+          targetUsers: [staff._id],
+          route: trip.routeId || null,
+          trip: trip._id,
+          vehicle: trip.vehicle?.busId || null,
+          activeFrom: new Date(),
+          expiresAt: null,
+          status: 'ACTIVE',
+          createdBy: actor?.userId || null,
+          sourceType,
+          sourceId: incident._id,
+          metadata: {
+            notificationKind: sourceType,
+            incidentId: incident._id,
+            tripId: trip._id,
+            scheduleCode: trip.scheduleCode,
+            previousStaffId: previousStaff?.userId || null,
+            replacementStaffId: staff._id,
+            replacementRole: isDriverReplacement ? 'DRIVER' : 'BUS_ASSISTANT',
+          },
+        },
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    await logAudit({
+      action: isDriverReplacement ? 'INCIDENT_TRIP_DRIVER_REASSIGNED' : 'INCIDENT_TRIP_ASSISTANT_REASSIGNED',
+      actorId: actor?.userId,
+      incidentId: incident._id,
+      metadata: {
+        tripId: trip._id,
+        previousStaffId: previousStaff?.userId || null,
+        replacementStaffId: staff._id,
+        replacementRole: isDriverReplacement ? 'DRIVER' : 'BUS_ASSISTANT',
       },
     });
 

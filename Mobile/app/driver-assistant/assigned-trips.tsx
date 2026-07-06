@@ -220,6 +220,7 @@ export default function AssignedTripsScreen() {
             <Text style={styles.emptyText}>No assigned trips match this filter.</Text>
           ) : filteredTrips.map((trip) => {
             const status = getTripStatus(trip);
+            const isCompleted = isTripCompleted(trip);
             const isAccepted = getAcceptanceStatus(trip) === 'ACCEPTED';
             const isVehicleReady = trip.inspection?.status === 'READY';
             const showDecisionActions = canDecideTrip(trip);
@@ -241,6 +242,8 @@ export default function AssignedTripsScreen() {
                   <InfoLine label="Direction" value={trip.route?.direction} />
                   <InfoLine label="Departure" value={formatTime(trip.scheduledStart)} />
                   <InfoLine label="Arrival" value={formatTime(trip.scheduledEnd)} />
+                  {trip.actualStartAt ? <InfoLine label="Started" value={formatTime(trip.actualStartAt)} /> : null}
+                  {trip.actualEndAt ? <InfoLine label="Ended" value={formatTime(trip.actualEndAt)} /> : null}
                   <InfoLine label="Bus Number" value={trip.vehicle?.code || trip.vehicle?.plateNumber} />
                   <InfoLine label="Driver" value={trip.driver?.fullName} />
                   <InfoLine label="Bus Assistant" value={trip.busAssistant?.fullName} />
@@ -267,7 +270,7 @@ export default function AssignedTripsScreen() {
                         style={styles.actionButton}
                       />
                     </>
-                  ) : isDriver && isAccepted ? (
+                  ) : isDriver && isAccepted && !isCompleted ? (
                     <AppButton
                       title={isVehicleReady ? 'Start Trip' : 'Kiem tra xe'}
                       loading={processingId === trip.id}
