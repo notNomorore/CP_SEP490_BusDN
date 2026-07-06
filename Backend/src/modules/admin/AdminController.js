@@ -378,8 +378,13 @@ const normalizeRouteDirection = (direction = {}) => {
       arrivalOffsetMinutes: Math.max(0, asNumber(stop.arrivalOffsetMinutes, index * 6)),
       departureOffsetMinutes: Math.max(0, asNumber(stop.departureOffsetMinutes, (index * 6) + 1)),
       isMainStation: Boolean(stop.isMainStation),
-    }))
+      }))
     : [];
+  const estimatedDistanceKm = Math.max(0, asNumber(direction.estimatedDistanceKm));
+  const submittedDurationMinutes = Math.max(0, asNumber(direction.estimatedDurationMinutes));
+  const urbanBusDurationMinutes = estimatedDistanceKm > 0
+    ? Math.ceil((estimatedDistanceKm / 20) * 60 + Math.max(0, orderedStops.length - 2) * 0.75)
+    : 0;
 
   return {
     startStation: normalizeStationRef(direction.startStation) || orderedStops[0],
@@ -391,8 +396,8 @@ const normalizeRouteDirection = (direction = {}) => {
         longitude: asNumber(point.longitude),
       }))
       : [],
-    estimatedDistanceKm: Math.max(0, asNumber(direction.estimatedDistanceKm)),
-    estimatedDurationMinutes: Math.max(0, asNumber(direction.estimatedDurationMinutes)),
+    estimatedDistanceKm,
+    estimatedDurationMinutes: Math.max(submittedDurationMinutes, urbanBusDurationMinutes),
   };
 };
 
