@@ -9,7 +9,13 @@
     "newArchEnabled": true,
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "BusDN needs camera access so bus assistants can scan passenger QR tickets."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

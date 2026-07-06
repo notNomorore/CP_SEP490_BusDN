@@ -9,6 +9,7 @@ export type StaffMember = {
 
 export type AssignedTrip = {
   id: string;
+  tripId?: string | null;
   shiftCode?: string;
   tripCode?: string;
   actorRole?: StaffRole;
@@ -21,7 +22,13 @@ export type AssignedTrip = {
     direction?: string;
     estimatedDistanceKm?: number;
     estimatedDurationMinutes?: number;
-    stops?: unknown[];
+    stops?: Array<{
+      id?: string | null;
+      stationId?: string | null;
+      stopName?: string;
+      address?: string;
+      stopOrder?: number | null;
+    }>;
   };
   vehicle?: {
     id?: string | null;

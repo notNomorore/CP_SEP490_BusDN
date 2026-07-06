@@ -1,71 +1,58 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import busAssistantApi from '@/api/busAssistant.api';
 import scheduleOperationsApi from '@/api/scheduleOperations.api';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
+import type { ShiftRevenue } from '@/types/busAssistant';
 import type { AssignedTrip, ShiftSchedule } from '@/types/scheduleOperations';
 import { isDriverAssistantRole } from '@/utils/roleNavigation';
-import {
-  formatDate,
-  formatTime,
-  getTodayRange,
-  getTripStatus,
-  isTripCompleted,
-  isTripToday,
-} from '@/utils/scheduleOperations';
+import { formatDate, formatTime, getTodayRange, getTripStatus, isTripCompleted, isTripToday, toDateInput } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
-
-const assignedTripsRoute = '/driver-assistant/assigned-trips' as Href;
-const shiftScheduleRoute = '/driver-assistant/shift-schedule' as Href;
-const tripDetailRoute = '/driver-assistant/trip-detail' as Href;
-const notificationsRoute = '/driver-assistant/notifications' as Href;
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
-function SummaryCard({
-  label,
-  value,
-  detail,
+const route = (pathname: string) => pathname as Href;
+
+function StatPill({ label, value }: { label: string; value: string | number }) {
+  return (
+    <View style={styles.statPill}>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function ActionTile({
+  title,
+  subtitle,
   icon,
-  muted,
+  href,
+  primary,
 }: {
-  label: string;
-  value: string | number;
-  detail: string;
+  title: string;
+  subtitle: string;
   icon: IconName;
-  muted?: boolean;
+  href: Href;
+  primary?: boolean;
 }) {
   return (
-    <View style={styles.summaryCard}>
-      <View style={[styles.statusBar, muted && styles.statusBarMuted]} />
-      <View style={styles.summaryContent}>
-        <Text style={styles.summaryLabel}>{label}</Text>
-        <View style={styles.summaryValueRow}>
-          <Text style={[styles.summaryValue, muted && styles.summaryValueMuted]}>{value}</Text>
-          <Text style={styles.summaryDetail}>{detail}</Text>
-        </View>
+    <Pressable
+      accessibilityRole="button"
+      onPress={() => router.push(href)}
+      style={({ pressed }) => [styles.actionTile, primary && styles.actionTilePrimary, pressed && styles.pressed]}
+    >
+      <View style={[styles.actionIcon, primary && styles.actionIconPrimary]}>
+        <MaterialCommunityIcons color={primary ? colors.white : colors.primary} name={icon} size={26} />
       </View>
-      <MaterialCommunityIcons
-        color="rgba(23,80,58,0.06)"
-        name={icon}
-        size={58}
-        style={styles.summaryIcon}
-      />
-    </View>
+      <Text style={[styles.actionTitle, primary && styles.actionTitlePrimary]}>{title}</Text>
+      <Text style={[styles.actionSubtitle, primary && styles.actionSubtitlePrimary]}>{subtitle}</Text>
+    </Pressable>
   );
 }
 
@@ -76,23 +63,23 @@ export default function DriverBusAssistantHomeScreen() {
   const isHydrated = useAuthStore((state) => state.isHydrated);
   const [trips, setTrips] = useState<AssignedTrip[]>([]);
   const [shifts, setShifts] = useState<ShiftSchedule[]>([]);
+  const [revenue, setRevenue] = useState<ShiftRevenue | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [processingId, setProcessingId] = useState('');
 
   const loadDashboard = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [tripsPayload, shiftsPayload] = await Promise.all([
+      const [tripsPayload, shiftsPayload, revenuePayload] = await Promise.all([
         scheduleOperationsApi.getAssignedTrips(getTodayRange()),
         scheduleOperationsApi.getShiftSchedule(getTodayRange()),
+        busAssistantApi.getShiftRevenue({ date: toDateInput() }).catch(() => null),
       ]);
       setTrips(tripsPayload.trips || []);
       setShifts(shiftsPayload.shifts || []);
+      setRevenue(revenuePayload);
     } catch (error) {
-      Alert.alert(
-        'Unable to load dashboard',
-        getErrorMessage(error, 'Unable to load schedule and assignment data.'),
-      );
+      Alert.alert('Unable to load dashboard', getErrorMessage(error, 'Unable to load schedule and assignment data.'));
     } finally {
       setIsLoading(false);
     }
@@ -109,23 +96,17 @@ export default function DriverBusAssistantHomeScreen() {
       return;
     }
 
-    void loadDashboard();
+    if (isHydrated && isAuthenticated) {
+      void loadDashboard();
+    }
   }, [isAuthenticated, isHydrated, loadDashboard, user?.role]);
 
   const todaysTrips = useMemo(() => trips.filter(isTripToday), [trips]);
   const completedCount = useMemo(() => trips.filter(isTripCompleted).length, [trips]);
-  const upcomingShift = shifts[0] || null;
   const nextTrip = todaysTrips.find((trip) => !isTripCompleted(trip)) || todaysTrips[0] || null;
+  const upcomingShift = shifts[0] || null;
   const isDriver = user?.role === 'DRIVER';
-  const roleLabel = isDriver ? 'Senior Driver' : 'Bus Assistant';
-  const displayName = user?.fullName || roleLabel;
-
-  const openTripDetail = (trip: AssignedTrip) => {
-    router.push({
-      pathname: tripDetailRoute,
-      params: { trip: JSON.stringify(trip), assignmentId: trip.id },
-    } as unknown as Href);
-  };
+  const displayName = user?.fullName || (isDriver ? 'Driver' : 'Bus Assistant');
 
   const startTrip = async (trip: AssignedTrip) => {
     setProcessingId(trip.id);
@@ -147,144 +128,83 @@ export default function DriverBusAssistantHomeScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.screen}>
-        <ScrollView
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: 96 + insets.bottom }]}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 104 + insets.bottom }]} showsVerticalScrollIndicator={false}>
           <View style={styles.topBar}>
             <View style={styles.profileRow}>
               <View style={styles.avatar}>
-                {user?.avatar ? (
-                  <Image source={{ uri: user.avatar }} style={styles.avatarImage} />
-                ) : (
-                  <Text style={styles.avatarText}>{displayName.slice(0, 1).toUpperCase()}</Text>
-                )}
+                {user?.avatar ? <Image source={{ uri: user.avatar }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>{displayName.slice(0, 1).toUpperCase()}</Text>}
               </View>
-              <Text style={styles.brand}>TransitPulse</Text>
+              <View>
+                <Text style={styles.brand}>BusDN Crew</Text>
+                <Text style={styles.dateText}>{formatDate(new Date().toISOString())}</Text>
+              </View>
             </View>
-            <Pressable
-              accessibilityLabel="Open notifications"
-              onPress={() => router.push(notificationsRoute)}
-              style={styles.notificationButton}
-            >
-              {isLoading ? (
-                <ActivityIndicator color={colors.primary} size="small" />
-              ) : (
-                <MaterialCommunityIcons color={colors.accent} name="bell-outline" size={22} />
-              )}
+            <Pressable accessibilityLabel="Open notifications" onPress={() => router.push(route('/driver-assistant/notifications'))} style={styles.notificationButton}>
+              {isLoading ? <ActivityIndicator color={colors.primary} size="small" /> : <MaterialCommunityIcons color={colors.accent} name="bell-outline" size={22} />}
             </Pressable>
           </View>
 
-          <View style={styles.greeting}>
-            <Text style={styles.kicker}>{formatDate(new Date().toISOString()).toUpperCase()}</Text>
-            <Text style={styles.title}>Good Morning, {displayName}!</Text>
-            <Text style={styles.subtitle}>{roleLabel} - Schedule & Assignment</Text>
-          </View>
-
-          <View style={styles.summaryGrid}>
-            <SummaryCard label="Assigned Trips Today" value={todaysTrips.length} detail="Routes" icon="routes" />
-            <SummaryCard
-              label="Upcoming Shift"
-              value={upcomingShift?.startTime || 'N/A'}
-              detail={upcomingShift?.shiftName || 'No shift'}
-              icon="clock-outline"
-            />
-            <SummaryCard
-              label="Completed Trips"
-              value={completedCount}
-              detail="Today"
-              icon="check-circle-outline"
-              muted
-            />
-          </View>
-
-          <View style={styles.featureGrid}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.push(assignedTripsRoute)}
-              style={({ pressed }) => [styles.primaryFeature, pressed && styles.pressed]}
-            >
-              <View style={styles.featureIconPrimary}>
-                <MaterialCommunityIcons color={colors.white} name="bus" size={28} />
-              </View>
-              <View>
-                <Text style={styles.primaryFeatureTitle}>View Assigned Trips</Text>
-                <Text style={styles.primaryFeatureText}>Review your daily routes and passenger manifests.</Text>
-              </View>
-              <MaterialCommunityIcons color="rgba(255,255,255,0.35)" name="arrow-right" size={42} style={styles.featureArrow} />
-            </Pressable>
-
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.push(shiftScheduleRoute)}
-              style={({ pressed }) => [styles.secondaryFeature, pressed && styles.pressed]}
-            >
-              <View style={styles.featureIconSecondary}>
-                <MaterialCommunityIcons color={colors.primary} name="calendar-month" size={28} />
-              </View>
-              <View>
-                <Text style={styles.secondaryFeatureTitle}>View Shift Schedule</Text>
-                <Text style={styles.secondaryFeatureText}>Manage your availability and upcoming work hours.</Text>
-              </View>
-              <MaterialCommunityIcons color="rgba(43,164,113,0.22)" name="arrow-right" size={42} style={styles.featureArrow} />
-            </Pressable>
+          <View style={styles.heroCard}>
+            <Text style={styles.heroKicker}>TODAY'S WORK</Text>
+            <Text style={styles.heroTitle}>Hi, {displayName}</Text>
+            <View style={styles.statsRow}>
+              <StatPill label="Trips" value={todaysTrips.length} />
+              <StatPill label="Done" value={completedCount} />
+              <StatPill label="Sales" value={revenue?.totalTicketsSold || 0} />
+            </View>
           </View>
 
           <View style={styles.nextCard}>
-            <Text style={styles.sectionTitle}>Next Assignment</Text>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Next assignment</Text>
+              <Pressable onPress={() => router.push(route('/driver-assistant/assigned-trips'))}>
+                <Text style={styles.linkText}>All trips</Text>
+              </Pressable>
+            </View>
             {nextTrip ? (
               <Pressable
                 accessibilityRole="button"
-                onPress={() => openTripDetail(nextTrip)}
+                onPress={() => router.push({ pathname: '/driver-assistant/trip-detail', params: { trip: JSON.stringify(nextTrip), assignmentId: nextTrip.id } } as unknown as Href)}
                 style={({ pressed }) => [styles.nextRow, pressed && styles.pressed]}
               >
                 <View style={styles.nextIcon}>
-                  <MaterialCommunityIcons color={colors.primary} name="bus-clock" size={24} />
+                  <MaterialCommunityIcons color={colors.primary} name="bus-clock" size={25} />
                 </View>
                 <View style={styles.nextContent}>
-                  <View style={styles.badgeRow}>
-                    <Text style={styles.routeBadge}>{nextTrip.route?.routeNumber || nextTrip.tripCode || 'Trip'}</Text>
-                    <Text style={styles.statusText}>{getTripStatus(nextTrip)}</Text>
-                  </View>
-                  <Text style={styles.nextTitle}>
-                    {nextTrip.route?.origin || 'Origin'} - {nextTrip.route?.destination || 'Destination'}
-                  </Text>
-                  <Text style={styles.nextMeta}>
-                    {formatTime(nextTrip.scheduledStart)} - {nextTrip.vehicle?.code || nextTrip.vehicle?.plateNumber || 'No bus'}
-                  </Text>
+                  <Text style={styles.routeBadge}>{nextTrip.route?.routeNumber || nextTrip.tripCode || 'Trip'}</Text>
+                  <Text style={styles.nextTitle}>{nextTrip.route?.origin || 'Origin'} - {nextTrip.route?.destination || 'Destination'}</Text>
+                  <Text style={styles.nextMeta}>{formatTime(nextTrip.scheduledStart)} - {nextTrip.vehicle?.code || nextTrip.vehicle?.plateNumber || 'No bus'} - {getTripStatus(nextTrip)}</Text>
                 </View>
                 {isDriver ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    disabled={processingId === nextTrip.id}
-                    onPress={(event) => {
-                      event.stopPropagation();
-                      void startTrip(nextTrip);
-                    }}
-                    style={({ pressed }) => [
-                      styles.startButton,
-                      pressed && styles.pressed,
-                      processingId === nextTrip.id && styles.disabledButton,
-                    ]}
-                  >
-                    {processingId === nextTrip.id ? (
-                      <ActivityIndicator color={colors.white} size="small" />
-                    ) : (
-                      <Text style={styles.startButtonText}>START</Text>
-                    )}
+                  <Pressable disabled={processingId === nextTrip.id} onPress={(event) => { event.stopPropagation(); void startTrip(nextTrip); }} style={styles.startButton}>
+                    {processingId === nextTrip.id ? <ActivityIndicator color={colors.white} size="small" /> : <Text style={styles.startButtonText}>START</Text>}
                   </Pressable>
                 ) : (
-                  <View style={styles.openPill}>
-                    <Text style={styles.openPillText}>OPEN</Text>
-                  </View>
+                  <MaterialCommunityIcons color={colors.muted} name="chevron-right" size={24} />
                 )}
               </Pressable>
-            ) : (
-              <Text style={styles.emptyText}>No next assignment for today.</Text>
-            )}
+            ) : <Text style={styles.emptyText}>No next assignment for today.</Text>}
+          </View>
+
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Core actions</Text>
+          </View>
+          <View style={styles.actionGrid}>
+            <ActionTile title="Validate ticket" subtitle="Check QR or ticket code" icon="qrcode-scan" href={route('/driver-assistant/validate-ticket')} primary />
+            <ActionTile title="Sell ticket" subtitle="Create onboard cash/QR ticket" icon="ticket-confirmation-outline" href={route('/driver-assistant/walkin-ticket')} />
+            <ActionTile title="Shift revenue" subtitle={`${revenue?.totalRevenue ? new Intl.NumberFormat('vi-VN').format(revenue.totalRevenue) : 0} VND today`} icon="cash-register" href={route('/driver-assistant/shift-revenue')} />
+            <ActionTile title="Submit summary" subtitle="Close shift cashbox" icon="clipboard-check-outline" href={route('/driver-assistant/revenue-summary')} />
+          </View>
+
+          <View style={styles.operationsSection}>
+            <Text style={styles.sectionTitle}>Operations</Text>
+            <View style={styles.actionGrid}>
+              <ActionTile title={upcomingShift?.shiftName || 'Shift schedule'} subtitle="View work hours and assignments" icon="calendar-month-outline" href={route('/driver-assistant/shift-schedule')} />
+              <ActionTile title="Operation chat" subtitle="Message dispatch and crew" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
+              <ActionTile title="Incident report" subtitle="Open a trip to report issues" icon="alert-circle-outline" href={route('/driver-assistant/assigned-trips')} />
+            </View>
           </View>
         </ScrollView>
-
         <RoleBottomNav active="home" role={user?.role} />
       </View>
     </SafeAreaView>
@@ -295,53 +215,43 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#f7f8fb' },
   screen: { flex: 1, backgroundColor: '#f7f8fb' },
   scrollContent: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 16, paddingTop: 10 },
-  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   profileRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  avatar: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 19, borderWidth: 2, borderColor: 'rgba(43,164,113,0.25)', backgroundColor: colors.surfaceHigh },
+  avatar: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 20, borderWidth: 2, borderColor: 'rgba(43,164,113,0.25)', backgroundColor: colors.surfaceHigh },
   avatarImage: { width: '100%', height: '100%' },
   avatarText: { color: colors.primary, fontSize: 16, fontWeight: '900' },
-  brand: { color: colors.accent, fontSize: 19, fontWeight: '900' },
-  notificationButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: colors.card },
-  greeting: { gap: 5, marginBottom: 20 },
-  kicker: { color: colors.muted, fontSize: 11, fontWeight: '900', letterSpacing: 0.8 },
-  title: { color: colors.text, fontSize: 25, lineHeight: 31, fontWeight: '900' },
-  subtitle: { color: colors.muted, fontSize: 13, fontWeight: '700' },
-  summaryGrid: { gap: 12 },
-  summaryCard: { minHeight: 88, overflow: 'hidden', borderRadius: 14, borderWidth: 1, borderColor: '#eceef1', backgroundColor: colors.card, padding: 16 },
-  statusBar: { position: 'absolute', left: 0, top: 14, bottom: 14, width: 4, borderTopRightRadius: 4, borderBottomRightRadius: 4, backgroundColor: colors.accent },
-  statusBarMuted: { backgroundColor: '#89918d' },
-  summaryContent: { marginLeft: 6 },
-  summaryLabel: { color: colors.muted, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
-  summaryValueRow: { marginTop: 4, flexDirection: 'row', alignItems: 'baseline', gap: 8 },
-  summaryValue: { color: colors.accent, fontSize: 27, fontWeight: '900' },
-  summaryValueMuted: { color: colors.text },
-  summaryDetail: { color: colors.muted, fontSize: 12, fontWeight: '700' },
-  summaryIcon: { position: 'absolute', right: -5, bottom: -8 },
-  featureGrid: { gap: 14, marginTop: 22 },
-  primaryFeature: { height: 190, justifyContent: 'space-between', overflow: 'hidden', borderRadius: 22, backgroundColor: colors.accent, padding: 22 },
-  secondaryFeature: { height: 190, justifyContent: 'space-between', overflow: 'hidden', borderRadius: 22, borderWidth: 1, borderColor: colors.outline, backgroundColor: '#e8ebee', padding: 22 },
-  featureIconPrimary: { width: 50, height: 50, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.18)' },
-  featureIconSecondary: { width: 50, height: 50, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: 'rgba(43,164,113,0.12)' },
-  primaryFeatureTitle: { maxWidth: 230, color: colors.white, fontSize: 24, lineHeight: 29, fontWeight: '900' },
-  primaryFeatureText: { maxWidth: 260, marginTop: 6, color: '#d6f8e5', fontSize: 13, lineHeight: 18, fontWeight: '600' },
-  secondaryFeatureTitle: { maxWidth: 230, color: colors.text, fontSize: 24, lineHeight: 29, fontWeight: '900' },
-  secondaryFeatureText: { maxWidth: 260, marginTop: 6, color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: '600' },
-  featureArrow: { position: 'absolute', right: 18, bottom: 18 },
-  nextCard: { gap: 12, marginTop: 24 },
-  sectionTitle: { color: colors.muted, fontSize: 15, fontWeight: '900' },
-  nextRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 18, borderWidth: 1, borderColor: '#e1e2e5', backgroundColor: colors.card, padding: 14 },
-  nextIcon: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 23, backgroundColor: '#d4f2e5' },
+  brand: { color: colors.accent, fontSize: 18, fontWeight: '900' },
+  dateText: { color: colors.muted, fontSize: 12, fontWeight: '700' },
+  notificationButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 21, backgroundColor: colors.card },
+  heroCard: { gap: 14, borderRadius: 26, backgroundColor: colors.primary, padding: 20, marginBottom: 14 },
+  heroKicker: { color: '#aff4d1', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  heroTitle: { color: colors.white, fontSize: 28, lineHeight: 34, fontWeight: '900' },
+  statsRow: { flexDirection: 'row', gap: 9 },
+  statPill: { flex: 1, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.12)', padding: 12 },
+  statValue: { color: colors.white, fontSize: 21, fontWeight: '900' },
+  statLabel: { marginTop: 2, color: '#d4f2e5', fontSize: 11, fontWeight: '800' },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  sectionTitle: { color: colors.text, fontSize: 17, fontWeight: '900' },
+  linkText: { color: colors.accent, fontSize: 13, fontWeight: '900' },
+  nextCard: { borderRadius: 22, backgroundColor: colors.card, padding: 16, marginBottom: 18 },
+  nextRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  nextIcon: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 24, backgroundColor: '#d4f2e5' },
   nextContent: { flex: 1, minWidth: 0 },
-  badgeRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  routeBadge: { overflow: 'hidden', borderRadius: 10, backgroundColor: colors.surfaceHigh, paddingHorizontal: 8, paddingVertical: 3, color: colors.text, fontSize: 10, fontWeight: '900' },
-  statusText: { color: colors.accent, fontSize: 10, fontWeight: '900' },
-  nextTitle: { marginTop: 5, color: colors.text, fontSize: 14, fontWeight: '900' },
-  nextMeta: { marginTop: 3, color: colors.muted, fontSize: 12 },
-  startButton: { minWidth: 72, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: colors.accent, paddingHorizontal: 16 },
+  routeBadge: { color: colors.accent, fontSize: 11, fontWeight: '900' },
+  nextTitle: { marginTop: 3, color: colors.text, fontSize: 15, fontWeight: '900' },
+  nextMeta: { marginTop: 3, color: colors.muted, fontSize: 12, fontWeight: '700' },
+  startButton: { minWidth: 72, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: colors.accent, paddingHorizontal: 14 },
   startButtonText: { color: colors.white, fontSize: 12, fontWeight: '900' },
-  openPill: { minWidth: 72, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: colors.surfaceHigh, paddingHorizontal: 16 },
-  openPillText: { color: colors.primary, fontSize: 12, fontWeight: '900' },
-  disabledButton: { opacity: 0.65 },
+  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 18 },
+  actionTile: { width: '48%', minHeight: 156, justifyContent: 'space-between', borderRadius: 22, borderWidth: 1, borderColor: '#e1e2e5', backgroundColor: colors.card, padding: 16 },
+  actionTilePrimary: { borderColor: colors.accent, backgroundColor: colors.accent },
+  actionIcon: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: '#d4f2e5' },
+  actionIconPrimary: { backgroundColor: 'rgba(255,255,255,0.18)' },
+  actionTitle: { color: colors.text, fontSize: 18, lineHeight: 22, fontWeight: '900' },
+  actionTitlePrimary: { color: colors.white },
+  actionSubtitle: { color: colors.muted, fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  actionSubtitlePrimary: { color: '#d6f8e5' },
+  operationsSection: { gap: 12 },
   emptyText: { borderRadius: 16, backgroundColor: colors.surfaceLow, padding: 14, color: colors.muted, fontSize: 13, fontWeight: '700' },
   pressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
 });

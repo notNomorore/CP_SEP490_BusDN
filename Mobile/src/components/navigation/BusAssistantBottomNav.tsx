@@ -3,8 +3,8 @@ import { BottomNavBase, type BottomNavItemConfig } from './BottomNavBase';
 
 const busAssistantItems: BottomNavItemConfig[] = [
   { key: 'home', label: 'Home', icon: 'home', href: '/driver-assistant' },
-  { key: 'trips', label: 'Trips', icon: 'bus-clock', href: '/driver-assistant/assigned-trips' },
   { key: 'schedule', label: 'Schedule', icon: 'calendar-month-outline', href: '/driver-assistant/shift-schedule' },
+  { key: 'validate', label: 'Validate', icon: 'qrcode-scan', href: '/driver-assistant/validate-ticket' },
   { key: 'chat', label: 'Chat', icon: 'chat-outline', href: '/driver-assistant/group-chat' },
   { key: 'profile', label: 'Profile', icon: 'account-outline', href: '/profile' },
 ];

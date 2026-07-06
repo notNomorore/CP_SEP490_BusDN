@@ -10,6 +10,8 @@ const formatStaff = (staff) => (
 );
 
 const normalizeGeoPoint = (point = {}) => ({
+  id: point.stationId || point._id || null,
+  stationId: point.stationId || point._id || null,
   stopName: point.stopName || '',
   address: point.address || '',
   latitude: Number(point.latitude),
@@ -202,6 +204,7 @@ export const ShiftAssignmentResponseDTO = {
 
     return ({
     id: assignment._id,
+    tripId: trip._id || assignment.trip || null,
     shiftCode: assignment.shiftCode,
     tripCode: trip.scheduleCode || assignment.tripCode,
     actorRole: resolvedActorRole,
