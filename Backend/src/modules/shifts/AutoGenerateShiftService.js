@@ -220,10 +220,16 @@ export default class AutoGenerateShiftService {
     const { errors, startDate, endDate, range } = validateBaseRequest(body);
     if (errors.length) throw Object.assign(new Error(errors[0]), { statusCode: 400, errors });
     if (!body._segmenting && range.end - range.start > MAX_WORK_MINUTES) {
-      const windows = [];
-      for (let cursor = range.start; cursor < range.end; cursor += MAX_WORK_MINUTES) {
+      const clock = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+      const duration = range.end - range.start;
+      const windows = duration <= MAX_WORK_MINUTES * 2
+        ? [
+          { startTime: clock(range.start), endTime: clock(range.start + MAX_WORK_MINUTES) },
+          { startTime: clock(range.end - MAX_WORK_MINUTES), endTime: clock(range.end) },
+        ]
+        : [];
+      for (let cursor = range.start; !windows.length && cursor < range.end; cursor += MAX_WORK_MINUTES) {
         const end = Math.min(cursor + MAX_WORK_MINUTES, range.end);
-        const clock = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
         windows.push({ startTime: clock(cursor), endTime: clock(end) });
       }
       const previews = [];
