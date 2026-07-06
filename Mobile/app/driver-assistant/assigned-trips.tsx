@@ -13,8 +13,8 @@ import type { AssignedTrip } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
 import {
   formatTime,
+  getAssignedTripsRange,
   getTripStatus,
-  getWeekRange,
   isTripCompleted,
   isTripDelayed,
   isTripToday,
@@ -86,7 +86,7 @@ export default function AssignedTripsScreen() {
   const loadTrips = useCallback(async () => {
     setIsLoading(true);
     try {
-      const payload = await scheduleOperationsApi.getAssignedTrips(getWeekRange());
+      const payload = await scheduleOperationsApi.getAssignedTrips(getAssignedTripsRange());
       setTrips(payload.trips || []);
     } catch (error) {
       Alert.alert('Unable to load assigned trips', getErrorMessage(error, 'Unable to load assigned trips.'));

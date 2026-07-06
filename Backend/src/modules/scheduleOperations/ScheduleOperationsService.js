@@ -141,6 +141,16 @@ const INCIDENT_TYPES = [
   'PASSENGER_CONFLICT',
   'FOUND_ITEM',
 ];
+const DRIVER_INCIDENT_TYPES = [
+  'TRAFFIC_CONGESTION',
+  'ACCIDENT',
+  'VEHICLE_BREAKDOWN',
+];
+const BUS_ASSISTANT_INCIDENT_TYPES = [
+  'PASSENGER_VIOLATION',
+  'PASSENGER_CONFLICT',
+  'FOUND_ITEM',
+];
 const INCIDENT_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
 const normalizeStartGpsPayload = (payload = {}, startedAt = new Date()) => {
@@ -1509,10 +1519,13 @@ export class ScheduleOperationsService {
       affectedDirection,
     } = this.validateIncidentPayload(payload);
 
-    if (
-      role === 'BUS_ASSISTANT'
-      && !['PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'].includes(type)
-    ) {
+    if (role === 'DRIVER' && !DRIVER_INCIDENT_TYPES.includes(type)) {
+      const error = new Error('Drivers can only report traffic congestion, accidents, or vehicle breakdowns');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (role === 'BUS_ASSISTANT' && !BUS_ASSISTANT_INCIDENT_TYPES.includes(type)) {
       const error = new Error('Bus assistants can only report passenger violations, passenger conflicts, or found items');
       error.statusCode = 403;
       throw error;

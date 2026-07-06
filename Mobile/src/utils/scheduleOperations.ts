@@ -45,6 +45,14 @@ export const getWeekRange = (anchor: Date | string = new Date()) => {
   };
 };
 
+export const getAssignedTripsRange = (anchor: Date | string = new Date()) => {
+  const today = parseScheduleDate(anchor);
+  return {
+    from: toDateInput(addDays(today, -7)),
+    to: toDateInput(addDays(today, 14)),
+  };
+};
+
 export const formatTime = (value?: string | null) => {
   if (!value) return 'N/A';
   const date = new Date(value);
