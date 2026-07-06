@@ -220,6 +220,8 @@ const isTimeRangeInsideShift = ({ departureTime, expectedArrivalTime }, shift) =
 };
 
 const ASSIGNABLE_SHIFT_STATUSES = new Set(['ACTIVE', 'APPROVED', 'PUBLISHED']);
+const MAX_DAILY_STAFF_WORK_MINUTES = 8 * 60;
+const MIN_RESOURCE_BUFFER_MINUTES = 10;
 
 const hasEligibleShiftAssignment = (resourceId, assignments, form, resourceKey) => assignments.some((assignment) => {
   const assignedResource = assignment?.[resourceKey];
@@ -230,6 +232,32 @@ const hasEligibleShiftAssignment = (resourceId, assignments, form, resourceKey) 
     && ASSIGNABLE_SHIFT_STATUSES.has(assignment?.shiftId?.status)
     && isTimeRangeInsideShift(form, assignment.shiftId);
 });
+
+const getAssignmentId = (assignment, assignmentKey) => {
+  const value = assignment?.[assignmentKey]?.[assignmentKey === 'vehicle' ? 'busId' : 'userId'];
+  return typeof value === 'object' && value !== null ? value._id : value;
+};
+
+const getTripWorkMinutes = (schedule) => {
+  const start = parseClockToMinutes(schedule.departureTime);
+  const end = parseClockToMinutes(schedule.expectedArrivalTime || schedule.departureTime);
+  return start !== null && end !== null && end > start ? end - start : 0;
+};
+
+const hasDailyStaffWorkloadCapacity = (resourceId, schedules, assignmentKey, form, excludeScheduleId = '') => {
+  if (!resourceId || !form.serviceDate || !form.departureTime || !form.expectedArrivalTime) return true;
+  const newTripMinutes = getTripWorkMinutes(form);
+  if (!newTripMinutes) return true;
+  const assignedMinutes = schedules
+    .filter((schedule) => (
+      String(schedule._id || '') !== String(excludeScheduleId || '')
+      && schedule.status !== 'CANCELLED'
+      && isSameDateInputValue(schedule.serviceDate, form.serviceDate)
+      && String(getAssignmentId(schedule, assignmentKey) || '') === String(resourceId || '')
+    ))
+    .reduce((total, schedule) => total + getTripWorkMinutes(schedule), 0);
+  return assignedMinutes + newTripMinutes <= MAX_DAILY_STAFF_WORK_MINUTES;
+};
 
 const isAssignableBus = (bus) => ASSIGNABLE_BUS_STATUSES.has(bus?.status);
 
@@ -823,6 +851,11 @@ const EmergencyReassignmentModal = ({
   const currentBusId = entityId(schedule.vehicle?.busId);
   const currentDriverId = entityId(schedule.driver?.userId);
   const currentAssistantId = entityId(schedule.assistant?.userId);
+  const scheduleWorkloadForm = {
+    serviceDate: toDateInputValue(schedule.serviceDate),
+    departureTime: schedule.departureTime,
+    expectedArrivalTime: schedule.expectedArrivalTime,
+  };
 
   const availableBuses = buses.filter((bus) => (
     isAssignableBus(bus)
@@ -832,6 +865,7 @@ const EmergencyReassignmentModal = ({
     String(driver._id) === String(currentDriverId)
     || (
       !isBusyAtScheduleTime(driver._id, 'driver')
+      && hasDailyStaffWorkloadCapacity(driver._id, schedules, 'driver', scheduleWorkloadForm, schedule._id)
       && hasEligibleShiftAssignment(driver._id, driverShiftAssignments, {
         serviceDate: toDateInputValue(schedule.serviceDate),
         departureTime: schedule.departureTime,
@@ -843,6 +877,7 @@ const EmergencyReassignmentModal = ({
     String(staff._id) === String(currentAssistantId)
     || (
       !isBusyAtScheduleTime(staff._id, 'assistant')
+      && hasDailyStaffWorkloadCapacity(staff._id, schedules, 'assistant', scheduleWorkloadForm, schedule._id)
       && hasEligibleShiftAssignment(staff._id, assistantShiftAssignments, {
         serviceDate: toDateInputValue(schedule.serviceDate),
         departureTime: schedule.departureTime,
@@ -1050,9 +1085,9 @@ const FrequencyScheduleModal = ({ onClose, onSaved, routes }) => {
             {selectedRoute ? (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <span><strong className="block text-xs uppercase text-emerald-700">Khung giờ</strong>{FIRST_BUS_DEPARTURE_TIME} - {LAST_BUS_DEPARTURE_TIME}</span>
-                <span><strong className="block text-xs uppercase text-emerald-700">Cao điểm</strong>{selectedRoute.scheduleConfig?.peakFrequencyMinutes || 0} phút/chuyến</span>
-                <span><strong className="block text-xs uppercase text-emerald-700">Thấp điểm</strong>{selectedRoute.scheduleConfig?.offPeakFrequencyMinutes || 0} phút/chuyến</span>
-                <span><strong className="block text-xs uppercase text-emerald-700">Nghỉ đầu cuối</strong>{selectedRoute.scheduleConfig?.layoverMinutes || 0} phút</span>
+                <span><strong className="block text-xs uppercase text-emerald-700">Cao điểm</strong>{selectedRoute.scheduleConfig?.peakFrequencyMinutes || selectedRoute.scheduleConfig?.frequencyMinutes || 0} phút/chuyến</span>
+                <span><strong className="block text-xs uppercase text-emerald-700">Thấp điểm</strong>{selectedRoute.scheduleConfig?.offPeakFrequencyMinutes || selectedRoute.scheduleConfig?.frequencyMinutes || selectedRoute.scheduleConfig?.peakFrequencyMinutes || 0} phút/chuyến</span>
+                <span><strong className="block text-xs uppercase text-emerald-700">Nghỉ đầu cuối</strong>{Math.max(MIN_RESOURCE_BUFFER_MINUTES, Number(selectedRoute.scheduleConfig?.layoverMinutes || 0))} phút</span>
               </div>
             ) : 'Chọn tuyến để xem cấu hình.'}
             {selectedRoute ? <p className="mt-3 text-xs text-emerald-700">Cao điểm: 06:30–08:30 và 16:30–18:30. Các giờ còn lại áp dụng tần suất thấp điểm.</p> : null}
@@ -1080,7 +1115,7 @@ const FrequencyScheduleModal = ({ onClose, onSaved, routes }) => {
             ))}
           </div>
         ) : null}
-        {rows.length ? <div className="mt-5"><div className="mb-3 flex justify-between"><h3 className="font-black">Bản xem trước</h3><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold">{rows.length} chuyến · {rows.filter((row) => row.shiftLabel === 'MORNING').length} sáng · {rows.filter((row) => row.shiftLabel === 'AFTERNOON').length} chiều</span></div>{hasIncompleteRows ? <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">Chỉ lưu được lịch đã đủ xe, tài xế và phụ xe. Các dòng còn cảnh báo cần xóa hoặc bổ sung ca làm trước.</div> : null}<div className="max-h-96 overflow-auto rounded-lg border border-slate-200"><table className="min-w-[1120px] w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr>{['Ngày', 'Mã lịch', 'Ca', 'Chiều', 'Xuất bến', 'Đến', 'Xe', 'Tài xế', 'Phụ xe', 'Cảnh báo', ''].map((item) => <th key={item} className="px-3 py-3 font-black uppercase text-slate-500">{item}</th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.previewId} className="border-t border-slate-200"><td className="px-3 py-3">{row.serviceDate}</td><td className="px-3 py-3 font-bold">{row.scheduleCode}</td><td className="px-3 py-3 font-bold">{scheduleShiftLabels[row.shiftLabel] || '-'}</td><td className="px-3 py-3">{scheduleDirectionLabels[row.direction]}</td><td className="px-3 py-3">{row.departureTime}</td><td className="px-3 py-3">{row.expectedArrivalTime}</td><td className="px-3 py-3">{row.vehicle?.busCode || 'Chưa gán'}</td><td className="px-3 py-3">{row.driver?.fullName || 'Chưa gán'}</td><td className="px-3 py-3">{row.assistant?.fullName || 'Chưa gán'}</td><td className="px-3 py-3 text-amber-700">{row.warnings?.join(' ') || 'Hợp lệ'}</td><td className="px-3 py-3"><button type="button" onClick={() => setRows((current) => current.filter((item) => item.previewId !== row.previewId))} className="text-rose-600">Xóa</button></td></tr>)}</tbody></table></div><div className="mt-4 flex justify-end"><button type="button" disabled={isLoading || hasIncompleteRows} onClick={confirm} className="rounded-lg bg-emerald-500 px-5 py-3 text-sm font-black text-emerald-950 disabled:opacity-50">Xác nhận tạo lịch</button></div></div> : null}
+        {rows.length ? <div className="mt-5"><div className="mb-3 flex justify-between"><h3 className="font-black">Bản xem trước</h3><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold">{rows.length} chuyến · {rows.filter((row) => row.shiftLabel === 'MORNING').length} sáng · {rows.filter((row) => row.shiftLabel === 'AFTERNOON').length} chiều</span></div>{hasIncompleteRows ? <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">Chỉ lưu được lịch đã đủ xe, tài xế và phụ xe. Các dòng còn cảnh báo cần xóa hoặc bổ sung ca làm trước.</div> : null}<div className="max-h-96 overflow-auto rounded-lg border border-slate-200"><table className="min-w-[1200px] w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr>{['Ngày', 'Mã lịch', 'Ca', 'Chiều', 'Xuất bến', 'Đến', 'Rảnh lại', 'Xe', 'Tài xế', 'Phụ xe', 'Cảnh báo', ''].map((item) => <th key={item} className="px-3 py-3 font-black uppercase text-slate-500">{item}</th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.previewId} className="border-t border-slate-200"><td className="px-3 py-3">{row.serviceDate}</td><td className="px-3 py-3 font-bold">{row.scheduleCode}</td><td className="px-3 py-3 font-bold">{scheduleShiftLabels[row.shiftLabel] || '-'}</td><td className="px-3 py-3">{scheduleDirectionLabels[row.direction]}</td><td className="px-3 py-3">{row.departureTime}</td><td className="px-3 py-3">{row.expectedArrivalTime}</td><td className="px-3 py-3">{row.turnaroundEndTime || row.expectedArrivalTime}</td><td className="px-3 py-3">{row.vehicle?.busCode || 'Chưa gán'}</td><td className="px-3 py-3">{row.driver?.fullName || 'Chưa gán'}</td><td className="px-3 py-3">{row.assistant?.fullName || 'Chưa gán'}</td><td className="px-3 py-3 text-amber-700">{row.warnings?.join(' ') || 'Hợp lệ'}</td><td className="px-3 py-3"><button type="button" onClick={() => setRows((current) => current.filter((item) => item.previewId !== row.previewId))} className="text-rose-600">Xóa</button></td></tr>)}</tbody></table></div><div className="mt-4 flex justify-end"><button type="button" disabled={isLoading || hasIncompleteRows} onClick={confirm} className="rounded-lg bg-emerald-500 px-5 py-3 text-sm font-black text-emerald-950 disabled:opacity-50">Xác nhận tạo lịch</button></div></div> : null}
       </div>
     </div>
   );
@@ -1141,16 +1176,18 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
     if (!form.serviceDate || !form.departureTime || !form.expectedArrivalTime) return [];
     return drivers.filter((driver) => (
       !isResourceBusy(driver._id, 'driver')
+      && hasDailyStaffWorkloadCapacity(driver._id, schedules, 'driver', form, editingScheduleId)
       && hasEligibleShiftAssignment(driver._id, driverShiftAssignments, form, 'driverId')
     ));
-  }, [driverShiftAssignments, drivers, form, isResourceBusy]);
+  }, [driverShiftAssignments, drivers, editingScheduleId, form, isResourceBusy, schedules]);
   const availableAssistants = useMemo(() => {
     if (!form.serviceDate || !form.departureTime || !form.expectedArrivalTime) return [];
     return assistantStaff.filter((assistant) => (
       !isResourceBusy(assistant._id, 'assistant')
+      && hasDailyStaffWorkloadCapacity(assistant._id, schedules, 'assistant', form, editingScheduleId)
       && hasEligibleShiftAssignment(assistant._id, assistantShiftAssignments, form, 'assistantId')
     ));
-  }, [assistantShiftAssignments, assistantStaff, form, isResourceBusy]);
+  }, [assistantShiftAssignments, assistantStaff, editingScheduleId, form, isResourceBusy, schedules]);
 
   useEffect(() => {
     if (!estimatedDurationMinutes || !form.departureTime) return;

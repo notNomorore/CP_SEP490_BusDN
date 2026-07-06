@@ -264,7 +264,7 @@ const sampleRoutes = [
       { latitude: 16.0610, longitude: 108.2325 },
       { latitude: 16.0590, longitude: 108.2355 },
     ],
-    operatingHours: { firstDeparture: '06:00', lastDeparture: '22:30', frequencyMinutes: 15 },
+    operatingHours: { firstDeparture: '05:30', lastDeparture: '18:30', frequencyMinutes: 15 },
   },
   {
     routeNumber: 'DN07',

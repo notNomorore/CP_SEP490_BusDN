@@ -30,7 +30,7 @@ const initialForm = {
 
 const shiftTimes = {
   MORNING: ['05:30', '13:30'],
-  AFTERNOON: ['13:30', '18:30'],
+  AFTERNOON: ['10:30', '18:30'],
   EVENING: ['17:30', '22:00'],
   FULL_DAY: ['05:30', '18:30'],
 };

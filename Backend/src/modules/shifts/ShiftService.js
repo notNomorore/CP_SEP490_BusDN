@@ -20,7 +20,7 @@ const OPERATING_START_MINUTES = (5 * 60) + 30;
 const OPERATING_END_MINUTES = (18 * 60) + 30;
 const AUTO_SHIFT_TEMPLATES = [
   { key: 'MORNING', name: 'Ca sáng tự động', startTime: '05:30', endTime: '13:30', shiftType: 'MORNING' },
-  { key: 'AFTERNOON', name: 'Ca chiều tự động', startTime: '13:30', endTime: '18:30', shiftType: 'AFTERNOON' },
+  { key: 'AFTERNOON', name: 'Ca chiều tự động', startTime: '10:30', endTime: '18:30', shiftType: 'AFTERNOON' },
 ];
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);

@@ -261,6 +261,7 @@ export class AuthController {
         error.code === 'ACCOUNT_LOCKED'
         || error.message.includes('Invalid email/phone')
         || error.message.includes('not verified')
+        || error.message.includes('inactive')
         || error.message.includes('locked')
       ) {
         return res.status(error.code === 'ACCOUNT_LOCKED' ? 423 : 401).json({
