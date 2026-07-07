@@ -113,18 +113,170 @@ const parseGoogleAddressComponent = (components, types) => components.find((comp
 ))?.long_name || '';
 
 const extractRequestedStreetNumber = (value) => String(value || '').trim().match(/^\s*(\d+[A-Za-z]?(?:[/-]\d+[A-Za-z]?)?)/)?.[1] || '';
+const extractStreetName = (value) => String(value || '')
+  .trim()
+  .replace(/^\s*\d+[A-Za-z]?(?:[/-]\d+[A-Za-z]?)?\s*/, '')
+  .split(',')
+  .map((part) => part.trim())
+  .filter(Boolean)[0] || '';
 const normalizeStreetNumber = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, '');
+const hasExactStreetNumberText = (value, requestedStreetNumber) => {
+  if (!requestedStreetNumber) return false;
+  const escapedNumber = requestedStreetNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^0-9A-Za-z])${escapedNumber}([^0-9A-Za-z]|$)`, 'i').test(String(value || ''));
+};
 const rankAddressResult = (result, requestedStreetNumber) => {
   const exactStreetNumber = requestedStreetNumber
-    && normalizeStreetNumber(result.streetNumber) === normalizeStreetNumber(requestedStreetNumber);
-  const preciseType = result.resultTypes?.some((type) => ['street_address', 'premise', 'subpremise'].includes(type));
-  return (exactStreetNumber ? 100 : 0) + (preciseType ? 20 : 0) + (result.partialMatch ? -10 : 0);
+    && (
+      normalizeStreetNumber(result.streetNumber) === normalizeStreetNumber(requestedStreetNumber)
+      || hasExactStreetNumberText(`${result.displayName || ''} ${result.address || ''}`, requestedStreetNumber)
+    );
+  const preciseType = result.resultTypes?.some((type) => ['street_address', 'premise', 'subpremise', 'house'].includes(type));
+  const preciseSource = ['SERPAPI_GOOGLE_MAPS', 'GOOGLE', 'OPENSTREETMAP_STRUCTURED'].includes(result.source);
+  return (exactStreetNumber ? 100 : 0) + (preciseType ? 20 : 0) + (preciseSource ? 6 : 0) + (result.partialMatch ? -10 : 0);
+};
+
+const fetchNominatimResults = async (url) => {
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'BusDN/1.0 (admin stop address search)' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw Object.assign(new Error('Khong the tim kiem dia chi tren ban do.'), { statusCode: 502 });
+  return response.json();
+};
+
+const mapNominatimResult = (result, requestedStreetNumber, source = 'OPENSTREETMAP') => {
+  const streetNumber = result.address?.house_number || '';
+  return {
+    id: String(result.place_id),
+    displayName: result.display_name,
+    address: result.display_name,
+    latitude: Number(result.lat),
+    longitude: Number(result.lon),
+    district: result.address?.city_district || result.address?.district || result.address?.county || '',
+    ward: result.address?.suburb || result.address?.quarter || result.address?.neighbourhood || result.address?.village || '',
+    streetNumber,
+    exactStreetNumber: Boolean(requestedStreetNumber)
+      && normalizeStreetNumber(streetNumber) === normalizeStreetNumber(requestedStreetNumber),
+    resultTypes: [result.type].filter(Boolean),
+    partialMatch: false,
+    source,
+  };
+};
+
+const searchNominatimAddresses = async (text, requestedStreetNumber) => {
+  const freeformUrl = new URL('https://nominatim.openstreetmap.org/search');
+  freeformUrl.searchParams.set('q', `${text}, Da Nang, Vietnam`);
+  freeformUrl.searchParams.set('format', 'jsonv2');
+  freeformUrl.searchParams.set('addressdetails', '1');
+  freeformUrl.searchParams.set('limit', '8');
+  freeformUrl.searchParams.set('countrycodes', 'vn');
+  freeformUrl.searchParams.set('viewbox', '107.95,16.25,108.35,15.95');
+  freeformUrl.searchParams.set('bounded', '1');
+
+  const requests = [fetchNominatimResults(freeformUrl)];
+  const streetName = extractStreetName(text);
+  if (requestedStreetNumber && streetName) {
+    const structuredUrl = new URL('https://nominatim.openstreetmap.org/search');
+    structuredUrl.searchParams.set('street', `${requestedStreetNumber} ${streetName}`);
+    structuredUrl.searchParams.set('city', 'Da Nang');
+    structuredUrl.searchParams.set('country', 'Vietnam');
+    structuredUrl.searchParams.set('format', 'jsonv2');
+    structuredUrl.searchParams.set('addressdetails', '1');
+    structuredUrl.searchParams.set('limit', '8');
+    structuredUrl.searchParams.set('countrycodes', 'vn');
+    structuredUrl.searchParams.set('viewbox', '107.95,16.25,108.35,15.95');
+    structuredUrl.searchParams.set('bounded', '1');
+    requests.unshift(fetchNominatimResults(structuredUrl));
+  }
+
+  const payloads = await Promise.all(requests);
+  const seen = new Set();
+  return payloads
+    .flatMap((payload, index) => payload.map((result) => mapNominatimResult(
+      result,
+      requestedStreetNumber,
+      index === 0 && requests.length > 1 ? 'OPENSTREETMAP_STRUCTURED' : 'OPENSTREETMAP'
+    )))
+    .filter((result) => Number.isFinite(result.latitude) && Number.isFinite(result.longitude))
+    .filter((result) => {
+      const key = `${result.id}:${result.latitude.toFixed(6)}:${result.longitude.toFixed(6)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((left, right) => rankAddressResult(right, requestedStreetNumber) - rankAddressResult(left, requestedStreetNumber))
+    .slice(0, 8);
+};
+
+const mapSerpApiPlace = (place, requestedStreetNumber) => {
+  const coordinates = place.gps_coordinates || {};
+  const address = place.address || place.formatted_address || place.title || '';
+  const title = place.title || address;
+  const streetNumber = hasExactStreetNumberText(address, requestedStreetNumber)
+    || hasExactStreetNumberText(title, requestedStreetNumber)
+    ? requestedStreetNumber
+    : '';
+
+  return {
+    id: place.place_id || place.data_id || place.data_cid || title,
+    displayName: title === address ? address : `${title}${address ? `, ${address}` : ''}`,
+    address,
+    latitude: Number(coordinates.latitude),
+    longitude: Number(coordinates.longitude),
+    district: '',
+    ward: '',
+    streetNumber,
+    exactStreetNumber: Boolean(requestedStreetNumber)
+      && normalizeStreetNumber(streetNumber) === normalizeStreetNumber(requestedStreetNumber),
+    resultTypes: [place.type, ...(place.types || [])].filter(Boolean),
+    partialMatch: false,
+    source: 'SERPAPI_GOOGLE_MAPS',
+  };
+};
+
+const searchSerpApiGoogleMapsAddresses = async (text, requestedStreetNumber) => {
+  const url = new URL('https://serpapi.com/search.json');
+  url.searchParams.set('engine', 'google_maps');
+  url.searchParams.set('q', `${text}, Da Nang, Vietnam`);
+  url.searchParams.set('ll', '@16.047079,108.206230,15z');
+  url.searchParams.set('hl', 'vi');
+  url.searchParams.set('gl', 'vn');
+  url.searchParams.set('type', 'search');
+  url.searchParams.set('api_key', config.serpApi.apiKey);
+
+  const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  const payload = await response.json();
+  if (!response.ok || payload.error) {
+    throw Object.assign(new Error(payload.error || 'SerpApi Google Maps search failed.'), { statusCode: 502 });
+  }
+
+  const places = [
+    ...(payload.place_results ? [payload.place_results] : []),
+    ...(payload.local_results || []),
+  ];
+  const seen = new Set();
+  return places
+    .map((place) => mapSerpApiPlace(place, requestedStreetNumber))
+    .filter((result) => Number.isFinite(result.latitude) && Number.isFinite(result.longitude))
+    .filter((result) => {
+      const key = `${result.id}:${result.latitude.toFixed(6)}:${result.longitude.toFixed(6)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((left, right) => rankAddressResult(right, requestedStreetNumber) - rankAddressResult(left, requestedStreetNumber))
+    .slice(0, 8);
 };
 
 export const searchStopAddresses = async (query) => {
   const text = String(query || '').trim();
   if (text.length < 3) return [];
   const requestedStreetNumber = extractRequestedStreetNumber(text);
+
+  if (config.serpApi.apiKey) {
+    return searchSerpApiGoogleMapsAddresses(text, requestedStreetNumber);
+  }
 
   if (config.googleMaps.apiKey) {
     const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
@@ -160,6 +312,11 @@ export const searchStopAddresses = async (query) => {
       })
       .sort((left, right) => rankAddressResult(right, requestedStreetNumber) - rankAddressResult(left, requestedStreetNumber))
       .slice(0, 6);
+  }
+
+  const nominatimResults = await searchNominatimAddresses(text, requestedStreetNumber);
+  if (Array.isArray(nominatimResults)) {
+    return nominatimResults;
   }
 
   const url = new URL('https://nominatim.openstreetmap.org/search');

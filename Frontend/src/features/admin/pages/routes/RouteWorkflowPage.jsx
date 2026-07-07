@@ -405,7 +405,7 @@ const StopMapPicker = ({
           if (isInsideDaNang(lat, lng)) pickLocationRef.current({ lat, lng });
         })
         .addTo(layer);
-      mapRef.current.setView([latitude, longitude], Math.max(mapRef.current.getZoom(), 15));
+      mapRef.current.setView([latitude, longitude], Math.max(mapRef.current.getZoom(), 18));
     }
 
     window.setTimeout(() => mapRef.current?.invalidateSize(), 80);
@@ -1018,7 +1018,7 @@ const FrequencyScheduleModal = ({ onClose, onSaved, routes }) => {
     startDate: toDateInputValue(),
     endDate: toDateInputValue(),
     autoAssign: true,
-    replaceScheduled: false,
+    replaceScheduled: true,
   });
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -1636,6 +1636,20 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
       .filter((station) => isInsideDaNang(station.latitude, station.longitude))
       .slice(0, 5);
   }, [stations]);
+  const requestedHouseNumber = addressQuery.trim().match(/^\s*(\d+[A-Za-z]?(?:[/-]\d+[A-Za-z]?)?)/)?.[1] || '';
+  const requiresExactHouseNumber = Boolean(requestedHouseNumber);
+  const getExactHouseNumberError = () => (
+    `Chưa tìm thấy tọa độ chính xác cho số nhà ${requestedHouseNumber}. Cần nguồn dữ liệu có house_number, ví dụ cấu hình GOOGLE_MAPS_API_KEY, hoặc chọn thủ công trên bản đồ.`
+  );
+  const getAddressResultMessage = (result) => {
+    if (result?.exactStreetNumber) {
+      return 'Đã đặt marker xanh đúng tọa độ số nhà tìm thấy trên bản đồ.';
+    }
+    if (requiresExactHouseNumber) {
+      return getExactHouseNumberError();
+    }
+    return 'Đã đặt marker xanh tại tọa độ gần nhất tìm thấy. Nếu chưa đúng cửa nhà, kéo marker xanh để chỉnh chính xác.';
+  };
 
   const searchAddress = async (event) => {
     event?.preventDefault();
@@ -1654,7 +1668,9 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
       const response = await adminService.searchStopAddresses(searchText);
       const results = response.results || [];
       setAddressSearchResults(results);
-      const firstResult = results[0];
+      const firstResult = requiresExactHouseNumber
+        ? results.find((result) => result.exactStreetNumber)
+        : results[0];
       if (firstResult) {
         setSelectedAddressResult(firstResult);
         setEditingStationId('');
@@ -1668,9 +1684,9 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
           ward: firstResult.ward || current.ward,
         }));
         setErrors((current) => ({ ...current, address: undefined, latitude: undefined, longitude: undefined }));
-        setMessage(firstResult.exactStreetNumber
-          ? 'Đã hiển thị đúng vị trí số nhà trên bản đồ.'
-          : 'Đã hiển thị vị trí gần đúng trên bản đồ. Có thể kéo marker xanh để chỉnh lại.');
+        setMessage(getAddressResultMessage(firstResult));
+      } else if (results.length && requiresExactHouseNumber) {
+        setMessage(getExactHouseNumberError());
       } else {
         setMessage('Không tìm thấy địa điểm phù hợp.');
       }
@@ -1753,6 +1769,11 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
     }
   };
   const pickAddressResult = (result) => {
+    if (requiresExactHouseNumber && !result.exactStreetNumber) {
+      setSelectedAddressResult(null);
+      setMessage(getExactHouseNumberError());
+      return;
+    }
     setSelectedAddressResult(result);
     setEditingStationId('');
     setForm((current) => ({
@@ -1765,13 +1786,16 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
       ward: result.ward || current.ward,
     }));
     setErrors((current) => ({ ...current, address: undefined, latitude: undefined, longitude: undefined }));
-    setMessage('Đã chọn địa chỉ và hiển thị vị trí trên bản đồ.');
+    setMessage(getAddressResultMessage(result));
   };
 
   const fillStopFromSearch = () => {
-    const result = selectedAddressResult || addressSearchResults[0];
+    const result = selectedAddressResult
+      || (requiresExactHouseNumber
+        ? addressSearchResults.find((item) => item.exactStreetNumber)
+        : addressSearchResults[0]);
     if (!result) {
-      setMessage('Hãy tìm và chọn một địa điểm trước khi thêm trạm nhanh.');
+      setMessage(requiresExactHouseNumber ? getExactHouseNumberError() : 'Hãy tìm và chọn một địa điểm trước khi thêm trạm nhanh.');
       return;
     }
 
@@ -1913,7 +1937,13 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
                       className={`rounded-lg border px-3 py-2 text-left text-xs transition ${isSelected ? 'border-cyan-400 bg-cyan-50' : 'border-slate-200 hover:border-cyan-300 hover:bg-slate-50'}`}
                     >
                       <span className="block text-sm font-black text-slate-900">{result.displayName}</span>
-                      <span className="mt-1 block font-semibold text-slate-500">{result.exactStreetNumber ? 'Khớp số nhà' : 'Bấm để xem trên bản đồ'}</span>
+                      <span className="mt-1 block font-semibold text-slate-500">
+                        {result.exactStreetNumber
+                          ? 'Khớp số nhà'
+                          : requiresExactHouseNumber
+                            ? 'Không khớp số nhà, không đặt marker tự động'
+                            : 'Chưa có tọa độ số nhà, bấm để đặt marker gần nhất'}
+                      </span>
                     </button>
                   );
                 })}

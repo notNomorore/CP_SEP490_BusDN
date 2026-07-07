@@ -570,18 +570,12 @@ const ShiftAssignmentManagementPage = () => {
       for (const workDate of dateRange) {
         for (let templateIndex = 0; templateIndex < shiftTemplates.length; templateIndex += 1) {
           const template = shiftTemplates[templateIndex];
-          const buildQueue = (items, role) => {
-            const preferred = items.filter((item, itemIndex) => (
+          const buildQueue = (items, role) => (
+            items.filter((item, itemIndex) => (
               itemIndex % shiftTemplates.length === templateIndex
               && canUseStaff(getId(item), role, workDate, template)
-            ));
-            const preferredIds = new Set(preferred.map((item) => getId(item)));
-            const fallback = items.filter((item) => (
-              !preferredIds.has(getId(item))
-              && canUseStaff(getId(item), role, workDate, template)
-            ));
-            return [...preferred, ...fallback];
-          };
+            ))
+          );
 
           const availableDriverQueue = buildQueue(selectedDrivers, 'driver');
           const availableAssistantQueue = buildQueue(selectedAssistants, 'assistant');

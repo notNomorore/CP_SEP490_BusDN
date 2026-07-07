@@ -286,7 +286,13 @@ export default class ScheduleGenerationService {
       if (route.scheduleConfig?.operatingDays?.length && !route.scheduleConfig.operatingDays.includes(weekdayToken(date))) continue;
       const dayStart = new Date(date);
       const dayEnd = addDays(date, 1);
-      const existingSchedules = await TripSchedule.find({ serviceDate: { $gte: dayStart, $lt: dayEnd }, status: { $ne: 'CANCELLED' } }).lean();
+      const existingSchedulesForDay = await TripSchedule.find({ serviceDate: { $gte: dayStart, $lt: dayEnd }, status: { $ne: 'CANCELLED' } }).lean();
+      const existingSchedules = body.replaceScheduled
+        ? existingSchedulesForDay.filter((schedule) => !(
+          getId(schedule.routeId) === getId(route._id)
+          && schedule.status === 'PLANNED'
+        ))
+        : existingSchedulesForDay;
       const bounds = dateBounds(date);
       const workDateFilter = bounds ? { $gte: bounds.start, $lt: bounds.end } : date;
       const [driverAssignments, assistantAssignments] = await Promise.all([

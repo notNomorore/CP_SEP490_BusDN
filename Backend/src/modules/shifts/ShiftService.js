@@ -348,9 +348,9 @@ const hasLeaveConflict = (driver, workDate) => {
   });
 };
 
-const buildAutoShiftPayload = ({ template, workDate, actorId }) => ({
-  shiftCode: `AUTO-${toDateToken(workDate)}-${template.key}`,
-  shiftName: template.name,
+const buildAutoShiftPayload = ({ template, workDate, actorId, sequence = null }) => ({
+  shiftCode: `AUTO-${toDateToken(workDate)}-${template.key}${sequence ? `-${String(sequence).padStart(3, '0')}` : ''}`,
+  shiftName: sequence ? `${template.name} ${String(sequence).padStart(3, '0')}` : template.name,
   workDate,
   startTime: template.startTime,
   endTime: template.endTime,
@@ -369,6 +369,7 @@ const shouldUpdateAutoShift = (shift, payload) => (
     || shift.startTime !== payload.startTime
     || shift.endTime !== payload.endTime
     || shift.shiftType !== payload.shiftType
+    || shift.status !== payload.status
     || shift.description !== payload.description
   )
 );
@@ -378,7 +379,7 @@ const isRemovedAutoShiftTemplate = (shift) => {
   const workDate = normalizeDateOnly(shift.workDate);
   if (!workDate) return false;
   return !AUTO_SHIFT_TEMPLATES.some((template) => (
-    shift.shiftCode === `AUTO-${toDateToken(workDate)}-${template.key}`
+    String(shift.shiftCode || '').startsWith(`AUTO-${toDateToken(workDate)}-${template.key}`)
   ));
 };
 
@@ -913,9 +914,24 @@ export default class ShiftService {
       throw Object.assign(new Error('Ngay lam viec la bat buoc.'), { statusCode: 400 });
     }
 
-    const drivers = await User.find({ role: 'DRIVER', status: 'ACTIVE' })
+    const [drivers, assistants] = await Promise.all([
+      User.find({
+        role: 'DRIVER',
+        status: 'ACTIVE',
+        isFirstLogin: { $ne: true },
+        'accountLock.isLocked': { $ne: true },
+      })
+        .sort({ fullName: 1, createdAt: 1 })
+        .lean(),
+      User.find({
+        role: { $in: ['CONDUCTOR', 'BUS_ASSISTANT'] },
+        status: 'ACTIVE',
+        isFirstLogin: { $ne: true },
+        'accountLock.isLocked': { $ne: true },
+      })
       .sort({ fullName: 1, createdAt: 1 })
-      .lean();
+        .lean(),
+    ]);
     if (!drivers.length) {
       throw Object.assign(new Error('Khong co tai xe dang hoat dong de sinh lich.'), { statusCode: 409 });
     }
@@ -928,6 +944,7 @@ export default class ShiftService {
       updatedShifts: 0,
       archivedShifts: 0,
       assignedDrivers: 0,
+      assignedAssistants: 0,
       skippedShifts: [],
       shifts: [],
     };
@@ -947,84 +964,113 @@ export default class ShiftService {
       summary.archivedShifts += 1;
     }
 
-    for (const template of AUTO_SHIFT_TEMPLATES) {
-      const payload = buildAutoShiftPayload({ template, workDate: dateOnly, actorId });
-      let wasCreated = false;
-      let shift = await Shift.findOne({ shiftCode: payload.shiftCode, workDate: dateOnly }).lean();
+    for (const [templateIndex, template] of AUTO_SHIFT_TEMPLATES.entries()) {
+      const templateDrivers = drivers.filter((_driver, index) => index % AUTO_SHIFT_TEMPLATES.length === templateIndex);
+      const templateAssistants = assistants.filter((_assistant, index) => index % AUTO_SHIFT_TEMPLATES.length === templateIndex);
+      const slotCount = Math.max(templateDrivers.length, templateAssistants.length);
 
-      if (shift) {
-        if (shouldUpdateAutoShift(shift, payload)) {
-          shift = await Shift.findByIdAndUpdate(
-            shift._id,
-            { $set: payload },
-            { new: true, runValidators: true }
-          ).lean();
-          summary.updatedShifts += 1;
-        }
-        summary.existingShifts += 1;
-      } else {
-        try {
-          const createdShift = new Shift(payload);
-          await createdShift.save();
-          shift = createdShift.toObject();
-          wasCreated = true;
-          summary.createdShifts += 1;
-        } catch (error) {
-          if (error.code !== 11000) throw error;
-          shift = await Shift.findOne({ shiftCode: payload.shiftCode, workDate: dateOnly }).lean();
+      for (let slotIndex = 0; slotIndex < slotCount; slotIndex += 1) {
+        const payload = buildAutoShiftPayload({
+          template,
+          workDate: dateOnly,
+          actorId,
+          sequence: slotIndex + 1,
+        });
+        let wasCreated = false;
+        let shift = await Shift.findOne({ shiftCode: payload.shiftCode, workDate: dateOnly }).lean();
+
+        if (shift) {
+          if (shouldUpdateAutoShift(shift, payload)) {
+            shift = await Shift.findByIdAndUpdate(
+              shift._id,
+              { $set: payload },
+              { new: true, runValidators: true }
+            ).lean();
+            summary.updatedShifts += 1;
+          }
           summary.existingShifts += 1;
+        } else {
+          try {
+            const createdShift = new Shift(payload);
+            await createdShift.save();
+            shift = createdShift.toObject();
+            wasCreated = true;
+            summary.createdShifts += 1;
+          } catch (error) {
+            if (error.code !== 11000) throw error;
+            shift = await Shift.findOne({ shiftCode: payload.shiftCode, workDate: dateOnly }).lean();
+            summary.existingShifts += 1;
+          }
         }
-      }
 
-      const shiftResult = {
-        shiftId: shift?._id,
-        shiftCode: shift?.shiftCode,
-        shiftName: shift?.shiftName,
-        startTime: shift?.startTime,
-        endTime: shift?.endTime,
-        driver: null,
-        status: 'UNASSIGNED',
-        reason: '',
-      };
+        const shiftResult = {
+          shiftId: shift?._id,
+          shiftCode: shift?.shiftCode,
+          shiftName: shift?.shiftName,
+          startTime: shift?.startTime,
+          endTime: shift?.endTime,
+          driver: null,
+          assistant: null,
+          status: 'UNASSIGNED',
+          reason: '',
+        };
 
-      const existingDriver = await getAssignedDriver(shift._id);
-      if (existingDriver) {
-        shiftResult.driver = existingDriver.driverId;
-        shiftResult.status = 'ALREADY_ASSIGNED';
-        summary.shifts.push(shiftResult);
-        continue;
-      }
+        const [existingDriver, existingAssistant] = await Promise.all([
+          getAssignedDriver(shift._id),
+          getAssignedAssistant(shift._id),
+        ]);
+        const targetDriver = templateDrivers[slotIndex] || null;
+        const targetAssistant = templateAssistants[slotIndex] || null;
 
-      let assigned = null;
-      let lastError = null;
-      for (const driver of drivers) {
-        try {
-          assigned = await this.assignDriverToShift(shift._id, { driverId: driver._id, actorId });
-          break;
-        } catch (error) {
-          lastError = error;
+        if (existingDriver) {
+          shiftResult.driver = existingDriver.driverId;
         }
-      }
-
-      if (assigned) {
-        shiftResult.driver = assigned.driverId;
-        shiftResult.status = 'ASSIGNED';
-        summary.assignedDrivers += 1;
-      } else {
-        shiftResult.reason = lastError?.message || 'Khong tim duoc tai xe phu hop.';
-        shiftResult.status = 'SKIPPED';
-        if (wasCreated && shift?._id) {
-          await Shift.findByIdAndUpdate(
-            shift._id,
-            { $set: { status: 'ARCHIVED', updatedBy: actorId } },
-            { new: true, runValidators: true }
-          ).lean();
-          summary.archivedShifts += 1;
+        if (existingAssistant) {
+          shiftResult.assistant = existingAssistant.assistantId;
         }
-        summary.skippedShifts.push(shiftResult);
+
+        let assignedDriver = existingDriver || null;
+        let assignedAssistant = existingAssistant || null;
+        let lastError = null;
+
+        if (!assignedDriver && targetDriver) {
+          try {
+            assignedDriver = await this.assignDriverToShift(shift._id, { driverId: targetDriver._id, actorId });
+            shiftResult.driver = assignedDriver.driverId;
+            summary.assignedDrivers += 1;
+          } catch (error) {
+            lastError = error;
+          }
+        }
+
+        if (!assignedAssistant && targetAssistant) {
+          try {
+            assignedAssistant = await this.assignAssistantToShift(shift._id, { assistantId: targetAssistant._id, actorId });
+            shiftResult.assistant = assignedAssistant.assistantId;
+            summary.assignedAssistants += 1;
+          } catch (error) {
+            lastError = error;
+          }
+        }
+
+        if (assignedDriver || assignedAssistant) {
+          shiftResult.status = existingDriver || existingAssistant ? 'ALREADY_ASSIGNED' : 'ASSIGNED';
+        } else {
+          shiftResult.reason = lastError?.message || 'Khong tim duoc nhan su phu hop.';
+          shiftResult.status = 'SKIPPED';
+          if (wasCreated && shift?._id) {
+            await Shift.findByIdAndUpdate(
+              shift._id,
+              { $set: { status: 'ARCHIVED', updatedBy: actorId } },
+              { new: true, runValidators: true }
+            ).lean();
+            summary.archivedShifts += 1;
+          }
+          summary.skippedShifts.push(shiftResult);
       }
 
       summary.shifts.push(shiftResult);
+      }
     }
 
     return summary;
