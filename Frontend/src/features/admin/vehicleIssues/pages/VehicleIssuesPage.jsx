@@ -2,9 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import {
   AlertTriangle,
+  BellRing,
+  BusFront,
   ClipboardCheck,
   Eye,
   LoaderCircle,
+  MapPin,
   RefreshCcw,
   ShieldAlert,
   Wrench,
@@ -22,6 +25,7 @@ const issueTypes = [
   'engine',
   'brake',
   'tire',
+  'accident',
   'door',
   'air_conditioner',
   'gps_device',
@@ -32,6 +36,7 @@ const issueTypes = [
 ];
 const severities = ['low', 'medium', 'high', 'critical'];
 const statuses = ['new', 'reviewed', 'maintenance_required', 'no_action_needed', 'resolved', 'dismissed'];
+const emergencyStatuses = ['REPORTED', 'CONFIRMED', 'STANDBY_BUS_DISPATCHED', 'RESOLVED'];
 
 const defaultFilters = {
   page: 1,
@@ -40,6 +45,8 @@ const defaultFilters = {
   severity: '',
   vehicleId: '',
   issueType: '',
+  emergency: '',
+  emergencyStatus: '',
   startDate: '',
   endDate: '',
 };
@@ -58,6 +65,21 @@ const statusClassName = {
   no_action_needed: 'bg-secondary-container text-on-secondary-container',
   resolved: 'bg-secondary-container text-on-secondary-container',
   dismissed: 'bg-surface-container text-on-surface-variant',
+};
+
+const emergencyStatusClassName = {
+  REPORTED: 'bg-error-container text-on-error-container ring-1 ring-error/40',
+  CONFIRMED: 'bg-[#ffe0b2] text-[#7a3e00]',
+  STANDBY_BUS_DISPATCHED: 'bg-[#dbeafe] text-[#1e40af]',
+  RESOLVED: 'bg-secondary-container text-on-secondary-container',
+};
+
+const breakdownTypeLabel = {
+  ENGINE_FAILURE: 'Engine Failure',
+  BRAKE_FAILURE: 'Brake Failure',
+  FLAT_TIRE: 'Flat Tire',
+  ACCIDENT: 'Accident',
+  OTHER: 'Other',
 };
 
 const formatDateTime = (value) => {
@@ -185,8 +207,38 @@ const ReviewModal = ({ issue, action, isSaving, onClose, onSubmit }) => {
   );
 };
 
+const LocationMap = ({ location }) => {
+  const latitude = Number(location?.latitude);
+  const longitude = Number(location?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return (
+      <div className="rounded-2xl border border-dashed border-outline-variant/50 bg-surface-container-low p-6 text-center text-sm font-semibold text-on-surface-variant">
+        GPS location was not provided with this report.
+      </div>
+    );
+  }
+
+  const src = `https://maps.google.com/maps?q=${latitude},${longitude}&z=15&output=embed`;
+  return (
+    <div className="overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-low">
+      <iframe
+        title="Emergency breakdown location"
+        src={src}
+        className="h-72 w-full border-0"
+        loading="lazy"
+      />
+      <div className="flex flex-wrap gap-4 px-4 py-3 text-xs font-bold text-on-surface-variant">
+        <span>Latitude: {latitude.toFixed(6)}</span>
+        <span>Longitude: {longitude.toFixed(6)}</span>
+      </div>
+    </div>
+  );
+};
+
 const DetailDrawer = ({ issue, isLoading, onClose, onAction }) => {
   const tripAffected = ['PLANNED', 'ASSIGNED', 'IN_PROGRESS'].includes(issue?.trip?.status);
+  const emergency = issue?.emergencyBreakdown?.isEmergency ? issue.emergencyBreakdown : null;
+  const emergencyStatus = emergency?.incidentStatus;
 
   return (
     <div className="fixed inset-0 z-[60] flex justify-end bg-black/35">
@@ -225,18 +277,82 @@ const DetailDrawer = ({ issue, isLoading, onClose, onAction }) => {
               </div>
             ) : null}
 
+            {emergency ? (
+              <div className="rounded-2xl border border-error/30 bg-error-container/20 p-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-error">UC48 Emergency Breakdown</p>
+                    <h3 className="mt-2 text-xl font-headline font-black text-primary">
+                      {breakdownTypeLabel[emergency.breakdownType] || labelize(emergency.breakdownType)}
+                    </h3>
+                    <p className="mt-1 text-sm text-on-surface-variant">
+                      Reported during an active trip. Confirm the breakdown, then dispatch a standby bus.
+                    </p>
+                  </div>
+                  <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${emergencyStatusClassName[emergencyStatus] || statusClassName.new}`}>
+                    {labelize(emergencyStatus)}
+                  </span>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl bg-white px-3 py-2">
+                    <p className="text-xs font-bold uppercase text-outline">Confirmed at</p>
+                    <p className="mt-1 text-sm font-bold text-on-surface">{formatDateTime(emergency.confirmedAt)}</p>
+                  </div>
+                  <div className="rounded-xl bg-white px-3 py-2">
+                    <p className="text-xs font-bold uppercase text-outline">Dispatch time</p>
+                    <p className="mt-1 text-sm font-bold text-on-surface">{formatDateTime(emergency.dispatchTime)}</p>
+                  </div>
+                  <div className="rounded-xl bg-white px-3 py-2">
+                    <p className="text-xs font-bold uppercase text-outline">Standby bus</p>
+                    <p className="mt-1 text-sm font-bold text-on-surface">
+                      {emergency.standbyVehicle?.plateNumber || emergency.standbyVehicle?.busCode || emergency.standbyVehicleId || 'Not dispatched'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             <div className="rounded-2xl bg-surface-container-low p-4">
               <p className="text-sm leading-7 text-on-surface">{issue?.description}</p>
             </div>
 
+            {emergency ? (
+              <section>
+                <div className="mb-3 flex items-center gap-2">
+                  <MapPin className="h-5 w-5 text-error" />
+                  <h3 className="text-lg font-bold text-primary">Current Location</h3>
+                </div>
+                <LocationMap location={issue?.location} />
+              </section>
+            ) : null}
+
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => onAction('mark_reviewed')} className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-white">Mark reviewed</button>
-              <button type="button" onClick={() => onAction('no_action_needed')} className="rounded-full border px-4 py-2 text-sm font-bold">No action needed</button>
-              <button type="button" onClick={() => onAction('create_maintenance_task')} className="rounded-full border px-4 py-2 text-sm font-bold">Create maintenance task</button>
-              <button type="button" onClick={() => onAction('mark_vehicle_under_maintenance')} className="rounded-full border border-error/40 px-4 py-2 text-sm font-bold text-error">Mark vehicle under maintenance</button>
-              {tripAffected ? (
-                <button type="button" onClick={() => onAction('assign_replacement_vehicle')} className="rounded-full border px-4 py-2 text-sm font-bold">Assign replacement vehicle</button>
-              ) : null}
+              {emergency ? (
+                <>
+                  {emergencyStatus === 'REPORTED' ? (
+                    <button type="button" onClick={() => onAction('confirm_emergency')} className="rounded-full bg-error px-4 py-2 text-sm font-bold text-white">Confirm Breakdown</button>
+                  ) : null}
+                  {emergencyStatus === 'CONFIRMED' ? (
+                    <button type="button" onClick={() => onAction('dispatch_standby_bus')} className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-white">
+                      <BusFront className="h-4 w-4" />
+                      Dispatch Standby Bus
+                    </button>
+                  ) : null}
+                  {emergencyStatus === 'STANDBY_BUS_DISPATCHED' ? (
+                    <button type="button" onClick={() => onAction('resolve_emergency')} className="rounded-full bg-secondary px-4 py-2 text-sm font-bold text-white">Mark Resolved</button>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => onAction('mark_reviewed')} className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-white">Mark reviewed</button>
+                  <button type="button" onClick={() => onAction('no_action_needed')} className="rounded-full border px-4 py-2 text-sm font-bold">No action needed</button>
+                  <button type="button" onClick={() => onAction('create_maintenance_task')} className="rounded-full border px-4 py-2 text-sm font-bold">Create maintenance task</button>
+                  <button type="button" onClick={() => onAction('mark_vehicle_under_maintenance')} className="rounded-full border border-error/40 px-4 py-2 text-sm font-bold text-error">Mark vehicle under maintenance</button>
+                  {tripAffected ? (
+                    <button type="button" onClick={() => onAction('assign_replacement_vehicle')} className="rounded-full border px-4 py-2 text-sm font-bold">Assign replacement vehicle</button>
+                  ) : null}
+                </>
+              )}
             </div>
 
             <dl className="grid gap-3 sm:grid-cols-2">
@@ -301,6 +417,9 @@ const VehicleIssuesPage = () => {
     criticalIssues: 0,
     vehiclesAffected: 0,
     maintenanceRequired: 0,
+    emergencyReported: 0,
+    emergencyConfirmed: 0,
+    standbyDispatched: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
   const [selectedId, setSelectedId] = useState('');
@@ -380,10 +499,59 @@ const VehicleIssuesPage = () => {
     }
   };
 
+  const confirmEmergencyBreakdown = async () => {
+    setIsSaving(true);
+    try {
+      const response = await vehicleIssueService.confirmEmergencyBreakdown(selectedId, {
+        adminNote: 'Emergency breakdown verified by operation center.',
+      });
+      setDetail(response.data);
+      toast.success('Emergency breakdown confirmed');
+      await loadIssues();
+    } catch (error) {
+      toast.error(error.message || 'Unable to confirm emergency breakdown');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const dispatchStandbyBus = async (payload) => {
+    setIsSaving(true);
+    try {
+      const response = await vehicleIssueService.dispatchStandbyBus(selectedId, {
+        standbyVehicleId: payload.replacementVehicleId,
+        adminNote: payload.note,
+      });
+      setDetail(response.data);
+      await loadIssues();
+      return response;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const resolveEmergencyBreakdown = async () => {
+    setIsSaving(true);
+    try {
+      const response = await vehicleIssueService.resolveEmergencyBreakdown(selectedId, {
+        adminNote: 'Emergency workflow resolved after standby bus dispatch.',
+      });
+      setDetail(response.data);
+      toast.success('Emergency breakdown resolved');
+      await loadIssues();
+    } catch (error) {
+      toast.error(error.message || 'Unable to resolve emergency breakdown');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const kpis = useMemo(() => ([
     ['New issues', meta.newIssues, 'Awaiting admin review', ClipboardCheck, false],
     ['Critical issues', meta.criticalIssues, 'Safety priority', AlertTriangle, true],
     ['Vehicles affected', meta.vehiclesAffected, 'Unique vehicles in filter', ShieldAlert, false],
+    ['Emergency UC48', meta.emergencyReported + meta.emergencyConfirmed, 'Reported or confirmed breakdowns', BellRing, true],
+    ['Standby dispatched', meta.standbyDispatched, 'Passenger notification triggered', BusFront, false],
     ['Maintenance required', meta.maintenanceRequired, 'Needs workshop follow-up', Wrench, false],
   ]), [meta]);
 
@@ -398,14 +566,14 @@ const VehicleIssuesPage = () => {
         </button>
       )}
     >
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         {kpis.map(([label, value, detailText, Icon, critical]) => (
           <KpiCard key={label} label={label} value={value} detail={detailText} icon={Icon} critical={critical} />
         ))}
       </section>
 
       <section className="mt-6 rounded-2xl border border-outline-variant/35 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-8">
           <select value={filters.status} onChange={(event) => updateFilter('status', event.target.value)} className={fieldClassName}>
             <option value="">All status</option>
             {statuses.map((option) => <option key={option} value={option}>{labelize(option)}</option>)}
@@ -419,6 +587,15 @@ const VehicleIssuesPage = () => {
             {issueTypes.map((option) => <option key={option} value={option}>{labelize(option)}</option>)}
           </select>
           <input value={filters.vehicleId} onChange={(event) => updateFilter('vehicleId', event.target.value)} className={fieldClassName} placeholder="Vehicle ObjectId" />
+          <select value={filters.emergency} onChange={(event) => updateFilter('emergency', event.target.value)} className={fieldClassName}>
+            <option value="">All workflows</option>
+            <option value="true">UC48 emergency only</option>
+            <option value="false">Regular vehicle issues</option>
+          </select>
+          <select value={filters.emergencyStatus} onChange={(event) => updateFilter('emergencyStatus', event.target.value)} className={fieldClassName}>
+            <option value="">All emergency status</option>
+            {emergencyStatuses.map((option) => <option key={option} value={option}>{labelize(option)}</option>)}
+          </select>
           <input type="date" value={filters.startDate} onChange={(event) => updateFilter('startDate', event.target.value)} className={fieldClassName} />
           <input type="date" value={filters.endDate} onChange={(event) => updateFilter('endDate', event.target.value)} className={fieldClassName} />
         </div>
@@ -441,6 +618,11 @@ const VehicleIssuesPage = () => {
                 <tr key={issue._id} className={issue.severity === 'critical' ? 'bg-error-container/20' : 'hover:bg-surface-container-low/70'}>
                   <td className="px-4 py-4">
                     <p className="font-bold text-primary">{labelize(issue.issueType)}</p>
+                    {issue.emergencyBreakdown?.isEmergency ? (
+                      <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-black ${emergencyStatusClassName[issue.emergencyBreakdown.incidentStatus] || statusClassName.new}`}>
+                        UC48 {labelize(issue.emergencyBreakdown.incidentStatus)}
+                      </span>
+                    ) : null}
                     <p className="mt-1 max-w-[260px] truncate text-xs text-on-surface-variant">{issue.description}</p>
                   </td>
                   <td className="px-4 py-4">{issue.vehicle?.plateNumber || issue.vehicle?.busCode || issue.vehicleId || 'N/A'}</td>
@@ -479,6 +661,18 @@ const VehicleIssuesPage = () => {
             setDetail(null);
           }}
           onAction={(action) => {
+            if (action === 'confirm_emergency') {
+              void confirmEmergencyBreakdown();
+              return;
+            }
+            if (action === 'dispatch_standby_bus') {
+              setReplacementModalOpen(true);
+              return;
+            }
+            if (action === 'resolve_emergency') {
+              void resolveEmergencyBreakdown();
+              return;
+            }
             if (action === 'assign_replacement_vehicle') {
               setReplacementModalOpen(true);
               return;
@@ -500,9 +694,9 @@ const VehicleIssuesPage = () => {
         open={replacementModalOpen}
         tripId={detail?.tripId}
         requiredCapacity={detail?.vehicle?.capacity}
-        title="Assign Replacement Vehicle"
+        title={detail?.emergencyBreakdown?.isEmergency ? 'Dispatch Standby Bus' : 'Assign Replacement Vehicle'}
         onClose={() => setReplacementModalOpen(false)}
-        onConfirm={submitIssueReplacement}
+        onConfirm={detail?.emergencyBreakdown?.isEmergency ? dispatchStandbyBus : submitIssueReplacement}
         onAssigned={() => {
           setReplacementModalOpen(false);
         }}

@@ -4,6 +4,7 @@ import { asyncHandler } from '../../middleware/errorHandler.js';
 import validateRequest from '../../middleware/validateRequest.js';
 import VehicleIssueController from './vehicleIssue.controller.js';
 import {
+  validateEmergencyBreakdownDispatch,
   validateVehicleIssueIdParam,
   validateVehicleIssueListQuery,
   validateVehicleIssueReview,
@@ -30,6 +31,25 @@ router.patch(
   validateRequest(validateVehicleIssueIdParam, 'params'),
   validateRequest(validateVehicleIssueReview),
   asyncHandler(VehicleIssueController.reviewIssue)
+);
+
+router.patch(
+  '/:id/emergency/confirm',
+  validateRequest(validateVehicleIssueIdParam, 'params'),
+  asyncHandler(VehicleIssueController.confirmEmergencyBreakdown)
+);
+
+router.patch(
+  '/:id/emergency/dispatch-standby-bus',
+  validateRequest(validateVehicleIssueIdParam, 'params'),
+  validateRequest(validateEmergencyBreakdownDispatch),
+  asyncHandler(VehicleIssueController.dispatchStandbyBus)
+);
+
+router.patch(
+  '/:id/emergency/resolve',
+  validateRequest(validateVehicleIssueIdParam, 'params'),
+  asyncHandler(VehicleIssueController.resolveEmergencyBreakdown)
 );
 
 export default router;

@@ -19,6 +19,18 @@ export const vehicleIssueService = {
   reviewIssue(id, payload) {
     return apiClient.patch(`/admin/vehicle-issues/${id}/review`, payload);
   },
+
+  confirmEmergencyBreakdown(id, payload = {}) {
+    return apiClient.patch(`/admin/vehicle-issues/${id}/emergency/confirm`, payload);
+  },
+
+  dispatchStandbyBus(id, payload = {}) {
+    return apiClient.patch(`/admin/vehicle-issues/${id}/emergency/dispatch-standby-bus`, payload);
+  },
+
+  resolveEmergencyBreakdown(id, payload = {}) {
+    return apiClient.patch(`/admin/vehicle-issues/${id}/emergency/resolve`, payload);
+  },
 };
 
 export default vehicleIssueService;

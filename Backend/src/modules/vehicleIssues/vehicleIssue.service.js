@@ -2,7 +2,10 @@ import mongoose from 'mongoose';
 import { HTTP_STATUS, PAGINATION } from '../../constants/index.js';
 import { CustomError } from '../../middleware/errorHandler.js';
 import FleetBus from '../admin/FleetBus.js';
+import TripSchedule from '../admin/TripSchedule.js';
 import Vehicle from '../fleetOperations/Vehicle.js';
+import PassengerTicket from '../tickets/Ticket.js';
+import { createBroadcastNotification } from '../systemNotifications/systemNotification.service.js';
 import VehicleReassignmentService from '../vehicleReassignments/vehicleReassignment.service.js';
 import VehicleIssue from './VehicleIssue.js';
 import MaintenanceTask from './MaintenanceTask.js';
@@ -47,6 +50,10 @@ const normalizeIssueType = (value) => {
     BRAKE: 'brake',
     BRAKES: 'brake',
     TIRE: 'tire',
+    FLAT_TIRE: 'tire',
+    ENGINE_FAILURE: 'engine',
+    BRAKE_FAILURE: 'brake',
+    ACCIDENT: 'accident',
     TIRES: 'tire',
     DOOR: 'door',
     AIR_CONDITIONER: 'air_conditioner',
@@ -60,6 +67,34 @@ const normalizeIssueType = (value) => {
   };
   return legacyMap[String(value || '').trim().toUpperCase()] || normalized || 'other';
 };
+
+const normalizeBreakdownType = (value) => {
+  const normalized = String(value || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  const map = {
+    ENGINE: 'ENGINE_FAILURE',
+    ENGINE_FAILURE: 'ENGINE_FAILURE',
+    BRAKE: 'BRAKE_FAILURE',
+    BRAKES: 'BRAKE_FAILURE',
+    BRAKE_FAILURE: 'BRAKE_FAILURE',
+    TIRE: 'FLAT_TIRE',
+    FLAT_TIRE: 'FLAT_TIRE',
+    ACCIDENT: 'ACCIDENT',
+    OTHER: 'OTHER',
+  };
+  return map[normalized] || 'OTHER';
+};
+
+const issueTypeFromBreakdownType = (breakdownType) => ({
+  ENGINE_FAILURE: 'engine',
+  BRAKE_FAILURE: 'brake',
+  FLAT_TIRE: 'tire',
+  ACCIDENT: 'accident',
+  OTHER: 'other',
+}[breakdownType] || 'other');
+
+const severityFromBreakdownType = (breakdownType) => (
+  ['BRAKE_FAILURE', 'ACCIDENT'].includes(breakdownType) ? 'critical' : 'high'
+);
 
 const normalizeSeverity = (value) => {
   const severity = String(value || '').trim().toLowerCase();
@@ -77,6 +112,20 @@ const buildFilter = (query = {}) => {
 
   if (query.vehicleId) {
     filter.vehicleId = new mongoose.Types.ObjectId(query.vehicleId);
+  }
+
+  if (query.emergency === 'true' || query.emergency === '1') {
+    filter['emergencyBreakdown.isEmergency'] = true;
+  }
+  if (query.emergency === 'false' || query.emergency === '0') {
+    filter.$or = [
+      { 'emergencyBreakdown.isEmergency': { $ne: true } },
+      { emergencyBreakdown: { $exists: false } },
+    ];
+  }
+
+  if (query.emergencyStatus) {
+    filter['emergencyBreakdown.incidentStatus'] = query.emergencyStatus;
   }
 
   if (query.startDate || query.endDate) {
@@ -140,6 +189,15 @@ const formatIssue = (issue) => ({
   tripId: issue.tripId?._id || issue.tripId,
   reportedBy: safeUser(issue.reportedBy),
   reviewedBy: safeUser(issue.reviewedBy),
+  emergencyBreakdown: issue.emergencyBreakdown
+    ? {
+      ...issue.emergencyBreakdown,
+      standbyVehicle: safeVehicle(issue.emergencyBreakdown.standbyVehicleId),
+      standbyVehicleId: issue.emergencyBreakdown.standbyVehicleId?._id || issue.emergencyBreakdown.standbyVehicleId || null,
+      assignedDriver: safeUser(issue.emergencyBreakdown.assignedDriverId),
+      assignedDriverId: issue.emergencyBreakdown.assignedDriverId?._id || issue.emergencyBreakdown.assignedDriverId || null,
+    }
+    : null,
   reviewHistory: (issue.reviewHistory || []).map((entry) => ({
     ...entry,
     reviewedBy: safeUser(entry.reviewedBy),
@@ -164,6 +222,76 @@ const logAudit = async ({ action, actorId, issueId, metadata = {} }) => {
 };
 
 export class VehicleIssueService {
+  static async createEmergencyBreakdownFromOperationIncident({
+    assignment,
+    userId,
+    payload = {},
+    operationIncident = null,
+    io = null,
+  }) {
+    const vehicleId = assignment?.trip?.vehicle?.busId;
+    const tripId = assignment?.trip?._id;
+    if (!vehicleId || !tripId) return null;
+
+    const breakdownType = normalizeBreakdownType(payload.breakdownType || payload.issueType || payload.issueCategory);
+    const latitude = Number(payload.latitude);
+    const longitude = Number(payload.longitude);
+    const locationText = String(payload.locationText || payload.location || '').trim()
+      || assignment.trip.routeName
+      || assignment.trip.scheduleCode
+      || '';
+
+    const issue = await VehicleIssue.create({
+      vehicleId,
+      tripId,
+      reportedBy: userId,
+      reportedAt: operationIncident?.reportedAt || new Date(),
+      issueType: issueTypeFromBreakdownType(breakdownType),
+      severity: severityFromBreakdownType(breakdownType),
+      description: String(payload.description || '').trim(),
+      photos: (operationIncident?.evidenceFiles || []).map((file) => file.url).filter(Boolean),
+      location: {
+        text: locationText,
+        latitude: Number.isFinite(latitude) ? latitude : null,
+        longitude: Number.isFinite(longitude) ? longitude : null,
+      },
+      status: 'new',
+      emergencyBreakdown: {
+        isEmergency: true,
+        breakdownType,
+        incidentStatus: 'REPORTED',
+        sourceIncidentId: operationIncident?._id || null,
+      },
+    });
+
+    await this.markVehicleUnderMaintenance(vehicleId);
+
+    try {
+      await createBroadcastNotification({
+        title: 'Emergency vehicle breakdown reported',
+        message: `Driver reported ${breakdownType.replaceAll('_', ' ').toLowerCase()} on trip ${assignment.trip.scheduleCode || tripId}.`,
+        type: 'emergency',
+        priority: 'urgent',
+        targetAudience: 'admins',
+        tripId,
+        sourceType: 'UC48_EMERGENCY_BREAKDOWN',
+        sourceId: issue._id,
+        metadata: {
+          issueId: String(issue._id),
+          tripId: String(tripId),
+          vehicleId: String(vehicleId),
+          breakdownType,
+        },
+      }, userId, io);
+    } catch {
+      // The emergency issue itself must still be stored even if realtime notification fails.
+    }
+
+    io?.to('fleet:operations').emit('server:vehicleIssue:emergencyReported', issue);
+    io?.emit('server:vehicleIssue:emergencyReported', issue);
+    return issue;
+  }
+
   static async createFromDriverReport({ assignment, inspection, userId, payload = {} }) {
     const vehicleId = assignment?.trip?.vehicle?.busId;
     if (!vehicleId) {
@@ -210,6 +338,8 @@ export class VehicleIssueService {
         .populate('vehicleId')
         .populate('tripId')
         .populate('reportedBy', 'fullName email phoneNumber role')
+        .populate('emergencyBreakdown.standbyVehicleId')
+        .populate('emergencyBreakdown.assignedDriverId', 'fullName email phoneNumber role')
         .sort({ severity: 1, reportedAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -223,6 +353,15 @@ export class VehicleIssueService {
             criticalIssues: { $sum: { $cond: [{ $eq: ['$severity', 'critical'] }, 1, 0] } },
             maintenanceRequired: {
               $sum: { $cond: [{ $eq: ['$status', 'maintenance_required'] }, 1, 0] },
+            },
+            emergencyReported: {
+              $sum: { $cond: [{ $eq: ['$emergencyBreakdown.incidentStatus', 'REPORTED'] }, 1, 0] },
+            },
+            emergencyConfirmed: {
+              $sum: { $cond: [{ $eq: ['$emergencyBreakdown.incidentStatus', 'CONFIRMED'] }, 1, 0] },
+            },
+            standbyDispatched: {
+              $sum: { $cond: [{ $eq: ['$emergencyBreakdown.incidentStatus', 'STANDBY_BUS_DISPATCHED'] }, 1, 0] },
             },
           },
         },
@@ -243,6 +382,9 @@ export class VehicleIssueService {
         criticalIssues: counts[0]?.criticalIssues || 0,
         vehiclesAffected: affectedVehicles.length,
         maintenanceRequired: counts[0]?.maintenanceRequired || 0,
+        emergencyReported: counts[0]?.emergencyReported || 0,
+        emergencyConfirmed: counts[0]?.emergencyConfirmed || 0,
+        standbyDispatched: counts[0]?.standbyDispatched || 0,
       },
     };
   }
@@ -253,6 +395,8 @@ export class VehicleIssueService {
       .populate('tripId')
       .populate('reportedBy', 'fullName email phoneNumber role')
       .populate('reviewedBy', 'fullName email phoneNumber role')
+      .populate('emergencyBreakdown.standbyVehicleId')
+      .populate('emergencyBreakdown.assignedDriverId', 'fullName email phoneNumber role')
       .populate('reviewHistory.reviewedBy', 'fullName email phoneNumber role')
       .lean();
 
@@ -352,6 +496,168 @@ export class VehicleIssueService {
     );
 
     return result.reassignmentLog?.newVehicleId || replacementVehicleId;
+  }
+
+  static assertEmergencyIssue(issue) {
+    if (!issue?.emergencyBreakdown?.isEmergency) {
+      throw new CustomError('This vehicle issue is not an emergency breakdown', HTTP_STATUS.CONFLICT);
+    }
+  }
+
+  static async confirmEmergencyBreakdown(id, payload, actor, io = null) {
+    const issue = await VehicleIssue.findById(id);
+    if (!issue) throw new CustomError('Vehicle issue not found', HTTP_STATUS.NOT_FOUND);
+    this.assertEmergencyIssue(issue);
+    if (issue.emergencyBreakdown.incidentStatus !== 'REPORTED') {
+      throw new CustomError('Only reported breakdowns can be confirmed', HTTP_STATUS.CONFLICT);
+    }
+
+    issue.emergencyBreakdown.incidentStatus = 'CONFIRMED';
+    issue.emergencyBreakdown.confirmedAt = new Date();
+    issue.status = 'reviewed';
+    issue.decision = 'mark_reviewed';
+    issue.adminNote = String(payload.adminNote || issue.adminNote || '').trim();
+    issue.reviewedBy = actor.userId;
+    issue.reviewedAt = new Date();
+    issue.reviewHistory.push({
+      fromStatus: 'new',
+      toStatus: 'reviewed',
+      decision: 'mark_reviewed',
+      adminNote: issue.adminNote,
+      reviewedBy: actor.userId,
+      reviewedAt: new Date(),
+    });
+    await issue.save();
+
+    const updated = await this.getIssueById(id, actor);
+    io?.to('fleet:operations').emit('server:vehicleIssue:emergencyConfirmed', updated);
+    io?.emit('server:vehicleIssue:emergencyConfirmed', updated);
+    return updated;
+  }
+
+  static async resolveTripPassengerIds(issue) {
+    const trip = await TripSchedule.findById(issue.tripId).lean();
+    const tripKeys = [
+      issue.tripId ? String(issue.tripId) : '',
+      trip?.scheduleCode || '',
+    ].filter(Boolean);
+
+    if (!tripKeys.length) return [];
+
+    const tickets = await PassengerTicket.find({
+      tripId: { $in: tripKeys },
+      bookingStatus: 'SUCCESS',
+      paymentStatus: 'PAID',
+      ticketStatus: { $nin: ['CANCELLED', 'REFUNDED'] },
+    }).select('passenger').lean();
+
+    return [...new Set(tickets.map((ticket) => String(ticket.passenger)).filter(Boolean))];
+  }
+
+  static async dispatchStandbyBus(id, payload, actor, io = null) {
+    const issue = await VehicleIssue.findById(id);
+    if (!issue) throw new CustomError('Vehicle issue not found', HTTP_STATUS.NOT_FOUND);
+    this.assertEmergencyIssue(issue);
+    if (issue.emergencyBreakdown.incidentStatus !== 'CONFIRMED') {
+      throw new CustomError('Confirm the breakdown before dispatching a standby bus', HTTP_STATUS.CONFLICT);
+    }
+    if (!payload.standbyVehicleId || !mongoose.isValidObjectId(payload.standbyVehicleId)) {
+      throw new CustomError('Standby vehicle is required', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const dispatchedVehicleId = await this.assignReplacementVehicle(
+      issue,
+      payload.standbyVehicleId,
+      actor,
+      payload.adminNote || 'Standby bus dispatched for emergency breakdown.',
+      {
+        reason: 'breakdown',
+        note: payload.adminNote || 'Standby bus dispatched for emergency breakdown.',
+        notifyStaff: true,
+        notifyPassengers: false,
+      },
+      io
+    );
+
+    const passengerIds = await this.resolveTripPassengerIds(issue);
+    let notification = null;
+    if (passengerIds.length) {
+      notification = await createBroadcastNotification({
+        title: 'Standby bus dispatched',
+        message: 'Your bus has encountered a technical issue.\nA standby bus has been dispatched and will continue your journey shortly.\nWe sincerely apologize for the inconvenience.',
+        type: 'emergency',
+        priority: 'urgent',
+        targetAudience: 'specific_users',
+        userIds: passengerIds,
+        tripId: issue.tripId,
+        sourceType: 'UC48_STANDBY_BUS_DISPATCHED',
+        sourceId: issue._id,
+        metadata: {
+          issueId: String(issue._id),
+          standbyVehicleId: String(dispatchedVehicleId || payload.standbyVehicleId),
+        },
+      }, actor.userId, io);
+    }
+
+    issue.emergencyBreakdown.incidentStatus = 'STANDBY_BUS_DISPATCHED';
+    issue.emergencyBreakdown.standbyVehicleId = dispatchedVehicleId || payload.standbyVehicleId;
+    issue.emergencyBreakdown.assignedDriverId = payload.assignedDriverId || null;
+    issue.emergencyBreakdown.dispatchTime = new Date();
+    issue.emergencyBreakdown.passengerNotificationId = notification?._id || null;
+    issue.emergencyBreakdown.notificationSentAt = notification?.deliverySummary?.sentAt || (notification ? new Date() : null);
+    issue.replacementVehicleId = dispatchedVehicleId || payload.standbyVehicleId;
+    issue.status = 'maintenance_required';
+    issue.decision = 'assign_replacement_vehicle';
+    issue.adminNote = String(payload.adminNote || issue.adminNote || '').trim();
+    issue.reviewedBy = actor.userId;
+    issue.reviewedAt = new Date();
+    issue.reviewHistory.push({
+      fromStatus: 'reviewed',
+      toStatus: 'maintenance_required',
+      decision: 'assign_replacement_vehicle',
+      adminNote: issue.adminNote,
+      reviewedBy: actor.userId,
+      reviewedAt: new Date(),
+      actions: {
+        assignedReplacementVehicle: dispatchedVehicleId || payload.standbyVehicleId,
+      },
+    });
+    await issue.save();
+
+    const updated = await this.getIssueById(id, actor);
+    io?.to('fleet:operations').emit('server:vehicleIssue:standbyDispatched', updated);
+    io?.emit('server:vehicleIssue:standbyDispatched', updated);
+    return updated;
+  }
+
+  static async resolveEmergencyBreakdown(id, payload, actor, io = null) {
+    const issue = await VehicleIssue.findById(id);
+    if (!issue) throw new CustomError('Vehicle issue not found', HTTP_STATUS.NOT_FOUND);
+    this.assertEmergencyIssue(issue);
+    if (issue.emergencyBreakdown.incidentStatus !== 'STANDBY_BUS_DISPATCHED') {
+      throw new CustomError('A standby bus must be dispatched before resolving this emergency', HTTP_STATUS.CONFLICT);
+    }
+
+    issue.emergencyBreakdown.incidentStatus = 'RESOLVED';
+    issue.status = 'resolved';
+    issue.decision = 'resolved';
+    issue.adminNote = String(payload.adminNote || issue.adminNote || '').trim();
+    issue.reviewedBy = actor.userId;
+    issue.reviewedAt = new Date();
+    issue.reviewHistory.push({
+      fromStatus: 'maintenance_required',
+      toStatus: 'resolved',
+      decision: 'resolved',
+      adminNote: issue.adminNote,
+      reviewedBy: actor.userId,
+      reviewedAt: new Date(),
+    });
+    await issue.save();
+
+    const updated = await this.getIssueById(id, actor);
+    io?.to('fleet:operations').emit('server:vehicleIssue:emergencyResolved', updated);
+    io?.emit('server:vehicleIssue:emergencyResolved', updated);
+    return updated;
   }
 
   static async reviewIssue(id, payload, actor, io) {

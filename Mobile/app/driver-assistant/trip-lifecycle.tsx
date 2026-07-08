@@ -48,6 +48,7 @@ type RouteInstruction = {
 
 type DriverIncidentType = 'TRAFFIC_CONGESTION' | 'ACCIDENT' | 'VEHICLE_BREAKDOWN';
 type IncidentSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+type BreakdownType = 'ENGINE_FAILURE' | 'BRAKE_FAILURE' | 'FLAT_TIRE' | 'ACCIDENT' | 'OTHER';
 type EvidenceFile = {
   uri: string;
   name?: string;
@@ -78,8 +79,8 @@ const DRIVER_INCIDENT_OPTIONS: Array<{
   {
     type: 'VEHICLE_BREAKDOWN',
     code: 'UC48',
-    label: 'Bao xe hong',
-    description: 'Bao xe hong trong chuyen, can ho tro ky thuat hoac xe thay the.',
+    label: 'Emergency Breakdown',
+    description: 'Bao xe hong khan cap va yeu cau dieu hanh dieu xe du phong.',
     icon: 'bus-alert',
   },
 ];
@@ -99,6 +100,14 @@ const TRAFFIC_CATEGORIES = [
   { value: 'STOP_OVERLOAD', label: 'Diem dung qua tai' },
   { value: 'TEMPORARY_BLOCK', label: 'Duong bi chan tam thoi' },
   { value: 'OTHER', label: 'Khac' },
+];
+
+const BREAKDOWN_TYPES: Array<{ value: BreakdownType; label: string }> = [
+  { value: 'ENGINE_FAILURE', label: 'Engine Failure' },
+  { value: 'BRAKE_FAILURE', label: 'Brake Failure' },
+  { value: 'FLAT_TIRE', label: 'Flat Tire' },
+  { value: 'ACCIDENT', label: 'Accident' },
+  { value: 'OTHER', label: 'Other' },
 ];
 
 const isValidRouteCoordinate = (point: RoutePoint) => (
@@ -554,8 +563,7 @@ export default function TripLifecycleScreen() {
   const [estimatedDelayMinutes, setEstimatedDelayMinutes] = useState('10');
   const [injuriesReported, setInjuriesReported] = useState(false);
   const [policeNotified, setPoliceNotified] = useState(false);
-  const [canVehicleContinue, setCanVehicleContinue] = useState(true);
-  const [requiresReplacementVehicle, setRequiresReplacementVehicle] = useState(false);
+  const [breakdownType, setBreakdownType] = useState<BreakdownType>('ENGINE_FAILURE');
   const [incidentDescription, setIncidentDescription] = useState('');
   const [evidenceFiles, setEvidenceFiles] = useState<EvidenceFile[]>([]);
   const [routeInfo, setRouteInfo] = useState<RouteInstruction>({
@@ -589,7 +597,7 @@ export default function TripLifecycleScreen() {
   const canReportIncident = Boolean(
     incidentType
     && isTripInProgress
-    && incidentLocation.trim().length >= 3
+    && (incidentType === 'VEHICLE_BREAKDOWN' || incidentLocation.trim().length >= 3)
     && incidentDescription.trim().length >= 10
     && !processingAction
   );
@@ -768,16 +776,21 @@ export default function TripLifecycleScreen() {
       Alert.alert('Can mo ta su co', 'Vui long nhap it nhat 10 ky tu.');
       return;
     }
-    if (incidentLocation.trim().length < 3) {
+    if (incidentType !== 'VEHICLE_BREAKDOWN' && incidentLocation.trim().length < 3) {
       Alert.alert('Can vi tri su co', 'Vui long nhap vi tri su co.');
       return;
     }
+    const autoLocation = currentGps?.latitude != null && currentGps?.longitude != null
+      ? `${formatCoordinate(currentGps.latitude)}, ${formatCoordinate(currentGps.longitude)}`
+      : trip?.route?.name || trip?.tripCode || 'Current GPS location';
 
     const payload: Record<string, unknown> = {
       type: incidentType,
       severity: incidentType === 'ACCIDENT' && incidentSeverity === 'LOW' ? 'MEDIUM' : incidentSeverity,
       description,
-      locationText: incidentLocation.trim(),
+      locationText: incidentType === 'VEHICLE_BREAKDOWN'
+        ? (incidentLocation.trim() || autoLocation)
+        : incidentLocation.trim(),
       latitude: currentGps?.latitude,
       longitude: currentGps?.longitude,
       evidenceFiles,
@@ -795,8 +808,9 @@ export default function TripLifecycleScreen() {
     }
 
     if (incidentType === 'VEHICLE_BREAKDOWN') {
-      payload.canContinue = canVehicleContinue;
-      payload.requiresReplacementVehicle = requiresReplacementVehicle;
+      payload.breakdownType = breakdownType;
+      payload.canContinue = false;
+      payload.requiresReplacementVehicle = true;
     }
 
     setProcessingAction('incident');
@@ -1069,15 +1083,25 @@ export default function TripLifecycleScreen() {
               ) : null}
 
               {incidentType === 'VEHICLE_BREAKDOWN' ? (
-                <View style={styles.checkboxGrid}>
-                  <Pressable style={styles.checkboxRow} onPress={() => setCanVehicleContinue((value) => !value)}>
-                    <MaterialCommunityIcons color={canVehicleContinue ? colors.error : colors.muted} name={canVehicleContinue ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} />
-                    <Text style={styles.checkboxText}>Xe con co the tiep tuc chay</Text>
-                  </Pressable>
-                  <Pressable style={styles.checkboxRow} onPress={() => setRequiresReplacementVehicle((value) => !value)}>
-                    <MaterialCommunityIcons color={requiresReplacementVehicle ? colors.error : colors.muted} name={requiresReplacementVehicle ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} />
-                    <Text style={styles.checkboxText}>Can xe thay the</Text>
-                  </Pressable>
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>Breakdown Type</Text>
+                  <View style={styles.optionGrid}>
+                    {BREAKDOWN_TYPES.map((type) => {
+                      const isActive = breakdownType === type.value;
+                      return (
+                        <Pressable
+                          key={type.value}
+                          accessibilityRole="button"
+                          disabled={!isTripInProgress || Boolean(processingAction)}
+                          onPress={() => setBreakdownType(type.value)}
+                          style={[styles.optionChipWide, isActive && styles.optionChipDanger]}
+                        >
+                          <Text style={[styles.optionChipText, isActive && styles.optionChipTextDanger]}>{type.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  <Text style={styles.fileHelp}>GPS hien tai, ma chuyen, xe, tai xe va thoi gian se duoc gui tu dong.</Text>
                 </View>
               ) : null}
 
@@ -1312,6 +1336,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   optionWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  optionGrid: { gap: 8 },
   optionChip: {
     minHeight: 40,
     justifyContent: 'center',
@@ -1331,9 +1356,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   optionChipActive: { borderColor: colors.error, backgroundColor: colors.error },
+  optionChipDanger: { borderColor: colors.error, backgroundColor: colors.error },
   optionChipDisabled: { opacity: 0.35 },
   optionChipText: { color: colors.text, fontSize: 12, fontWeight: '800' },
   optionChipTextActive: { color: colors.white },
+  optionChipTextDanger: { color: colors.white },
   checkboxGrid: { gap: 10 },
   checkboxRow: {
     minHeight: 48,

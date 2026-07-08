@@ -31,6 +31,36 @@ export class VehicleIssueController {
     );
     return res.success(issue, 'Vehicle issue reviewed successfully');
   }
+
+  static async confirmEmergencyBreakdown(req, res) {
+    const issue = await VehicleIssueService.confirmEmergencyBreakdown(
+      req.params.id,
+      req.body,
+      req.user,
+      req.app?.io
+    );
+    return res.success(issue, 'Emergency breakdown confirmed successfully');
+  }
+
+  static async dispatchStandbyBus(req, res) {
+    const issue = await VehicleIssueService.dispatchStandbyBus(
+      req.params.id,
+      req.body,
+      req.user,
+      req.app?.io
+    );
+    return res.success(issue, 'Standby bus dispatched successfully');
+  }
+
+  static async resolveEmergencyBreakdown(req, res) {
+    const issue = await VehicleIssueService.resolveEmergencyBreakdown(
+      req.params.id,
+      req.body,
+      req.user,
+      req.app?.io
+    );
+    return res.success(issue, 'Emergency breakdown resolved successfully');
+  }
 }
 
 export default VehicleIssueController;

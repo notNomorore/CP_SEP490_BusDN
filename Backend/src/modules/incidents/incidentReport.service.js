@@ -171,6 +171,7 @@ const operationIncidentTitle = (incident) => {
     VEHICLE_ISSUE: 'Báo lỗi xe trước chuyến',
     TRAFFIC_CONGESTION: 'Báo kẹt xe',
     ACCIDENT: 'Báo tai nạn',
+    VEHICLE_BREAKDOWN: 'Báo xe hỏng khẩn cấp',
     PASSENGER_VIOLATION: 'Báo hành khách vi phạm',
     PASSENGER_CONFLICT: 'Báo xung đột hành khách',
     FOUND_ITEM: 'Báo đồ tìm thấy',
@@ -283,6 +284,12 @@ const operationIncidentDescription = (incident) => [
     : '',
   incident.type === 'ACCIDENT'
     ? `Đã báo cơ quan chức năng: ${incident.policeNotified ? 'Có' : 'Không'}.`
+    : '',
+  incident.type === 'VEHICLE_BREAKDOWN'
+    ? `Xe có thể tiếp tục: ${incident.canContinue === true ? 'Có' : 'Không'}.`
+    : '',
+  incident.type === 'VEHICLE_BREAKDOWN'
+    ? `Cần xe dự phòng: ${incident.requiresReplacementVehicle ? 'Có' : 'Không'}.`
     : '',
   incident.type === 'PASSENGER_VIOLATION'
     ? `Loại vi phạm: ${incident.passengerViolation?.violationCategory || 'OTHER'}.`
@@ -398,7 +405,7 @@ export class IncidentReportService {
   static async syncOperationalSources() {
     const [operationIncidents] = await Promise.all([
       OperationIncident.find({
-        type: { $in: ['TRIP_REJECTION', 'VEHICLE_ISSUE', 'TRAFFIC_CONGESTION', 'ACCIDENT', 'PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'] },
+        type: { $in: ['TRIP_REJECTION', 'VEHICLE_ISSUE', 'TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN', 'PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'] },
         driver: { $ne: null },
       }).sort({ reportedAt: -1, updatedAt: -1 }).limit(300).lean(),
     ]);

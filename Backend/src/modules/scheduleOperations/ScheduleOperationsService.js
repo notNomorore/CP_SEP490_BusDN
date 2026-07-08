@@ -152,6 +152,7 @@ const BUS_ASSISTANT_INCIDENT_TYPES = [
   'FOUND_ITEM',
 ];
 const INCIDENT_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+const BREAKDOWN_TYPES = ['ENGINE_FAILURE', 'BRAKE_FAILURE', 'FLAT_TIRE', 'ACCIDENT', 'OTHER'];
 
 const normalizeStartGpsPayload = (payload = {}, startedAt = new Date()) => {
   const latitude = Number(payload.latitude);
@@ -1334,7 +1335,7 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    if (locationText.length < 3) {
+    if (type !== 'VEHICLE_BREAKDOWN' && locationText.length < 3) {
       const error = new Error('Incident location is required');
       error.statusCode = 400;
       throw error;
@@ -1367,8 +1368,8 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    if (type === 'VEHICLE_BREAKDOWN' && parseBoolean(payload.canContinue) === null) {
-      const error = new Error('Vehicle breakdown report must specify whether the vehicle can continue');
+    if (type === 'VEHICLE_BREAKDOWN' && !BREAKDOWN_TYPES.includes(payload.breakdownType || '')) {
+      const error = new Error('Vehicle breakdown type is invalid');
       error.statusCode = 400;
       throw error;
     }
@@ -1611,16 +1612,26 @@ export class ScheduleOperationsService {
     });
 
     if (type === 'VEHICLE_BREAKDOWN') {
+      await VehicleIssueService.createEmergencyBreakdownFromOperationIncident({
+        assignment,
+        userId,
+        payload,
+        operationIncident: incident,
+      });
+    }
+
+    if (type === 'VEHICLE_BREAKDOWN') {
       await FleetBus.updateOne(
         { _id: getScheduleVehicleId(assignment.trip) },
         { $set: { status: 'MAINTENANCE' } }
       );
     }
 
-    if (['TRAFFIC_CONGESTION', 'ACCIDENT', 'PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'].includes(type)) {
+    if (['TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN', 'PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'].includes(type)) {
       const titleLabel = {
         TRAFFIC_CONGESTION: 'Báo kẹt xe',
         ACCIDENT: 'Báo tai nạn',
+        VEHICLE_BREAKDOWN: 'Báo xe hỏng khẩn cấp',
         PASSENGER_VIOLATION: 'Báo hành khách vi phạm',
         PASSENGER_CONFLICT: 'Báo xung đột hành khách',
         FOUND_ITEM: 'Báo đồ tìm thấy',
@@ -1652,6 +1663,12 @@ export class ScheduleOperationsService {
             : '',
           type === 'ACCIDENT'
             ? `Đã báo cơ quan chức năng: ${payload.policeNotified ? 'Có' : 'Không'}.`
+            : '',
+          type === 'VEHICLE_BREAKDOWN'
+            ? `Loại xe hỏng: ${payload.breakdownType}.`
+            : '',
+          type === 'VEHICLE_BREAKDOWN'
+            ? `Cần xe dự phòng: Có.`
             : '',
           type === 'PASSENGER_VIOLATION'
             ? `Loại vi phạm: ${payload.violationCategory}.`
