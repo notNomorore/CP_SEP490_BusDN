@@ -82,6 +82,20 @@ const breakdownTypeLabel = {
   OTHER: 'Other',
 };
 
+const emergencyNextActionLabel = {
+  REPORTED: 'Confirm Breakdown',
+  CONFIRMED: 'Dispatch Standby Bus',
+  STANDBY_BUS_DISPATCHED: 'Mark Resolved',
+  RESOLVED: 'View Detail',
+};
+
+const emergencyStepLabel = {
+  REPORTED: 'Step 1 of 3',
+  CONFIRMED: 'Step 2 of 3',
+  STANDBY_BUS_DISPATCHED: 'Step 3 of 3',
+  RESOLVED: 'Resolved',
+};
+
 const formatDateTime = (value) => {
   if (!value) return 'N/A';
   try {
@@ -91,7 +105,16 @@ const formatDateTime = (value) => {
   }
 };
 
+const formatWorkflowDateTime = (value, fallback) => (value ? formatDateTime(value) : fallback);
+
 const labelize = (value) => String(value || 'N/A').replaceAll('_', ' ');
+
+const emergencyGuidance = {
+  REPORTED: 'Bước tiếp theo: xác nhận sự cố xe hỏng trước khi điều xe dự phòng.',
+  CONFIRMED: 'Bước tiếp theo: chọn xe dự phòng và dispatch để tiếp tục hành trình.',
+  STANDBY_BUS_DISPATCHED: 'Xe dự phòng đã được điều phối. Đánh dấu hoàn tất khi sự cố đã xử lý xong.',
+  RESOLVED: 'Sự cố đã được xử lý xong.',
+};
 
 const KpiCard = ({ label, value, detail, icon: Icon, critical = false }) => (
   <div className={`rounded-2xl border bg-white p-4 shadow-sm ${critical ? 'border-error/40' : 'border-outline-variant/35'}`}>
@@ -105,6 +128,96 @@ const KpiCard = ({ label, value, detail, icon: Icon, critical = false }) => (
     <p className="mt-1 text-sm text-on-surface-variant">{detail}</p>
   </div>
 );
+
+const VehicleIssueQueueCard = ({ issue, onOpen }) => {
+  const emergency = issue.emergencyBreakdown?.isEmergency ? issue.emergencyBreakdown : null;
+  const emergencyStatus = emergency?.incidentStatus;
+  const vehicleLabel = issue.vehicle?.plateNumber || issue.vehicle?.busCode || issue.vehicleId || 'N/A';
+  const tripLabel = issue.trip?.scheduleCode || issue.tripId || 'N/A';
+  const driverLabel = issue.reportedBy?.fullName || issue.trip?.driver?.fullName || 'Unknown';
+  const issueLabel = emergency
+    ? breakdownTypeLabel[emergency.breakdownType] || labelize(emergency.breakdownType)
+    : labelize(issue.issueType);
+  const nextAction = emergency
+    ? emergencyNextActionLabel[emergencyStatus] || 'View Detail'
+    : 'Review Issue';
+  const workflowPercent = emergencyStatus === 'REPORTED'
+    ? '33%'
+    : emergencyStatus === 'CONFIRMED'
+      ? '66%'
+      : '100%';
+
+  return (
+    <article className={`rounded-2xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+      issue.severity === 'critical' || emergency ? 'border-error/30' : 'border-outline-variant/35'
+    }`}>
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {emergency ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-error px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.12em] text-white">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                UC48 Emergency
+              </span>
+            ) : null}
+            <span className={`rounded-full px-2.5 py-1 text-xs font-black ${severityClassName[issue.severity] || severityClassName.medium}`}>
+              {labelize(issue.severity)}
+            </span>
+            {emergency ? (
+              <span className={`rounded-full px-2.5 py-1 text-xs font-black ${emergencyStatusClassName[emergencyStatus] || statusClassName.new}`}>
+                {labelize(emergencyStatus)}
+              </span>
+            ) : (
+              <span className={`rounded-full px-2.5 py-1 text-xs font-black ${statusClassName[issue.status] || statusClassName.new}`}>
+                {labelize(issue.status)}
+              </span>
+            )}
+          </div>
+
+          <h3 className="mt-3 truncate text-lg font-headline font-black text-primary">{issueLabel}</h3>
+          <p className="mt-1 max-w-3xl truncate text-sm text-on-surface-variant">{issue.description || 'No description provided.'}</p>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              ['Vehicle', vehicleLabel],
+              ['Trip', tripLabel],
+              ['Driver', driverLabel],
+              ['Reported', formatDateTime(issue.reportedAt)],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-xl bg-surface-container-low px-3 py-2">
+                <p className="text-[11px] font-black uppercase tracking-[0.12em] text-outline">{label}</p>
+                <p className="mt-1 truncate text-sm font-black text-on-surface">{value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-col gap-3 rounded-2xl border border-outline-variant/35 bg-surface px-4 py-3 xl:w-64">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.14em] text-outline">Next admin action</p>
+            <p className="mt-1 text-base font-headline font-black text-primary">{nextAction}</p>
+            <p className="mt-1 text-xs font-bold text-on-surface-variant">
+              {emergency ? emergencyStepLabel[emergencyStatus] || 'Emergency workflow' : 'Vehicle issue workflow'}
+            </p>
+          </div>
+          {emergency ? (
+            <div className="h-2 overflow-hidden rounded-full bg-error-container">
+              <div className="h-full rounded-full bg-error" style={{ width: workflowPercent }} />
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => onOpen(issue._id)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-black text-white hover:bg-primary/90"
+          >
+            <Eye className="h-4 w-4" />
+            Open Detail
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+};
 
 const ReviewModal = ({ issue, action, isSaving, onClose, onSubmit }) => {
   const [adminNote, setAdminNote] = useState(issue?.adminNote || '');
@@ -210,7 +323,11 @@ const ReviewModal = ({ issue, action, isSaving, onClose, onSubmit }) => {
 const LocationMap = ({ location }) => {
   const latitude = Number(location?.latitude);
   const longitude = Number(location?.longitude);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+  const hasUsableCoordinates = Number.isFinite(latitude)
+    && Number.isFinite(longitude)
+    && !(Math.abs(latitude) < 0.000001 && Math.abs(longitude) < 0.000001);
+
+  if (!hasUsableCoordinates) {
     return (
       <div className="rounded-2xl border border-dashed border-outline-variant/50 bg-surface-container-low p-6 text-center text-sm font-semibold text-on-surface-variant">
         GPS location was not provided with this report.
@@ -286,26 +403,37 @@ const DetailDrawer = ({ issue, isLoading, onClose, onAction }) => {
                       {breakdownTypeLabel[emergency.breakdownType] || labelize(emergency.breakdownType)}
                     </h3>
                     <p className="mt-1 text-sm text-on-surface-variant">
-                      Reported during an active trip. Confirm the breakdown, then dispatch a standby bus.
+                      {emergencyGuidance[emergencyStatus] || 'Theo dõi và xử lý sự cố phương tiện trong chuyến.'}
                     </p>
                   </div>
                   <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${emergencyStatusClassName[emergencyStatus] || statusClassName.new}`}>
                     {labelize(emergencyStatus)}
                   </span>
                 </div>
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                  <div className="rounded-xl bg-white px-3 py-2">
+                    <p className="text-xs font-bold uppercase text-outline">Reported at</p>
+                    <p className="mt-1 text-sm font-bold text-on-surface">{formatDateTime(issue?.reportedAt)}</p>
+                  </div>
                   <div className="rounded-xl bg-white px-3 py-2">
                     <p className="text-xs font-bold uppercase text-outline">Confirmed at</p>
-                    <p className="mt-1 text-sm font-bold text-on-surface">{formatDateTime(emergency.confirmedAt)}</p>
+                    <p className="mt-1 text-sm font-bold text-on-surface">
+                      {formatWorkflowDateTime(emergency.confirmedAt, emergencyStatus === 'REPORTED' ? 'Chờ admin xác nhận' : 'Chưa ghi nhận')}
+                    </p>
                   </div>
                   <div className="rounded-xl bg-white px-3 py-2">
                     <p className="text-xs font-bold uppercase text-outline">Dispatch time</p>
-                    <p className="mt-1 text-sm font-bold text-on-surface">{formatDateTime(emergency.dispatchTime)}</p>
+                    <p className="mt-1 text-sm font-bold text-on-surface">
+                      {formatWorkflowDateTime(
+                        emergency.dispatchTime,
+                        ['REPORTED', 'CONFIRMED'].includes(emergencyStatus) ? 'Chưa điều xe dự phòng' : 'Chưa ghi nhận'
+                      )}
+                    </p>
                   </div>
                   <div className="rounded-xl bg-white px-3 py-2">
                     <p className="text-xs font-bold uppercase text-outline">Standby bus</p>
                     <p className="mt-1 text-sm font-bold text-on-surface">
-                      {emergency.standbyVehicle?.plateNumber || emergency.standbyVehicle?.busCode || emergency.standbyVehicleId || 'Not dispatched'}
+                      {emergency.standbyVehicle?.plateNumber || emergency.standbyVehicle?.busCode || emergency.standbyVehicleId || 'Chưa chọn xe dự phòng'}
                     </p>
                   </div>
                 </div>
@@ -602,46 +730,30 @@ const VehicleIssuesPage = () => {
       </section>
 
       <section className="mt-6 overflow-hidden rounded-2xl border border-outline-variant/35 bg-white shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="min-w-[1100px] divide-y divide-outline-variant/30 text-left text-sm">
-            <thead className="bg-surface-container-low text-xs uppercase tracking-[0.12em] text-outline">
-              <tr>
-                {['Issue', 'Vehicle', 'Trip', 'Driver', 'Severity', 'Status', 'Reported', 'Action'].map((heading) => (
-                  <th key={heading} className="px-4 py-4">{heading}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-outline-variant/20">
-              {isLoading ? (
-                <tr><td colSpan="8" className="px-5 py-12 text-center text-on-surface-variant">Loading vehicle issues...</td></tr>
-              ) : issues.length ? issues.map((issue) => (
-                <tr key={issue._id} className={issue.severity === 'critical' ? 'bg-error-container/20' : 'hover:bg-surface-container-low/70'}>
-                  <td className="px-4 py-4">
-                    <p className="font-bold text-primary">{labelize(issue.issueType)}</p>
-                    {issue.emergencyBreakdown?.isEmergency ? (
-                      <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-black ${emergencyStatusClassName[issue.emergencyBreakdown.incidentStatus] || statusClassName.new}`}>
-                        UC48 {labelize(issue.emergencyBreakdown.incidentStatus)}
-                      </span>
-                    ) : null}
-                    <p className="mt-1 max-w-[260px] truncate text-xs text-on-surface-variant">{issue.description}</p>
-                  </td>
-                  <td className="px-4 py-4">{issue.vehicle?.plateNumber || issue.vehicle?.busCode || issue.vehicleId || 'N/A'}</td>
-                  <td className="px-4 py-4">{issue.trip?.scheduleCode || issue.tripId || 'N/A'}</td>
-                  <td className="px-4 py-4">{issue.reportedBy?.fullName || issue.trip?.driver?.fullName || 'Unknown'}</td>
-                  <td className="px-4 py-4"><span className={`rounded-full px-3 py-1 text-xs font-bold ${severityClassName[issue.severity]}`}>{labelize(issue.severity)}</span></td>
-                  <td className="px-4 py-4"><span className={`rounded-full px-3 py-1 text-xs font-bold ${statusClassName[issue.status]}`}>{labelize(issue.status)}</span></td>
-                  <td className="px-4 py-4">{formatDateTime(issue.reportedAt)}</td>
-                  <td className="px-4 py-4">
-                    <button type="button" title="View issue detail" onClick={() => openDetail(issue._id)} className="rounded-full p-2 text-primary hover:bg-surface-container">
-                      <Eye className="h-4 w-4" />
-                    </button>
-                  </td>
-                </tr>
-              )) : (
-                <tr><td colSpan="8" className="px-5 py-12 text-center text-on-surface-variant">No vehicle issues found.</td></tr>
-              )}
-            </tbody>
-          </table>
+        <div className="border-b border-outline-variant/30 bg-surface-container-low px-5 py-4">
+          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-outline">Operations queue</p>
+              <h2 className="mt-1 text-xl font-headline font-black text-primary">Vehicle issue handling</h2>
+            </div>
+            <p className="text-sm font-semibold text-on-surface-variant">
+              Showing {issues.length} of {meta.total || issues.length} issues
+            </p>
+          </div>
+        </div>
+        <div className="space-y-3 bg-surface-container-low/40 p-4">
+          {isLoading ? (
+            <div className="flex items-center justify-center rounded-2xl bg-white px-5 py-12 text-on-surface-variant">
+              <LoaderCircle className="mr-3 h-5 w-5 animate-spin text-primary" />
+              Loading vehicle issues...
+            </div>
+          ) : issues.length ? issues.map((issue) => (
+            <VehicleIssueQueueCard key={issue._id} issue={issue} onOpen={openDetail} />
+          )) : (
+            <div className="rounded-2xl bg-white px-5 py-12 text-center text-sm font-semibold text-on-surface-variant">
+              No vehicle issues found.
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-between gap-4 border-t border-outline-variant/30 px-5 py-4">
           <p className="text-sm text-on-surface-variant">Page {meta.page} of {meta.totalPages}</p>
