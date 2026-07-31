@@ -2,17 +2,27 @@ import crypto from 'crypto';
 import SupportCase from './SupportCase.js';
 import OperationIncident from '../scheduleOperations/OperationIncident.js';
 import User from '../auth/User.js';
+import { createBroadcastNotification } from '../systemNotifications/systemNotification.service.js';
+import {
+  FEEDBACK_ACTION,
+  FEEDBACK_REPLY_STATUS,
+  FEEDBACK_STATUS,
+  SUPPORT_CASE_STATUS_ALIASES,
+  assertFeedbackTransition,
+  createBusinessError,
+  getReplyStatusForAdminAction,
+  isTerminalFeedbackStatus,
+  normalizeFeedbackStatus,
+  resolveFeedbackAction,
+} from './feedbackWorkflow.js';
 
-const FEEDBACK_STATUS_ALIASES = {
-  SUBMITTED: 'PENDING',
-  OPEN: 'PENDING',
-  UNDER_REVIEW: 'IN_PROGRESS',
-  RESPONDED: 'IN_PROGRESS',
-};
+const FEEDBACK_STATUS_ALIASES = SUPPORT_CASE_STATUS_ALIASES;
 
 const FEEDBACK_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'ratingScore', 'priority', 'status']);
 const escapeRegex = (value) => String(value).replace(/[|\\{}()[\]^$+*?.]/g, '\\$&');
 const isObjectId = (value) => /^[a-f\d]{24}$/i.test(String(value || ''));
+const DUPLICATE_SUBMIT_WINDOW_MS = 15000;
+const DUPLICATE_REPLY_WINDOW_MS = 10000;
 
 const normalizePagination = ({ page = 1, limit = 20 } = {}) => {
   const normalizedPage = Math.max(Number.parseInt(page, 10) || 1, 1);
@@ -127,6 +137,89 @@ export class CustomerSupportService {
     });
   }
 
+  static appendAudit(supportCase, {
+    actorId,
+    actorRole,
+    action,
+    previousStatus,
+    newStatus,
+    message = '',
+    metadata = {},
+  }) {
+    supportCase.auditTrail.push({
+      actorId,
+      actorRole,
+      action,
+      previousStatus,
+      newStatus,
+      message: String(message || '').trim(),
+      metadata,
+      createdAt: new Date(),
+    });
+  }
+
+  static ensureAssignedToAdmin(supportCase, adminId) {
+    const assignedTo = supportCase.assignedTo?._id || supportCase.assignedTo;
+
+    if (!assignedTo) {
+      throw createBusinessError('Assign this feedback ticket before processing it', 409);
+    }
+
+    if (String(assignedTo) !== String(adminId)) {
+      throw createBusinessError('This feedback ticket is assigned to another administrator', 403);
+    }
+  }
+
+  static async assertNoRecentDuplicate(userId, data) {
+    if (data.type !== 'SERVICE_FEEDBACK') return;
+
+    const createdAfter = new Date(Date.now() - DUPLICATE_SUBMIT_WINDOW_MS);
+    const duplicate = await SupportCase.exists({
+      passenger: userId,
+      type: data.type,
+      title: data.title.trim(),
+      description: data.description.trim(),
+      category: data.category,
+      ratingScore: Number(data.ratingScore),
+      createdAt: { $gte: createdAfter },
+    });
+
+    if (duplicate) {
+      throw createBusinessError('Duplicate feedback submission detected. Please wait before retrying.', 409);
+    }
+  }
+
+  static async createPassengerFeedbackReplyNotification({ supportCase, adminId }) {
+    const passengerId = supportCase.passenger?._id || supportCase.passenger;
+
+    if (!passengerId) return;
+
+    try {
+      await createBroadcastNotification({
+        title: 'Feedback response received',
+        message: 'Your feedback has received a response from the administrator.',
+        type: 'general',
+        priority: 'normal',
+        targetAudience: 'specific_users',
+        userIds: [passengerId],
+        actionUrl: '/my-feedback',
+        sourceType: 'SupportCase',
+        sourceId: supportCase._id,
+        metadata: {
+          caseId: String(supportCase._id),
+          referenceNumber: supportCase.referenceNumber,
+          feedbackType: supportCase.type,
+        },
+      }, adminId);
+    } catch (error) {
+      // Reply persistence must not fail just because notification delivery fails.
+      await this.recordUserNotification(
+        passengerId,
+        `Admin replied to feedback ${supportCase.referenceNumber}.`
+      );
+    }
+  }
+
   static async notifyAdmins(message) {
     if (!message) return;
 
@@ -193,7 +286,13 @@ export class CustomerSupportService {
   }
 
   static async createCase(userId, data, files = []) {
+    if (data.type === 'SERVICE_FEEDBACK' && !data.relatedTripId?.trim()) {
+      throw createBusinessError('Related trip or route is required for service feedback', 400);
+    }
+
     const relatedTrip = await this.validateRelatedTrip(userId, data.relatedTripId);
+    await this.assertNoRecentDuplicate(userId, data);
+
     const supportCase = new SupportCase({
       type: data.type,
       referenceNumber: await this.generateUniqueReferenceNumber(data.type),
@@ -204,7 +303,8 @@ export class CustomerSupportService {
       priority: data.type === 'SERVICE_FEEDBACK'
         ? this.determineFeedbackPriority({ category: data.category, ratingScore: data.ratingScore })
         : data.priority || 'NORMAL',
-      status: data.type === 'SERVICE_FEEDBACK' ? 'PENDING' : data.type === 'LOST_ITEM' ? 'SUBMITTED' : 'OPEN',
+      status: data.type === 'SERVICE_FEEDBACK' ? FEEDBACK_STATUS.PENDING : data.type === 'LOST_ITEM' ? 'SUBMITTED' : 'OPEN',
+      replyStatus: data.type === 'SERVICE_FEEDBACK' ? FEEDBACK_REPLY_STATUS.UNREPLIED : undefined,
       ratingScore: data.ratingScore ? Number(data.ratingScore) : undefined,
       routeId: isObjectId(data.routeId) ? data.routeId : undefined,
       tripId: data.tripId?.trim() || data.relatedTripId?.trim() || '',
@@ -235,6 +335,14 @@ export class CustomerSupportService {
         senderRole: 'PASSENGER',
         message: data.description,
       });
+      this.appendAudit(supportCase, {
+        actorId: userId,
+        actorRole: 'PASSENGER',
+        action: FEEDBACK_ACTION.CREATE,
+        previousStatus: null,
+        newStatus: supportCase.status,
+        message: 'Feedback submitted',
+      });
     }
 
     await supportCase.save();
@@ -257,6 +365,7 @@ export class CustomerSupportService {
       SupportCase.find(query)
         .populate('passenger', 'fullName email phone')
         .populate('assignedTo', 'fullName email role')
+        .populate('adminResponseBy', 'fullName email role')
         .sort({ [sortField]: sortDirection, createdAt: -1 })
         .skip(skip)
         .limit(normalizedLimit),
@@ -299,6 +408,7 @@ export class CustomerSupportService {
     const [items, total] = await Promise.all([
       SupportCase.find(query)
         .populate('assignedTo', 'fullName email role')
+        .populate('adminResponseBy', 'fullName email role')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
@@ -326,6 +436,7 @@ export class CustomerSupportService {
       ],
     })
       .populate('assignedTo', 'fullName email role')
+      .populate('adminResponseBy', 'fullName email role')
       .populate('conversation.senderId', 'fullName email role');
 
     if (!feedback) {
@@ -340,18 +451,33 @@ export class CustomerSupportService {
   static async addPassengerFeedbackReply(userId, caseId, data) {
     const feedback = await this.getMyFeedback(userId, caseId);
 
-    if (feedback.status !== 'WAITING_FOR_PASSENGER') {
+    if (normalizeFeedbackStatus(feedback.status) !== FEEDBACK_STATUS.WAITING_FOR_PASSENGER) {
       const error = new Error('Passenger follow-up is only allowed while feedback is waiting for passenger input');
       error.statusCode = 400;
       throw error;
     }
+
+    if (isTerminalFeedbackStatus(feedback.status)) {
+      throw createBusinessError('Closed or rejected feedback cannot receive passenger replies', 409);
+    }
+
+    const previousStatus = feedback.status;
 
     this.appendConversation(feedback, {
       senderId: userId,
       senderRole: 'PASSENGER',
       message: data.message,
     });
-    feedback.status = 'IN_PROGRESS';
+    feedback.status = FEEDBACK_STATUS.IN_PROGRESS;
+    feedback.replyStatus = FEEDBACK_REPLY_STATUS.CUSTOMER_REPLIED;
+    this.appendAudit(feedback, {
+      actorId: userId,
+      actorRole: 'PASSENGER',
+      action: FEEDBACK_ACTION.CUSTOMER_REPLY,
+      previousStatus,
+      newStatus: feedback.status,
+      message: 'Passenger provided follow-up information',
+    });
 
     await feedback.save();
     await this.notifyAdmins(`Passenger replied to feedback ${feedback.referenceNumber}.`);
@@ -490,6 +616,7 @@ export class CustomerSupportService {
     const supportCase = await SupportCase.findById(caseId)
       .populate('passenger', 'fullName email phone')
       .populate('assignedTo', 'fullName email role')
+      .populate('adminResponseBy', 'fullName email role')
       .populate('responses.responder', 'fullName email role')
       .populate('conversation.senderId', 'fullName email role');
 
@@ -501,14 +628,6 @@ export class CustomerSupportService {
   }
 
   static async assignFeedback(caseId, adminId, { assignedTo } = {}) {
-    const supportCase = await this.getCaseById(caseId);
-
-    if (supportCase.type !== 'SERVICE_FEEDBACK') {
-      const error = new Error('Only feedback tickets can be assigned through this action');
-      error.statusCode = 400;
-      throw error;
-    }
-
     const targetAdminId = assignedTo || adminId;
     const admin = await User.findOne({ _id: targetAdminId, role: 'ADMIN' }).select('_id fullName email').lean();
 
@@ -518,14 +637,65 @@ export class CustomerSupportService {
       throw error;
     }
 
-    supportCase.assignedTo = admin._id;
-    supportCase.assignedAt = new Date();
-    if (supportCase.status === 'PENDING') {
-      supportCase.status = 'IN_PROGRESS';
+    const previous = await SupportCase.findById(caseId).select('type status assignedTo assignedAt referenceNumber');
+
+    if (!previous) {
+      throw createBusinessError('Support case not found', 404);
     }
 
-    await supportCase.save();
-    await this.recordUserNotification(admin._id, `Feedback ${supportCase.referenceNumber} was assigned to you.`);
+    if (previous.type !== 'SERVICE_FEEDBACK') {
+      throw createBusinessError('Only feedback tickets can be assigned through this action', 400);
+    }
+
+    if (previous.assignedTo && String(previous.assignedTo) !== String(targetAdminId)) {
+      throw createBusinessError('Feedback ticket is already assigned to another administrator', 409);
+    }
+
+    const nextStatus = normalizeFeedbackStatus(previous.status) === FEEDBACK_STATUS.PENDING
+      ? FEEDBACK_STATUS.IN_PROGRESS
+      : previous.status;
+    if (nextStatus !== previous.status) {
+      assertFeedbackTransition(previous.status, nextStatus);
+    }
+
+    const assignedAt = previous.assignedTo ? previous.assignedAt : new Date();
+    const updatedCase = await SupportCase.findOneAndUpdate(
+      {
+        _id: caseId,
+        type: 'SERVICE_FEEDBACK',
+        $or: [
+          { assignedTo: { $exists: false } },
+          { assignedTo: null },
+          { assignedTo: targetAdminId },
+        ],
+      },
+      {
+        $set: {
+          assignedTo: admin._id,
+          assignedAt,
+          status: nextStatus,
+        },
+        $push: {
+          auditTrail: {
+            actorId: adminId,
+            actorRole: 'ADMIN',
+            action: FEEDBACK_ACTION.ASSIGN,
+            previousStatus: previous.status,
+            newStatus: nextStatus,
+            message: previous.assignedTo ? 'Assignment confirmed' : 'Feedback assigned',
+            metadata: { assignedTo: String(admin._id) },
+            createdAt: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
+
+    if (!updatedCase) {
+      throw createBusinessError('Feedback ticket assignment changed. Please refresh and try again.', 409);
+    }
+
+    await this.recordUserNotification(admin._id, `Feedback ${updatedCase.referenceNumber} was assigned to you.`);
     return this.getCaseById(caseId);
   }
 
@@ -539,41 +709,87 @@ export class CustomerSupportService {
     }
 
     const previousStatus = supportCase.status;
-    supportCase.assignedTo = supportCase.assignedTo || adminId;
-    supportCase.assignedAt = supportCase.assignedAt || new Date();
+    this.ensureAssignedToAdmin(supportCase, adminId);
 
-    if (data.message?.trim()) {
+    if (isTerminalFeedbackStatus(supportCase.status)) {
+      throw createBusinessError('Closed or rejected feedback cannot be updated', 409);
+    }
+
+    const hasMessage = Boolean(data.message?.trim());
+    const hasResolution = Boolean(data.resolutionSummary?.trim() || supportCase.resolutionSummary?.trim());
+    const nextStatus = data.status ? assertFeedbackTransition(supportCase.status, data.status) : supportCase.status;
+
+    if (nextStatus === FEEDBACK_STATUS.RESOLVED && !hasMessage && !hasResolution && !supportCase.adminResponse?.trim()) {
+      throw createBusinessError('Resolution requires an admin response or resolution summary', 422);
+    }
+
+    if (nextStatus === FEEDBACK_STATUS.CLOSED && normalizeFeedbackStatus(supportCase.status) !== FEEDBACK_STATUS.RESOLVED) {
+      throw createBusinessError('Feedback must be resolved before it can be closed', 409);
+    }
+
+    if (hasMessage) {
+      const replyAt = new Date();
+      const duplicateReply = [...(supportCase.conversation || [])].reverse().find((message) => (
+        message.senderRole === 'ADMIN'
+        && String(message.senderId?._id || message.senderId) === String(adminId)
+        && message.message === data.message.trim()
+        && replyAt.getTime() - new Date(message.createdAt).getTime() <= DUPLICATE_REPLY_WINDOW_MS
+      ));
+
+      if (duplicateReply) {
+        throw createBusinessError('Duplicate admin reply detected. Please refresh the ticket.', 409);
+      }
+
       this.appendConversation(supportCase, {
         senderId: adminId,
         senderRole: 'ADMIN',
         message: data.message,
       });
       supportCase.adminResponse = data.message.trim();
+      supportCase.adminResponseBy = adminId;
+      supportCase.adminResponseAt = replyAt;
+      supportCase.firstResponseAt = supportCase.firstResponseAt || replyAt;
+      supportCase.lastResponseAt = replyAt;
     }
 
     if (data.resolutionSummary?.trim()) {
       supportCase.resolutionSummary = data.resolutionSummary.trim();
     }
 
-    if (data.status) {
-      supportCase.status = data.status;
-    } else if (data.message?.trim() && supportCase.status === 'PENDING') {
-      supportCase.status = 'IN_PROGRESS';
-    }
+    supportCase.status = nextStatus;
+    supportCase.replyStatus = getReplyStatusForAdminAction({
+      nextStatus,
+      hasMessage,
+      currentReplyStatus: supportCase.replyStatus,
+    });
 
-    if (supportCase.status === 'RESOLVED' && !supportCase.resolvedAt) {
+    if (nextStatus === FEEDBACK_STATUS.RESOLVED && !supportCase.resolvedAt) {
       supportCase.resolvedAt = new Date();
     }
 
-    if (supportCase.status === 'CLOSED' && !supportCase.closedAt) {
+    if (nextStatus === FEEDBACK_STATUS.CLOSED && !supportCase.closedAt) {
       supportCase.closedAt = new Date();
     }
+
+    this.appendAudit(supportCase, {
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: resolveFeedbackAction({ previousStatus, nextStatus, hasMessage }),
+      previousStatus,
+      newStatus: supportCase.status,
+      message: hasMessage ? 'Admin public reply recorded' : 'Feedback status updated',
+      metadata: {
+        replyStatus: supportCase.replyStatus,
+        hasResolutionSummary: Boolean(supportCase.resolutionSummary),
+      },
+    });
 
     await supportCase.save();
 
     const notifications = [];
-    if (data.message?.trim()) {
+    if (hasMessage) {
       notifications.push(this.recordUserNotification(supportCase.passenger._id || supportCase.passenger, `Admin replied to feedback ${supportCase.referenceNumber}.`));
+      notifications.push(this.createPassengerFeedbackReplyNotification({ supportCase, adminId }));
     }
     if (previousStatus !== supportCase.status) {
       notifications.push(this.recordUserNotification(supportCase.passenger._id || supportCase.passenger, `Feedback ${supportCase.referenceNumber} status changed to ${supportCase.status}.`));

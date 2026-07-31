@@ -156,7 +156,7 @@ const AdminCommandLayout = () => {
       .sort((left, right) => right.path.length - left.path.length)
       .find((item) => isNavigationItemActive(location, item))
       || adminNavigation[0];
-  }, [location]);
+  }, [location.pathname, location.search]);
 
   const activeGroup = useMemo(() => (
     adminNavGroups.find((group) => (

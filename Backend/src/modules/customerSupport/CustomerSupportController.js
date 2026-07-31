@@ -63,7 +63,7 @@ export class CustomerSupportController {
 
       return res.json({
         success: true,
-        data: result.items.map((supportCase) => SupportCaseResponseDTO.format(supportCase)),
+        data: result.items.map((supportCase) => SupportCaseResponseDTO.format(supportCase, { includeInternal: true })),
         meta: result.meta,
       });
     } catch (error) {
@@ -93,7 +93,7 @@ export class CustomerSupportController {
 
       return res.json({
         success: true,
-        data: SupportCaseResponseDTO.format(supportCase),
+        data: SupportCaseResponseDTO.format(supportCase, { includeInternal: true }),
       });
     } catch (error) {
       logger.error('Get passenger feedback error:', error);
@@ -231,7 +231,7 @@ export class CustomerSupportController {
       return res.json({
         success: true,
         message: 'Complaint response recorded successfully',
-        data: SupportCaseResponseDTO.format(supportCase),
+        data: SupportCaseResponseDTO.format(supportCase, { includeInternal: true }),
       });
     } catch (error) {
       logger.error('Respond to complaint error:', error);
@@ -342,7 +342,7 @@ export class CustomerSupportController {
       return res.json({
         success: true,
         message: 'Lost item case updated successfully',
-        data: SupportCaseResponseDTO.format(supportCase),
+        data: SupportCaseResponseDTO.format(supportCase, { includeInternal: true }),
       });
     } catch (error) {
       logger.error('Update lost item case error:', error);
@@ -369,7 +369,7 @@ export class CustomerSupportController {
       return res.json({
         success: true,
         message: 'Feedback assignment updated successfully',
-        data: SupportCaseResponseDTO.format(supportCase),
+        data: SupportCaseResponseDTO.format(supportCase, { includeInternal: true }),
       });
     } catch (error) {
       logger.error('Assign feedback error:', error);
@@ -406,7 +406,7 @@ export class CustomerSupportController {
       return res.json({
         success: true,
         message: 'Feedback ticket updated successfully',
-        data: SupportCaseResponseDTO.format(supportCase),
+        data: SupportCaseResponseDTO.format(supportCase, { includeInternal: true }),
       });
     } catch (error) {
       logger.error('Update feedback error:', error);
