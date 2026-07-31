@@ -126,11 +126,49 @@ const isScheduleAssignedToActor = (schedule, userId, role) => {
     return String(schedule?.driver?.userId || '') === String(userId);
   }
 
-  if (role === 'BUS_ASSISTANT') {
+  if (role === 'BUS_ASSISTANT' || role === 'CONDUCTOR') {
     return String(schedule?.assistant?.userId || '') === String(userId);
   }
 
   return false;
+};
+
+const getShiftTypeFromClock = (timeValue = '') => {
+  const hour = Number(String(timeValue).split(':')[0]);
+  return Number.isFinite(hour) && hour >= 12 ? 'AFTERNOON' : 'MORNING';
+};
+
+const buildShiftScheduleFromTripSchedule = (schedule, role) => {
+  const acceptance = role === 'DRIVER'
+    ? schedule.driverAcceptance || {}
+    : schedule.assistantAcceptance || {};
+  const acceptanceStatus = ['IN_PROGRESS', 'COMPLETED'].includes(schedule.status)
+    ? schedule.status
+    : acceptance.status || 'ASSIGNED';
+
+  return {
+    _id: `trip-schedule-${schedule._id}`,
+    status: acceptanceStatus === 'PENDING' ? 'ASSIGNED' : acceptanceStatus,
+    workDate: schedule.serviceDate,
+    source: 'TRIP_SCHEDULE',
+    shift: {
+      _id: schedule._id,
+      workDate: schedule.serviceDate,
+      shiftCode: `TRIP-${schedule.scheduleCode}`,
+      shiftName: schedule.shiftLabel || `Chuyến ${schedule.scheduleCode}`,
+      shiftType: getShiftTypeFromClock(schedule.departureTime),
+      startTime: schedule.departureTime || '',
+      endTime: schedule.expectedArrivalTime || schedule.turnaroundEndTime || '',
+      description: schedule.notes || `${schedule.routeCode || ''} ${schedule.routeName || ''}`.trim(),
+      routeId: schedule.routeId && schedule.routeId._id
+        ? schedule.routeId
+        : {
+          _id: schedule.routeId,
+          routeCode: schedule.routeCode || '',
+          routeName: schedule.routeName || '',
+        },
+    },
+  };
 };
 
 const INCIDENT_TYPES = [
@@ -237,7 +275,7 @@ export class ScheduleOperationsService {
       return { 'driver.userId': userId };
     }
 
-    if (role === 'BUS_ASSISTANT') {
+    if (role === 'BUS_ASSISTANT' || role === 'CONDUCTOR') {
       return { 'assistant.userId': userId };
     }
 
@@ -395,25 +433,45 @@ export class ScheduleOperationsService {
 
     const AssignmentModel = isDriver ? DriverShiftAssignment : AssistantShiftAssignment;
     const staffField = isDriver ? 'driverId' : 'assistantId';
-    const assignments = await AssignmentModel.find({
-      [staffField]: userId,
-      workDate: { $gte: from, $lte: to },
-      status: { $ne: 'CANCELLED' },
-    })
-      .populate({
-        path: 'shiftId',
-        match: { status: { $in: ['ACTIVE', 'APPROVED', 'DRAFT'] } },
-        populate: { path: 'routeId', select: 'routeCode routeName' },
+    const [assignments, tripSchedules] = await Promise.all([
+      AssignmentModel.find({
+        [staffField]: userId,
+        workDate: { $gte: from, $lte: to },
+        status: { $ne: 'CANCELLED' },
       })
-      .sort({ workDate: 1, createdAt: 1 })
-      .lean();
+        .populate({
+          path: 'shiftId',
+          match: { status: { $in: ['ACTIVE', 'APPROVED', 'DRAFT', 'PUBLISHED', 'IN_PROGRESS', 'COMPLETED'] } },
+          populate: { path: 'routeId', select: 'routeCode routeName' },
+        })
+        .sort({ workDate: 1, createdAt: 1 })
+        .lean(),
+      TripSchedule.find({
+        ...this.buildActorScheduleQuery(userId, role),
+        serviceDate: { $gte: from, $lte: to },
+        status: { $ne: 'CANCELLED' },
+      })
+        .populate('routeId', 'routeCode routeName')
+        .sort({ serviceDate: 1, departureTime: 1 })
+        .lean(),
+    ]);
 
-    return assignments
+    const manualShiftSchedules = assignments
       .filter((assignment) => assignment.shiftId)
       .map((assignment) => ({
         ...assignment,
         shift: assignment.shiftId,
       }));
+
+    const generatedTripShifts = tripSchedules
+      .filter((schedule) => isScheduleAssignedToActor(schedule, userId, role))
+      .map((schedule) => buildShiftScheduleFromTripSchedule(schedule, role));
+
+    return [...manualShiftSchedules, ...generatedTripShifts].sort((left, right) => {
+      const leftStart = buildTimeOnServiceDate(left.workDate || left.shift?.workDate, left.shift?.startTime);
+      const rightStart = buildTimeOnServiceDate(right.workDate || right.shift?.workDate, right.shift?.startTime);
+      return (leftStart?.getTime() || 0) - (rightStart?.getTime() || 0);
+    });
   }
 
   static async listOperationNotifications(userId, role, query = {}) {
@@ -516,7 +574,9 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    return buildTripScheduleAssignment(schedule, 'DRIVER');
+    const assignment = buildTripScheduleAssignment(schedule, 'DRIVER');
+    await this.attachInspectionRecords([assignment]);
+    return assignment;
   }
 
   static async getActorAssignment(userId, role, assignmentId) {
@@ -531,7 +591,9 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    return buildTripScheduleAssignment(schedule, role);
+    const assignment = buildTripScheduleAssignment(schedule, role);
+    await this.attachInspectionRecords([assignment]);
+    return assignment;
   }
 
   static assertTripAccepted(assignment) {

@@ -8,10 +8,13 @@ export type StaffMember = {
 } | null;
 
 export type RoutePoint = {
+  id?: string | null;
+  stationId?: string | null;
+  _id?: string | null;
   stopName?: string;
   address?: string;
-  latitude?: number | null;
-  longitude?: number | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
   stopOrder?: number | null;
   arrivalOffsetMinutes?: number;
   departureOffsetMinutes?: number;
@@ -19,8 +22,8 @@ export type RoutePoint = {
 };
 
 export type TripStartLocation = {
-  latitude?: number | null;
-  longitude?: number | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
   accuracyMeters?: number | null;
   capturedAt?: string | null;
 };
@@ -44,6 +47,7 @@ export type AssignedTrip = {
   tripCode?: string;
   actorRole?: StaffRole;
   route?: {
+    _id?: string | null;
     id?: string | null;
     routeNumber?: string;
     name?: string;
@@ -58,6 +62,8 @@ export type AssignedTrip = {
       stationId?: string | null;
       stopName?: string;
       address?: string;
+      latitude?: number | string | null;
+      longitude?: number | string | null;
       stopOrder?: number | null;
     }>;
   };

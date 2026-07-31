@@ -14,7 +14,7 @@ import { useAuthStore } from '@/store/auth.store';
 import type { AssignedTrip, RoutePoint } from '@/types/scheduleOperations';
 import { getDeviceGpsPayload, type DeviceGpsPayload, watchDeviceGps } from '@/utils/deviceGps';
 import { goBackOrReplace } from '@/utils/navigation';
-import { formatCoordinate, formatTime, getRouteStops, getTripStatus } from '@/utils/scheduleOperations';
+import { formatCoordinate, formatTime, getRoutePathPoints, getRouteStops, getTripStatus } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
 const ARRIVAL_RADIUS_METERS = 30;
@@ -111,10 +111,8 @@ const BREAKDOWN_TYPES: Array<{ value: BreakdownType; label: string }> = [
 ];
 
 const isValidRouteCoordinate = (point: RoutePoint) => (
-  typeof point.latitude === 'number'
-  && typeof point.longitude === 'number'
-  && Number.isFinite(point.latitude)
-  && Number.isFinite(point.longitude)
+  Number.isFinite(Number(point.latitude))
+  && Number.isFinite(Number(point.longitude))
 );
 
 const isValidGpsCoordinate = (point?: DeviceGpsPayload | null) => (
@@ -123,6 +121,22 @@ const isValidGpsCoordinate = (point?: DeviceGpsPayload | null) => (
   && Number.isFinite(point.latitude)
   && Number.isFinite(point.longitude)
 );
+
+const toDeviceGpsPayload = (location?: AssignedTrip['startLocation'] | null): DeviceGpsPayload | null => {
+  const latitude = Number(location?.latitude);
+  const longitude = Number(location?.longitude);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return {
+    latitude,
+    longitude,
+    accuracyMeters: location?.accuracyMeters,
+    capturedAt: location?.capturedAt || undefined,
+  };
+};
 
 const toMapPoints = (stops: RoutePoint[]): MapPoint[] => stops
   .filter(isValidRouteCoordinate)
@@ -430,16 +444,9 @@ function NavigationMap({
   onRouteInfo: (info: RouteInstruction) => void;
 }) {
   const webViewRef = useRef<WebView | null>(null);
-  const mapPoints = useMemo(() => toMapPoints(getRouteStops(trip || ({} as AssignedTrip))), [trip]);
+  const mapPoints = useMemo(() => toMapPoints(getRoutePathPoints(trip || ({} as AssignedTrip))), [trip]);
   const driverLocation = useMemo(() => {
-    const tripStartLocation: DeviceGpsPayload | null = trip?.startLocation
-      ? {
-        latitude: trip.startLocation.latitude,
-        longitude: trip.startLocation.longitude,
-        accuracyMeters: trip.startLocation.accuracyMeters,
-        capturedAt: trip.startLocation.capturedAt || undefined,
-      }
-      : null;
+    const tripStartLocation = toDeviceGpsPayload(trip?.startLocation);
     const driverSource = isValidGpsCoordinate(currentGps) ? currentGps : tripStartLocation;
     return driverSource && isValidGpsCoordinate(driverSource)
       ? {
@@ -544,14 +551,7 @@ export default function TripLifecycleScreen() {
   const initialTrip = useMemo(() => parseTripParam(params.trip), [params.trip]);
   const [trip, setTrip] = useState<AssignedTrip | null>(initialTrip);
   const [currentGps, setCurrentGps] = useState<DeviceGpsPayload | null>(
-    initialTrip?.startLocation
-      ? {
-        latitude: initialTrip.startLocation.latitude,
-        longitude: initialTrip.startLocation.longitude,
-        accuracyMeters: initialTrip.startLocation.accuracyMeters,
-        capturedAt: initialTrip.startLocation.capturedAt || undefined,
-      }
-      : null,
+    toDeviceGpsPayload(initialTrip?.startLocation),
   );
   const [processingAction, setProcessingAction] = useState('');
   const [currentStopIndex, setCurrentStopIndex] = useState(0);
@@ -582,10 +582,12 @@ export default function TripLifecycleScreen() {
   const isVehicleReady = inspectionStatus === 'READY';
   const canStart = user?.role === 'DRIVER' && isTripReady && isVehicleReady && !isTripInProgress && !isTripClosed;
   const canComplete = user?.role === 'DRIVER' && isTripInProgress && !isTripClosed;
-  const mapPoints = useMemo(() => toMapPoints(getRouteStops(trip || ({} as AssignedTrip))), [trip]);
-  const nextStop = mapPoints[currentStopIndex] || null;
-  const progress = mapPoints.length ? Math.min(1, completedStopCount / mapPoints.length) : 0;
-  const remainingStops = Math.max(0, mapPoints.length - completedStopCount);
+  const mapPoints = useMemo(() => toMapPoints(getRoutePathPoints(trip || ({} as AssignedTrip))), [trip]);
+  const routeStops = useMemo(() => toMapPoints(getRouteStops(trip || ({} as AssignedTrip))), [trip]);
+  const stopPoints = routeStops.length ? routeStops : mapPoints;
+  const nextStop = stopPoints[currentStopIndex] || null;
+  const progress = stopPoints.length ? Math.min(1, completedStopCount / stopPoints.length) : 0;
+  const remainingStops = Math.max(0, stopPoints.length - completedStopCount);
   const driverPoint = currentGps?.latitude != null && currentGps?.longitude != null && isValidGpsCoordinate(currentGps)
     ? { latitude: Number(currentGps.latitude), longitude: Number(currentGps.longitude) }
     : null;
@@ -625,11 +627,11 @@ export default function TripLifecycleScreen() {
       return;
     }
 
-    const nextCompletedCount = Math.min(mapPoints.length, currentStopIndex + 1);
+    const nextCompletedCount = Math.min(stopPoints.length, currentStopIndex + 1);
     setCompletedStopCount(nextCompletedCount);
-    setCurrentStopIndex((index) => Math.min(mapPoints.length, index + 1));
+    setCurrentStopIndex((index) => Math.min(stopPoints.length, index + 1));
 
-    if (nextCompletedCount >= mapPoints.length) {
+    if (nextCompletedCount >= stopPoints.length) {
       Alert.alert('Hoan thanh tat ca tram', 'Da di het cac tram trong tuyen. Ban co the bam Hoan thanh chuyen.');
     } else if (manual) {
       Alert.alert('Da den tram', `Dang huong den tram ${nextCompletedCount + 1}.`);
@@ -701,10 +703,10 @@ export default function TripLifecycleScreen() {
 
   const completeTrip = async () => {
     if (!assignmentId) return;
-    if (completedStopCount < mapPoints.length) {
+    if (completedStopCount < stopPoints.length) {
       Alert.alert(
         'Chua di het tram',
-        `Da di ${completedStopCount}/${mapPoints.length} tram. Ban van muon hoan thanh chuyen?`,
+        `Da di ${completedStopCount}/${stopPoints.length} tram. Ban van muon hoan thanh chuyen?`,
         [
           { text: 'Huy', style: 'cancel' },
           { text: 'Hoan thanh', onPress: () => void completeTripRequest() },
@@ -877,7 +879,7 @@ export default function TripLifecycleScreen() {
             </View>
 
             <View style={styles.progressHeader}>
-              <Text style={styles.progressText}>Da di {completedStopCount}/{mapPoints.length} tram</Text>
+              <Text style={styles.progressText}>Da di {completedStopCount}/{stopPoints.length} tram</Text>
               <Text style={styles.progressText}>{Math.round(progress * 100)}%</Text>
             </View>
             <View style={styles.progressTrack}>

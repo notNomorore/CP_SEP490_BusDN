@@ -48,7 +48,7 @@ export const getWeekRange = (anchor: Date | string = new Date()) => {
 export const getAssignedTripsRange = (anchor: Date | string = new Date()) => {
   const today = parseScheduleDate(anchor);
   return {
-    from: toDateInput(addDays(today, -7)),
+    from: toDateInput(addDays(today, -30)),
     to: toDateInput(addDays(today, 14)),
   };
 };
@@ -90,21 +90,42 @@ export const isTripUpcoming = (trip: AssignedTrip) => {
   return Boolean(start && start > new Date() && !['COMPLETED', 'CANCELLED'].includes(getTripStatus(trip)));
 };
 
+export const isTripHistory = (trip: AssignedTrip) => {
+  const start = trip.scheduledStart ? new Date(trip.scheduledStart) : null;
+  const todayStart = parseScheduleDate(toDateInput());
+  return Boolean(start && start < todayStart);
+};
+
 export const isTripCompleted = (trip: AssignedTrip) => Boolean(trip.actualEndAt)
   || ['COMPLETED', 'DONE'].includes(getTripStatus(trip));
 
 export const isTripDelayed = (trip: AssignedTrip) => ['DELAYED', 'LATE'].includes(getTripStatus(trip)) || trip.gpsSync?.status === 'DELAYED';
 
-export const getRouteStops = (trip: AssignedTrip): RoutePoint[] => {
-  const stops = trip.route?.stops?.filter((stop) => stop.stopName || stop.address) || [];
-  if (stops.length) {
-    return [...stops].sort((first, second) => Number(first.stopOrder || 0) - Number(second.stopOrder || 0));
-  }
-
-  return (trip.route?.pathPoints || []).filter((point) => point.stopName || point.address);
+const hasValidCoordinate = (point: RoutePoint) => {
+  const latitude = Number(point.latitude);
+  const longitude = Number(point.longitude);
+  return Number.isFinite(latitude)
+    && Number.isFinite(longitude)
+    && !(latitude === 0 && longitude === 0);
 };
 
-export const formatCoordinate = (value?: number | null) => {
-  if (typeof value !== 'number' || Number.isNaN(value)) return 'N/A';
-  return value.toFixed(6);
+export const getRouteStops = (trip: AssignedTrip): RoutePoint[] => {
+  const stops = trip.route?.stops?.filter((stop) => stop.stopName || stop.address) || [];
+  const sortedStops = [...stops].sort((first, second) => Number(first.stopOrder || 0) - Number(second.stopOrder || 0));
+
+  return sortedStops;
+};
+
+export const getRoutePathPoints = (trip: AssignedTrip): RoutePoint[] => {
+  const pathPoints = trip.route?.pathPoints || [];
+  const validPathPoints = pathPoints.filter(hasValidCoordinate);
+  const stopPoints = getRouteStops(trip).filter(hasValidCoordinate);
+
+  return validPathPoints.length ? validPathPoints : stopPoints;
+};
+
+export const formatCoordinate = (value?: number | string | null) => {
+  const coordinate = Number(value);
+  if (!Number.isFinite(coordinate)) return 'N/A';
+  return coordinate.toFixed(6);
 };

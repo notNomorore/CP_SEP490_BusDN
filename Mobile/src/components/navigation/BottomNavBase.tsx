@@ -23,6 +23,7 @@ type BottomNavBaseProps = {
 
 export function BottomNavBase({ active, items, style }: BottomNavBaseProps) {
   const insets = useSafeAreaInsets();
+  const isCompact = items.length > 5;
 
   return (
     <View style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 10) }, style]}>
@@ -39,14 +40,19 @@ export function BottomNavBase({ active, items, style }: BottomNavBaseProps) {
               }
               Alert.alert(item.unavailableTitle || item.label, `${item.label} is not available in the mobile app yet.`);
             }}
-            style={[styles.navItem, isActive && styles.navItemActive]}
+            style={[styles.navItem, isCompact && styles.navItemCompact, isActive && styles.navItemActive]}
           >
             <MaterialCommunityIcons
               color={isActive ? colors.primary : colors.muted}
               name={item.icon}
-              size={21}
+              size={isCompact ? 20 : 21}
             />
-            <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>{item.label}</Text>
+            <Text
+              numberOfLines={1}
+              style={[styles.navLabel, isCompact && styles.navLabelCompact, isActive && styles.navLabelActive]}
+            >
+              {item.label}
+            </Text>
           </Pressable>
         );
       })}
@@ -78,6 +84,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 7,
   },
+  navItemCompact: {
+    minWidth: 48,
+    paddingHorizontal: 5,
+  },
   navItemActive: {
     backgroundColor: '#d7f4e6',
   },
@@ -86,6 +96,9 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 10,
     fontWeight: '700',
+  },
+  navLabelCompact: {
+    fontSize: 9,
   },
   navLabelActive: {
     color: colors.primary,
