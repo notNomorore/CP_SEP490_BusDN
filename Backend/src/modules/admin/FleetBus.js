@@ -22,10 +22,26 @@ const FleetBusSchema = new mongoose.Schema(
       trim: true,
       default: 'Standard City Bus',
     },
+    manufacturer: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    model: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    year: {
+      type: Number,
+      min: 1980,
+      max: 2100,
+    },
     capacity: {
       type: Number,
       required: true,
-      min: 1,
+      min: 15,
+      max: 25,
     },
     operator: {
       type: String,
@@ -34,8 +50,32 @@ const FleetBusSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['ACTIVE', 'RESERVE', 'MAINTENANCE'],
+      enum: ['ACTIVE', 'INACTIVE', 'RESERVE', 'ASSIGNED', 'MAINTENANCE'],
       default: 'ACTIVE',
+    },
+    notes: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    maintenance: {
+      startDate: Date,
+      endDate: Date,
+      reason: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      note: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      updatedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+      updatedAt: Date,
     },
     currentLatitude: {
       type: Number,

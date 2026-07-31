@@ -1,123 +1,101 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import AuthShell from '../components/AuthShell';
 import useAuthStore from '../stores/authStore.js';
-
-const passwordRules = [
-  { label: 'It nhat 8 ky tu', test: (value) => value.length >= 8 },
-  { label: 'Co chu hoa va chu thuong', test: (value) => /[A-Z]/.test(value) && /[a-z]/.test(value) },
-  { label: 'Co so va ky tu dac biet', test: (value) => /[0-9]/.test(value) && /[@$!%*?&]/.test(value) },
-];
+import getRoleLandingPath from '../utils/roleRedirect.js';
 
 const ForcePasswordChangePage = () => {
   const navigate = useNavigate();
-  const { changePassword, user, isLoading } = useAuthStore();
-  const [form, setForm] = useState({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: '',
-  });
-  const [message, setMessage] = useState('');
-
-  const checks = useMemo(() => passwordRules.map((rule) => ({
-    ...rule,
-    passed: rule.test(form.newPassword),
-  })), [form.newPassword]);
-  const canSubmit = form.currentPassword
-    && form.newPassword
-    && form.confirmPassword
-    && checks.every((rule) => rule.passed)
-    && form.newPassword === form.confirmPassword;
-
-  const updateField = (field, value) => {
-    setForm((current) => ({ ...current, [field]: value }));
-    setMessage('');
-  };
+  const { changePassword, isLoading, error, clearError, user } = useAuthStore();
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [localError, setLocalError] = useState('');
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!canSubmit) {
-      setMessage('Vui long kiem tra lai mat khau moi va xac nhan mat khau.');
+    clearError();
+    setLocalError('');
+
+    if (newPassword !== confirmPassword) {
+      setLocalError('Mật khẩu xác nhận không khớp.');
+      return;
+    }
+
+    if (newPassword === currentPassword) {
+      setLocalError('Mật khẩu mới không được trùng mật khẩu tạm thời.');
       return;
     }
 
     try {
-      await changePassword(form);
-      navigate(user?.role === 'ADMIN' ? '/admin/users' : '/', { replace: true });
-    } catch (error) {
-      setMessage(error?.message || 'Khong the doi mat khau. Vui long thu lai.');
+      await changePassword({ currentPassword, newPassword, confirmPassword });
+      navigate(getRoleLandingPath(user), { replace: true });
+    } catch {
+      // Store error is rendered below.
     }
   };
 
   return (
-    <main className="min-h-screen bg-[#eefaf6] px-4 py-10 text-slate-950">
-      <section className="mx-auto max-w-xl rounded-[28px] border border-emerald-100 bg-white p-8 shadow-[0_24px_70px_rgba(15,23,42,0.12)]">
-        <span className="rounded-full bg-emerald-100 px-4 py-2 text-xs font-black uppercase tracking-[0.22em] text-emerald-700">
-          Bao mat tai khoan
-        </span>
-        <h1 className="mt-6 text-3xl font-black">Doi mat khau lan dau</h1>
-        <p className="mt-3 text-sm leading-6 text-slate-600">
-          Tai khoan nhan su moi can doi mat khau tam thoi truoc khi tiep tuc su dung he thong.
-        </p>
+    <AuthShell
+      eyebrow="Bảo mật tài khoản"
+      heroTitle="Đổi mật khẩu trước khi tiếp tục."
+      heroDescription="Mật khẩu tạm thời chỉ dùng để đăng nhập lần đầu. Bạn phải đặt mật khẩu mới để vào hệ thống."
+    >
+      <div className="space-y-7">
+        <div>
+          <h2 className="text-3xl font-headline font-black tracking-tight text-primary">Đổi mật khẩu lần đầu</h2>
+          <p className="mt-2 text-body-lg text-on-surface-variant">
+            Không tiếp tục sử dụng mật khẩu được gửi qua email.
+          </p>
+        </div>
 
-        <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
-          <label className="block">
-            <span className="mb-2 block text-sm font-bold">Mat khau hien tai</span>
-            <input
-              type="password"
-              value={form.currentPassword}
-              onChange={(event) => updateField('currentPassword', event.target.value)}
-              className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none focus:border-emerald-400"
-              autoComplete="current-password"
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-sm font-bold">Mat khau moi</span>
-            <input
-              type="password"
-              value={form.newPassword}
-              onChange={(event) => updateField('newPassword', event.target.value)}
-              className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none focus:border-emerald-400"
-              autoComplete="new-password"
-            />
-          </label>
-
-          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-            {checks.map((rule) => (
-              <div key={rule.label} className={`flex items-center gap-2 text-sm ${rule.passed ? 'text-emerald-700' : 'text-slate-500'}`}>
-                <span className="material-symbols-outlined text-base">{rule.passed ? 'check_circle' : 'radio_button_unchecked'}</span>
-                {rule.label}
-              </div>
-            ))}
+        {(localError || error) ? (
+          <div className="rounded-2xl border border-error/20 bg-error-container px-4 py-3 text-sm text-on-error-container">
+            {localError || (typeof error === 'string' ? error : JSON.stringify(error))}
           </div>
+        ) : null}
 
-          <label className="block">
-            <span className="mb-2 block text-sm font-bold">Xac nhan mat khau moi</span>
+        <form className="space-y-5" onSubmit={handleSubmit}>
+          <label className="block space-y-2">
+            <span className="text-sm font-semibold text-on-surface">Mật khẩu tạm thời</span>
             <input
               type="password"
-              value={form.confirmPassword}
-              onChange={(event) => updateField('confirmPassword', event.target.value)}
-              className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none focus:border-emerald-400"
-              autoComplete="new-password"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              className="w-full rounded-2xl border border-outline-variant/60 bg-white px-4 py-3 text-base text-on-surface focus:border-on-tertiary-container focus:outline-none focus:ring-2 focus:ring-on-tertiary-container/20"
             />
           </label>
 
-          {message ? (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {message}
-            </div>
-          ) : null}
+          <label className="block space-y-2">
+            <span className="text-sm font-semibold text-on-surface">Mật khẩu mới</span>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              className="w-full rounded-2xl border border-outline-variant/60 bg-white px-4 py-3 text-base text-on-surface focus:border-on-tertiary-container focus:outline-none focus:ring-2 focus:ring-on-tertiary-container/20"
+            />
+          </label>
+
+          <label className="block space-y-2">
+            <span className="text-sm font-semibold text-on-surface">Xác nhận mật khẩu mới</span>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              className="w-full rounded-2xl border border-outline-variant/60 bg-white px-4 py-3 text-base text-on-surface focus:border-on-tertiary-container focus:outline-none focus:ring-2 focus:ring-on-tertiary-container/20"
+            />
+          </label>
 
           <button
             type="submit"
-            disabled={isLoading || !canSubmit}
-            className="h-12 w-full rounded-2xl bg-emerald-700 px-5 text-sm font-black text-white shadow-[0_14px_28px_rgba(4,120,87,0.22)] disabled:cursor-not-allowed disabled:bg-slate-400"
+            disabled={isLoading || !currentPassword || !newPassword || !confirmPassword}
+            className="w-full rounded-full bg-primary px-6 py-4 text-base font-bold text-on-primary shadow-lg shadow-primary/15 hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isLoading ? 'Dang cap nhat...' : 'Doi mat khau va tiep tuc'}
+            {isLoading ? 'Đang cập nhật...' : 'Đổi mật khẩu và tiếp tục'}
           </button>
         </form>
-      </section>
-    </main>
+      </div>
+    </AuthShell>
   );
 };
 

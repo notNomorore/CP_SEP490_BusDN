@@ -41,13 +41,13 @@ const RouteMapEditor = ({
   direction,
   isDarkMode,
   routeColor,
-  stations,
+  stations = [],
   showStationLayer,
   onAddMapStop,
   onAddStationStop,
   onSelectStop,
   onUpdateStop,
-  routingStatus,
+  routingStatus = 'idle',
   selectedStopIndex,
 }) => {
   const elementRef = useRef(null);
@@ -59,6 +59,7 @@ const RouteMapEditor = ({
   const stops = useMemo(() => (
     (direction?.orderedStops || []).filter((stop) => isInsideDaNang(stop.latitude, stop.longitude))
   ), [direction?.orderedStops]);
+
   const routedPoints = useMemo(() => (
     Array.isArray(direction?.polylinePath)
       ? direction.polylinePath
@@ -95,7 +96,7 @@ const RouteMapEditor = ({
 
     map.on('click', (event) => {
       if (isInsideDaNang(event.latlng.lat, event.latlng.lng)) {
-        addMapStopRef.current(activeDirectionRef.current, event.latlng);
+        addMapStopRef.current?.(activeDirectionRef.current, event.latlng);
       }
     });
 
@@ -132,12 +133,14 @@ const RouteMapEditor = ({
 
     const stopPoints = stops.map((stop) => [Number(stop.latitude), Number(stop.longitude)]);
     const routePoints = routedPoints.length >= 2 ? routedPoints : stopPoints;
+
     if (routePoints.length >= 2) {
       L.polyline(routePoints, {
         color: routeColor || '#10b981',
         weight: 5,
         opacity: 0.9,
       }).addTo(layer);
+
       const arrowStep = Math.max(8, Math.floor(routePoints.length / 6));
       for (let pointIndex = arrowStep; pointIndex < routePoints.length; pointIndex += arrowStep) {
         const previousPoint = routePoints[pointIndex - 1];
@@ -147,22 +150,25 @@ const RouteMapEditor = ({
           interactive: false,
         }).addTo(layer);
       }
+
       bounds.push(...routePoints);
     }
 
     stops.forEach((stop, index) => {
       const marker = L.marker([Number(stop.latitude), Number(stop.longitude)], {
         icon: markerIcon('route', index === selectedStopIndex, String(index + 1)),
-        draggable: true,
+        draggable: Boolean(onUpdateStop && activeDirection),
         title: stop.stopName,
       });
 
-      marker.bindTooltip(`${index + 1}. ${stop.stopName || 'Điểm dừng'}`);
-      marker.on('click', () => onSelectStop(index));
+      marker.bindTooltip(`${index + 1}. ${stop.stopName || 'Diem dung'}`);
+      marker.on('click', () => onSelectStop?.(index));
       marker.on('dragend', (event) => {
         const { lat, lng } = event.target.getLatLng();
         if (isInsideDaNang(lat, lng)) {
-          onUpdateStop(activeDirection, index, { latitude: lat, longitude: lng });
+          onUpdateStop?.(activeDirection, index, { latitude: lat, longitude: lng });
+        } else {
+          marker.setLatLng([Number(stop.latitude), Number(stop.longitude)]);
         }
       });
       marker.addTo(layer);
@@ -179,7 +185,7 @@ const RouteMapEditor = ({
             title: station.stationName,
           });
           marker.bindPopup(`<strong>${station.stationName || ''}</strong><br/>${station.address || ''}`);
-          marker.on('click', () => onAddStationStop(activeDirection, station));
+          marker.on('click', () => onAddStationStop?.(activeDirection, station));
           marker.addTo(layer);
         });
     }
@@ -210,13 +216,13 @@ const RouteMapEditor = ({
     <div className={`relative h-[640px] min-h-[520px] w-full overflow-hidden rounded-2xl border ${isDarkMode ? 'border-white/10 bg-[#071416]' : 'border-slate-200 bg-slate-100'}`}>
       <div ref={elementRef} className="h-full w-full" />
       <div className="pointer-events-none absolute left-4 top-4 rounded-2xl border border-white/20 bg-slate-950/75 px-4 py-3 text-xs font-semibold text-white shadow-lg">
-        Bấm bản đồ để thêm điểm dừng. Kéo marker để chỉnh vị trí.
+        Bam ban do de them diem dung. Keo marker de chinh vi tri.
       </div>
       {routingStatus !== 'idle' ? (
         <div className="pointer-events-none absolute right-4 top-4 rounded-2xl border border-white/20 bg-slate-950/75 px-4 py-3 text-xs font-semibold text-white shadow-lg">
-          {routingStatus === 'loading' ? 'Đang bám theo mạng lưới đường phố...' : null}
-          {routingStatus === 'ready' ? 'Đã bám theo đường thật và hướng một chiều.' : null}
-          {routingStatus === 'error' ? 'Không lấy được lộ trình, kiểm tra kết nối OSRM.' : null}
+          {routingStatus === 'loading' ? 'Dang tinh lo trinh...' : null}
+          {routingStatus === 'ready' ? 'Da cap nhat lo trinh theo duong thuc.' : null}
+          {routingStatus === 'error' ? 'Khong lay duoc lo trinh, vui long kiem tra ket noi OSRM.' : null}
         </div>
       ) : null}
       <style>{`

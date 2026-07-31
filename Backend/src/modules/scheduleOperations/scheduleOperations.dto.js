@@ -10,6 +10,8 @@ const formatStaff = (staff) => (
 );
 
 const normalizeGeoPoint = (point = {}) => ({
+  id: point.stationId || point._id || null,
+  stationId: point.stationId || point._id || null,
   stopName: point.stopName || '',
   address: point.address || '',
   latitude: Number(point.latitude),
@@ -149,11 +151,38 @@ export const OperationIncidentResponseDTO = {
     policeNotified: incident.policeNotified,
     canContinue: incident.canContinue,
     requiresReplacementVehicle: incident.requiresReplacementVehicle,
+    passengerViolation: incident.passengerViolation || null,
+    passengerConflict: incident.passengerConflict || null,
+    foundItem: incident.foundItem || null,
     evidenceFiles: incident.evidenceFiles || [],
     reportedAt: incident.reportedAt,
     acknowledgedAt: incident.acknowledgedAt,
     resolvedAt: incident.resolvedAt,
     adminNote: incident.adminNote,
+  }),
+};
+
+export const OperationNotificationResponseDTO = {
+  format: (notification, actorId) => ({
+    id: notification._id,
+    title: notification.title,
+    message: notification.message,
+    category: notification.category,
+    priority: notification.priority,
+    targetRoles: notification.targetRoles || [],
+    route: notification.route || null,
+    trip: notification.trip || null,
+    vehicle: notification.vehicle || null,
+    activeFrom: notification.activeFrom,
+    expiresAt: notification.expiresAt,
+    sourceType: notification.sourceType || '',
+    sourceId: notification.sourceId || null,
+    metadata: notification.metadata || {},
+    isRead: (notification.readBy || []).some((item) => (
+      String(item.user || item) === String(actorId)
+    )),
+    createdAt: notification.createdAt,
+    updatedAt: notification.updatedAt,
   }),
 };
 
@@ -175,6 +204,7 @@ export const ShiftAssignmentResponseDTO = {
 
     return ({
     id: assignment._id,
+    tripId: trip._id || assignment.trip || null,
     shiftCode: assignment.shiftCode,
     tripCode: trip.scheduleCode || assignment.tripCode,
     actorRole: resolvedActorRole,
@@ -211,6 +241,32 @@ export const ShiftAssignmentResponseDTO = {
     inspection,
     notes: assignment.notes,
     });
+  },
+};
+
+export const StaffShiftScheduleResponseDTO = {
+  format: (assignment) => {
+    const shift = assignment.shift || assignment.shiftId || {};
+    const route = shift.routeId || {};
+
+    return {
+      id: assignment._id,
+      assignmentStatus: assignment.status || 'ASSIGNED',
+      workDate: assignment.workDate || shift.workDate,
+      shiftCode: shift.shiftCode || '',
+      shiftName: shift.shiftName || 'Ca làm việc',
+      shiftType: shift.shiftType || 'CUSTOM',
+      startTime: shift.startTime || '',
+      endTime: shift.endTime || '',
+      description: shift.description || '',
+      route: route && route._id
+        ? {
+          id: route._id,
+          routeCode: route.routeCode || '',
+          routeName: route.routeName || '',
+        }
+        : null,
+    };
   },
 };
 

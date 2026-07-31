@@ -11,13 +11,17 @@ import {
 } from 'react-leaflet';
 import {
   AlertTriangle,
+  BellRing,
   BusFront,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ClipboardCheck,
   Clock3,
   ListChecks,
   MapPin,
+  MessageCircle,
   PlayCircle,
   RefreshCw,
   Route,
@@ -25,9 +29,8 @@ import {
   UserRound,
   Wrench,
 } from 'lucide-react';
-import Header from '../../../shared/components/navigation/Header.jsx';
-import Footer from '../../../shared/components/common/Footer.jsx';
 import useAuthStore from '../../auth/stores/authStore.js';
+import { OperationChatPage } from '../../operationChat';
 import scheduleOperationsService from '../services/scheduleOperationsService.js';
 
 const STATUS_META = {
@@ -67,7 +70,31 @@ const INCIDENT_TYPES = [
   { value: 'TRAFFIC_CONGESTION', label: 'UC46 - Báo kẹt xe' },
   { value: 'ACCIDENT', label: 'UC47 - Báo tai nạn' },
   { value: 'VEHICLE_BREAKDOWN', label: 'UC48 - Báo xe hỏng' },
+  { value: 'PASSENGER_VIOLATION', label: 'UC50 - Báo hành khách vi phạm' },
+  { value: 'PASSENGER_CONFLICT', label: 'UC51 - Báo xung đột hành khách' },
+  { value: 'FOUND_ITEM', label: 'UC52 - Báo đồ tìm thấy' },
 ];
+
+const DRIVER_INCIDENT_TYPES = INCIDENT_TYPES.filter((type) => [
+  'TRAFFIC_CONGESTION',
+  'ACCIDENT',
+  'VEHICLE_BREAKDOWN',
+].includes(type.value));
+
+const BUS_ASSISTANT_INCIDENT_TYPES = INCIDENT_TYPES.filter((type) => [
+  'PASSENGER_VIOLATION',
+  'PASSENGER_CONFLICT',
+  'FOUND_ITEM',
+].includes(type.value));
+
+const INCIDENT_TYPE_DESCRIPTIONS = {
+  TRAFFIC_CONGESTION: 'Báo ùn tắc, chậm tuyến hoặc đường bị chặn.',
+  ACCIDENT: 'Báo tai nạn, va chạm hoặc tình huống cần hỗ trợ khẩn.',
+  VEHICLE_BREAKDOWN: 'Báo xe hỏng trong chuyến, cần hỗ trợ kỹ thuật hoặc xe thay thế.',
+  PASSENGER_VIOLATION: 'Báo hành khách vi phạm nội quy xe buýt để điều hành xử lý.',
+  PASSENGER_CONFLICT: 'Báo xung đột giữa hành khách để điều hành nắm tình hình.',
+  FOUND_ITEM: 'Báo đồ vật tìm thấy trên xe để xử lý thất lạc.',
+};
 
 const IN_TRIP_INCIDENT_TYPES = INCIDENT_TYPES.filter(
   (type) => type.value === 'TRAFFIC_CONGESTION'
@@ -83,19 +110,53 @@ const TRAFFIC_CATEGORIES = [
   { value: 'OTHER', label: 'Khác' },
 ];
 
-const AFFECTED_DIRECTIONS = [
-  { value: 'CURRENT_DIRECTION', label: 'Chiều đang chạy' },
-  { value: 'OPPOSITE_DIRECTION', label: 'Chiều ngược lại' },
-  { value: 'BOTH_DIRECTIONS', label: 'Cả hai chiều' },
-  { value: 'UNKNOWN', label: 'Chưa xác định' },
+const BREAKDOWN_TYPES = [
+  { value: 'ENGINE_FAILURE', label: 'Engine Failure' },
+  { value: 'BRAKE_FAILURE', label: 'Brake Failure' },
+  { value: 'FLAT_TIRE', label: 'Flat Tire' },
+  { value: 'ACCIDENT', label: 'Accident' },
+  { value: 'OTHER', label: 'Other' },
 ];
 
+const PASSENGER_CONFLICT_CATEGORIES = [
+  { value: 'ARGUMENT', label: 'Cãi vã / gây rối' },
+  { value: 'FARE_DISPUTE', label: 'Tranh chấp vé / thanh toán' },
+  { value: 'SEAT_DISPUTE', label: 'Tranh chấp chỗ ngồi' },
+  { value: 'HARASSMENT', label: 'Quấy rối / đe dọa' },
+  { value: 'SAFETY_RISK', label: 'Nguy cơ mất an toàn' },
+  { value: 'OTHER', label: 'Khác' },
+];
+
+
+const PASSENGER_VIOLATION_CATEGORIES = [
+  { value: 'NO_TICKET', label: 'Không có vé / không quét vé' },
+  { value: 'WRONG_TICKET', label: 'Dùng sai loại vé' },
+  { value: 'SMOKING', label: 'Hút thuốc trên xe' },
+  { value: 'LITTERING', label: 'Xả rác trên xe' },
+  { value: 'UNSAFE_BEHAVIOR', label: 'Hành vi mất an toàn' },
+  { value: 'DISTURBANCE', label: 'Gây ồn / làm phiền hành khách' },
+  { value: 'OTHER', label: 'Khác' },
+];
 const INCIDENT_SEVERITIES = [
   { value: 'LOW', label: 'Thấp' },
   { value: 'MEDIUM', label: 'Trung bình' },
   { value: 'HIGH', label: 'Cao' },
   { value: 'CRITICAL', label: 'Khẩn cấp' },
 ];
+
+const NOTIFICATION_CATEGORY_LABELS = {
+  ROUTE_UPDATE: 'Cập nhật tuyến',
+  SCHEDULE_CHANGE: 'Đổi lịch vận hành',
+  EMERGENCY_INSTRUCTION: 'Chỉ đạo khẩn',
+  GENERAL: 'Thông báo chung',
+};
+
+const NOTIFICATION_PRIORITY_META = {
+  LOW: 'bg-slate-100 text-slate-700',
+  NORMAL: 'bg-blue-100 text-blue-800',
+  HIGH: 'bg-amber-100 text-amber-900',
+  CRITICAL: 'bg-red-100 text-red-800',
+};
 
 const formatDate = (value) => new Intl.DateTimeFormat('vi-VN', {
   weekday: 'long',
@@ -207,13 +268,21 @@ const getInitialFilters = () => {
   const from = new Date();
   const to = new Date();
   to.setDate(to.getDate() + 13);
-
-  return {
-    from: getDateInputValue(from),
-    to: getDateInputValue(to),
-  };
+  return { from: getDateInputValue(from), to: getDateInputValue(to) };
 };
 
+const addInputDays = (value, days) => {
+  const date = new Date(`${value}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return getDateInputValue(date);
+};
+
+const getWeekRange = (anchor = new Date()) => {
+  const date = new Date(`${getDateInputValue(new Date(anchor))}T00:00:00`);
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+  const from = getDateInputValue(date);
+  return { from, to: addInputDays(from, 6) };
+};
 const getErrorMessage = (error) => (
   error?.message || 'Không thể tải lịch vận hành. Vui lòng thử lại.'
 );
@@ -909,24 +978,54 @@ const IncidentReportingPanel = ({
     description: '',
     injuriesReported: false,
     policeNotified: false,
-    canContinue: true,
-    requiresReplacementVehicle: false,
+    breakdownType: 'ENGINE_FAILURE',
+    canContinue: false,
+    requiresReplacementVehicle: true,
+    violationCategory: 'NO_TICKET',
+    passengerDescription: '',
+    conflictCategory: 'ARGUMENT',
+    partiesInvolved: '',
+    actionTaken: '',
+    itemName: '',
+    itemDescription: '',
+    foundLocation: '',
+    handedTo: '',
   });
   const [showIncidentChoices, setShowIncidentChoices] = useState(false);
   const [selectedIncidentType, setSelectedIncidentType] = useState(null);
   const [evidenceFiles, setEvidenceFiles] = useState([]);
 
   const isTripRunning = assignment.tripStatus === 'IN_PROGRESS';
+  const isTripCompleted = assignment.tripStatus === 'COMPLETED';
+  const canReportFoundItemAfterCompletion = assignment.actorRole === 'BUS_ASSISTANT' && isTripCompleted;
+  const canUseIncidentForm = isTripRunning || canReportFoundItemAfterCompletion;
+  const allowedIncidentTypes = assignment.actorRole === 'BUS_ASSISTANT'
+    ? BUS_ASSISTANT_INCIDENT_TYPES.filter((type) => (
+      canReportFoundItemAfterCompletion ? type.value === 'FOUND_ITEM' : true
+    ))
+    : DRIVER_INCIDENT_TYPES;
+  useEffect(() => {
+    if (
+      selectedIncidentType
+      && !allowedIncidentTypes.some((type) => type.value === selectedIncidentType)
+    ) {
+      setSelectedIncidentType(null);
+      setShowIncidentChoices(false);
+    }
+  }, [allowedIncidentTypes, selectedIncidentType]);
   const activeIncidentType = selectedIncidentType || form.type;
   const incidentTitle = {
     TRAFFIC_CONGESTION: 'UC46 - Báo kẹt xe',
     ACCIDENT: 'UC47 - Báo tai nạn',
     VEHICLE_BREAKDOWN: 'UC48 - Báo xe hỏng',
+    PASSENGER_VIOLATION: 'UC50 - Báo hành khách vi phạm',
+    PASSENGER_CONFLICT: 'UC51 - Báo xung đột hành khách',
+    FOUND_ITEM: 'UC52 - Báo đồ tìm thấy',
   }[activeIncidentType] || 'Báo sự cố trong chuyến';
   const canSubmit = canReportIncident
-    && isTripRunning
+    && canUseIncidentForm
     && selectedIncidentType
-    && form.locationText.trim().length >= 3
+    && (form.type === 'VEHICLE_BREAKDOWN' || form.locationText.trim().length >= 3)
     && form.description.trim().length >= 10
     && (form.type !== 'ACCIDENT' || form.severity !== 'LOW')
     && (
@@ -937,6 +1036,13 @@ const IncidentReportingPanel = ({
         && Number(form.estimatedDelayMinutes) >= 1
       )
     );
+  const hasPassengerViolationDetail = form.type !== 'PASSENGER_VIOLATION'
+    || (form.violationCategory && form.actionTaken.trim().length >= 3);
+  const hasPassengerConflictDetail = form.type !== 'PASSENGER_CONFLICT'
+    || (form.conflictCategory && form.actionTaken.trim().length >= 3);
+  const hasFoundItemDetail = form.type !== 'FOUND_ITEM'
+    || (form.itemName.trim().length >= 2 && form.foundLocation.trim().length >= 3);
+  const canSubmitReport = canSubmit && hasPassengerViolationDetail && hasPassengerConflictDetail && hasFoundItemDetail;
 
   const updateForm = (field, value) => {
     setForm((current) => ({
@@ -949,11 +1055,22 @@ const IncidentReportingPanel = ({
     setEvidenceFiles(Array.from(event.target.files || []).slice(0, 5));
   };
 
-  const submitIncidentReport = () => {
-    onReportIncident(assignment.id, {
+  const submitIncidentReport = async () => {
+    const autoLocationText = form.locationText.trim()
+      || assignment.currentLocation?.name
+      || assignment.route?.name
+      || assignment.tripCode
+      || 'Current GPS location';
+    await onReportIncident(assignment.id, {
       ...form,
+      locationText: form.type === 'VEHICLE_BREAKDOWN' ? autoLocationText : form.locationText,
+      canContinue: form.type === 'VEHICLE_BREAKDOWN' ? false : form.canContinue,
+      requiresReplacementVehicle: form.type === 'VEHICLE_BREAKDOWN' ? true : form.requiresReplacementVehicle,
       evidenceFiles,
     });
+    setSelectedIncidentType(null);
+    setShowIncidentChoices(false);
+    setEvidenceFiles([]);
   };
 
   const selectIncidentType = (type) => {
@@ -963,6 +1080,7 @@ const IncidentReportingPanel = ({
       ...current,
       type,
       severity: type === 'ACCIDENT' && current.severity === 'LOW' ? 'MEDIUM' : current.severity,
+      foundLocation: type === 'FOUND_ITEM' ? current.locationText : current.foundLocation,
     }));
   };
 
@@ -981,7 +1099,7 @@ const IncidentReportingPanel = ({
         <StatusBadge status={assignment.tripStatus} />
       </div>
 
-      {!isTripRunning && (
+      {!canUseIncidentForm && (
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Cần bắt đầu chuyến trước khi báo sự cố.
         </div>
@@ -999,7 +1117,7 @@ const IncidentReportingPanel = ({
             <button
               type="button"
               onClick={() => setShowIncidentChoices((current) => !current)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-700 px-4 py-3 text-sm font-bold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <AlertTriangle className="h-4 w-4" />
@@ -1009,21 +1127,17 @@ const IncidentReportingPanel = ({
 
           {showIncidentChoices && (
             <div className="mt-4 grid gap-3 md:grid-cols-3">
-              {INCIDENT_TYPES.map((type) => (
+              {allowedIncidentTypes.map((type) => (
                 <button
                   key={type.value}
                   type="button"
                   onClick={() => selectIncidentType(type.value)}
-                  disabled={!canReportIncident || !isTripRunning || isProcessing}
+                  disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
                   className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-left hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <p className="font-black text-slate-950">{type.label}</p>
                   <p className="mt-1 text-xs text-slate-600">
-                    {type.value === 'TRAFFIC_CONGESTION'
-                      ? 'Báo ùn tắc, chậm tuyến hoặc đường bị chặn.'
-                      : type.value === 'ACCIDENT'
-                        ? 'Báo tai nạn, va chạm hoặc tình huống cần hỗ trợ khẩn.'
-                        : 'Báo xe hỏng trong chuyến, cần hỗ trợ kỹ thuật hoặc xe thay thế.'}
+                    {INCIDENT_TYPE_DESCRIPTIONS[type.value]}
                   </p>
                 </button>
               ))}
@@ -1058,10 +1172,10 @@ const IncidentReportingPanel = ({
           <select
             value={form.type}
             onChange={(event) => updateForm('type', event.target.value)}
-            disabled={!canReportIncident || !isTripRunning || isProcessing}
+            disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
             className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
           >
-            {INCIDENT_TYPES.map((type) => (
+            {allowedIncidentTypes.map((type) => (
               <option key={type.value} value={type.value}>{type.label}</option>
             ))}
           </select>
@@ -1071,7 +1185,7 @@ const IncidentReportingPanel = ({
           <select
             value={form.severity}
             onChange={(event) => updateForm('severity', event.target.value)}
-            disabled={!canReportIncident || !isTripRunning || isProcessing}
+            disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
             className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
           >
             {INCIDENT_SEVERITIES.map((severity) => (
@@ -1084,7 +1198,7 @@ const IncidentReportingPanel = ({
           <input
             value={form.locationText}
             onChange={(event) => updateForm('locationText', event.target.value)}
-            disabled={!canReportIncident || !isTripRunning || isProcessing}
+            disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
             placeholder="Ví dụ: gần cầu Rồng"
             className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
           />
@@ -1092,30 +1206,17 @@ const IncidentReportingPanel = ({
       </div>
 
       {form.type === 'TRAFFIC_CONGESTION' && (
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
           <label className="space-y-1">
             <span className="text-xs font-bold uppercase text-slate-500">Loại kẹt xe</span>
             <select
               value={form.trafficCategory}
               onChange={(event) => updateForm('trafficCategory', event.target.value)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
             >
               {TRAFFIC_CATEGORIES.map((category) => (
                 <option key={category.value} value={category.value}>{category.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-1">
-            <span className="text-xs font-bold uppercase text-slate-500">Chiều ảnh hưởng</span>
-            <select
-              value={form.affectedDirection}
-              onChange={(event) => updateForm('affectedDirection', event.target.value)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
-              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
-            >
-              {AFFECTED_DIRECTIONS.map((direction) => (
-                <option key={direction.value} value={direction.value}>{direction.label}</option>
               ))}
             </select>
           </label>
@@ -1126,7 +1227,7 @@ const IncidentReportingPanel = ({
               min="1"
               value={form.estimatedDelayMinutes}
               onChange={(event) => updateForm('estimatedDelayMinutes', event.target.value)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
             />
           </label>
@@ -1140,7 +1241,7 @@ const IncidentReportingPanel = ({
               type="checkbox"
               checked={form.injuriesReported}
               onChange={(event) => updateForm('injuriesReported', event.target.checked)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="rounded border-slate-300 text-red-600 focus:ring-red-500"
             />
             Có người bị thương
@@ -1150,7 +1251,7 @@ const IncidentReportingPanel = ({
               type="checkbox"
               checked={form.policeNotified}
               onChange={(event) => updateForm('policeNotified', event.target.checked)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="rounded border-slate-300 text-red-600 focus:ring-red-500"
             />
             Đã báo cơ quan chức năng
@@ -1160,12 +1261,33 @@ const IncidentReportingPanel = ({
 
       {form.type === 'VEHICLE_BREAKDOWN' && (
         <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Breakdown Type</span>
+            <select
+              value={form.breakdownType}
+              onChange={(event) => updateForm('breakdownType', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            >
+              {BREAKDOWN_TYPES.map((type) => (
+                <option key={type.value} value={type.value}>{type.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">
+            Current trip, vehicle, driver, GPS location, and timestamp will be attached automatically.
+          </div>
+        </div>
+      )}
+
+      {form.type === 'VEHICLE_BREAKDOWN' && (
+        <div className="hidden">
           <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
             <input
               type="checkbox"
               checked={form.canContinue}
               onChange={(event) => updateForm('canContinue', event.target.checked)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="rounded border-slate-300 text-red-600 focus:ring-red-500"
             />
             Xe còn có thể tiếp tục chạy
@@ -1175,10 +1297,121 @@ const IncidentReportingPanel = ({
               type="checkbox"
               checked={form.requiresReplacementVehicle}
               onChange={(event) => updateForm('requiresReplacementVehicle', event.target.checked)}
-              disabled={!canReportIncident || !isTripRunning || isProcessing}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
               className="rounded border-slate-300 text-red-600 focus:ring-red-500"
             />
             Cần xe thay thế
+          </label>
+        </div>
+      )}
+
+      {form.type === 'PASSENGER_VIOLATION' && (
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Loại vi phạm</span>
+            <select
+              value={form.violationCategory}
+              onChange={(event) => updateForm('violationCategory', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            >
+              {PASSENGER_VIOLATION_CATEGORIES.map((category) => (
+                <option key={category.value} value={category.value}>{category.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Mô tả hành khách</span>
+            <input
+              value={form.passengerDescription}
+              onChange={(event) => updateForm('passengerDescription', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: hành khách áo xanh tại cửa sau"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Hành động đã xử lý</span>
+            <input
+              value={form.actionTaken}
+              onChange={(event) => updateForm('actionTaken', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: nhắc nội quy, yêu cầu mua vé"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+        </div>
+      )}
+
+      {form.type === 'PASSENGER_CONFLICT' && (
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Nhóm xung đột</span>
+            <select
+              value={form.conflictCategory}
+              onChange={(event) => updateForm('conflictCategory', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            >
+              {PASSENGER_CONFLICT_CATEGORIES.map((category) => (
+                <option key={category.value} value={category.value}>{category.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Các bên liên quan</span>
+            <input
+              value={form.partiesInvolved}
+              onChange={(event) => updateForm('partiesInvolved', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: 2 hành khách tại cửa sau"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Hành động đã xử lý</span>
+            <input
+              value={form.actionTaken}
+              onChange={(event) => updateForm('actionTaken', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: tách hành khách, nhắc nội quy"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+        </div>
+      )}
+
+      {form.type === 'FOUND_ITEM' && (
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Tên đồ vật</span>
+            <input
+              value={form.itemName}
+              onChange={(event) => updateForm('itemName', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: ví da màu đen"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Vị trí tìm thấy</span>
+            <input
+              value={form.foundLocation}
+              onChange={(event) => updateForm('foundLocation', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: ghế số 12"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Bàn giao cho</span>
+            <input
+              value={form.handedTo}
+              onChange={(event) => updateForm('handedTo', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              placeholder="Ví dụ: quầy điều hành bến"
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            />
           </label>
         </div>
       )}
@@ -1188,7 +1421,7 @@ const IncidentReportingPanel = ({
         <textarea
           value={form.description}
           onChange={(event) => updateForm('description', event.target.value)}
-          disabled={!canReportIncident || !isTripRunning || isProcessing}
+          disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
           placeholder="Mô tả rõ tình huống, mức ảnh hưởng và hành động đã thực hiện."
           rows={3}
           className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
@@ -1203,7 +1436,7 @@ const IncidentReportingPanel = ({
           capture="environment"
           multiple
           onChange={updateEvidenceFiles}
-          disabled={!canReportIncident || !isTripRunning || isProcessing}
+          disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
           className="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-red-100 file:px-3 file:py-2 file:text-sm file:font-bold file:text-red-700 hover:file:bg-red-200"
         />
         <p className="text-xs text-slate-500">Có thể chụp hoặc chọn tối đa 5 ảnh JPG, PNG, WEBP để admin xem tình hình rõ hơn.</p>
@@ -1222,7 +1455,7 @@ const IncidentReportingPanel = ({
       <button
         type="button"
         onClick={submitIncidentReport}
-        disabled={!canSubmit || isProcessing}
+        disabled={!canSubmitReport || isProcessing}
         className="mt-3 inline-flex items-center justify-center gap-2 rounded-lg bg-red-700 px-4 py-3 text-sm font-bold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Send className="h-4 w-4" />
@@ -1261,7 +1494,8 @@ const AssignmentCard = ({
     assignment.inspection?.status === 'READY'
     || ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(assignment.tripStatus)
   );
-  const showIncidentStep = assignment.tripStatus === 'IN_PROGRESS';
+  const showIncidentStep = assignment.tripStatus === 'IN_PROGRESS'
+    || (assignment.actorRole === 'BUS_ASSISTANT' && assignment.tripStatus === 'COMPLETED');
   const acceptedScreenTitle = assignment.tripStatus === 'IN_PROGRESS'
     ? 'Chuyến đang vận hành'
     : assignment.inspection?.status === 'READY'
@@ -1323,6 +1557,14 @@ const AssignmentCard = ({
             </div>
           </div>
         </div>
+        {showIncidentStep && (
+          <IncidentReportingPanel
+            assignment={assignment}
+            canReportIncident={assignment.actorRole === 'BUS_ASSISTANT'}
+            isProcessing={isProcessing}
+            onReportIncident={onReportIncident}
+          />
+        )}
       </article>
     );
   }
@@ -1375,7 +1617,7 @@ const AssignmentCard = ({
         {showIncidentStep && (
           <IncidentReportingPanel
             assignment={assignment}
-            canReportIncident={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+            canReportIncident={['DRIVER', 'BUS_ASSISTANT'].includes(assignment.actorRole)}
             isProcessing={isProcessing}
             onReportIncident={onReportIncident}
           />
@@ -1496,7 +1738,7 @@ const AssignmentCard = ({
     {showIncidentStep && (
       <IncidentReportingPanel
         assignment={assignment}
-        canReportIncident={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+        canReportIncident={['DRIVER', 'BUS_ASSISTANT'].includes(assignment.actorRole)}
         isProcessing={isProcessing}
         onReportIncident={onReportIncident}
       />
@@ -1578,6 +1820,51 @@ const ShiftScheduleCard = ({ shift }) => {
   );
 };
 
+const OperationNotificationsPanel = ({ notifications = [] }) => (
+    <section className="mt-6 rounded-lg border border-cyan-200 bg-cyan-50/70 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-black uppercase text-cyan-900">
+            <BellRing className="h-4 w-4" />
+            Thông báo vận hành
+          </div>
+          <p className="mt-1 text-sm text-slate-600">
+            Thông báo từ điều hành về tuyến, lịch chạy hoặc chỉ đạo khẩn.
+          </p>
+        </div>
+        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-cyan-800">
+          {notifications.length} thông báo
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {notifications.length ? notifications.map((notification) => (
+          <article key={notification.id} className="rounded-lg border border-cyan-100 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${NOTIFICATION_PRIORITY_META[notification.priority] || NOTIFICATION_PRIORITY_META.NORMAL}`}>
+                {notification.priority || 'NORMAL'}
+              </span>
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">
+                {NOTIFICATION_CATEGORY_LABELS[notification.category] || notification.category}
+              </span>
+            </div>
+            <h3 className="mt-3 text-base font-black text-slate-950">{notification.title}</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-700">{notification.message}</p>
+            {notification.createdAt ? (
+              <p className="mt-3 text-xs font-semibold text-slate-500">
+                Gửi lúc {formatShortDate(notification.createdAt)} {formatTime(notification.createdAt)}
+              </p>
+            ) : null}
+          </article>
+        )) : (
+          <div className="rounded-lg border border-dashed border-cyan-200/50 bg-white/70 p-8 text-center text-sm font-semibold text-slate-500 lg:col-span-2">
+            Chưa có thông báo vận hành trong khoảng thời gian này.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+
 const EmptyState = ({ message }) => (
   <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">
     {message}
@@ -1590,6 +1877,7 @@ const ScheduleOperationsPage = () => {
   const [filters, setFilters] = useState(getInitialFilters);
   const [assignedTrips, setAssignedTrips] = useState([]);
   const [shiftSchedule, setShiftSchedule] = useState([]);
+  const [operationNotifications, setOperationNotifications] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [processingAssignmentId, setProcessingAssignmentId] = useState('');
   const [error, setError] = useState('');
@@ -1600,9 +1888,14 @@ const ScheduleOperationsPage = () => {
     setError('');
 
     try {
-      const tripsPayload = await scheduleOperationsService.getAssignedTrips(filters);
+      const [tripsPayload, shiftsPayload, notificationsPayload] = await Promise.all([
+        scheduleOperationsService.getAssignedTrips(filters),
+        scheduleOperationsService.getShiftSchedule(filters),
+        scheduleOperationsService.getOperationNotifications(filters),
+      ]);
       setAssignedTrips(tripsPayload.trips || []);
-      setShiftSchedule([]);
+      setShiftSchedule(shiftsPayload.shifts || []);
+      setOperationNotifications(notificationsPayload.notifications || []);
     } catch (requestError) {
       setError(getErrorMessage(requestError));
     } finally {
@@ -1613,6 +1906,19 @@ const ScheduleOperationsPage = () => {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(async () => {
+      try {
+        const payload = await scheduleOperationsService.getOperationNotifications(filters);
+        setOperationNotifications(payload.notifications || []);
+      } catch {
+        // Giữ dữ liệu thông báo gần nhất nếu refresh nền lỗi tạm thời.
+      }
+    }, 10000);
+
+    return () => window.clearInterval(intervalId);
+  }, [filters]);
 
   const runVehicleAction = async (assignmentId, action, successText) => {
     setProcessingAssignmentId(assignmentId);
@@ -1697,41 +2003,133 @@ const ScheduleOperationsPage = () => {
 
   const scheduleByDate = useMemo(() => (
     shiftSchedule.reduce((groups, shift) => {
-      const key = new Date(shift.scheduledStart).toISOString().slice(0, 10);
+      const key = getDateInputValue(new Date(shift.workDate));
       groups[key] = [...(groups[key] || []), shift];
       return groups;
     }, {})
   ), [shiftSchedule]);
+  const weekDays = useMemo(() => (
+    Array.from({ length: 7 }, (_, index) => addInputDays(filters.from, index))
+  ), [filters.from]);
+
+  const openShiftWeek = (anchor) => {
+    setFilters(getWeekRange(anchor));
+    setActiveTab('shifts');
+  };
 
   const actorLabel = user?.role === 'DRIVER' ? 'Tài xế' : 'Phụ xe';
   const canOperateVehicle = user?.role === 'DRIVER';
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
+    <div className="driver-dark-shell min-h-screen bg-[#020617] text-slate-100">
+      <header className="border-b border-white/10 bg-slate-950/95">
+        <div className="flex w-full flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between xl:px-10">
+          <button
+            type="button"
+            onClick={() => setActiveTab('trips')}
+            className="flex items-center gap-3 text-left"
+          >
+            <span className="grid h-10 w-10 place-items-center rounded bg-emerald-400 text-slate-950">
+              <BusFront size={22} />
+            </span>
+            <span>
+              <span className="block text-lg font-semibold text-white">Driver BusDN</span>
+              <span className="block text-xs text-slate-400">Vận hành xe buýt Đà Nẵng</span>
+            </span>
+          </button>
 
-      <main className="pt-20">
-        <section className="border-b border-emerald-900/20 bg-emerald-950 text-white">
-          <div className="mx-auto max-w-7xl px-6 py-10">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase text-emerald-200">
-                  Vận hành lịch trình
-                </span>
-                <h1 className="mt-4 text-3xl font-black md:text-4xl">Lịch vận hành cá nhân</h1>
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-emerald-100/80">
-                  Theo dõi chuyến được phân công, lịch ca làm việc và tình trạng kiểm tra xe trước khi xuất bến.
-                </p>
-              </div>
-              <div className="rounded-lg border border-white/10 bg-white/10 px-4 py-3">
-                <p className="text-xs font-semibold uppercase text-emerald-200">Đang đăng nhập</p>
-                <p className="mt-1 font-bold">{user?.fullName || 'Nhân viên vận hành'} - {actorLabel}</p>
+          <div className="flex items-center gap-3">
+            <span className="rounded border border-white/10 bg-white/5 px-3 py-2 text-sm font-bold text-slate-200">VN</span>
+            <div className="flex items-center gap-2 rounded border border-white/10 bg-white/[0.04] px-2 py-1.5">
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800">
+                {(user?.fullName || 'D').charAt(0).toUpperCase()}
+              </span>
+              <div className="hidden min-w-0 sm:block">
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Đã đăng nhập</p>
+                <p className="max-w-[180px] truncate text-sm font-semibold text-white">{user?.fullName || 'Tài xế'}</p>
+                <p className="text-xs font-semibold text-emerald-400">{actorLabel}</p>
               </div>
             </div>
           </div>
-        </section>
+        </div>
+      </header>
 
-        <section className="mx-auto max-w-7xl px-6 py-8">
+      <main className="grid w-full gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[215px_minmax(0,1fr)] xl:px-10">
+        <nav className="flex h-fit flex-col gap-2 rounded border border-white/10 bg-white/[0.04] p-3 lg:sticky lg:top-6">
+          <button
+            type="button"
+            onClick={() => setActiveTab('trips')}
+            className={`inline-flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium transition ${
+              activeTab === 'trips'
+                ? 'bg-emerald-400 text-slate-950'
+                : 'bg-white/5 text-slate-300 hover:bg-white/10'
+            }`}
+          >
+            <Route size={16} /> Chuyến được phân công
+          </button>
+          <button
+            type="button"
+            onClick={() => openShiftWeek(filters.from)}
+            className={`inline-flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium transition ${
+              activeTab === 'shifts'
+                ? 'bg-emerald-400 text-slate-950'
+                : 'bg-white/5 text-slate-300 hover:bg-white/10'
+            }`}
+          >
+            <CalendarDays size={16} /> Lịch ca làm việc
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('notifications')}
+            className={`inline-flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium transition ${
+              activeTab === 'notifications'
+                ? 'bg-emerald-400 text-slate-950'
+                : 'bg-white/5 text-slate-300 hover:bg-white/10'
+            }`}
+          >
+            <BellRing size={16} /> Thông báo vận hành
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('chat')}
+            className={`inline-flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium transition ${
+              activeTab === 'chat'
+                ? 'bg-emerald-400 text-slate-950'
+                : 'bg-white/5 text-slate-300 hover:bg-white/10'
+            }`}
+          >
+            <MessageCircle size={16} /> Nhóm trò chuyện
+          </button>
+          <div className="mt-2 border-t border-white/10 pt-3 text-xs leading-5 text-slate-400">
+            Theo dõi chuyến được phân công, kiểm tra xe, lịch ca làm việc và trao đổi vận hành.
+          </div>
+        </nav>
+
+        <section className="min-w-0">
+          <section className="mb-5 rounded border border-white/10 bg-white/[0.04] px-4 py-4">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-400">Driver Operations</p>
+            <h1 className="mt-1 text-2xl font-black text-white">
+              {activeTab === 'trips'
+                ? 'Chuyến được phân công'
+                : activeTab === 'shifts'
+                  ? 'Lịch ca làm việc'
+                  : activeTab === 'chat'
+                    ? 'Nhóm trò chuyện vận hành'
+                    : 'Thông báo vận hành'}
+            </h1>
+            <p className="mt-1 text-sm text-slate-400">
+              {activeTab === 'trips'
+                ? 'Tiếp nhận chuyến, kiểm tra xe và vận hành theo phân công.'
+                : activeTab === 'shifts'
+                  ? 'Theo dõi ca làm việc của bạn theo tuần.'
+                  : activeTab === 'chat'
+                    ? 'Trao đổi nhanh với điều hành, tài xế và phụ xe trong nhóm vận hành.'
+                    : 'Theo dõi phản hồi từ điều hành và cập nhật xử lý báo cáo đã gửi.'}
+            </p>
+          </section>
+
+          <section className="space-y-6">
+          {activeTab !== 'chat' && (
           <div className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-end md:justify-between">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1">
@@ -1764,30 +2162,7 @@ const ScheduleOperationsPage = () => {
               Làm mới lịch
             </button>
           </div>
-
-          <div className="mt-6 grid grid-cols-2 border-b border-slate-200">
-            <button
-              type="button"
-              onClick={() => setActiveTab('trips')}
-              className={`flex items-center justify-center gap-2 border-b-2 px-4 py-4 text-sm font-bold ${
-                activeTab === 'trips'
-                  ? 'border-emerald-700 text-emerald-800'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <Route className="h-4 w-4" />
-              UC39 - Chuyến được phân công ({assignedTrips.length})
-            </button>
-            <button
-              type="button"
-              disabled
-              title="UC40 sẽ làm sau khi có màn admin phân công ca làm việc riêng."
-              className="flex cursor-not-allowed items-center justify-center gap-2 border-b-2 border-transparent px-4 py-4 text-sm font-bold text-slate-400"
-            >
-              <CalendarDays className="h-4 w-4" />
-              UC40 - Lịch ca làm việc (làm sau)
-            </button>
-          </div>
+          )}
 
           {successMessage && (
             <div className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -1801,7 +2176,11 @@ const ScheduleOperationsPage = () => {
             </div>
           )}
 
-          {isLoading ? (
+          {activeTab === 'chat' ? (
+            <div className="mt-6">
+              <OperationChatPage embedded />
+            </div>
+          ) : isLoading ? (
             <div className="mt-6 rounded-lg border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
               Đang tải lịch vận hành...
             </div>
@@ -1827,29 +2206,57 @@ const ScheduleOperationsPage = () => {
                 <EmptyState message="Không có chuyến xe nào được phân công trong khoảng thời gian này." />
               )}
             </div>
+          ) : activeTab === 'shifts' ? (
+            <section className="mt-6 overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
+              <div className="flex flex-col gap-4 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">UC40 - Lịch ca làm việc</p>
+                  <h2 className="mt-1 text-xl font-black text-slate-950">Lịch làm việc theo tuần</h2>
+                  <p className="mt-1 text-sm text-slate-500">Chỉ hiển thị các ca admin đã phân công cho bạn.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => openShiftWeek(addInputDays(filters.from, -7))} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-200 text-emerald-700" title="Tuần trước"><ChevronLeft size={18} /></button>
+                  <button type="button" onClick={() => openShiftWeek(new Date())} className="h-10 rounded-lg border border-emerald-200 px-3 text-sm font-bold text-emerald-700">Tuần này</button>
+                  <button type="button" onClick={() => openShiftWeek(addInputDays(filters.from, 7))} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-200 text-emerald-700" title="Tuần sau"><ChevronRight size={18} /></button>
+                </div>
+              </div>
+              <div className="overflow-x-auto p-4">
+                <div className="grid min-w-[980px] grid-cols-7 gap-3">
+                  {weekDays.map((date) => {
+                    const dayShifts = scheduleByDate[date] || [];
+                    const today = getDateInputValue(new Date()) === date;
+                    return (
+                      <div key={date} className={`min-h-[260px] overflow-hidden rounded-xl border ${today ? 'border-emerald-400 ring-1 ring-emerald-200' : 'border-slate-200'}`}>
+                        <div className={today ? 'border-b border-emerald-200 bg-emerald-50 px-3 py-3 text-emerald-800' : 'border-b border-slate-200 bg-slate-50 px-3 py-3 text-slate-700'}>
+                          <p className="text-xs font-black uppercase tracking-[0.12em]">{new Date(`${date}T00:00:00`).toLocaleDateString('vi-VN', { weekday: 'short' })}</p>
+                          <p className="mt-1 text-lg font-black">{date.slice(8, 10)}/{date.slice(5, 7)}</p>
+                        </div>
+                        <div className="space-y-2 p-2">
+                          {dayShifts.length ? dayShifts.map((shift) => (
+                            <article key={shift.id} className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-sm font-black text-slate-950">{shift.startTime} - {shift.endTime}</p>
+                                <StatusBadge status={shift.assignmentStatus} />
+                              </div>
+                              <p className="mt-2 text-sm font-bold text-slate-950">{shift.shiftName}</p>
+                              <p className="mt-1 text-xs font-semibold text-slate-600">{shift.shiftCode}</p>
+                              {shift.route?.routeName ? <p className="mt-2 text-xs text-emerald-800">{shift.route.routeCode} · {shift.route.routeName}</p> : null}
+                              {shift.description ? <p className="mt-2 line-clamp-3 text-xs text-slate-500">{shift.description}</p> : null}
+                            </article>
+                          )) : <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-center text-xs text-slate-400">Không có ca</div>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
           ) : (
-            <div className="mt-6 space-y-6">
-              {Object.entries(scheduleByDate).length ? Object.entries(scheduleByDate).map(([date, shifts]) => (
-                <section key={date}>
-                  <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase text-slate-700">
-                    <MapPin className="h-4 w-4 text-emerald-700" />
-                    {formatDate(shifts[0].scheduledStart)}
-                  </div>
-                  <div className="space-y-4">
-                    {shifts.map((shift) => (
-                      <ShiftScheduleCard key={shift.id} shift={shift} />
-                    ))}
-                  </div>
-                </section>
-              )) : (
-                <EmptyState message="Không có ca làm việc nào trong khoảng thời gian này." />
-              )}
-            </div>
+            <OperationNotificationsPanel notifications={operationNotifications} />
           )}
+          </section>
         </section>
       </main>
-
-      <Footer />
     </div>
   );
 };

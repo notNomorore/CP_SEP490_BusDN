@@ -128,13 +128,13 @@ const RegisterPage = () => {
       ]}
       imagePosition="right"
     >
-      <div className="space-y-8">
-        <div className="space-y-3">
+      <div className="space-y-5">
+        <div className="space-y-2">
           <span className="inline-flex rounded-full bg-primary/5 px-3 py-1 text-sm font-semibold text-on-tertiary-fixed-variant">
             Register
           </span>
           <div>
-            <h2 className="text-3xl font-headline font-black tracking-tight text-primary">
+            <h2 className="text-3xl font-headline font-black leading-tight tracking-tight text-primary">
               Create your account
             </h2>
             <p className="mt-2 text-body-lg text-on-surface-variant">
@@ -149,7 +149,7 @@ const RegisterPage = () => {
           </div>
         )}
 
-        <form className="space-y-5" onSubmit={handleSubmit}>
+        <form className="space-y-4" onSubmit={handleSubmit}>
           <label className="block space-y-2">
             <span className="text-sm font-semibold text-on-surface">Full name</span>
             <input
@@ -159,7 +159,7 @@ const RegisterPage = () => {
               placeholder="Nguyen Van A"
               value={fullName}
               onChange={(event) => setFullName(event.target.value)}
-              className="w-full rounded-2xl border border-outline-variant/60 bg-white px-4 py-3 text-base text-on-surface shadow-sm placeholder:text-outline/70 focus:border-on-tertiary-container focus:ring-2 focus:ring-on-tertiary-container/20"
+              className="w-full rounded-2xl border border-outline-variant/60 bg-white px-4 py-2.5 text-base text-on-surface shadow-sm placeholder:text-outline/70 focus:border-on-tertiary-container focus:ring-2 focus:ring-on-tertiary-container/20"
             />
           </label>
 
@@ -174,13 +174,13 @@ const RegisterPage = () => {
               placeholder="name@example.com or 0912345678"
               value={identifier}
               onChange={(event) => setIdentifier(event.target.value)}
-              className="w-full rounded-2xl border border-outline-variant/60 bg-white px-4 py-3 text-base text-on-surface shadow-sm placeholder:text-outline/70 focus:border-on-tertiary-container focus:ring-2 focus:ring-on-tertiary-container/20"
+              className="w-full rounded-2xl border border-outline-variant/60 bg-white px-4 py-2.5 text-base text-on-surface shadow-sm placeholder:text-outline/70 focus:border-on-tertiary-container focus:ring-2 focus:ring-on-tertiary-container/20"
             />
           </label>
 
           <label className="block space-y-2">
             <span className="text-sm font-semibold text-on-surface">Password</span>
-            <span className="flex items-center gap-3 rounded-2xl border border-outline-variant/60 bg-white px-4 py-3 shadow-sm focus-within:border-on-tertiary-container focus-within:ring-2 focus-within:ring-on-tertiary-container/20">
+            <span className="flex items-center gap-3 rounded-2xl border border-outline-variant/60 bg-white px-4 py-2.5 shadow-sm focus-within:border-on-tertiary-container focus-within:ring-2 focus-within:ring-on-tertiary-container/20">
               <span className="material-symbols-outlined text-outline">lock</span>
               <input
                 type={showPassword ? 'text' : 'password'}
@@ -204,7 +204,7 @@ const RegisterPage = () => {
             </span>
           </label>
 
-          <div className="grid gap-3 rounded-3xl bg-surface-container-low p-4">
+          <div className="grid gap-2 rounded-3xl bg-surface-container-low p-4">
             {passwordChecks.map((rule) => (
               <div
                 key={rule.key}
@@ -222,7 +222,7 @@ const RegisterPage = () => {
 
           <label className="block space-y-2">
             <span className="text-sm font-semibold text-on-surface">Confirm password</span>
-            <span className="flex items-center gap-3 rounded-2xl border border-outline-variant/60 bg-white px-4 py-3 shadow-sm focus-within:border-on-tertiary-container focus-within:ring-2 focus-within:ring-on-tertiary-container/20">
+            <span className="flex items-center gap-3 rounded-2xl border border-outline-variant/60 bg-white px-4 py-2.5 shadow-sm focus-within:border-on-tertiary-container focus-within:ring-2 focus-within:ring-on-tertiary-container/20">
               <span className="material-symbols-outlined text-outline">password</span>
               <input
                 type={showConfirmPassword ? 'text' : 'password'}
@@ -249,7 +249,7 @@ const RegisterPage = () => {
             )}
           </label>
 
-          <label className="flex items-start gap-3 rounded-2xl border border-outline-variant/40 bg-white/70 px-4 py-3 text-sm text-on-surface-variant">
+          <label className="flex items-start gap-3 rounded-2xl border border-outline-variant/40 bg-white/70 px-4 py-2.5 text-sm text-on-surface-variant">
             <input
               type="checkbox"
               checked={agreeToTerms}
@@ -272,7 +272,7 @@ const RegisterPage = () => {
           <button
             type="submit"
             disabled={isLoading || !canSubmit}
-            className="w-full rounded-full bg-primary px-6 py-4 text-base font-bold text-on-primary shadow-lg shadow-primary/15 hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-full bg-primary px-6 py-3.5 text-base font-bold text-on-primary shadow-lg shadow-primary/15 hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isLoading ? 'Creating Account...' : 'Create Account'}
           </button>

@@ -3,30 +3,62 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import AppInitializer from './shared/components/AppInitializer';
 import { HomePage } from './features/home';
 import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/priorityProfile';
-import { AdminCustomerSupportPage } from './features/customerSupport';
+import {
+  AdminCustomerSupportPage,
+  AdminLostItemCasesPage,
+  LostItemCaseStatusPage,
+  MyFeedbackPage,
+  ReportLostItemPage,
+  SubmitFeedbackPage,
+} from './features/customerSupport';
 import { SearchRoutesPage } from './features/routes';
+import {
+  ETicketPage,
+  MyTicketsPage,
+  PaymentFailedPage,
+  PaymentSuccessPage,
+  TicketCheckoutPage,
+  TicketPurchasePage,
+  TransactionHistoryPage,
+  ValidateTicketPage,
+} from './features/tickets';
+import { TravelHistoryPage } from './features/travelHistory';
 import {
   AdminCommandLayout,
   AdminActiveTripsPage,
   AdminDelayedTripsPage,
-  AdminFleetLocationPage,
   DashboardAdminPage,
   RouteControlPage,
   StaffPerformancePage,
   SystemNotificationsPage,
+  TripScheduleDetailPage,
   UserAccountsPage,
 } from './features/admin';
 import { ScheduleOperationsPage } from './features/scheduleOperations';
+import { OperationChatPage } from './features/operationChat';
 import {
   LoginPage,
   RegisterPage,
   RegisterVerifyOtpPage,
+  ForcePasswordChangePage,
   ProtectedRoute,
   OperationsRoute,
   PublicRoute,
   AdminRoute,
+  BusAssistantRoute,
 } from './features/auth';
 import { ProfilePage } from './features/profile';
+import {
+  AssignedTripsPage,
+  BusAssistantShell,
+  CreateWalkInTicketPage,
+  IncidentReportPage,
+  OperationNotificationsPage,
+  RevenueSummaryPage,
+  ShiftRevenuePage,
+  ShiftSchedulePage,
+  ValidateQrTicketPage,
+} from './features/busAssistant';
 import {
   PromotionManagementPage,
   PromotionStatisticsPage,
@@ -39,72 +71,78 @@ import { MaintenanceApprovalPage } from './features/admin/maintenanceApproval';
 import { SystemMonitoringPage } from './features/admin/systemMonitoring';
 import { FareOperationsPage } from './features/admin/fareOperations';
 import { WalkInTicketMonitoringPage } from './features/admin/walkInTickets';
+import ShiftManagementPage from './features/admin/pages/ShiftManagementPage.jsx';
+import AutoGenerateShiftPage from './features/admin/pages/AutoGenerateShiftPage.jsx';
 import { PassengerCompliancePage } from './features/admin/passengerCompliance';
+import NotFoundPage from './shared/components/common/NotFoundPage.jsx';
+import I18nBoundary from './shared/components/I18nBoundary.jsx';
 
 function App() {
   return (
     <Router>
-      <AppInitializer>
+      <I18nBoundary>
+        <AppInitializer>
         <Routes>
           <Route path="/" element={<HomePage />} />
 
           <Route
             path="/auth/login"
-            element={
+            element={(
               <PublicRoute>
                 <LoginPage />
               </PublicRoute>
-            }
+            )}
           />
           <Route
             path="/auth/register"
-            element={
+            element={(
               <PublicRoute>
                 <RegisterPage />
               </PublicRoute>
-            }
+            )}
           />
           <Route
             path="/auth/verify-otp"
-            element={
+            element={(
               <PublicRoute>
                 <RegisterVerifyOtpPage />
               </PublicRoute>
-            }
+            )}
+          />
+          <Route
+            path="/auth/force-change-password"
+            element={(
+              <ProtectedRoute allowFirstLogin>
+                <ForcePasswordChangePage />
+              </ProtectedRoute>
+            )}
           />
 
           <Route
             path="/login"
-            element={
+            element={(
               <PublicRoute>
                 <LoginPage />
               </PublicRoute>
-            }
+            )}
           />
           <Route
             path="/register"
-            element={
+            element={(
               <PublicRoute>
                 <RegisterPage />
               </PublicRoute>
-            }
+            )}
           />
 
-          <Route
-            path="/search"
-            element={
-              <ProtectedRoute>
-                <SearchRoutesPage />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/search" element={<SearchRoutesPage />} />
           <Route
             path="/priority-profile"
-            element={
+            element={(
               <ProtectedRoute>
                 <PriorityProfilePage />
               </ProtectedRoute>
-            }
+            )}
           />
           <Route
             path="/profile"
@@ -114,6 +152,22 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="/tickets/purchase" element={<ProtectedRoute><TicketPurchasePage /></ProtectedRoute>} />
+          <Route path="/tickets/checkout" element={<ProtectedRoute><TicketCheckoutPage /></ProtectedRoute>} />
+          <Route path="/payment/success" element={<ProtectedRoute><PaymentSuccessPage /></ProtectedRoute>} />
+          <Route path="/payment/failed" element={<ProtectedRoute><PaymentFailedPage /></ProtectedRoute>} />
+          <Route path="/my-tickets" element={<ProtectedRoute><MyTicketsPage /></ProtectedRoute>} />
+          <Route path="/my-tickets/:ticketId" element={<ProtectedRoute><ETicketPage /></ProtectedRoute>} />
+          <Route path="/transactions" element={<ProtectedRoute><TransactionHistoryPage /></ProtectedRoute>} />
+          <Route path="/buy-ticket" element={<ProtectedRoute><TicketPurchasePage /></ProtectedRoute>} />
+          <Route path="/buy-tickets" element={<ProtectedRoute><TicketPurchasePage /></ProtectedRoute>} />
+          <Route path="/tickets/:ticketId" element={<ProtectedRoute><ETicketPage /></ProtectedRoute>} />
+          <Route path="/conductor/validate-qr" element={<ProtectedRoute><ValidateTicketPage /></ProtectedRoute>} />
+          <Route path="/travel-history" element={<ProtectedRoute><TravelHistoryPage /></ProtectedRoute>} />
+          <Route path="/submit-feedback" element={<ProtectedRoute><SubmitFeedbackPage /></ProtectedRoute>} />
+          <Route path="/my-feedback" element={<ProtectedRoute><MyFeedbackPage /></ProtectedRoute>} />
+          <Route path="/report-lost-item" element={<ProtectedRoute><ReportLostItemPage /></ProtectedRoute>} />
+          <Route path="/lost-item-cases" element={<ProtectedRoute><LostItemCaseStatusPage /></ProtectedRoute>} />
 
           {/* Ticket Feature */}
           {/* <Route path="/booking" element={<ProtectedRoute><BookingPage /></ProtectedRoute>} />
@@ -135,8 +189,11 @@ function App() {
             <Route path="dashboard" element={<DashboardAdminPage embedded />} />
             <Route path="fleet/active-trips" element={<AdminActiveTripsPage />} />
             <Route path="fleet/delayed-trips" element={<AdminDelayedTripsPage />} />
-            <Route path="fleet/locations" element={<AdminFleetLocationPage />} />
+            <Route path="fleet/locations" element={<DashboardAdminPage embedded />} />
             <Route path="routes" element={<RouteControlPage />} />
+            <Route path="trip-schedules" element={<TripScheduleDetailPage />} />
+            <Route path="shifts" element={<ShiftManagementPage />} />
+            <Route path="shifts/auto-generate" element={<AutoGenerateShiftPage />} />
             <Route path="users" element={<UserAccountsPage />} />
             <Route path="staff-performance" element={<StaffPerformancePage />} />
             <Route path="priority-verification" element={<AdminPriorityVerificationPage />} />
@@ -156,9 +213,114 @@ function App() {
             <Route path="maintenance-approval" element={<MaintenanceApprovalPage />} />
             <Route path="system-monitoring" element={<SystemMonitoringPage />} />
             <Route path="system-monitoring/suspicious" element={<SystemMonitoringPage />} />
+            <Route path="operation-chat" element={<OperationChatPage embedded />} />
           </Route>
 
-          {/* Driver and Bus Assistant Feature */}
+          <Route
+            path="/admin/priority-verification"
+            element={(
+              <AdminRoute>
+                <AdminPriorityVerificationPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/customer-support"
+            element={(
+              <AdminRoute>
+                <AdminCustomerSupportPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/lost-items"
+            element={(
+              <AdminRoute>
+                <AdminLostItemCasesPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/routes"
+            element={(
+              <AdminRoute>
+                <RouteControlPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/trip-schedules"
+            element={(
+              <AdminRoute>
+                <TripScheduleDetailPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/users"
+            element={(
+              <AdminRoute>
+                <UserAccountsPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/promotions"
+            element={(
+              <AdminRoute>
+                <PromotionManagementPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/promotions/statistics"
+            element={(
+              <AdminRoute>
+                <PromotionStatisticsPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/revenue"
+            element={(
+              <AdminRoute>
+                <RevenueReportsPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/analytics/route-efficiency"
+            element={(
+              <AdminRoute>
+                <RouteEfficiencyPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/incidents"
+            element={(
+              <AdminRoute>
+                <IncidentReportsPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/system-monitoring"
+            element={(
+              <AdminRoute>
+                <SystemMonitoringPage />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="/admin/system-monitoring/suspicious"
+            element={(
+              <AdminRoute>
+                <SystemMonitoringPage />
+              </AdminRoute>
+            )}
+          />
+
           <Route
             path="/operations/schedule"
             element={(
@@ -167,8 +329,45 @@ function App() {
               </OperationsRoute>
             )}
           />
+          <Route
+            path="/operations/chat"
+            element={(
+              <OperationsRoute>
+                <OperationChatPage />
+              </OperationsRoute>
+            )}
+          />
+          <Route
+            path="/bus-assistant"
+            element={(
+              <BusAssistantRoute>
+                <BusAssistantShell />
+              </BusAssistantRoute>
+            )}
+          >
+            <Route index element={<AssignedTripsPage />} />
+            <Route path="assigned-trips" element={<AssignedTripsPage />} />
+            <Route path="shift-schedule" element={<ShiftSchedulePage />} />
+            <Route path="operation-notifications" element={<OperationNotificationsPage />} />
+            <Route path="operation-chat" element={<OperationChatPage embedded />} />
+            <Route path="validate-ticket" element={<ValidateQrTicketPage />} />
+            <Route path="walkin-ticket" element={<CreateWalkInTicketPage />} />
+            <Route path="incident-reports" element={<IncidentReportPage />} />
+            <Route path="shift-revenue" element={<ShiftRevenuePage />} />
+            <Route path="revenue-summary" element={<RevenueSummaryPage />} />
+          </Route>
+          <Route
+            path="/admin/staff-performance"
+            element={
+              <AdminRoute>
+                <StaffPerformancePage />
+              </AdminRoute>
+            }
+          />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
-      </AppInitializer>
+        </AppInitializer>
+      </I18nBoundary>
     </Router>
   );
 }

@@ -1,0 +1,1931 @@
+import crypto from 'crypto';
+import mongoose from 'mongoose';
+import QRCode from 'qrcode';
+import { CustomError } from '../../middleware/errorHandler.js';
+import { HTTP_STATUS } from '../../constants/index.js';
+import User from '../auth/User.js';
+import RouteService from '../routes/RouteService.js';
+import Ticket from './Ticket.js';
+import MonthlyPass from './MonthlyPass.js';
+import QRCodeService from './QRCodeService.js';
+import PaymentOrder from './PaymentOrder.js';
+import PayOSService from './PayOSService.js';
+import Promotion from '../promotions/Promotion.js';
+import PromotionUsage from '../promotions/PromotionUsage.js';
+
+const PASSENGER_TYPES = new Set(['STANDARD', 'STUDENT', 'PRIORITY']);
+const MONTHLY_PASS_PRICES = {
+  STANDARD: 250000,
+  STUDENT: 120000,
+  PRIORITY: 0,
+};
+
+const parseServiceDateParts = (value) => {
+  const dateMatch = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!dateMatch) {
+    return null;
+  }
+
+  const [, year, month, day] = dateMatch.map(Number);
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+
+  const storedDate = new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
+  const isValidDate = storedDate.getUTCFullYear() === year
+    && storedDate.getUTCMonth() === month - 1
+    && storedDate.getUTCDate() === day;
+
+  return isValidDate ? { year, month, day } : null;
+};
+
+const buildStoredServiceDate = (value) => {
+  const parts = parseServiceDateParts(value);
+  if (!parts) {
+    return null;
+  }
+
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0, 0));
+};
+
+const buildVietnamDepartureDate = (serviceDate, departureTime) => {
+  const dateParts = parseServiceDateParts(serviceDate);
+  const timeMatch = String(departureTime || '').match(/^(\d{2}):(\d{2})$/);
+
+  if (!dateParts || !timeMatch) {
+    return null;
+  }
+
+  const { year, month, day } = dateParts;
+  const [, hours, minutes] = timeMatch.map(Number);
+
+  if (
+    month < 1 || month > 12
+    || day < 1 || day > 31
+    || hours < 0 || hours > 23
+    || minutes < 0 || minutes > 59
+  ) {
+    return null;
+  }
+
+  // Vietnam uses UTC+7 year-round, so subtract seven hours to obtain UTC.
+  const departureDate = new Date(Date.UTC(year, month - 1, day, hours - 7, minutes, 0, 0));
+  const vietnamParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(departureDate).reduce((parts, part) => {
+    parts[part.type] = part.value;
+    return parts;
+  }, {});
+
+  const isValid = Number(vietnamParts.year) === year
+    && Number(vietnamParts.month) === month
+    && Number(vietnamParts.day) === day
+    && Number(vietnamParts.hour) === hours
+    && Number(vietnamParts.minute) === minutes;
+
+  return isValid ? departureDate : null;
+};
+
+const buildTicketCode = () => `TKT-${crypto.randomBytes(3).toString('hex')}`.toUpperCase();
+const buildPassCode = () => `MP-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`.toUpperCase();
+
+const roundFareToNearestThousand = (value) => {
+  const amount = Number(value) || 0;
+  if (amount <= 0) {
+    return 0;
+  }
+
+  return Math.max(Math.round(amount / 1000) * 1000, 1000);
+};
+
+const getTicketDepartureDate = (ticket) => {
+  const serviceDate = new Date(ticket.serviceDate);
+  const dateValue = [
+    serviceDate.getUTCFullYear(),
+    String(serviceDate.getUTCMonth() + 1).padStart(2, '0'),
+    String(serviceDate.getUTCDate()).padStart(2, '0'),
+  ].join('-');
+
+  return buildVietnamDepartureDate(dateValue, ticket.departureTime || '23:59') || serviceDate;
+};
+
+const normalizeDate = (value) => {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    throw new CustomError('NgÃ y Ä‘Ã£ chá»n khÃ´ng há»£p lá»‡', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const formatVietnamOffsetDateTime = (date) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date).reduce((result, part) => {
+    result[part.type] = part.value;
+    return result;
+  }, {});
+
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}+07:00`;
+};
+
+const addHours = (date, hours) => new Date(date.getTime() + hours * 60 * 60 * 1000);
+
+const buildValidationResult = (result, message, data = {}) => ({
+  ok: result === 'VALID',
+  result,
+  message,
+  ...data,
+});
+
+const toValidationDateRange = (dateValue) => {
+  const dateText = String(dateValue || '').match(/^\d{4}-\d{2}-\d{2}$/)
+    ? String(dateValue)
+    : formatVietnamOffsetDateTime(new Date()).slice(0, 10);
+
+  return {
+    date: dateText,
+    start: new Date(`${dateText}T00:00:00+07:00`),
+    end: new Date(`${dateText}T23:59:59.999+07:00`),
+  };
+};
+
+const buildTicketValidationInfo = (ticket, route) => ({
+  ticketInfo: {
+    _id: ticket._id,
+    ticketCode: ticket.ticketCode,
+    ticketType: ticket.ticketType || 'ONE_WAY',
+    passengerType: ticket.passengerType || 'STANDARD',
+    status: ticket.ticketStatus || '',
+    paymentStatus: ticket.paymentStatus || '',
+    bookingStatus: ticket.bookingStatus || '',
+    routeCode: ticket.routeCode || ticket.routeNumber,
+    routeNumber: ticket.routeNumber,
+    tripId: ticket.tripId,
+    departureLocation: ticket.departureLocation,
+    destinationLocation: ticket.destinationLocation,
+    serviceDate: ticket.serviceDate,
+    departureTime: ticket.departureTime,
+    amount: ticket.ticketPrice,
+    ticketPrice: ticket.ticketPrice,
+    validFrom: ticket.validFrom,
+    validUntil: ticket.validUntil || ticket.expiresAt,
+    usedAt: ticket.usedAt,
+  },
+  passengerInfo: {
+    _id: ticket.passenger?._id || ticket.passenger || null,
+    fullName: ticket.passenger?.fullName || 'Passenger',
+    email: ticket.passenger?.email || '',
+    phoneNumber: ticket.passenger?.phoneNumber || '',
+  },
+  routeInfo: {
+    _id: route?._id || ticket.routeId?._id || ticket.routeId || null,
+    routeCode: ticket.routeCode || ticket.routeNumber,
+    routeNumber: ticket.routeNumber,
+    name: route?.name || route?.routeName || ticket.routeNumber,
+  },
+});
+
+const buildMonthlyPassValidationInfo = (monthlyPass) => ({
+  ticketInfo: {
+    _id: monthlyPass._id,
+    passCode: monthlyPass.passCode,
+    ticketCode: monthlyPass.passCode,
+    ticketType: 'MONTHLY_PASS',
+    passengerType: monthlyPass.passType,
+    status: monthlyPass.passStatus,
+    paymentStatus: monthlyPass.paymentStatus,
+    routeCode: monthlyPass.routeCode || 'ALL',
+    amount: monthlyPass.passPrice,
+    ticketPrice: monthlyPass.passPrice,
+    validFrom: monthlyPass.validFrom || monthlyPass.startDate,
+    validUntil: monthlyPass.validUntil || monthlyPass.expiryDate,
+  },
+  passengerInfo: {
+    _id: monthlyPass.passenger?._id || monthlyPass.passenger || null,
+    fullName: monthlyPass.passenger?.fullName || 'Passenger',
+    email: monthlyPass.passenger?.email || '',
+    phoneNumber: monthlyPass.passenger?.phoneNumber || '',
+  },
+  routeInfo: {
+    routeCode: monthlyPass.routeCode || 'ALL',
+    name: monthlyPass.routeCode && monthlyPass.routeCode !== 'ALL' ? monthlyPass.routeCode : 'All routes',
+  },
+});
+
+export class TicketService {
+  static async findRoute(routeId) {
+    try {
+      return await RouteService.findActiveRoute(routeId, routeId);
+    } catch {
+      return null;
+    }
+  }
+
+  static findStop(route, stopName) {
+    return (route.stops || []).find((stop) => (
+      stop.name.toLowerCase() === String(stopName || '').trim().toLowerCase()
+    ));
+  }
+
+  static calculatePrice(route, startStop, endStop) {
+    const routeStopCount = Math.max((route.stops || []).length - 1, 1);
+    const stopSpan = Math.max(endStop.order - startStop.order, 1);
+    const proportionalFare = (route.fare / routeStopCount) * stopSpan;
+    const minimumFare = route.fare * 0.35;
+    return roundFareToNearestThousand(Math.max(proportionalFare, minimumFare));
+  }
+
+  static async generateUniqueTicketCode() {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const ticketCode = buildTicketCode();
+      // eslint-disable-next-line no-await-in-loop
+      const existingTicket = await Ticket.exists({ ticketCode });
+      if (!existingTicket) {
+        return ticketCode;
+      }
+    }
+
+    return `TKT-${crypto.randomBytes(4).toString('hex')}`.toUpperCase();
+  }
+
+  static buildDuplicateTicketMatch(ticket) {
+    return {
+      passenger: ticket.passenger,
+      routeId: ticket.routeId,
+      tripId: ticket.tripId,
+      departureLocation: ticket.departureLocation,
+      destinationLocation: ticket.destinationLocation,
+      passengerType: ticket.passengerType,
+      ticketPrice: ticket.ticketPrice,
+      serviceDate: ticket.serviceDate,
+      departureTime: ticket.departureTime,
+    };
+  }
+
+  static buildTicketDedupeKey(ticket) {
+    const serviceDateKey = ticket.serviceDate
+      ? new Date(ticket.serviceDate).toISOString().slice(0, 10)
+      : '';
+
+    return [
+      ticket.passenger,
+      ticket.routeId?._id || ticket.routeId,
+      ticket.tripId,
+      ticket.departureLocation,
+      ticket.destinationLocation,
+      ticket.passengerType,
+      ticket.ticketPrice,
+      serviceDateKey,
+      ticket.departureTime,
+    ].map((value) => String(value || '')).join('|');
+  }
+
+  static getTicketDisplayPriority(ticket) {
+    if (ticket.paymentStatus === 'PAID' && ticket.bookingStatus === 'SUCCESS' && ticket.ticketStatus !== 'CANCELLED') {
+      return 4;
+    }
+    if (ticket.paymentStatus === 'PENDING' && ticket.bookingStatus === 'PENDING' && ticket.ticketStatus !== 'CANCELLED') {
+      return 3;
+    }
+    if (ticket.ticketStatus === 'USED') {
+      return 2;
+    }
+    if (ticket.ticketStatus === 'EXPIRED') {
+      return 1;
+    }
+    return 0;
+  }
+
+  static dedupeTicketListForDisplay(tickets) {
+    const bestTicketsByKey = new Map();
+
+    tickets.forEach((ticket) => {
+      const key = this.buildTicketDedupeKey(ticket);
+      const current = bestTicketsByKey.get(key);
+      if (!current) {
+        bestTicketsByKey.set(key, ticket);
+        return;
+      }
+
+      const currentPriority = this.getTicketDisplayPriority(current);
+      const nextPriority = this.getTicketDisplayPriority(ticket);
+      const currentTime = new Date(current.updatedAt || current.purchasedAt || 0).getTime();
+      const nextTime = new Date(ticket.updatedAt || ticket.purchasedAt || 0).getTime();
+
+      if (nextPriority > currentPriority || (nextPriority === currentPriority && nextTime > currentTime)) {
+        bestTicketsByKey.set(key, ticket);
+      }
+    });
+
+    return Array.from(bestTicketsByKey.values())
+      .sort((left, right) => new Date(right.purchasedAt || 0) - new Date(left.purchasedAt || 0));
+  }
+
+  static async cancelDuplicatePendingTicketsForPaidTicket(ticket) {
+    if (!ticket || ticket.paymentStatus !== 'PAID' || ticket.bookingStatus !== 'SUCCESS') {
+      return;
+    }
+
+    const duplicatePendingTickets = await Ticket.find({
+      ...this.buildDuplicateTicketMatch(ticket),
+      _id: { $ne: ticket._id },
+      paymentStatus: 'PENDING',
+      bookingStatus: 'PENDING',
+      ticketStatus: { $ne: 'CANCELLED' },
+    }).select('_id');
+
+    if (!duplicatePendingTickets.length) {
+      return;
+    }
+
+    const duplicateTicketIds = duplicatePendingTickets.map((duplicateTicket) => duplicateTicket._id);
+    await Ticket.updateMany(
+      { _id: { $in: duplicateTicketIds } },
+      {
+        $set: {
+          bookingStatus: 'CANCELLED',
+          ticketStatus: 'CANCELLED',
+          cancelledAt: new Date(),
+        },
+      }
+    );
+
+    await PaymentOrder.updateMany(
+      {
+        passenger: ticket.passenger,
+        ticketId: { $in: duplicateTicketIds },
+        status: 'PENDING',
+      },
+      {
+        $set: {
+          status: 'CANCELLED',
+          'payos.rawStatus': 'CANCELLED',
+        },
+      }
+    );
+  }
+
+  static async cleanupPaidDuplicatePendingTickets(userId) {
+    const paidTickets = await Ticket.find({
+      passenger: userId,
+      paymentStatus: 'PAID',
+      bookingStatus: 'SUCCESS',
+      ticketStatus: { $ne: 'CANCELLED' },
+    }).sort({ purchasedAt: -1 });
+
+    await Promise.all(paidTickets.map((ticket) => this.cancelDuplicatePendingTicketsForPaidTicket(ticket)));
+  }
+
+  static normalizePromotionCode(code) {
+    return String(code || '').trim().toUpperCase();
+  }
+
+  static calculatePromotionDiscount(promotion, amount) {
+    const originalAmount = Math.max(Number(amount) || 0, 0);
+    let discountAmount = 0;
+
+    if (promotion.discountType === 'PERCENTAGE') {
+      discountAmount = Math.round((originalAmount * Number(promotion.discountValue || 0)) / 100);
+      if (promotion.maxDiscountAmount) {
+        discountAmount = Math.min(discountAmount, Number(promotion.maxDiscountAmount));
+      }
+    } else {
+      discountAmount = Number(promotion.discountValue || 0);
+    }
+
+    discountAmount = Math.min(Math.max(Math.round(discountAmount), 0), originalAmount);
+
+    return {
+      originalAmount,
+      discountAmount,
+      finalAmount: Math.max(originalAmount - discountAmount, 0),
+    };
+  }
+
+  static async applyPromotionToAmount(userId, {
+    promotionCode,
+    ticketType,
+    routeId,
+    amount,
+    strict = true,
+  }) {
+    const code = this.normalizePromotionCode(promotionCode);
+    const originalAmount = Math.max(Number(amount) || 0, 0);
+
+    if (!code) {
+      return {
+        promotion: null,
+        promotionCode: '',
+        originalAmount,
+        discountAmount: 0,
+        finalAmount: originalAmount,
+      };
+    }
+
+    const now = new Date();
+    const promotion = await Promotion.findOne({ code });
+    const fail = (message) => {
+      if (strict) {
+        throw new CustomError(message, HTTP_STATUS.BAD_REQUEST);
+      }
+      return {
+        promotion: null,
+        promotionCode: code,
+        originalAmount,
+        discountAmount: 0,
+        finalAmount: originalAmount,
+        message,
+      };
+    };
+
+    if (!promotion) return fail('Mã khuyến mãi không tồn tại.');
+    if (promotion.status !== 'ACTIVE' || promotion.startDate > now || promotion.endDate < now) {
+      return fail('Mã khuyến mãi không còn hiệu lực.');
+    }
+    if (promotion.usageLimit && promotion.usedCount >= promotion.usageLimit) {
+      return fail('Mã khuyến mãi đã hết lượt sử dụng.');
+    }
+    if (originalAmount < Number(promotion.minOrderAmount || 0)) {
+      return fail('Đơn hàng chưa đạt giá trị tối thiểu để áp dụng mã.');
+    }
+
+    const normalizedTicketType = String(ticketType || 'ONE_WAY').trim().toUpperCase();
+    const routeObjectId = mongoose.isValidObjectId(routeId) ? new mongoose.Types.ObjectId(routeId) : null;
+    const appliesToTicketType = (
+      (normalizedTicketType === 'MONTHLY_PASS' && promotion.applicableTo === 'MONTHLY_PASS')
+      || (normalizedTicketType === 'ONE_WAY' && ['ALL_ROUTES', 'E_TICKET'].includes(promotion.applicableTo))
+      || (
+        normalizedTicketType === 'ONE_WAY'
+        && promotion.applicableTo === 'SELECTED_ROUTES'
+        && routeObjectId
+        && promotion.routeIds.some((item) => String(item) === String(routeObjectId))
+      )
+    );
+
+    if (!appliesToTicketType) {
+      return fail('Mã khuyến mãi không áp dụng cho vé hoặc tuyến này.');
+    }
+
+    const usedByUser = await PromotionUsage.countDocuments({
+      promotionId: promotion._id,
+      userId,
+      status: 'APPLIED',
+    });
+
+    if (promotion.usagePerUser && usedByUser >= promotion.usagePerUser) {
+      return fail('Bạn đã sử dụng hết lượt cho mã khuyến mãi này.');
+    }
+
+    const discount = this.calculatePromotionDiscount(promotion, originalAmount);
+    return {
+      promotion,
+      promotionId: promotion._id,
+      promotionCode: promotion.code,
+      promotionName: promotion.name,
+      discountType: promotion.discountType,
+      discountValue: promotion.discountValue,
+      ...discount,
+    };
+  }
+
+  static async previewPromotion(userId, payload = {}) {
+    const amount = Math.max(Number(payload.amount) || 0, 0);
+    const result = await this.applyPromotionToAmount(userId, {
+      promotionCode: payload.promotionCode,
+      ticketType: payload.ticketType,
+      routeId: payload.routeId,
+      amount,
+      strict: true,
+    });
+
+    return {
+      promotionId: result.promotionId,
+      promotionCode: result.promotionCode,
+      promotionName: result.promotionName,
+      discountType: result.discountType,
+      discountValue: result.discountValue,
+      originalAmount: result.originalAmount,
+      discountAmount: result.discountAmount,
+      finalAmount: result.finalAmount,
+    };
+  }
+
+  static async recordPromotionUsage({ promotionId, userId, ticketId, routeId, ticketType, paymentMethod, discountAmount, originalAmount, finalAmount }) {
+    if (!promotionId || !discountAmount) {
+      return;
+    }
+
+    const usageFilter = {
+      promotionId,
+      userId,
+      ticketId,
+      status: 'APPLIED',
+    };
+
+    const usageResult = await PromotionUsage.findOneAndUpdate(
+      usageFilter,
+      {
+        $setOnInsert: {
+          promotionId,
+          userId,
+          ticketId,
+          routeId,
+          ticketType: ticketType || 'ONE_WAY',
+          paymentMethod: paymentMethod || 'PAYOS',
+          discountAmount,
+          originalAmount,
+          finalAmount,
+          status: 'APPLIED',
+          usedAt: new Date(),
+        },
+      },
+      {
+        upsert: true,
+        new: false,
+        includeResultMetadata: true,
+      }
+    );
+
+    if (usageResult?.lastErrorObject?.updatedExisting) {
+      return;
+    }
+
+    await Promotion.findByIdAndUpdate(promotionId, { $inc: { usedCount: 1 } });
+  }
+
+  static async purchaseOneWayTicket(userId, payload) {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new CustomError('Không tìm thấy người dùng', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const route = await this.findRoute(payload.routeId);
+    if (!route) {
+      throw new CustomError('Chuyến đi hoặc tuyến xe đã chọn không tồn tại', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const direction = String(payload.direction || 'OUTBOUND').trim().toUpperCase();
+    if (!['OUTBOUND', 'INBOUND'].includes(direction)) {
+      throw new CustomError('Chiều tuyến không hợp lệ', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const directionStops = route.directions?.[direction]?.stops || route.stops || [];
+    const directionalRoute = { ...route, stops: directionStops };
+    const startStop = this.findStop(directionalRoute, payload.departureLocation);
+    const endStop = this.findStop(directionalRoute, payload.destinationLocation);
+
+    if (!startStop || !endStop) {
+      throw new CustomError('Diem di hoac diem den khong thuoc tuyen da chon', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    if (startStop.order >= endStop.order) {
+      throw new CustomError('Điểm đi hoặc điểm đến không hợp lệ', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const passengerType = String(payload.passengerType || 'STANDARD').trim().toUpperCase();
+    if (!PASSENGER_TYPES.has(passengerType)) {
+      throw new CustomError('Loại vé không hợp lệ', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const paymentMethod = String(payload.paymentMethod || 'PAYOS').trim().toUpperCase();
+
+
+    const departureTime = payload.departureTime || route.operatingHours?.firstDeparture || '05:30';
+    const departureDate = buildVietnamDepartureDate(payload.serviceDate, departureTime);
+
+    if (!departureDate) {
+      throw new CustomError('Ngày đi hoặc giờ khởi hành không hợp lệ', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    if (departureDate.getTime() <= Date.now()) {
+      throw new CustomError(
+        'Không thể mua vé cho chuyến xe đã khởi hành. Vui lòng chọn thời gian trong tương lai.',
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    const serviceDate = buildStoredServiceDate(payload.serviceDate);
+    if (!serviceDate) {
+      throw new CustomError('Ngày đi không hợp lệ', HTTP_STATUS.BAD_REQUEST);
+    }
+    const serviceDateValue = String(payload.serviceDate || '').slice(0, 10);
+    const tripId = `${route.routeNumber}-${serviceDateValue}-${departureTime}-${direction}`;
+
+    const originalPrice = this.calculatePrice(directionalRoute, startStop, endStop);
+    const promotion = await this.applyPromotionToAmount(userId, {
+      promotionCode: payload.promotionCode,
+      ticketType: 'ONE_WAY',
+      routeId: route._id,
+      amount: originalPrice,
+      strict: true,
+    });
+    const ticketPrice = promotion.finalAmount;
+    const duplicateTicketQuery = {
+      passenger: user._id,
+      routeId: route._id,
+      tripId,
+      direction,
+      departureLocation: startStop.name,
+      destinationLocation: endStop.name,
+      passengerType,
+      ticketPrice,
+      promotionCode: promotion.promotionCode || '',
+      serviceDate,
+      departureTime,
+    };
+    const existingPaidTicket = await Ticket.findOne({
+      ...duplicateTicketQuery,
+      paymentStatus: 'PAID',
+      bookingStatus: 'SUCCESS',
+      ticketStatus: { $ne: 'CANCELLED' },
+    }).lean();
+
+    if (existingPaidTicket) {
+      return existingPaidTicket;
+    }
+
+    const existingPendingTicket = await Ticket.findOne({
+      ...duplicateTicketQuery,
+      paymentStatus: 'PENDING',
+      bookingStatus: 'PENDING',
+      ticketStatus: { $ne: 'CANCELLED' },
+    }).lean();
+
+    if (existingPendingTicket) {
+      return existingPendingTicket;
+    }
+
+    const ticketCode = await this.generateUniqueTicketCode();
+    const ticket = new Ticket({
+      ticketCode,
+      ticketType: 'ONE_WAY',
+      passenger: user._id,
+      routeId: route._id,
+      routeCode: route.routeNumber,
+      routeNumber: route.routeNumber,
+      tripId,
+      direction,
+      departureLocation: startStop.name,
+      destinationLocation: endStop.name,
+      passengerType,
+      originalPrice,
+      discountAmount: promotion.discountAmount,
+      promotionCode: promotion.promotionCode || '',
+      promotionId: promotion.promotionId || null,
+      ticketPrice,
+      paymentMethod,
+      paymentStatus: 'PENDING',
+      bookingStatus: 'PENDING',
+      ticketStatus: 'ACTIVE',
+      serviceDate,
+      departureTime,
+    });
+
+    const validFrom = departureDate;
+    const validUntil = addHours(validFrom, 2);
+    const digitalTicket = await QRCodeService.buildTicketQRCode({
+      type: 'BUS_TICKET',
+      ticketCode,
+      ticketType: 'ONE_WAY',
+      routeCode: route.routeNumber,
+      fromStop: startStop.name,
+      toStop: endStop.name,
+      validFrom: formatVietnamOffsetDateTime(validFrom),
+      validUntil: formatVietnamOffsetDateTime(validUntil),
+    });
+
+    ticket.validFrom = validFrom;
+    ticket.validUntil = validUntil;
+    ticket.expiresAt = validUntil;
+    ticket.digitalTicket = {
+      ...digitalTicket,
+      issuedAt: new Date(digitalTicket.issuedAt),
+      expiresAt: validUntil,
+    };
+
+    await ticket.save();
+
+    return ticket.toObject();
+  }
+
+  static async listMyTickets(userId) {
+    await this.reconcilePendingPaymentOrders(userId);
+    await this.cleanupPaidDuplicatePendingTickets(userId);
+
+    const tickets = await Ticket.find({ passenger: userId })
+      .sort({ purchasedAt: -1 })
+      .populate('routeId')
+      .populate('passenger', 'fullName email phoneNumber')
+      .lean();
+
+    const visibleTickets = this.dedupeTicketListForDisplay(tickets);
+
+    return Promise.all(visibleTickets.map((ticket) => this.buildTicketView(ticket)));
+  }
+
+  static getCurrentTicketStatus(ticket) {
+    if (ticket.bookingStatus === 'CANCELLED' || ticket.ticketStatus === 'CANCELLED') {
+      return 'CANCELLED';
+    }
+
+    if (ticket.ticketStatus === 'USED' || ticket.usedAt) {
+      return 'USED';
+    }
+
+    // Expiration is based on the scheduled departure time, even when the
+    // reservation has not been paid yet. Keep this before the PENDING check.
+    if (getTicketDepartureDate(ticket) <= new Date()) {
+      return 'EXPIRED';
+    }
+
+    if (ticket.paymentStatus !== 'PAID' || ticket.bookingStatus !== 'SUCCESS') {
+      return 'PENDING';
+    }
+
+    return 'ACTIVE';
+  }
+
+  static buildTripProgress(ticket, route) {
+    const stops = (route?.stops || []).map((stop) => ({
+      name: stop.name,
+      order: stop.order,
+      latitude: stop.latitude,
+      longitude: stop.longitude,
+      isBoardingPoint: stop.name === ticket.departureLocation,
+      isDestination: stop.name === ticket.destinationLocation,
+    }));
+    const boardingIndex = stops.findIndex((stop) => stop.name === ticket.departureLocation);
+    const destinationIndex = stops.findIndex((stop) => stop.name === ticket.destinationLocation);
+    const safeBoardingIndex = Math.max(boardingIndex, 0);
+    const safeDestinationIndex = destinationIndex >= safeBoardingIndex ? destinationIndex : stops.length - 1;
+
+    return {
+      routeName: route?.name || ticket.routeNumber,
+      estimatedDurationMinutes: route?.estimatedDurationMinutes || 0,
+      estimatedArrivalTime: ticket.departureTime
+        ? `${ticket.departureTime} + ${route?.estimatedDurationMinutes || 0} min`
+        : 'Not available',
+      boardingPoint: ticket.departureLocation,
+      destinationPoint: ticket.destinationLocation,
+      stops,
+      completedStops: stops.slice(0, safeBoardingIndex),
+      remainingStops: stops.slice(safeBoardingIndex, safeDestinationIndex + 1),
+      progressPercent: stops.length > 1
+        ? Math.round((safeBoardingIndex / (stops.length - 1)) * 100)
+        : 0,
+    };
+  }
+
+  static async buildTicketView(ticket) {
+    const route = ticket.routeId && typeof ticket.routeId === 'object' && (ticket.routeId.routeCode || ticket.routeId.routeNumber)
+      ? RouteService.formatRoute(ticket.routeId)
+      : await this.findRoute(ticket.routeId);
+    const passenger = ticket.passenger && typeof ticket.passenger === 'object'
+      ? ticket.passenger
+      : await User.findById(ticket.passenger).select('fullName email phoneNumber').lean();
+    const status = this.getCurrentTicketStatus(ticket);
+    const isCancelable = status === 'ACTIVE' || status === 'PENDING';
+
+    return {
+      ...ticket,
+      id: String(ticket._id),
+      ticketId: ticket.ticketCode,
+      ticketType: 'ONE_WAY',
+      passengerType: ticket.passengerType || 'STANDARD',
+      status,
+      canCancel: isCancelable,
+      qrCode: {
+        payload: ticket.digitalTicket?.qrPayload || JSON.stringify({
+          app: 'BusDN',
+          type: 'BUS_TICKET',
+          ticketCode: ticket.ticketCode,
+          ticketType: ticket.ticketType || 'ONE_WAY',
+          routeCode: ticket.routeCode || ticket.routeNumber,
+          validFrom: ticket.validFrom ? formatVietnamOffsetDateTime(new Date(ticket.validFrom)) : undefined,
+          validUntil: ticket.validUntil ? formatVietnamOffsetDateTime(new Date(ticket.validUntil)) : undefined,
+        }),
+        data: ticket.digitalTicket?.qrCodeData || '',
+        image: ticket.digitalTicket?.qrCodeImage || '',
+        signature: ticket.digitalTicket?.qrSignature || '',
+        issuedAt: ticket.digitalTicket?.issuedAt,
+        validFrom: ticket.validFrom,
+        validUntil: ticket.validUntil || ticket.expiresAt || ticket.digitalTicket?.expiresAt,
+        expiresAt: ticket.validUntil || ticket.expiresAt || ticket.digitalTicket?.expiresAt,
+      },
+      passengerInfo: {
+        fullName: passenger?.fullName || 'Passenger',
+        email: passenger?.email || '',
+        phoneNumber: passenger?.phoneNumber || '',
+      },
+      tripInfo: this.buildTripProgress(ticket, route),
+      actionAvailability: {
+        download: true,
+        share: true,
+        addToCalendar: status === 'ACTIVE',
+        cancel: isCancelable,
+      },
+      importantNotes: [
+        'Vui lòng có mặt tại điểm dừng ít nhất 5 phút trước giờ khởi hành.',
+        'Giữ mã QR rõ ràng và xuất trình khi lên xe.',
+        'Vé chỉ dành cho cá nhân và không được chuyển nhượng.',
+        'Không thể hủy vé đã sử dụng hoặc hết hạn.',
+      ],
+    };
+  }
+
+  static async getMyTicketById(userId, ticketId) {
+    if (!mongoose.isValidObjectId(ticketId)) {
+      throw new CustomError('Không tìm thấy thông tin vé.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const ticket = await Ticket.findOne({
+      _id: ticketId,
+      passenger: userId,
+    })
+      .populate('routeId')
+      .populate('passenger', 'fullName email phoneNumber')
+      .lean();
+
+    if (!ticket) {
+      throw new CustomError('Không tìm thấy thông tin vé.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const view = await this.buildTicketView(ticket);
+    if (view.status === 'EXPIRED') {
+      return { ...view, statusMessage: 'Vé này đã hết hạn.' };
+    }
+    if (view.status === 'USED') {
+      return { ...view, statusMessage: 'Vé này đã được sử dụng.' };
+    }
+    return view;
+  }
+
+  static async cancelMyTicket(userId, ticketId) {
+    if (!mongoose.isValidObjectId(ticketId)) {
+      throw new CustomError('Không tìm thấy thông tin vé.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const ticket = await Ticket.findOne({ _id: ticketId, passenger: userId });
+    if (!ticket) {
+      throw new CustomError('Không tìm thấy thông tin vé.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const status = this.getCurrentTicketStatus(ticket);
+    if (status === 'USED') {
+      throw new CustomError('Vé này đã được sử dụng.', HTTP_STATUS.BAD_REQUEST);
+    }
+    if (status === 'EXPIRED') {
+      throw new CustomError('Vé này đã hết hạn.', HTTP_STATUS.BAD_REQUEST);
+    }
+    if (status === 'CANCELLED') {
+      throw new CustomError('Vé này đã được hủy trước đó.', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    ticket.bookingStatus = 'CANCELLED';
+    ticket.ticketStatus = 'CANCELLED';
+    ticket.cancelledAt = new Date();
+    await ticket.save();
+
+    if (status === 'PENDING') {
+      const duplicatePendingTickets = await Ticket.find({
+        _id: { $ne: ticket._id },
+        passenger: userId,
+        routeId: ticket.routeId,
+        tripId: ticket.tripId,
+        departureLocation: ticket.departureLocation,
+        destinationLocation: ticket.destinationLocation,
+        passengerType: ticket.passengerType,
+        ticketPrice: ticket.ticketPrice,
+        serviceDate: ticket.serviceDate,
+        departureTime: ticket.departureTime,
+        paymentStatus: 'PENDING',
+        bookingStatus: 'PENDING',
+        ticketStatus: { $ne: 'CANCELLED' },
+      }).select('_id');
+
+      const cancelledTicketIds = [
+        ticket._id,
+        ...duplicatePendingTickets.map((duplicateTicket) => duplicateTicket._id),
+      ];
+
+      if (duplicatePendingTickets.length) {
+        await Ticket.updateMany(
+          { _id: { $in: duplicatePendingTickets.map((duplicateTicket) => duplicateTicket._id) } },
+          {
+            $set: {
+              bookingStatus: 'CANCELLED',
+              ticketStatus: 'CANCELLED',
+              cancelledAt: new Date(),
+            },
+          }
+        );
+      }
+
+      await PaymentOrder.updateMany(
+        {
+          passenger: userId,
+          ticketId: { $in: cancelledTicketIds },
+          status: 'PENDING',
+        },
+        {
+          $set: {
+            status: 'CANCELLED',
+            'payos.rawStatus': 'CANCELLED',
+          },
+        }
+      );
+    }
+
+    return this.getMyTicketById(userId, ticket._id);
+  }
+
+  static normalizePassType(value) {
+    const passType = String(value || 'STANDARD').trim().toUpperCase();
+    return Object.keys(MONTHLY_PASS_PRICES).includes(passType) ? passType : null;
+  }
+
+  static addMonths(date, months) {
+    const nextDate = new Date(date);
+    nextDate.setMonth(nextDate.getMonth() + months);
+    return nextDate;
+  }
+
+  static async purchaseMonthlyPass(userId, payload) {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new CustomError('Không tìm thấy người dùng', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const passType = this.normalizePassType(payload.passType);
+    if (!passType) {
+      throw new CustomError('Loại vé tháng đã chọn không khả dụng', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const paymentMethod = String(payload.paymentMethod || 'PAYOS').trim().toUpperCase();
+
+
+    const activePass = await MonthlyPass.findOne({
+      passenger: user._id,
+      passType,
+      passStatus: 'ACTIVE',
+      expiryDate: { $gte: new Date() },
+    }).lean();
+
+    if (activePass && !payload.renew) {
+      throw new CustomError('Bạn đang có một vé tháng cùng loại còn hiệu lực.', HTTP_STATUS.CONFLICT);
+    }
+
+    const selectedRoute = payload.routeId ? await this.findRoute(payload.routeId) : null;
+    if (payload.routeId && !selectedRoute) {
+      throw new CustomError('Tuyen xe da chon khong ton tai', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const routeCode = selectedRoute?.routeNumber || String(payload.routeCode || 'ALL').trim().toUpperCase();
+    const startDate = normalizeDate(payload.startDate);
+    const currentMonthStart = new Date();
+    currentMonthStart.setDate(1);
+    currentMonthStart.setHours(0, 0, 0, 0);
+    if (startDate < currentMonthStart) {
+      throw new CustomError('Khong the dat ve thang cho thang da qua', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const validityMonths = Math.max(Number(payload.validityMonths) || 1, 1);
+    const expiryDate = new Date(this.addMonths(startDate, validityMonths).getTime() - 1);
+    const originalPrice = MONTHLY_PASS_PRICES[passType] * validityMonths;
+    const promotion = await this.applyPromotionToAmount(userId, {
+      promotionCode: payload.promotionCode,
+      ticketType: 'MONTHLY_PASS',
+      routeId: selectedRoute?._id,
+      amount: originalPrice,
+      strict: true,
+    });
+    const passPrice = promotion.finalAmount;
+    const duplicatePendingPass = await MonthlyPass.findOne({
+      passenger: user._id,
+      passType,
+      routeCode,
+      passStatus: 'PENDING',
+      startDate,
+      expiryDate,
+      passPrice,
+      promotionCode: promotion.promotionCode || '',
+    }).lean();
+
+    if (duplicatePendingPass && !payload.renew) {
+      throw new CustomError('Ban da co ve thang cung tuyen va thoi han dang cho xu ly.', HTTP_STATUS.CONFLICT);
+    }
+
+    const passCode = buildPassCode();
+    const issuedAt = new Date();
+
+    const monthlyPass = new MonthlyPass({
+      passCode,
+      passenger: user._id,
+      routeId: selectedRoute?._id,
+      routeCode,
+      passType,
+      startDate,
+      expiryDate,
+      validFrom: startDate,
+      validUntil: expiryDate,
+      originalPrice,
+      discountAmount: promotion.discountAmount,
+      promotionCode: promotion.promotionCode || '',
+      promotionId: promotion.promotionId || null,
+      passPrice,
+      paymentMethod,
+      paymentStatus: 'PENDING',
+      passStatus: 'PENDING',
+      digitalPass: {
+        issuedAt,
+        expiresAt: expiryDate,
+      },
+    });
+
+    const refreshedDigitalPass = await QRCodeService.buildTicketQRCode({
+      type: 'MONTHLY_PASS',
+      passCode,
+      routeCode,
+      passengerName: user.fullName || user.email || 'Passenger',
+      validFrom: formatVietnamOffsetDateTime(startDate),
+      validUntil: formatVietnamOffsetDateTime(expiryDate),
+    });
+    monthlyPass.digitalPass = {
+      ...refreshedDigitalPass,
+      issuedAt: new Date(refreshedDigitalPass.issuedAt),
+      expiresAt: expiryDate,
+    };
+
+    await monthlyPass.save();
+
+    return monthlyPass.toObject();
+  }
+
+  static async listMyMonthlyPasses(userId) {
+    await this.reconcilePendingPaymentOrders(userId);
+
+    return MonthlyPass.find({ passenger: userId }).sort({ purchasedAt: -1 }).lean();
+  }
+
+  static async listMyTransactions(userId) {
+    await this.reconcilePendingPaymentOrders(userId);
+
+    const paidOrders = await PaymentOrder.find({
+      passenger: userId,
+      status: 'PAID',
+    })
+      .sort({ paidAt: -1, completedAt: -1, createdAt: -1 })
+      .populate({
+        path: 'ticketId',
+        populate: { path: 'routeId' },
+      })
+      .populate('monthlyPassId')
+      .lean();
+
+    return paidOrders.map((order) => {
+      const ticket = order.ticketId && typeof order.ticketId === 'object' ? order.ticketId : null;
+      const monthlyPass = order.monthlyPassId && typeof order.monthlyPassId === 'object' ? order.monthlyPassId : null;
+      const route = ticket?.routeId && typeof ticket.routeId === 'object' ? ticket.routeId : null;
+      const paidAt = order.paidAt || order.completedAt || order.updatedAt || order.createdAt;
+      const ticketDocument = ticket || monthlyPass || null;
+
+      return {
+        id: String(order._id),
+        orderCode: order.orderCode,
+        transactionCode: `PAY-${order.orderCode}`,
+        ticketType: order.ticketType,
+        ticketLabel: order.ticketType === 'MONTHLY_PASS' ? 'Monthly pass' : 'One-way ticket',
+        amount: order.amount,
+        paymentMethod: order.paymentMethod || 'PAYOS',
+        status: order.status,
+        paidAt,
+        completedAt: order.completedAt,
+        createdAt: order.createdAt,
+        ticketId: ticket?._id || null,
+        monthlyPassId: monthlyPass?._id || null,
+        ticketCode: ticket?.ticketCode || monthlyPass?.passCode || '',
+        routeCode: ticket?.routeCode || ticket?.routeNumber || monthlyPass?.routeCode || 'ALL',
+        routeName: route?.name || route?.routeName || ticket?.routeNumber || monthlyPass?.routeCode || 'All routes',
+        fromStop: ticket?.departureLocation || '',
+        toStop: ticket?.destinationLocation || '',
+        serviceDate: ticket?.serviceDate || monthlyPass?.validFrom || monthlyPass?.startDate || null,
+        ticketStatus: ticket?.ticketStatus || monthlyPass?.passStatus || '',
+        paymentStatus: ticketDocument?.paymentStatus || 'PAID',
+      };
+    });
+  }
+
+  static buildPayOSOrderCode() {
+    return (Date.now() * 1000) + crypto.randomInt(100, 999);
+  }
+
+  static async createPaymentOrder(userId, payload = {}) {
+    if (payload.ticketId) {
+      return this.createPaymentForPendingTicket(userId, payload.ticketId);
+    }
+
+    const ticketType = String(payload.ticketType || '').trim().toUpperCase();
+    let orderTarget;
+    let amount;
+
+    if (ticketType === 'ONE_WAY') {
+      orderTarget = await this.purchaseOneWayTicket(userId, {
+        ...payload,
+        paymentMethod: 'PAYOS',
+      });
+      amount = orderTarget.ticketPrice;
+      if (orderTarget.paymentStatus === 'PAID' && orderTarget.bookingStatus === 'SUCCESS') {
+        return {
+          orderCode: 0,
+          status: 'PAID',
+          amount,
+          ticketType,
+          checkoutUrl: '',
+          qrCode: '',
+          qrCodeImage: '',
+          paymentLinkId: '',
+          message: 'Vé này đã được thanh toán.',
+        };
+      }
+    } else if (ticketType === 'MONTHLY_PASS') {
+      orderTarget = await this.purchaseMonthlyPass(userId, {
+        ...payload,
+        paymentMethod: 'PAYOS',
+      });
+      amount = orderTarget.passPrice;
+    } else {
+      throw new CustomError('Loại vé thanh toán không hợp lệ', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const orderCode = this.buildPayOSOrderCode();
+    const description = ticketType === 'ONE_WAY'
+      ? `BusDN ${orderTarget.ticketCode}`
+      : `BusDN ${orderTarget.passCode}`;
+    const existingPaymentOrder = await PaymentOrder.findOne({
+      passenger: userId,
+      status: 'PENDING',
+      ...(ticketType === 'ONE_WAY'
+        ? { ticketId: orderTarget._id }
+        : { monthlyPassId: orderTarget._id }),
+    });
+    const paymentOrder = existingPaymentOrder || await PaymentOrder.create({
+      orderCode,
+      passenger: userId,
+      ticketType,
+      payload,
+      amount,
+      description,
+      status: amount > 0 ? 'PENDING' : 'PAID',
+      ticketId: ticketType === 'ONE_WAY' ? orderTarget._id : undefined,
+      monthlyPassId: ticketType === 'MONTHLY_PASS' ? orderTarget._id : undefined,
+    });
+
+    if (amount <= 0) {
+      await this.completePaymentOrder(paymentOrder);
+      return {
+        orderCode,
+        status: 'PAID',
+        amount,
+        ticketType,
+        checkoutUrl: '',
+        qrCode: '',
+        message: 'Vé miễn phí đã được kích hoạt.',
+      };
+    }
+
+    if (!paymentOrder.payos?.qrCode) {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const payosLink = await PayOSService.createPaymentLink({
+        orderCode: paymentOrder.orderCode,
+        amount,
+        description,
+        returnUrl: `${frontendUrl}/my-tickets`,
+        cancelUrl: `${frontendUrl}/tickets/checkout`,
+      });
+
+      paymentOrder.payos = {
+        paymentLinkId: payosLink.paymentLinkId || '',
+        checkoutUrl: payosLink.checkoutUrl || '',
+        qrCode: payosLink.qrCode || '',
+        rawStatus: payosLink.status || 'PENDING',
+        rawResponse: payosLink,
+      };
+      await paymentOrder.save();
+    }
+
+    return {
+      orderCode: paymentOrder.orderCode,
+      status: paymentOrder.status,
+      amount,
+      ticketType,
+      checkoutUrl: paymentOrder.payos.checkoutUrl,
+      qrCode: paymentOrder.payos.qrCode,
+      qrCodeImage: paymentOrder.payos.qrCode
+        ? await QRCode.toDataURL(paymentOrder.payos.qrCode, {
+          errorCorrectionLevel: 'M',
+          margin: 2,
+          width: 320,
+          color: {
+            dark: '#002f1b',
+            light: '#ffffff',
+          },
+        })
+        : '',
+      paymentLinkId: paymentOrder.payos.paymentLinkId,
+    };
+  }
+
+  static async createPaymentForPendingTicket(userId, ticketId) {
+    if (!mongoose.isValidObjectId(ticketId)) {
+      throw new CustomError('Không tìm thấy thông tin vé.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const ticket = await Ticket.findOne({
+      _id: ticketId,
+      passenger: userId,
+      paymentStatus: 'PENDING',
+      bookingStatus: 'PENDING',
+    });
+
+    if (!ticket) {
+      throw new CustomError('Không tìm thấy vé chưa thanh toán.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    if (this.getCurrentTicketStatus(ticket) === 'EXPIRED') {
+      if (ticket.ticketStatus !== 'EXPIRED') {
+        ticket.ticketStatus = 'EXPIRED';
+        await ticket.save();
+      }
+      throw new CustomError('Vé này đã hết hạn nên không thể thanh toán.', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    let paymentOrder = await PaymentOrder.findOne({
+      passenger: userId,
+      ticketId: ticket._id,
+      status: { $in: ['PENDING', 'PAID'] },
+    }).sort({ createdAt: -1 });
+
+    if (paymentOrder?.status === 'PENDING') {
+      try {
+        await this.syncPaymentOrderWithPayOS(paymentOrder);
+      } catch {
+        // Keep the existing pending QR usable if PayOS status lookup is temporarily unavailable.
+      }
+    }
+
+    if (paymentOrder?.status === 'PAID') {
+      await this.completePaymentOrder(paymentOrder);
+      if (paymentOrder.status !== 'PAID') {
+        throw new CustomError('Vé này đã bị hủy nên không thể kích hoạt thanh toán.', HTTP_STATUS.BAD_REQUEST);
+      }
+
+      return {
+        orderCode: paymentOrder.orderCode,
+        status: 'PAID',
+        amount: paymentOrder.amount,
+        ticketType: 'ONE_WAY',
+        checkoutUrl: '',
+        qrCode: '',
+        qrCodeImage: '',
+        message: 'Thanh toan thanh cong. Ve da duoc kich hoat.',
+      };
+    }
+
+    if (paymentOrder && paymentOrder.status !== 'PENDING') {
+      paymentOrder = null;
+    }
+
+    if (!paymentOrder) {
+      paymentOrder = await PaymentOrder.create({
+        orderCode: this.buildPayOSOrderCode(),
+        passenger: userId,
+        ticketType: 'ONE_WAY',
+        payload: {
+          ticketId: ticket._id,
+          routeId: ticket.routeId,
+          departureLocation: ticket.departureLocation,
+          destinationLocation: ticket.destinationLocation,
+          serviceDate: ticket.serviceDate,
+          departureTime: ticket.departureTime,
+          passengerType: ticket.passengerType,
+        },
+        amount: ticket.ticketPrice,
+        description: `BusDN ${ticket.ticketCode}`,
+        status: ticket.ticketPrice > 0 ? 'PENDING' : 'PAID',
+        ticketId: ticket._id,
+      });
+    }
+
+    if (paymentOrder.amount <= 0) {
+      await this.completePaymentOrder(paymentOrder);
+      return {
+        orderCode: paymentOrder.orderCode,
+        status: 'PAID',
+        amount: paymentOrder.amount,
+        ticketType: 'ONE_WAY',
+        checkoutUrl: '',
+        qrCode: '',
+        qrCodeImage: '',
+        message: 'Vé miễn phí đã được kích hoạt.',
+      };
+    }
+
+    if (!paymentOrder.payos?.qrCode) {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const payosLink = await PayOSService.createPaymentLink({
+        orderCode: paymentOrder.orderCode,
+        amount: paymentOrder.amount,
+        description: paymentOrder.description,
+        returnUrl: `${frontendUrl}/my-tickets`,
+        cancelUrl: `${frontendUrl}/my-tickets`,
+      });
+
+      paymentOrder.payos = {
+        paymentLinkId: payosLink.paymentLinkId || '',
+        checkoutUrl: payosLink.checkoutUrl || '',
+        qrCode: payosLink.qrCode || '',
+        rawStatus: payosLink.status || 'PENDING',
+        rawResponse: payosLink,
+      };
+      await paymentOrder.save();
+    }
+
+    return {
+      orderCode: paymentOrder.orderCode,
+      status: paymentOrder.status,
+      amount: paymentOrder.amount,
+      ticketType: 'ONE_WAY',
+      checkoutUrl: paymentOrder.payos.checkoutUrl,
+      qrCode: paymentOrder.payos.qrCode,
+      qrCodeImage: paymentOrder.payos.qrCode
+        ? await QRCode.toDataURL(paymentOrder.payos.qrCode, {
+          errorCorrectionLevel: 'M',
+          margin: 2,
+          width: 320,
+          color: {
+            dark: '#002f1b',
+            light: '#ffffff',
+          },
+        })
+        : '',
+      paymentLinkId: paymentOrder.payos.paymentLinkId,
+    };
+  }
+
+  static async completePaymentOrder(paymentOrder) {
+    if (paymentOrder.ticketType === 'ONE_WAY' && paymentOrder.ticketId) {
+      const ticket = await Ticket.findById(paymentOrder.ticketId);
+      if (!ticket) {
+        throw new CustomError('Không tìm thấy vé cần kích hoạt', HTTP_STATUS.NOT_FOUND);
+      }
+      if (ticket.bookingStatus === 'CANCELLED' || ticket.ticketStatus === 'CANCELLED') {
+        paymentOrder.status = 'CANCELLED';
+        paymentOrder.completedAt = paymentOrder.completedAt || new Date();
+        await paymentOrder.save();
+        return;
+      }
+
+      ticket.paymentMethod = 'PAYOS';
+      ticket.paymentStatus = 'PAID';
+      ticket.bookingStatus = 'SUCCESS';
+      ticket.ticketStatus = 'ACTIVE';
+      await ticket.save();
+      await this.recordPromotionUsage({
+        promotionId: ticket.promotionId,
+        userId: ticket.passenger,
+        ticketId: ticket._id,
+        routeId: ticket.routeId,
+        ticketType: 'ONE_WAY',
+        paymentMethod: 'PAYOS',
+        discountAmount: ticket.discountAmount,
+        originalAmount: ticket.originalPrice || ticket.ticketPrice,
+        finalAmount: ticket.ticketPrice,
+      });
+      await this.cancelDuplicatePendingTicketsForPaidTicket(ticket);
+
+      const user = await User.findById(ticket.passenger);
+      const route = await this.findRoute(ticket.routeId);
+      const alreadyLogged = user?.travelHistory?.some((item) => item.ticketCode === ticket.ticketCode);
+      if (user && !alreadyLogged) {
+        user.travelHistory.push({
+          routeNumber: ticket.routeNumber,
+          tripId: ticket.tripId,
+          ticketCode: ticket.ticketCode,
+          ticketType: 'ONE_WAY',
+          fromStop: ticket.departureLocation,
+          toStop: ticket.destinationLocation,
+          boardedAt: ticket.validFrom,
+          arrivedAt: route?.estimatedDurationMinutes
+            ? new Date(new Date(ticket.validFrom).getTime() + route.estimatedDurationMinutes * 60 * 1000)
+            : ticket.validUntil,
+          durationMinutes: route?.estimatedDurationMinutes || 0,
+          fare: ticket.ticketPrice,
+          paymentMethod: 'PAYOS',
+          status: 'COMPLETED',
+        });
+        await user.save();
+      }
+    }
+
+    if (paymentOrder.ticketType === 'MONTHLY_PASS' && paymentOrder.monthlyPassId) {
+      const monthlyPass = await MonthlyPass.findById(paymentOrder.monthlyPassId);
+      if (!monthlyPass) {
+        throw new CustomError('Không tìm thấy vé tháng cần kích hoạt', HTTP_STATUS.NOT_FOUND);
+      }
+
+      monthlyPass.paymentMethod = 'PAYOS';
+      monthlyPass.paymentStatus = 'PAID';
+      monthlyPass.passStatus = 'ACTIVE';
+      await monthlyPass.save();
+      await this.recordPromotionUsage({
+        promotionId: monthlyPass.promotionId,
+        userId: monthlyPass.passenger,
+        ticketId: monthlyPass._id,
+        routeId: monthlyPass.routeId,
+        ticketType: 'MONTHLY_PASS',
+        paymentMethod: 'PAYOS',
+        discountAmount: monthlyPass.discountAmount,
+        originalAmount: monthlyPass.originalPrice || monthlyPass.passPrice,
+        finalAmount: monthlyPass.passPrice,
+      });
+
+      await User.findByIdAndUpdate(monthlyPass.passenger, {
+        monthlyPassStatus: 'ACTIVE',
+        monthlyPassExpireDate: monthlyPass.expiryDate,
+      });
+    }
+
+    paymentOrder.status = 'PAID';
+    paymentOrder.paidAt = paymentOrder.paidAt || new Date();
+    paymentOrder.completedAt = paymentOrder.completedAt || new Date();
+    await paymentOrder.save();
+  }
+
+  static async reconcilePendingPaymentOrders(userId) {
+    const pendingOrders = await PaymentOrder.find({
+      passenger: userId,
+      status: 'PENDING',
+      $or: [
+        { ticketId: { $exists: true, $ne: null } },
+        { monthlyPassId: { $exists: true, $ne: null } },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .limit(20);
+
+    await Promise.all(pendingOrders.map(async (paymentOrder) => {
+      try {
+        await this.syncPaymentOrderWithPayOS(paymentOrder);
+      } catch {
+        // Do not block the tickets page if PayOS is temporarily unavailable.
+      }
+    }));
+  }
+
+  static async getValidationHistory(validatorUserId, query = {}) {
+    const { date, start, end } = toValidationDateRange(query.date);
+    const validatorId = new mongoose.Types.ObjectId(validatorUserId);
+
+    const [tickets, monthlyPasses] = await Promise.all([
+      Ticket.find({
+        validationLogs: {
+          $elemMatch: {
+            validatedBy: validatorId,
+            result: 'VALID',
+            validatedAt: { $gte: start, $lte: end },
+          },
+        },
+      })
+        .populate('passenger', 'fullName email phoneNumber')
+        .populate('routeId')
+        .lean(),
+      MonthlyPass.find({
+        validationLogs: {
+          $elemMatch: {
+            validatedBy: validatorId,
+            result: 'VALID',
+            validatedAt: { $gte: start, $lte: end },
+          },
+        },
+      })
+        .populate('passenger', 'fullName email phoneNumber')
+        .lean(),
+    ]);
+
+    const ticketItems = tickets.flatMap((ticket) => {
+      const route = ticket.routeId && typeof ticket.routeId === 'object' ? ticket.routeId : null;
+      const validationInfo = buildTicketValidationInfo(ticket, route);
+
+      return (ticket.validationLogs || [])
+        .filter((log) => (
+          String(log.validatedBy) === String(validatorUserId)
+          && log.result === 'VALID'
+          && new Date(log.validatedAt) >= start
+          && new Date(log.validatedAt) <= end
+        ))
+        .map((log) => ({
+          ok: true,
+          result: 'VALID',
+          validationStatus: 'VALIDATED',
+          message: log.message || 'Ticket is valid for boarding.',
+          ticketType: 'ONE_WAY',
+          ticketCode: ticket.ticketCode,
+          status: ticket.ticketStatus,
+          passengerName: ticket.passenger?.fullName || 'Passenger',
+          routeCode: ticket.routeCode || ticket.routeNumber,
+          routeNumber: ticket.routeNumber,
+          tripId: log.tripId || ticket.tripId,
+          validFrom: ticket.validFrom,
+          validUntil: ticket.validUntil || ticket.expiresAt,
+          usedAt: ticket.usedAt || log.validatedAt,
+          savedAt: log.validatedAt,
+          savedDate: date,
+          ...validationInfo,
+        }));
+    });
+
+    const monthlyPassItems = monthlyPasses.flatMap((monthlyPass) => {
+      const validationInfo = buildMonthlyPassValidationInfo(monthlyPass);
+
+      return (monthlyPass.validationLogs || [])
+        .filter((log) => (
+          String(log.validatedBy) === String(validatorUserId)
+          && log.result === 'VALID'
+          && new Date(log.validatedAt) >= start
+          && new Date(log.validatedAt) <= end
+        ))
+        .map((log) => ({
+          ok: true,
+          result: 'VALID',
+          validationStatus: 'VALIDATED',
+          message: log.message || 'Monthly pass is valid for boarding.',
+          ticketType: 'MONTHLY_PASS',
+          passCode: monthlyPass.passCode,
+          ticketCode: monthlyPass.passCode,
+          status: monthlyPass.passStatus,
+          passengerName: monthlyPass.passenger?.fullName || 'Passenger',
+          passType: monthlyPass.passType,
+          routeCode: log.routeCode || monthlyPass.routeCode || 'ALL',
+          validFrom: monthlyPass.validFrom || monthlyPass.startDate,
+          validUntil: monthlyPass.validUntil || monthlyPass.expiryDate,
+          usedAt: log.validatedAt,
+          savedAt: log.validatedAt,
+          savedDate: date,
+          ...validationInfo,
+        }));
+    });
+
+    const validations = [...ticketItems, ...monthlyPassItems]
+      .sort((left, right) => new Date(right.savedAt) - new Date(left.savedAt));
+
+    return {
+      date,
+      validations,
+      count: validations.length,
+    };
+  }
+
+  static async syncPaymentOrderWithPayOS(paymentOrder) {
+    if (!paymentOrder || paymentOrder.status === 'PAID') {
+      return paymentOrder;
+    }
+
+    const payosInfo = await PayOSService.getPaymentLinkInformation(paymentOrder.orderCode);
+    const rawStatus = String(payosInfo.status || '').toUpperCase();
+
+    paymentOrder.payos = {
+      ...(paymentOrder.payos || {}),
+      rawStatus,
+      rawResponse: payosInfo,
+    };
+
+    if (rawStatus === 'PAID') {
+      await this.completePaymentOrder(paymentOrder);
+      return paymentOrder;
+    }
+
+    if (rawStatus === 'CANCELLED') {
+      paymentOrder.status = 'CANCELLED';
+    }
+
+    await paymentOrder.save();
+    return paymentOrder;
+  }
+
+  static async getPaymentOrderStatus(userId, orderCode) {
+    const numericOrderCode = Number(orderCode);
+    if (!Number.isSafeInteger(numericOrderCode)) {
+      throw new CustomError('Mã thanh toán không hợp lệ', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const paymentOrder = await PaymentOrder.findOne({
+      orderCode: numericOrderCode,
+      passenger: userId,
+    });
+
+    if (!paymentOrder) {
+      throw new CustomError('Không tìm thấy đơn thanh toán', HTTP_STATUS.NOT_FOUND);
+    }
+
+    if (paymentOrder.status === 'PAID') {
+      return {
+        orderCode: paymentOrder.orderCode,
+        status: paymentOrder.status,
+        amount: paymentOrder.amount,
+        ticketId: paymentOrder.ticketId,
+        monthlyPassId: paymentOrder.monthlyPassId,
+      };
+    }
+
+    await this.syncPaymentOrderWithPayOS(paymentOrder);
+
+    return {
+      orderCode: paymentOrder.orderCode,
+      status: paymentOrder.status,
+      rawStatus: paymentOrder.payos?.rawStatus || '',
+      amount: paymentOrder.amount,
+      ticketId: paymentOrder.ticketId,
+      monthlyPassId: paymentOrder.monthlyPassId,
+    };
+  }
+
+  static getValidationMessage(status) {
+    return {
+      USED: 'Already used',
+      EXPIRED: 'Expired ticket',
+      CANCELLED: 'Cancelled ticket',
+      PENDING: 'Ticket is not active',
+    }[status] || 'Invalid QR';
+  }
+
+  static extractManualCode(input) {
+    const value = String(input || '').trim();
+    if (!value) return '';
+
+    const signedPayload = QRCodeService.decodePayload(value);
+    if (signedPayload?.data) {
+      return signedPayload.data.ticketCode || signedPayload.data.passCode || '';
+    }
+
+    try {
+      const parsed = JSON.parse(value);
+      return parsed.ticketCode || parsed.passCode || parsed.code || '';
+    } catch {
+      return value;
+    }
+  }
+
+  static async validateQRCode(validatorUserId, payload = {}) {
+    const scannedValue = payload.qrPayload || payload.qrCodeData || payload.code || payload.ticketCode || '';
+    const signedPayload = QRCodeService.decodePayload(scannedValue);
+    const isSignedScan = Boolean(signedPayload);
+
+    if (!isSignedScan) {
+      try {
+        const parsedPayload = JSON.parse(String(scannedValue || '').trim());
+        if (parsedPayload?.app === 'BusDN') {
+          return buildValidationResult('INVALID_QR', 'QR signature is missing or invalid.');
+        }
+      } catch {
+        // Manual ticket/pass code entry is still supported for staff testing.
+      }
+    }
+
+    if (isSignedScan && !QRCodeService.verifySignedPayload(signedPayload)) {
+      return buildValidationResult('INVALID_QR', 'QR signature is invalid.');
+    }
+
+    const qrData = signedPayload?.data || {};
+    const manualCode = this.extractManualCode(scannedValue);
+    const ticketCode = qrData.ticketCode || (String(manualCode).startsWith('TKT-') ? manualCode : '');
+    const passCode = qrData.passCode || (String(manualCode).startsWith('MP-') ? manualCode : '');
+
+    if (isSignedScan && qrData.app !== 'BusDN') {
+      return buildValidationResult('INVALID_QR', 'QR does not belong to BusDN.');
+    }
+
+    if (isSignedScan && !signedPayload.legacy && !['BUS_TICKET', 'MONTHLY_PASS'].includes(qrData.type)) {
+      return buildValidationResult('INVALID_QR', 'QR ticket type is invalid.');
+    }
+
+    if (qrData.type === 'MONTHLY_PASS' || qrData.ticketType === 'MONTHLY_PASS' || passCode) {
+      return this.validateMonthlyPassQR(validatorUserId, {
+        signedPayload,
+        passCode,
+        routeId: payload.routeId,
+        routeCode: payload.routeCode,
+      });
+    }
+
+    if (!ticketCode) {
+      return buildValidationResult('INVALID_QR', 'QR payload is invalid.');
+    }
+
+    const ticket = await Ticket.findOne({ ticketCode: String(ticketCode).trim().toUpperCase() })
+      .populate('passenger', 'fullName email phoneNumber')
+      .populate('routeId')
+      .exec();
+
+    if (!ticket) {
+      return buildValidationResult('NOT_FOUND', 'Ticket was not found.', { ticketCode });
+    }
+    const route = ticket.routeId && typeof ticket.routeId === 'object' ? ticket.routeId : null;
+    const validationInfo = buildTicketValidationInfo(ticket, route);
+
+    if (isSignedScan) {
+      const expectedValues = [
+        ['ticketCode', ticket.ticketCode],
+        ['routeCode', ticket.routeCode || ticket.routeNumber],
+        ['ticketType', 'ONE_WAY'],
+      ];
+
+      const hasMismatch = expectedValues.some(([key, expected]) => (
+        qrData[key] && String(qrData[key]) !== String(expected)
+      ));
+
+      if (hasMismatch) {
+        return buildValidationResult('INVALID_QR', 'QR content does not match ticket record.');
+      }
+    }
+
+    if (payload.routeId && String(payload.routeId) !== String(ticket.routeId?._id || ticket.routeId)) {
+      return buildValidationResult('WRONG_ROUTE', 'Ticket is not valid for this route.', {
+        ticketCode: ticket.ticketCode,
+        routeCode: ticket.routeCode || ticket.routeNumber,
+        ...validationInfo,
+      });
+    }
+
+    if (payload.routeCode && String(payload.routeCode).toUpperCase() !== String(ticket.routeCode || ticket.routeNumber).toUpperCase()) {
+      return buildValidationResult('WRONG_ROUTE', 'Ticket is not valid for this route.', {
+        ticketCode: ticket.ticketCode,
+        routeCode: ticket.routeCode || ticket.routeNumber,
+        ...validationInfo,
+      });
+    }
+
+    if ((payload.tripId || payload.scheduleId) && String(payload.tripId || payload.scheduleId) !== ticket.tripId) {
+      return buildValidationResult('WRONG_ROUTE', 'Ticket is not valid for this trip.', {
+        ticketCode: ticket.ticketCode,
+        tripId: ticket.tripId,
+        ...validationInfo,
+      });
+    }
+
+    const status = this.getCurrentTicketStatus(ticket);
+    if (status !== 'ACTIVE') {
+      return buildValidationResult({
+        USED: 'ALREADY_USED',
+        EXPIRED: 'EXPIRED',
+        CANCELLED: 'CANCELLED',
+      }[status] || 'INVALID_QR', this.getValidationMessage(status), {
+        ticketCode: ticket.ticketCode,
+        ticketType: ticket.ticketType || 'ONE_WAY',
+        routeCode: ticket.routeCode || ticket.routeNumber,
+        validUntil: ticket.validUntil || ticket.expiresAt,
+        ...validationInfo,
+      });
+    }
+
+    const validationMessage = 'Ticket is valid for boarding.';
+    ticket.ticketStatus = 'USED';
+    ticket.usedAt = new Date();
+    ticket.validatedBy = validatorUserId;
+    ticket.validatedTripId = payload.tripId || payload.scheduleId || ticket.tripId;
+    ticket.validationLogs.push({
+      validatedAt: ticket.usedAt,
+      validatedBy: validatorUserId,
+      result: 'VALID',
+      tripId: ticket.validatedTripId,
+      routeCode: ticket.routeCode || ticket.routeNumber,
+      message: validationMessage,
+    });
+    await ticket.save();
+
+    return buildValidationResult('VALID', validationMessage, {
+      ticketType: 'ONE_WAY',
+      ticketCode: ticket.ticketCode,
+      status: 'USED',
+      passengerName: ticket.passenger?.fullName || 'Passenger',
+      routeCode: ticket.routeCode || ticket.routeNumber,
+      routeNumber: ticket.routeNumber,
+      tripId: ticket.tripId,
+      validFrom: ticket.validFrom,
+      validUntil: ticket.validUntil || ticket.expiresAt,
+      usedAt: ticket.usedAt,
+      validationStatus: 'VALIDATED',
+      ...buildTicketValidationInfo(ticket, route),
+    });
+  }
+
+  static async validateMonthlyPassQR(validatorUserId, { signedPayload, passCode, routeId, routeCode }) {
+    if (!passCode) {
+      return buildValidationResult('INVALID_QR', 'QR payload is invalid.');
+    }
+
+    const monthlyPass = await MonthlyPass.findOne({ passCode: String(passCode).trim().toUpperCase() })
+      .populate('passenger', 'fullName email phoneNumber')
+      .exec();
+
+    if (!monthlyPass) {
+      return buildValidationResult('NOT_FOUND', 'Monthly pass was not found.', { passCode });
+    }
+    const validationInfo = buildMonthlyPassValidationInfo(monthlyPass);
+
+    if (signedPayload) {
+      const qrData = signedPayload.data || {};
+      const expectedValues = [
+        ['passCode', monthlyPass.passCode],
+        ['routeCode', monthlyPass.routeCode || 'ALL'],
+      ];
+
+      const hasMismatch = expectedValues.some(([key, expected]) => (
+        qrData[key] && String(qrData[key]) !== String(expected)
+      ));
+
+      if (hasMismatch) {
+        return buildValidationResult('INVALID_QR', 'QR content does not match monthly pass record.');
+      }
+    }
+
+    if (routeId) {
+      const route = await this.findRoute(routeId);
+      if (monthlyPass.routeId && String(monthlyPass.routeId) !== String(route?._id)) {
+        return buildValidationResult('WRONG_ROUTE', 'Monthly pass is not valid for this route.', {
+          passCode: monthlyPass.passCode,
+          routeCode: monthlyPass.routeCode || 'ALL',
+          ...validationInfo,
+        });
+      }
+    }
+
+    if (
+      routeCode
+      && monthlyPass.routeCode
+      && monthlyPass.routeCode !== 'ALL'
+      && String(routeCode).toUpperCase() !== String(monthlyPass.routeCode).toUpperCase()
+    ) {
+      return buildValidationResult('WRONG_ROUTE', 'Monthly pass is not valid for this route.', {
+        passCode: monthlyPass.passCode,
+        routeCode: monthlyPass.routeCode,
+        ...validationInfo,
+      });
+    }
+
+    const now = new Date();
+    if (monthlyPass.passStatus === 'CANCELLED') {
+      return buildValidationResult('CANCELLED', 'Cancelled ticket', { passCode: monthlyPass.passCode, ...validationInfo });
+    }
+    if (monthlyPass.passStatus !== 'ACTIVE') {
+      return buildValidationResult('INVALID_QR', 'Ticket is not active', { passCode: monthlyPass.passCode, ...validationInfo });
+    }
+    if (new Date(monthlyPass.validFrom || monthlyPass.startDate) > now || new Date(monthlyPass.validUntil || monthlyPass.expiryDate) < now) {
+      return buildValidationResult('EXPIRED', 'Expired ticket', {
+        passCode: monthlyPass.passCode,
+        validUntil: monthlyPass.validUntil || monthlyPass.expiryDate,
+        ...validationInfo,
+      });
+    }
+
+    const validationMessage = 'Monthly pass is valid for boarding.';
+    monthlyPass.validationLogs.push({
+      validatedAt: new Date(),
+      validatedBy: validatorUserId,
+      result: 'VALID',
+      routeCode: routeCode || monthlyPass.routeCode || 'ALL',
+      message: validationMessage,
+    });
+    await monthlyPass.save();
+
+    return buildValidationResult('VALID', validationMessage, {
+      ticketType: 'MONTHLY_PASS',
+      passCode: monthlyPass.passCode,
+      status: 'ACTIVE',
+      passengerName: monthlyPass.passenger?.fullName || 'Passenger',
+      passType: monthlyPass.passType,
+      routeCode: monthlyPass.routeCode || 'ALL',
+      validatedBy: validatorUserId,
+      validFrom: monthlyPass.validFrom || monthlyPass.startDate,
+      validUntil: monthlyPass.validUntil || monthlyPass.expiryDate,
+      validationStatus: 'VALIDATED',
+      ...validationInfo,
+    });
+  }
+}
+
+export default TicketService;

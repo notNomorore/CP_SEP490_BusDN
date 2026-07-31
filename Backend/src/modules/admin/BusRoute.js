@@ -167,16 +167,31 @@ const ScheduleConfigSchema = new mongoose.Schema(
     firstDepartureTime: {
       type: String,
       trim: true,
-      default: '',
+      default: '05:30',
     },
     lastDepartureTime: {
       type: String,
       trim: true,
-      default: '',
+      default: '18:30',
     },
     frequencyMinutes: {
       type: Number,
       default: 10,
+      min: 0,
+    },
+    peakFrequencyMinutes: {
+      type: Number,
+      default: 10,
+      min: 0,
+    },
+    offPeakFrequencyMinutes: {
+      type: Number,
+      default: 15,
+      min: 0,
+    },
+    layoverMinutes: {
+      type: Number,
+      default: 0,
       min: 0,
     },
     operatingDays: {
@@ -388,4 +403,11 @@ const BusRouteSchema = new mongoose.Schema(
 
 BusRouteSchema.index({ routeName: 1, routeCode: 1, status: 1 });
 
-export default mongoose.model('BusRoute', BusRouteSchema);
+const Route = mongoose.models.Route || mongoose.model('Route', BusRouteSchema, 'routes');
+
+if (!mongoose.models.BusRoute) {
+  mongoose.model('BusRoute', BusRouteSchema, 'routes');
+}
+
+export { BusRouteSchema };
+export default Route;

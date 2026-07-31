@@ -23,7 +23,7 @@ const Promotions = () => {
   ];
 
   return (
-    <section className="bg-surface-container py-24">
+    <section className="relative z-0 bg-surface-container py-20 lg:py-24">
       <div className="container mx-auto px-6">
         <div className="flex justify-between items-end mb-12">
           <div>

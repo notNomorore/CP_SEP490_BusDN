@@ -56,17 +56,28 @@ const routeFilter = (routeId) => (
     : {}
 );
 
-const normalizeRoute = (route) => ({
-  id: toId(route._id),
-  routeNumber: route.routeNumber || route.code || '',
-  routeName: route.name || route.routeName || route.routeNumber || toId(route._id),
-  origin: route.origin || route.startPoint || '',
-  destination: route.destination || route.endPoint || '',
-  estimatedDurationMinutes: toNumber(route.estimatedDurationMinutes || route.durationMinutes),
-  distanceKm: toNumber(route.distanceKm || route.distance),
-  stops: route.stops || [],
-  pathPoints: route.pathPoints || [],
-});
+const normalizeRoute = (route) => {
+  const outboundStops = route.outboundRoute?.orderedStops || [];
+  const startStation = route.outboundRoute?.startStation || outboundStops[0] || {};
+  const endStation = route.outboundRoute?.endStation || outboundStops[outboundStops.length - 1] || {};
+
+  return {
+    id: toId(route._id),
+    routeNumber: route.routeCode || route.routeNumber || route.code || '',
+    routeName: route.routeName || route.name || route.routeCode || route.routeNumber || toId(route._id),
+    origin: startStation.stopName || route.origin || route.startPoint || '',
+    destination: endStation.stopName || route.destination || route.endPoint || '',
+    estimatedDurationMinutes: toNumber(route.outboundRoute?.estimatedDurationMinutes || route.estimatedDurationMinutes || route.durationMinutes),
+    distanceKm: toNumber(route.outboundRoute?.estimatedDistanceKm || route.distanceKm || route.distance),
+    stops: (outboundStops.length ? outboundStops : route.stops || []).map((stop, index) => ({
+      name: stop.stopName || stop.name || '',
+      order: stop.stopOrder || stop.order || index + 1,
+      latitude: stop.latitude,
+      longitude: stop.longitude,
+    })),
+    pathPoints: route.outboundRoute?.polylinePath || route.pathPoints || [],
+  };
+};
 
 const normalizeVehicle = (vehicle) => ({
   id: toId(vehicle._id),

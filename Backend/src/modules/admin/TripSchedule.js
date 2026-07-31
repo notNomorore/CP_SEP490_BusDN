@@ -63,13 +63,16 @@ const TripScheduleSchema = new mongoose.Schema(
   {
     scheduleCode: { type: String, required: true, unique: true, trim: true, uppercase: true },
     serviceDate: { type: Date, required: true },
-    routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'BusRoute', required: true },
+    routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
     routeCode: { type: String, trim: true, default: '' },
     routeName: { type: String, trim: true, default: '' },
     direction: { type: String, enum: ['OUTBOUND', 'INBOUND'], default: 'OUTBOUND' },
     departureTime: { type: String, required: true, trim: true },
     expectedArrivalTime: { type: String, trim: true, default: '' },
+    turnaroundEndTime: { type: String, trim: true, default: '' },
     shiftLabel: { type: String, trim: true, default: '' },
+    isScheduleException: { type: Boolean, default: false },
+    exceptionReason: { type: String, trim: true, default: '' },
     status: {
       type: String,
       enum: ['PLANNED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'],
@@ -84,6 +87,7 @@ const TripScheduleSchema = new mongoose.Schema(
     startLocation: { type: TripLocationSchema, default: () => ({}) },
     gpsSync: { type: GpsSyncSchema, default: () => ({}) },
     driverAcceptance: { type: DriverAcceptanceSchema, default: () => ({}) },
+    assistantAcceptance: { type: DriverAcceptanceSchema, default: () => ({}) },
     emergencyHistory: {
       type: [{
         reason: { type: String, trim: true, default: '' },

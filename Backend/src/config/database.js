@@ -4,6 +4,9 @@ import { config } from '../config/environment.js';
 import logger from '../utils/logger.js';
 
 let isConnected = false;
+let lastConnectionError = null;
+
+mongoose.set('bufferCommands', false);
 
 export const connectDatabase = async () => {
   if (isConnected) {
@@ -24,9 +27,11 @@ export const connectDatabase = async () => {
     });
 
     isConnected = true;
+    lastConnectionError = null;
     logger.info(`Connected to MongoDB: ${mongoose.connection.name} @ ${mongoose.connection.host}`);
 
     mongoose.connection.on('error', (err) => {
+      lastConnectionError = err;
       logger.error('MongoDB connection error:', err);
     });
 
@@ -38,8 +43,10 @@ export const connectDatabase = async () => {
     mongoose.connection.on('reconnected', () => {
       logger.info('MongoDB reconnected');
       isConnected = true;
+      lastConnectionError = null;
     });
   } catch (error) {
+    lastConnectionError = error;
     logger.error('Failed to connect to MongoDB:', error);
     throw error;
   }
@@ -57,9 +64,14 @@ export const disconnectDatabase = async () => {
 };
 
 export const isDatabaseConnected = () => isConnected;
+export const getDatabaseStatus = () => ({
+  isConnected,
+  lastError: lastConnectionError ? lastConnectionError.message : null,
+});
 
 export default {
   connectDatabase,
   disconnectDatabase,
   isDatabaseConnected,
+  getDatabaseStatus,
 };

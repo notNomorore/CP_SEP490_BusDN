@@ -30,7 +30,7 @@ const Partners = () => {
   ];
 
   return (
-    <section className="py-16 container mx-auto px-6 border-t border-outline-variant/10">
+    <section id="partners" className="container mx-auto scroll-mt-24 border-t border-outline-variant/10 px-6 py-16">
       {/* Title */}
       <h3 className="text-center text-outline font-bold text-xs uppercase tracking-[0.3em] mb-12">
         Đối tác thanh toán tin cậy

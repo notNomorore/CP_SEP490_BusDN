@@ -23,7 +23,6 @@ import revenueReportRoutes from './modules/revenue/revenueReport.routes.js';
 import routeEfficiencyRoutes from './modules/analytics/routeEfficiency.routes.js';
 import incidentReportRoutes from './modules/incidents/incidentReport.routes.js';
 import systemMonitoringRoutes from './modules/systemMonitoring/systemMonitoring.routes.js';
-import scheduleOperationsRoutes from './modules/scheduleOperations/scheduleOperationsRoutes.js';
 import fareOperationsRoutes from './modules/fareOperations/fareOperations.routes.js';
 import walkInTicketRoutes from './modules/walkInTickets/walkInTicket.routes.js';
 import passengerComplianceRoutes from './modules/passengerCompliance/passengerCompliance.routes.js';
@@ -33,6 +32,10 @@ import systemNotificationRoutes from './modules/systemNotifications/systemNotifi
 import vehicleIssueRoutes from './modules/vehicleIssues/vehicleIssue.routes.js';
 import maintenanceApprovalRoutes from './modules/vehicleIssues/maintenanceApproval.routes.js';
 import vehicleReassignmentRoutes from './modules/vehicleReassignments/vehicleReassignment.routes.js';
+import busAssistantRoutes from './modules/busAssistant/busAssistant.routes.js';
+import scheduleOperationsRoutes from './modules/scheduleOperations/scheduleOperationsRoutes.js';
+import operationChatRoutes from './modules/operationChat/operationChat.routes.js';
+import ticketRoutes from './modules/tickets/ticketRoutes.js';
 
 export const createApp = () => {
   const app = express();
@@ -59,7 +62,7 @@ export const createApp = () => {
   // Body parsing middleware
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
-  app.use('/uploads', express.static(path.join(config.paths.root, 'uploads')));
+  app.use('/uploads', express.static(path.resolve(config.paths.uploads)));
 
   // Rate limiting
   const limiter = rateLimit({
@@ -117,7 +120,6 @@ export const createApp = () => {
     );
   });
 
-  // Routes will be mounted here
   app.use('/api/auth', authRoutes);
   app.use('/api/priority-profile', priorityProfileRoutes);
   app.use('/api/customer-support', customerSupportRoutes);
@@ -133,15 +135,18 @@ export const createApp = () => {
   app.use('/api/admin', passengerComplianceRoutes);
   app.use('/api/admin/fleet', fleetMonitoringRoutes);
   app.use('/api/admin/notifications', systemNotificationRoutes);
+  app.use('/api/notifications', systemNotificationRoutes);
   app.use('/api/admin/vehicle-issues', vehicleIssueRoutes);
   app.use('/api/admin/maintenance', maintenanceApprovalRoutes);
   app.use('/api/admin', vehicleReassignmentRoutes);
+
+  app.use('/api/bus-assistant', busAssistantRoutes);
   app.use('/api/fleet-operations', fleetOperationsRoutes);
-  // app.use('/api/routes', routeRoutes);
+  app.use('/api/tickets', ticketRoutes);
   app.use('/api/routes', routeRoutes);
   app.use('/api/schedule-operations', scheduleOperationsRoutes);
-  // etc...
-
+  app.use('/api/operation-chat', operationChatRoutes);
+  // app.use('/api/bus-stops', busStopRoutes);
   // 404 handler (must be after all routes)
   app.use(notFoundHandler);
 

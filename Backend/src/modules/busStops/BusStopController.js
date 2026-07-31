@@ -5,6 +5,7 @@ import {
   getBusStopById,
   importBusStops,
   listBusStops,
+  searchStopAddresses,
   updateBusStop,
 } from './BusStopService.js';
 import logger from '../../utils/logger.js';
@@ -51,6 +52,16 @@ export const getBusStop = async (req, res) => {
     });
   } catch (error) {
     logger.error('Get bus stop error:', error);
+    return sendServiceError(res, error);
+  }
+};
+
+export const searchAddresses = async (req, res) => {
+  try {
+    const results = await searchStopAddresses(req.query.q);
+    return res.json({ success: true, message: 'Tìm kiếm địa chỉ thành công', results });
+  } catch (error) {
+    logger.error('Search stop addresses error:', error);
     return sendServiceError(res, error);
   }
 };
@@ -147,6 +158,7 @@ export const exportStopsCsv = async (req, res) => {
 export default {
   getBusStops,
   getBusStop,
+  searchAddresses,
   postBusStop,
   putBusStop,
   removeBusStop,

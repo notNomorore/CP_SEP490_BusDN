@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-export const WALKIN_PAYMENT_METHODS = ['CASH', 'CARD', 'QR', 'BANK_TRANSFER', 'WALLET'];
+export const WALKIN_PAYMENT_METHODS = ['CASH', 'CARD', 'QR', 'BANK_TRANSFER', 'WALLET', 'E_WALLET'];
 export const WALKIN_TICKET_STATUSES = ['PENDING', 'COMPLETED', 'CANCELLED'];
 
 const WalkInTicketSchema = new mongoose.Schema(

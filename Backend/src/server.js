@@ -7,12 +7,34 @@ import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { createApp } from './app.js';
 import logger from './utils/logger.js';
 import registerFleetOperationSockets from './modules/fleetOperations/fleetOperations.socket.js';
+import registerOperationChatSockets from './modules/operationChat/operationChat.socket.js';
+import startPromotionNotificationScheduler from './modules/promotions/promotionNotificationScheduler.js';
+
+let isConnectingDatabase = false;
+
+const connectDatabaseWithRetry = async () => {
+  if (isConnectingDatabase) {
+    return;
+  }
+
+  isConnectingDatabase = true;
+  try {
+    await connectDatabase();
+  } catch (error) {
+    logger.warn('MongoDB unavailable during startup. Retrying in 15 seconds...');
+    setTimeout(() => {
+      isConnectingDatabase = false;
+      connectDatabaseWithRetry();
+    }, 15000);
+    return;
+  }
+
+  isConnectingDatabase = false;
+};
 
 const startServer = async () => {
   try {
     logger.info('Initializing server...');
-    await connectDatabase();
-
     const app = createApp();
     const server = http.createServer(app);
 
@@ -22,6 +44,7 @@ const startServer = async () => {
     });
 
     registerFleetOperationSockets(io);
+    registerOperationChatSockets(io);
 
     io.on('connection', (socket) => {
       logger.info(`Socket.IO client connected: ${socket.id}`);
@@ -36,6 +59,7 @@ const startServer = async () => {
     });
 
     app.io = io;
+    let stopPromotionNotificationScheduler = null;
 
     const gracefulShutdown = async (signal) => {
       logger.warn(`${signal} received, starting graceful shutdown...`);
@@ -44,6 +68,9 @@ const startServer = async () => {
         logger.info('HTTP server closed');
 
         try {
+          if (stopPromotionNotificationScheduler) {
+            stopPromotionNotificationScheduler();
+          }
           await disconnectDatabase();
           logger.info('Database disconnected');
         } catch (error) {
@@ -71,8 +98,13 @@ const startServer = async () => {
     process.on('unhandledRejection', (reason, promise) => {
       logger.error('Unhandled Rejection at:', promise);
       logger.error('Unhandled Rejection reason:', reason);
-      process.exit(1);
     });
+
+    // Complete the initial database connection attempt before accepting API
+    // requests. With Mongoose buffering disabled, listening first creates a
+    // startup race where route requests fail before the connection is ready.
+    await connectDatabaseWithRetry();
+    stopPromotionNotificationScheduler = startPromotionNotificationScheduler({ io });
 
     server.listen(config.port, config.host, () => {
       logger.info(`Server running at http://${config.host}:${config.port}`);

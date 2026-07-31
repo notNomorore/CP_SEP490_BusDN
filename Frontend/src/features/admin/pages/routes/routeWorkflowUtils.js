@@ -1,11 +1,15 @@
+import {
+  DA_NANG_BOUNDS,
+  DA_NANG_CENTER,
+  isInsideDaNang,
+} from '../../../../shared/config/mapConfig.js';
+
 export const routeTypeOptions = ['URBAN', 'EXPRESS', 'AIRPORT', 'INTERCITY', 'CIRCULAR', 'SHUTTLE'];
 export const routeStatusOptions = ['DRAFT', 'PENDING_APPROVAL', 'PUBLISHED', 'SUSPENDED'];
 export const operatingDayOptions = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-export const DA_NANG_CENTER = [16.0471, 108.2068];
-export const DA_NANG_BOUNDS = [
-  [15.85, 107.95],
-  [16.25, 108.35],
-];
+export const FIRST_BUS_DEPARTURE_TIME = '05:30';
+export const LAST_BUS_DEPARTURE_TIME = '18:30';
+export { DA_NANG_BOUNDS, DA_NANG_CENTER, isInsideDaNang };
 export const OSRM_BASE_URL = import.meta.env.VITE_OSRM_BASE_URL || 'https://router.project-osrm.org';
 
 export const routeTypeLabels = {
@@ -48,7 +52,7 @@ export const emptyRouteDraft = () => ({
   routeCode: '',
   routeName: '',
   routeType: 'URBAN',
-  operator: 'Veridian Transit',
+  operator: 'BusDN',
   status: 'DRAFT',
   routeColor: '#10b981',
   description: '',
@@ -56,8 +60,8 @@ export const emptyRouteDraft = () => ({
   inboundRoute: emptyDirection(),
   scheduleConfig: {
     operatingDays: [...operatingDayOptions],
-    firstDepartureTime: '05:30',
-    lastDepartureTime: '22:00',
+    firstDepartureTime: FIRST_BUS_DEPARTURE_TIME,
+    lastDepartureTime: LAST_BUS_DEPARTURE_TIME,
     frequencyMinutes: 12,
     peakFrequencyMinutes: 8,
     offPeakFrequencyMinutes: 15,
@@ -94,17 +98,6 @@ export const getEffectiveRouteName = (draft, outboundRoute = draft.outboundRoute
   draft.routeName?.trim()
   || buildDefaultRouteName(outboundRoute.startStation, outboundRoute.endStation)
 );
-
-export const isInsideDaNang = (latitude, longitude) => {
-  const lat = Number(latitude);
-  const lng = Number(longitude);
-  return Number.isFinite(lat)
-    && Number.isFinite(lng)
-    && lat >= DA_NANG_BOUNDS[0][0]
-    && lat <= DA_NANG_BOUNDS[1][0]
-    && lng >= DA_NANG_BOUNDS[0][1]
-    && lng <= DA_NANG_BOUNDS[1][1];
-};
 
 export const normalizeSearch = (value = '') => String(value)
   .trim()
@@ -169,6 +162,14 @@ export const buildStopSignature = (stops = []) => stops
   .map((stop) => `${Number(stop.latitude).toFixed(6)},${Number(stop.longitude).toFixed(6)}`)
   .join('|');
 
+const estimateUrbanBusDurationMinutes = (distanceKm, stopCount = 0) => {
+  const effectiveDistanceKm = Math.max(0, Number(distanceKm) || 0);
+  if (!effectiveDistanceKm) return 0;
+  const baseTravelMinutes = (effectiveDistanceKm / 20) * 60;
+  const stopDwellMinutes = Math.max(0, Number(stopCount || 0) - 2) * 0.75;
+  return Math.ceil(baseTravelMinutes + stopDwellMinutes);
+};
+
 export const routeStreetPath = async (stops = [], { signal } = {}) => {
   const waypoints = stops.filter((stop) => isInsideDaNang(stop.latitude, stop.longitude));
   if (waypoints.length < 2) {
@@ -209,11 +210,14 @@ export const routeStreetPath = async (stops = [], { signal } = {}) => {
   const fallbackDistanceKm = polylinePath.reduce((total, point, index) => (
     index === 0 ? total : total + distanceKm(polylinePath[index - 1], point)
   ), 0);
+  const estimatedDistanceKm = Number(((route?.distance || 0) / 1000 || fallbackDistanceKm).toFixed(1));
+  const mapDurationMinutes = Math.max(1, Math.round((route?.duration || 0) / 60));
+  const busDurationMinutes = estimateUrbanBusDurationMinutes(estimatedDistanceKm, waypoints.length);
 
   return {
     polylinePath,
-    estimatedDistanceKm: Number(((route?.distance || 0) / 1000 || fallbackDistanceKm).toFixed(1)),
-    estimatedDurationMinutes: Math.max(1, Math.round((route?.duration || 0) / 60)),
+    estimatedDistanceKm,
+    estimatedDurationMinutes: Math.max(mapDurationMinutes, busDurationMinutes),
   };
 };
 
@@ -309,6 +313,7 @@ export const buildSuggestedStops = ({
   maxDistanceKm = 0.18,
   minSpacingKm = 0.45,
   limit = 10,
+  requireRightSide = true,
 }) => {
   const start = direction?.startStation;
   const end = direction?.endStation;
@@ -337,7 +342,6 @@ export const buildSuggestedStops = ({
     .filter((station) => buildStationKeys(station).every((key) => !existingStationKeys.has(key)))
     .filter((station) => buildStationKeys(station).every((key) => !terminalKeys.has(key)))
     .filter((station) => station.isActive !== false)
-    .filter((station) => station.source !== 'MANUAL' || station.sourceId || station.googlePlaceId)
     .filter((station) => isInsideDaNang(station.latitude, station.longitude))
     .map((station) => {
       const projection = projectPointToPath(station, path);
@@ -357,7 +361,8 @@ export const buildSuggestedStops = ({
       };
     })
     .filter((station) => station
-      && station.corridorDistanceKm <= maxDistanceKm)
+      && station.corridorDistanceKm <= maxDistanceKm
+      && (!requireRightSide || station.sideOfTravel === 'right'))
     .sort((left, right) => (
       left.corridorProgress - right.corridorProgress
         || left.sideRank - right.sideRank
@@ -396,6 +401,8 @@ export const computeDirection = (direction) => {
   const estimatedDistanceKm = polylinePath.reduce((total, point, index) => (
     index === 0 ? total : total + distanceKm(polylinePath[index - 1], point)
   ), 0);
+  const effectiveDistanceKm = Number(direction?.estimatedDistanceKm) || estimatedDistanceKm;
+  const urbanBusDurationMinutes = estimateUrbanBusDurationMinutes(effectiveDistanceKm, stops.length);
 
   return {
     ...direction,
@@ -403,11 +410,12 @@ export const computeDirection = (direction) => {
     startStation: stationToRefFromStop(stops[0]) || direction.startStation || null,
     endStation: stationToRefFromStop(stops[stops.length - 1]) || direction.endStation || null,
     polylinePath,
-    estimatedDistanceKm: Number((Number(direction?.estimatedDistanceKm) || estimatedDistanceKm).toFixed(1)),
-    estimatedDurationMinutes: Math.max(
-      0,
-      Math.round(Number(direction?.estimatedDurationMinutes) || (estimatedDistanceKm * 3.2 + stops.length * 1.5))
-    ),
+    estimatedDistanceKm: Number(effectiveDistanceKm.toFixed(1)),
+    estimatedDurationMinutes: Math.min(80, Math.max(
+      60,
+      Math.round(Number(direction?.estimatedDurationMinutes) || 0),
+      urbanBusDurationMinutes
+    )),
   };
 };
 
@@ -490,6 +498,9 @@ export const prepareRoutePayload = (draft, status = draft.status) => {
     inboundRoute,
     scheduleConfig: {
       ...draft.scheduleConfig,
+      firstDepartureTime: FIRST_BUS_DEPARTURE_TIME,
+      lastDepartureTime: LAST_BUS_DEPARTURE_TIME,
+      holidaySchedule: '',
       frequencyMinutes: Number(draft.scheduleConfig.peakFrequencyMinutes || draft.scheduleConfig.frequencyMinutes || 0),
     },
     vehicleAssignment: {
@@ -507,6 +518,27 @@ const parseClock = (value) => {
   const minutes = Number(match[2]);
   if (hours > 23 || minutes > 59) return null;
   return hours * 60 + minutes;
+};
+
+const isPeakScheduleMinute = (minute) => (
+  (minute >= 390 && minute <= 510)
+  || (minute >= 990 && minute <= 1110)
+);
+
+const estimateDailyTrips = (firstTrip, lastTrip, peakFrequency, offPeakFrequency) => {
+  if (
+    firstTrip === null
+    || lastTrip === null
+    || firstTrip >= lastTrip
+    || peakFrequency <= 0
+    || offPeakFrequency <= 0
+  ) return 0;
+  let departuresPerDirection = 0;
+  for (let departure = firstTrip; departure <= lastTrip;) {
+    departuresPerDirection += 1;
+    departure += isPeakScheduleMinute(departure) ? peakFrequency : offPeakFrequency;
+  }
+  return departuresPerDirection * 2;
 };
 
 const sameStopLocation = (left, right) => {
@@ -540,14 +572,23 @@ export const validateRouteDraft = (draft) => {
   }
   if (firstTrip === null || lastTrip === null) errors.push('L\u1ecbch ch\u1ea1y thi\u1ebfu gi\u1edd chuy\u1ebfn \u0111\u1ea7u ho\u1eb7c chuy\u1ebfn cu\u1ed1i.');
   if (firstTrip !== null && lastTrip !== null && firstTrip >= lastTrip) errors.push('Chuy\u1ebfn \u0111\u1ea7u ph\u1ea3i s\u1edbm h\u01a1n chuy\u1ebfn cu\u1ed1i.');
+  if (lastTrip !== null && lastTrip > parseClock(LAST_BUS_DEPARTURE_TIME)) errors.push('Chuy\u1ebfn cu\u1ed1i kh\u00f4ng \u0111\u01b0\u1ee3c mu\u1ed9n h\u01a1n 18:30.');
   if (Number(draft.scheduleConfig.peakFrequencyMinutes || 0) <= 0) errors.push('T\u1ea7n su\u1ea5t cao \u0111i\u1ec3m ph\u1ea3i l\u1edbn h\u01a1n 0.');
+  if (Number(draft.scheduleConfig.offPeakFrequencyMinutes || 0) <= 0) errors.push('T\u1ea7n su\u1ea5t th\u1ea5p \u0111i\u1ec3m ph\u1ea3i l\u1edbn h\u01a1n 0.');
   if (!draft.scheduleConfig.operatingDays.length) errors.push('C\u1ea7n ch\u1ecdn \u00edt nh\u1ea5t m\u1ed9t ng\u00e0y ho\u1ea1t \u0111\u1ed9ng.');
 
   [outbound, inbound].forEach((direction, directionIndex) => {
     const seen = new Set();
-    direction.orderedStops.forEach((stop) => {
+    direction.orderedStops.forEach((stop, index) => {
       const key = stop.stationId || `${Number(stop.latitude).toFixed(5)}:${Number(stop.longitude).toFixed(5)}`;
       if (seen.has(key)) warnings.push(`${directionIndex === 0 ? 'Chi\u1ec1u \u0111i' : 'Chi\u1ec1u v\u1ec1'} c\u00f3 \u0111i\u1ec3m d\u1eebng tr\u00f9ng.`);
+      const previousStop = direction.orderedStops[index - 1];
+      const previousKey = previousStop
+        ? previousStop.stationId || `${Number(previousStop.latitude).toFixed(5)}:${Number(previousStop.longitude).toFixed(5)}`
+        : '';
+      if (index > 0 && key && key === previousKey) {
+        errors.push(`${directionIndex === 0 ? 'Chi\u1ec1u \u0111i' : 'Chi\u1ec1u v\u1ec1'} kh\u00f4ng \u0111\u01b0\u1ee3c c\u00f3 hai \u0111i\u1ec3m d\u1eebng li\u00ean ti\u1ebfp tr\u00f9ng nhau.`);
+      }
       seen.add(key);
     });
     direction.orderedStops.forEach((stop, index) => {
@@ -567,9 +608,12 @@ export const validateRouteDraft = (draft) => {
     totalStops,
     totalDistance,
     totalDuration,
-    dailyTrips: firstTrip !== null && lastTrip !== null && Number(draft.scheduleConfig.peakFrequencyMinutes) > 0
-      ? Math.floor((lastTrip - firstTrip) / Number(draft.scheduleConfig.peakFrequencyMinutes)) + 1
-      : 0,
+    dailyTrips: estimateDailyTrips(
+      firstTrip,
+      lastTrip,
+      Number(draft.scheduleConfig.peakFrequencyMinutes || 0),
+      Number(draft.scheduleConfig.offPeakFrequencyMinutes || 0)
+    ),
   };
 };
 
@@ -580,6 +624,8 @@ export const normalizeRouteFromApi = (route) => ({
   scheduleConfig: {
     ...emptyRouteDraft().scheduleConfig,
     ...(route.scheduleConfig || {}),
+    firstDepartureTime: FIRST_BUS_DEPARTURE_TIME,
+    lastDepartureTime: LAST_BUS_DEPARTURE_TIME,
     peakFrequencyMinutes: route.scheduleConfig?.peakFrequencyMinutes || route.scheduleConfig?.frequencyMinutes || 12,
     offPeakFrequencyMinutes: route.scheduleConfig?.offPeakFrequencyMinutes || 18,
     layoverMinutes: route.scheduleConfig?.layoverMinutes || 8,

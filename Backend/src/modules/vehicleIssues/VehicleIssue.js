@@ -4,6 +4,7 @@ export const VEHICLE_ISSUE_TYPES = [
   'engine',
   'brake',
   'tire',
+  'accident',
   'door',
   'air_conditioner',
   'gps_device',
@@ -31,6 +32,21 @@ export const VEHICLE_ISSUE_DECISIONS = [
   'assign_replacement_vehicle',
   'resolved',
   'dismissed',
+];
+
+export const EMERGENCY_BREAKDOWN_TYPES = [
+  'ENGINE_FAILURE',
+  'BRAKE_FAILURE',
+  'FLAT_TIRE',
+  'ACCIDENT',
+  'OTHER',
+];
+
+export const EMERGENCY_BREAKDOWN_STATUSES = [
+  'REPORTED',
+  'CONFIRMED',
+  'STANDBY_BUS_DISPATCHED',
+  'RESOLVED',
 ];
 
 const LocationSchema = new mongoose.Schema(
@@ -149,6 +165,45 @@ const VehicleIssueSchema = new mongoose.Schema(
       ref: 'FleetBus',
       default: null,
     },
+    emergencyBreakdown: {
+      isEmergency: { type: Boolean, default: false, index: true },
+      breakdownType: {
+        type: String,
+        enum: [...EMERGENCY_BREAKDOWN_TYPES, null],
+        default: null,
+        index: true,
+      },
+      incidentStatus: {
+        type: String,
+        enum: [...EMERGENCY_BREAKDOWN_STATUSES, null],
+        default: null,
+        index: true,
+      },
+      sourceIncidentId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'OperationIncident',
+        default: null,
+        index: true,
+      },
+      confirmedAt: { type: Date, default: null },
+      standbyVehicleId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'FleetBus',
+        default: null,
+      },
+      assignedDriverId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null,
+      },
+      dispatchTime: { type: Date, default: null },
+      passengerNotificationId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Notification',
+        default: null,
+      },
+      notificationSentAt: { type: Date, default: null },
+    },
     reviewHistory: {
       type: [ReviewHistorySchema],
       default: [],
@@ -160,5 +215,6 @@ const VehicleIssueSchema = new mongoose.Schema(
 VehicleIssueSchema.index({ status: 1, severity: 1, reportedAt: -1 });
 VehicleIssueSchema.index({ vehicleId: 1, reportedAt: -1 });
 VehicleIssueSchema.index({ tripId: 1, reportedAt: -1 });
+VehicleIssueSchema.index({ 'emergencyBreakdown.isEmergency': 1, 'emergencyBreakdown.incidentStatus': 1, reportedAt: -1 });
 
 export default mongoose.model('VehicleIssue', VehicleIssueSchema);

@@ -22,6 +22,7 @@ import { AdminPriorityVerificationPage } from '../../priorityProfile';
 import { AdminCustomerSupportPage } from '../../customerSupport';
 import { SystemMonitoringPage } from '../systemMonitoring';
 import { PromotionManagementPage, PromotionStatisticsPage } from '../promotions';
+import AdminFleetLocationPage from '../fleetMonitoring/pages/AdminFleetLocationPage.jsx';
 
 const translations = {
   en: {
@@ -110,113 +111,14 @@ const adminModules = [
   { id: 'monitoring', labelKey: 'monitoring', icon: 'admin_panel_settings' },
 ];
 
-const kpis = [
-  { labelKey: 'activeBuses', value: '42', icon: 'directions_bus', tone: 'text-on-tertiary-container bg-on-tertiary-container/10' },
-  { labelKey: 'activeTrips', value: '38', icon: 'route', tone: 'text-secondary bg-secondary-container' },
-  { labelKey: 'delayedTrips', value: '4', icon: 'schedule', tone: 'text-on-secondary-fixed-variant bg-secondary-fixed' },
-  { labelKey: 'incidents', value: '2', icon: 'warning', tone: 'text-on-error-container bg-error/10', danger: true },
-];
-
-const buses = [
-  {
-    id: 'B-702',
-    route: 'R01',
-    driver: 'Nguyen Van A',
-    status: 'ON-TIME',
-    position: [16.0672, 108.2208],
-    currentStop: 'Le Duan St',
-    nextStop: 'Dien Bien Phu',
-    occupancy: '65%',
-    speed: '32 km/h',
-    lastGps: '2s ago',
-  },
-  {
-    id: 'B-415',
-    route: 'R05',
-    driver: 'Le Thi B',
-    status: 'DELAYED',
-    position: [16.0476, 108.2084],
-    currentStop: 'Park View',
-    nextStop: 'Tran Phu St',
-    occupancy: '82%',
-    speed: '18 km/h',
-    lastGps: '12s ago',
-  },
-  {
-    id: 'B-228',
-    route: 'R03',
-    driver: 'Tran Van C',
-    status: 'ON-TIME',
-    position: [16.0751, 108.1869],
-    currentStop: 'Main Station',
-    nextStop: 'Airport Gate',
-    occupancy: '41%',
-    speed: '39 km/h',
-    lastGps: '5s ago',
-  },
-  {
-    id: 'B-119',
-    route: 'R02',
-    driver: 'Pham Thi D',
-    status: 'BOARDING',
-    position: [16.0334, 108.2317],
-    currentStop: 'Riverfront',
-    nextStop: 'My Khe',
-    occupancy: '28%',
-    speed: '0 km/h',
-    lastGps: '20s ago',
-  },
-];
-
-const routeOverlays = [
-  {
-    route: 'R01',
-    color: '#047857',
-    points: [
-      [16.0824, 108.1792],
-      [16.0742, 108.1978],
-      [16.0672, 108.2208],
-      [16.058, 108.2362],
-    ],
-  },
-  {
-    route: 'R05',
-    color: '#1d4ed8',
-    points: [
-      [16.0504, 108.1786],
-      [16.0476, 108.2084],
-      [16.0442, 108.2284],
-      [16.0384, 108.2466],
-    ],
-  },
-  {
-    route: 'R03',
-    color: '#b45309',
-    points: [
-      [16.0912, 108.2013],
-      [16.0751, 108.1869],
-      [16.0571, 108.1816],
-      [16.0394, 108.1901],
-    ],
-  },
-];
-
-const activeTrips = [
-  { route: 'R01', name: 'Main Line Express', bus: 'B-702', driver: 'Nguyen Van A', status: 'ON-TIME', eta: '14:45', delay: '0m' },
-  { route: 'R05', name: 'West Sector Path', bus: 'B-415', driver: 'Le Thi B', status: 'DELAYED', eta: '15:02', delay: '+4m' },
-  { route: 'R03', name: 'Downtown Loop', bus: 'B-228', driver: 'Tran Van C', status: 'ON-TIME', eta: '14:55', delay: '0m' },
-];
-
-const recentNotifications = [
-  { title: 'R01 dispatch confirmed', time: '1 min ago', icon: 'task_alt' },
-  { title: 'B-415 delay threshold reached', time: '4 min ago', icon: 'timer' },
-  { title: 'Monthly pass batch synced', time: '12 min ago', icon: 'sync' },
-];
-
-const incidentAlerts = [
-  { title: 'Heavy Traffic - R05', note: 'Dien Bien Phu junction affecting 4 vehicles.', severity: 'HIGH' },
-  { title: 'Road Work - Tran Phu St', note: 'Lane closure on southbound route.', severity: 'MEDIUM' },
-];
+// Legacy dashboard-only fleet mock data is intentionally empty. The fleet module
+// now renders AdminFleetLocationPage, which owns the live API/socket data flow.
+const kpis = [];
+const buses = [];
+const routeOverlays = [];
+const activeTrips = [];
+const recentNotifications = [];
+const incidentAlerts = [];
 
 const revenueCards = [
   { label: 'Total Revenue', value: '1.24B VND', icon: 'payments' },
@@ -252,23 +154,7 @@ const busMarkerIcon = (status) => {
     className: '',
     iconAnchor: [18, 18],
     popupAnchor: [0, -18],
-    html: `
-      <div style="
-        width: 36px;
-        height: 36px;
-        border-radius: 9999px;
-        border: 4px solid #ffffff;
-        background: ${color};
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 12px 26px rgba(0,26,15,0.24);
-        font-size: 18px;
-      ">
-        <span class="material-symbols-outlined" style="font-size: 18px;">directions_bus</span>
-      </div>
-    `,
+    html: `<div style="width:36px;height:36px;border-radius:9999px;border:4px solid #fff;background:${color};color:#fff;display:flex;align-items:center;justify-content:center"><span class="material-symbols-outlined" style="font-size:18px">directions_bus</span></div>`,
   });
 };
 
@@ -407,6 +293,8 @@ const FleetMap = ({ filteredBuses }) => (
   </div>
 );
 
+// Retained temporarily for safe rollback while the live fleet workspace settles.
+// eslint-disable-next-line no-unused-vars
 const FleetOperationsPanel = ({ t }) => {
   const [activeFleetTab, setActiveFleetTab] = useState('map');
   const [routeFilter, setRouteFilter] = useState('ALL');
@@ -988,7 +876,7 @@ const GenericTablePanel = ({ title, description, actionLabel, columns, rows, com
 );
 
 const panels = {
-  fleet: FleetOperationsPanel,
+  fleet: AdminFleetLocationPage,
   routes: RouteWorkflowPage,
   scheduling: RouteWorkflowPage,
   analytics: AnalyticsPanel,
@@ -1074,12 +962,12 @@ const DashboardAdminPage = ({ embedded = false }) => {
   const { user } = useAuthStore();
   const displayName = user?.fullName?.trim() || 'Admin';
   const initial = displayName.charAt(0).toUpperCase();
-  const ActivePanel = panels[activeModule] || FleetOperationsPanel;
+  const ActivePanel = panels[activeModule] || AdminFleetLocationPage;
   const t = (key) => translations[language]?.[key] || translations.en[key] || key;
   const activeLabelKey = adminModules.find((item) => item.id === activeModule)?.labelKey || 'fleet';
 
   if (embedded) {
-    return <FleetOperationsPanel language={language} t={t} />;
+    return <AdminFleetLocationPage />;
   }
 
   return (
@@ -1121,7 +1009,7 @@ const DashboardAdminPage = ({ embedded = false }) => {
               aria-label={t('switchLanguage')}
               className="inline-flex h-10 min-w-14 items-center justify-center rounded-full border border-outline-variant/40 bg-surface-container-low px-3 text-sm font-black text-primary shadow-sm hover:bg-surface-container"
             >
-              {language === 'en' ? 'VI' : 'EN'}
+              {language === 'en' ? 'EN' : 'VN'}
             </button>
             <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-surface-container-highest bg-secondary-container text-sm font-black text-secondary">
               {initial}

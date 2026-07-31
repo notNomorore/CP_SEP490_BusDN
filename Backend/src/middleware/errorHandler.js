@@ -108,10 +108,14 @@ export const globalErrorHandler = (err, req, res, _next) => {
 
   // Handle Mongoose errors
   if (error.name === 'MongooseError' || error.name === 'ValidationError') {
+    const details = error.name === 'ValidationError'
+      ? Object.values(error.errors || {}).map((item) => item.message).filter(Boolean)
+      : [];
     return res.status(HTTP_STATUS.UNPROCESSABLE_ENTITY).json({
       success: false,
       statusCode: HTTP_STATUS.UNPROCESSABLE_ENTITY,
-      message: 'Database validation error',
+      message: details[0] || error.message || 'Database validation error',
+      ...(details.length ? { details } : {}),
       timestamp: new Date().toISOString(),
     });
   }

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Header from '../../../shared/components/navigation/Header.jsx';
 import Footer from '../../../shared/components/common/Footer.jsx';
+import { resolveFileUrl } from '../../../shared/components/common/FileViewerModal.jsx';
 import priorityProfileService, {
   DOCUMENT_TYPES,
   PROFILE_TYPES,
@@ -59,12 +60,7 @@ const getErrorMessage = (error) => {
 };
 
 const getDocumentUrl = (url) => {
-  if (!url) return '#';
-  if (url.startsWith('http')) return url;
-
-  const apiBaseUrl = localStorage.getItem('apiBaseUrl') || 'http://localhost:3000/api';
-  const backendBaseUrl = apiBaseUrl.replace(/\/api\/?$/, '');
-  return `${backendBaseUrl}${url}`;
+  return resolveFileUrl(url);
 };
 
 const getTodayInputValue = () => new Date().toISOString().slice(0, 10);

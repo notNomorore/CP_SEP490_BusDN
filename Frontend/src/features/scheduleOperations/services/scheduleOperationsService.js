@@ -11,6 +11,11 @@ export const scheduleOperationsService = {
     return response.data;
   },
 
+  getOperationNotifications: async (params = {}) => {
+    const response = await apiClient.get('/schedule-operations/operation-notifications', { params });
+    return response.data;
+  },
+
   startVehicleInspection: async (assignmentId, payload = {}) => {
     const response = await apiClient.post(
       `/schedule-operations/assigned-trips/${assignmentId}/inspection/start`,

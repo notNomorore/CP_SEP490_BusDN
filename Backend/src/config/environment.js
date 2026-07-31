@@ -27,6 +27,34 @@ const toNumber = (value, fallback) => {
   return Number.isNaN(parsed) ? fallback : parsed;
 };
 
+const toList = (value, fallback = []) => {
+  const source = typeof value === 'string' ? value : '';
+  const list = source
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return list.length ? list : fallback;
+};
+
+const createCorsOrigin = () => {
+  const allowedOrigins = toList(getEnv('CORS_ORIGIN'), ['http://localhost:5173']);
+  const isDevelopment = getEnv('NODE_ENV', 'development') === 'development';
+  const localDevOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
+
+  return (origin, callback) => {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (allowedOrigins.includes(origin) || (isDevelopment && localDevOriginPattern.test(origin))) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS origin not allowed: ${origin}`), false);
+  };
+};
+
 export const config = {
   // Server
   port: toNumber(getEnv('PORT'), 3000),
@@ -49,6 +77,11 @@ export const config = {
     secret: getEnv('JWT_SECRET', 'dev_secret_key_do_not_use_in_production'),
     expire: getEnv('JWT_EXPIRE', '7d'),
     refreshExpire: getEnv('JWT_REFRESH_EXPIRE', '30d'),
+  },
+
+  // QR e-ticket signing
+  qr: {
+    secret: getEnv('QR_SECRET', getEnv('JWT_SECRET', 'dev_qr_secret_do_not_use_in_production')),
   },
 
   // Session
@@ -79,7 +112,7 @@ export const config = {
 
   // CORS
   cors: {
-    origin: getEnv('CORS_ORIGIN', 'http://localhost:5173'),
+    origin: createCorsOrigin(),
     credentials: true,
   },
 
@@ -95,9 +128,34 @@ export const config = {
     publicKey: getEnv('STRIPE_PUBLIC_KEY'),
   },
 
+  payos: {
+    clientId: getEnv('PAYOS_CLIENT_ID'),
+    apiKey: getEnv('PAYOS_API_KEY'),
+    checksumKey: getEnv('PAYOS_CHECKSUM_KEY'),
+    apiBaseUrl: getEnv('PAYOS_API_BASE_URL', 'https://api-merchant.payos.vn'),
+  },
+
+  frontend: {
+    url: getEnv('FRONTEND_URL', 'http://localhost:5173'),
+  },
+
   // Redis
   redis: {
     url: getEnv('REDIS_URL', 'redis://localhost:6379'),
+  },
+
+  // Google Maps Platform
+  googleMaps: {
+    apiKey: getEnv('GOOGLE_MAPS_API_KEY'),
+  },
+
+  // Da Nang public bus data
+  danabus: {
+    stopApiUrl: getEnv(
+      'DANABUS_STOP_API_URL',
+      'https://ecobus.danang.gov.vn/api/api/BusStop/GetListBusStop'
+    ),
+    requestTimeoutMs: toNumber(getEnv('DANABUS_REQUEST_TIMEOUT_MS', '20000'), 20000),
   },
 
   // Logging

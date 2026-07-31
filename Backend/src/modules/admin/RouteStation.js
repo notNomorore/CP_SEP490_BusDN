@@ -77,7 +77,7 @@ const RouteStationSchema = new mongoose.Schema(
         {
           routeId: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: 'BusRoute',
+            ref: 'Route',
           },
           routeCode: {
             type: String,

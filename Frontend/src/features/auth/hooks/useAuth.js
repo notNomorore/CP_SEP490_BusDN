@@ -17,6 +17,7 @@ export const useAuth = () => {
     // Selectors
     isAdmin: store.isAdmin,
     isDriver: store.isDriver,
+    isBusAssistant: store.isBusAssistant,
     isConductor: store.isConductor,
     isPassenger: store.isPassenger,
 

@@ -13,12 +13,6 @@ const directionTabs = [
   { key: 'inboundRoute', label: 'Chiều về' },
 ];
 
-const isRealTransitStation = (station) => (
-  station.source !== 'MANUAL'
-  || Boolean(station.sourceId)
-  || Boolean(station.googlePlaceId)
-);
-
 const DefinePathStep = ({ inputClassName, panelClassName, stations, isDarkMode }) => {
   const [stationQuery, setStationQuery] = useState('');
   const [selectedStopIndex, setSelectedStopIndex] = useState(null);
@@ -71,7 +65,6 @@ const DefinePathStep = ({ inputClassName, panelClassName, stations, isDarkMode }
     if (!query) return [];
     return stations
       .filter((station) => station.isActive !== false)
-      .filter(isRealTransitStation)
       .filter((station) => [
         station.stationName,
         station.stationCode,
@@ -197,7 +190,7 @@ const DefinePathStep = ({ inputClassName, panelClassName, stations, isDarkMode }
         <p className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-500">Bước 2</p>
         <h2 className="mt-3 text-2xl font-black">Dựng lộ trình tuyến</h2>
 
-        <div className="mt-5 grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1">
+        <div className={`mt-5 grid grid-cols-2 gap-2 rounded-xl border p-1 ${isDarkMode ? 'border-white/15 bg-white/10' : 'border-slate-200 bg-slate-100'}`}>
           {directionTabs.map((tab) => (
             <button
               key={tab.key}
@@ -206,7 +199,15 @@ const DefinePathStep = ({ inputClassName, panelClassName, stations, isDarkMode }
                 setActiveDirection(tab.key);
                 setSelectedStopIndex(null);
               }}
-              className={`rounded-lg px-3 py-2 text-sm font-bold ${activeDirection === tab.key ? 'bg-slate-950 text-white' : 'text-slate-600'}`}
+              className={`rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
+                activeDirection === tab.key
+                  ? tab.key === 'outboundRoute'
+                    ? 'bg-emerald-300 text-emerald-950 shadow-sm'
+                    : 'bg-cyan-300 text-cyan-950 shadow-sm'
+                  : isDarkMode
+                    ? 'text-slate-100 hover:bg-white/10'
+                    : 'bg-white text-slate-700 hover:bg-slate-50'
+              }`}
             >
               {tab.label}
             </button>

@@ -6,6 +6,7 @@ const router = express.Router();
 
 router.get('/', BusStopController.getBusStops);
 router.get('/export/csv', authMiddleware, authorizeRole('ADMIN'), BusStopController.exportStopsCsv);
+router.get('/geocode/search', authMiddleware, authorizeRole('ADMIN'), BusStopController.searchAddresses);
 router.get('/:id', BusStopController.getBusStop);
 router.post('/', authMiddleware, authorizeRole('ADMIN'), BusStopController.postBusStop);
 router.post('/import', authMiddleware, authorizeRole('ADMIN'), BusStopController.importStops);
