@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -263,10 +263,12 @@ export default function ProfileScreen() {
 
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionGrid}>
-            <ActionCard icon="square-edit-outline" label="Edit Profile" onPress={() => unavailable('Edit Profile')} />
+            <ActionCard icon="ticket-confirmation-outline" label="My Tickets" onPress={() => router.push('/my-tickets')} />
+            <ActionCard icon="history" label="Travel History" onPress={() => router.push('/travel-history')} />
+            <ActionCard icon="bell-ring-outline" label="Alerts" onPress={() => router.push('/notifications')} />
+            <ActionCard icon="message-plus-outline" label="Send Feedback" onPress={() => router.push('/submit-feedback')} />
+            <ActionCard icon="message-text-outline" label="My Feedback" onPress={() => router.push('/my-feedback' as Href)} />
             <ActionCard icon="lock-outline" label="Security" onPress={() => router.push('/change-password')} />
-            <ActionCard icon="bell-ring-outline" label="Alerts" onPress={() => unavailable('Alerts')} />
-            <ActionCard icon="web" label="Language" onPress={() => unavailable('Language')} />
           </View>
 
           <View style={styles.settingsCard}>
