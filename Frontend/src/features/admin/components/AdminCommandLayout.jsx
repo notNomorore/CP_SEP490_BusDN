@@ -4,6 +4,7 @@ import useAuthStore from '../../auth/stores/authStore.js';
 import vehicleIssueService from '../vehicleIssues/services/vehicleIssueService.js';
 import useAdminI18n, { getAdminMessage } from '../../../shared/i18n/adminI18n.js';
 import { adminNavGroups, adminNavigation } from '../../../shared/i18n/adminMessages.js';
+import AdminI18nBoundary from './AdminI18nBoundary.jsx';
 
 const getNavigationTarget = (item) => {
   const [pathname, rawSearch = ''] = item.path.split('?');
@@ -156,7 +157,7 @@ const AdminCommandLayout = () => {
       .sort((left, right) => right.path.length - left.path.length)
       .find((item) => isNavigationItemActive(location, item))
       || adminNavigation[0];
-  }, [location.pathname, location.search]);
+  }, [location]);
 
   const activeGroup = useMemo(() => (
     adminNavGroups.find((group) => (
@@ -287,6 +288,7 @@ const AdminCommandLayout = () => {
   );
 
   return (
+    <AdminI18nBoundary>
     <div className="flex h-screen overflow-hidden bg-surface text-on-surface">
       <div className="hidden lg:block">{sidebar}</div>
 
@@ -385,6 +387,7 @@ const AdminCommandLayout = () => {
         }
       `}</style>
     </div>
+    </AdminI18nBoundary>
   );
 };
 

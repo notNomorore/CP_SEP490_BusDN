@@ -61,6 +61,14 @@ const phraseOverrides = {
   'Notification history': { en: 'Notification history', vi: 'Lịch sử thông báo' },
   'Create broadcast': { en: 'Create broadcast', vi: 'Tạo thông báo phát rộng' },
   'Payload preview': { en: 'Payload preview', vi: 'Xem trước nội dung gửi' },
+  'Active buses': { en: 'Active buses', vi: 'Xe đang hoạt động' },
+  'Delayed buses': { en: 'Delayed buses', vi: 'Xe bị trễ' },
+  'Lost signal': { en: 'Lost signal', vi: 'Mất tín hiệu' },
+  'Incidents': { en: 'Incidents', vi: 'Sự cố' },
+  'Fleet shown': { en: 'Fleet shown', vi: 'Đội xe đang hiển thị' },
+  'No buses match the current filters.': { en: 'No buses match the current filters.', vi: 'Không có xe nào phù hợp với bộ lọc hiện tại.' },
+  'Live connection': { en: 'Live connection', vi: 'Kết nối trực tiếp' },
+  'Sample data': { en: 'Sample data', vi: 'Dữ liệu mẫu' },
 };
 
 const statusTranslations = {
@@ -110,6 +118,24 @@ const preserveWhitespace = (original, translated) => {
   return `${leading}${translated}${trailing}`;
 };
 
+const phraseLookup = new Map();
+Object.entries({ ...adminPhraseTranslations, ...phraseOverrides }).forEach(([source, values]) => {
+  [source, values?.en, values?.vi].filter(Boolean).forEach((phrase) => {
+    phraseLookup.set(String(phrase).replace(/\s+/g, ' ').trim(), values);
+  });
+});
+Object.entries(statusTranslations).forEach(([statusLanguage, values]) => {
+  Object.entries(values).forEach(([source, translated]) => {
+    const pair = {
+      en: statusTranslations.en[source] || source,
+      vi: statusTranslations.vi[source] || source,
+    };
+    phraseLookup.set(source, pair);
+    phraseLookup.set(translated, pair);
+    phraseLookup.set(statusLanguage === 'en' ? pair.vi : pair.en, pair);
+  });
+});
+
 const translateDynamicText = (text, language) => {
   const replacements = language === 'vi'
     ? [
@@ -144,7 +170,7 @@ export const translateAdminPhrase = (value, language = 'en') => {
   const status = statusTranslations[language]?.[normalized.toUpperCase()];
   if (status) return preserveWhitespace(original, status);
 
-  const translated = (phraseOverrides[normalized] || adminPhraseTranslations[normalized])?.[language];
+  const translated = phraseLookup.get(normalized)?.[language];
   if (translated) return preserveWhitespace(original, translated);
 
   return translateDynamicText(original, language);

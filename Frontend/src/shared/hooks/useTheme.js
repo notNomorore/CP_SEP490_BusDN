@@ -59,6 +59,8 @@ const subscribe = (listener) => {
 
 const useTheme = () => {
   const [theme, setTheme] = useState(() => getTheme());
+  const isBusAssistantArea = typeof window !== 'undefined'
+    && window.location.pathname.startsWith('/bus-assistant');
 
   useEffect(() => subscribe(setTheme), []);
 
@@ -93,10 +95,10 @@ const useTheme = () => {
   }, []);
 
   return {
-    theme,
-    isDarkMode: theme === 'dark',
-    setTheme: setGlobalTheme,
-    toggleTheme: () => setGlobalTheme(theme === 'dark' ? 'light' : 'dark'),
+    theme: isBusAssistantArea ? 'light' : theme,
+    isDarkMode: isBusAssistantArea ? false : theme === 'dark',
+    setTheme: isBusAssistantArea ? () => {} : setGlobalTheme,
+    toggleTheme: isBusAssistantArea ? () => {} : () => setGlobalTheme(theme === 'dark' ? 'light' : 'dark'),
   };
 };
 

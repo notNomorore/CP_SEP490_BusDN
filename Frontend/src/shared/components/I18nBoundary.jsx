@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import useLanguage from '../hooks/useLanguage.js';
 import { translateAdminPhrase } from '../i18n/adminI18n.js';
+import { translateBusAssistantPhrase } from '../../features/busAssistant/busAssistantPhraseTranslations.js';
 
 const originalText = new WeakMap();
 const appliedText = new WeakMap();
@@ -10,6 +11,7 @@ const translatedAttributes = ['placeholder', 'title', 'aria-label'];
 const shouldSkipTextNode = (node) => {
   const parent = node.parentElement;
   if (!parent) return true;
+  if (parent.closest('[data-local-i18n]')) return true;
   if (['SCRIPT', 'STYLE', 'CODE', 'PRE'].includes(parent.tagName)) return true;
   return parent.classList.contains('material-symbols-outlined');
 };
@@ -19,13 +21,17 @@ const translateTextNode = (node, language, refreshOriginal = false) => {
   const current = node.nodeValue || '';
   if (refreshOriginal && current !== appliedText.get(node)) originalText.set(node, current);
   if (!originalText.has(node)) originalText.set(node, current);
-  const translated = translateAdminPhrase(originalText.get(node), language);
+  const source = originalText.get(node);
+  const translated = window.location.pathname.startsWith('/bus-assistant')
+    ? translateBusAssistantPhrase(translateAdminPhrase(source, language), language)
+    : translateAdminPhrase(source, language);
   appliedText.set(node, translated);
   if (current !== translated) node.nodeValue = translated;
 };
 
 const translateElementAttributes = (element, language, refreshOriginal = false) => {
   if (!(element instanceof HTMLElement)) return;
+  if (element.closest('[data-local-i18n]')) return;
   const stored = originalAttributes.get(element) || {};
   let changed = false;
 
@@ -36,7 +42,9 @@ const translateElementAttributes = (element, language, refreshOriginal = false) 
     if (!(attribute in stored) || (refreshOriginal && current !== translatedMarker)) {
       stored[attribute] = current;
     }
-    const translated = translateAdminPhrase(stored[attribute], language);
+    const translated = window.location.pathname.startsWith('/bus-assistant')
+      ? translateBusAssistantPhrase(translateAdminPhrase(stored[attribute], language), language)
+      : translateAdminPhrase(stored[attribute], language);
     stored[`${attribute}Translated`] = translated;
     if (current !== translated) element.setAttribute(attribute, translated);
     changed = true;

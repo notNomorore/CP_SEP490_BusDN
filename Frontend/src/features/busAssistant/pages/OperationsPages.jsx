@@ -15,8 +15,10 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import useTheme from '../../../shared/hooks/useTheme.js';
+import useLanguage from '../../../shared/hooks/useLanguage.js';
 import useAuthStore from '../../auth/stores/authStore.js';
 import scheduleOperationsService from '../../scheduleOperations/services/scheduleOperationsService.js';
+import { translateBusAssistantPhrase } from '../busAssistantPhraseTranslations.js';
 
 const toInputDate = (date) => date.toISOString().slice(0, 10);
 
@@ -424,6 +426,7 @@ const OperationNotificationCard = ({ notification }) => {
 };
 
 export const AssignedTripsPage = () => {
+  const { language } = useLanguage();
   const [filters, setFilters] = useState(getDefaultRange);
   const [assignments, setAssignments] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -464,7 +467,7 @@ export const AssignedTripsPage = () => {
   };
 
   const rejectTrip = (assignmentId) => {
-    const reason = window.prompt('Nhập lý do từ chối chuyến được phân công:');
+    const reason = window.prompt(translateBusAssistantPhrase('Nhập lý do từ chối chuyến được phân công:', language));
     if (!reason?.trim()) return;
     runDecision(
       assignmentId,
