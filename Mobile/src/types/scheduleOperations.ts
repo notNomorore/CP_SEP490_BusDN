@@ -74,6 +74,24 @@ export type AssignedTrip = {
     model?: string;
     capacity?: number;
   };
+  vehicleReplacement?: {
+    reason?: string;
+    changedAt?: string | null;
+    previousVehicle?: {
+      id?: string | null;
+      code?: string;
+      plateNumber?: string;
+      model?: string;
+      capacity?: number;
+    };
+    currentVehicle?: {
+      id?: string | null;
+      code?: string;
+      plateNumber?: string;
+      model?: string;
+      capacity?: number;
+    };
+  } | null;
   driver?: StaffMember;
   busAssistant?: StaffMember;
   scheduledStart?: string | null;

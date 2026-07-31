@@ -16,6 +16,9 @@ import {
   formatDate,
   formatTime,
   getAssignedTripsRange,
+  getTripVehicleLabel,
+  getVehicleLabel,
+  hasVehicleReplacement,
   getTripStatus,
   isTripCompleted,
   isTripDelayed,
@@ -584,6 +587,20 @@ export default function AssignedTripsScreen() {
     } as unknown as Href);
   };
 
+  const refreshTrip = async (trip: AssignedTrip) => {
+    try {
+      const updated = await scheduleOperationsApi.getAssignedTripDetail(trip.id);
+      setTrips((current) => current.map((item) => (item.id === trip.id ? updated : item)));
+      return updated;
+    } catch {
+      return trip;
+    }
+  };
+
+  const openFreshDetail = async (trip: AssignedTrip) => {
+    openDetail(await refreshTrip(trip));
+  };
+
   const openInspection = (trip: AssignedTrip) => {
     router.push({
       pathname: '/driver-assistant/vehicle-inspection',
@@ -591,11 +608,19 @@ export default function AssignedTripsScreen() {
     } as unknown as Href);
   };
 
+  const openFreshInspection = async (trip: AssignedTrip) => {
+    openInspection(await refreshTrip(trip));
+  };
+
   const openLifecycle = (trip: AssignedTrip) => {
     router.push({
       pathname: '/driver-assistant/trip-lifecycle',
       params: { assignmentId: trip.id, trip: JSON.stringify(trip) },
     } as unknown as Href);
+  };
+
+  const openFreshLifecycle = async (trip: AssignedTrip) => {
+    openLifecycle(await refreshTrip(trip));
   };
 
   const acceptTrip = async (trip: AssignedTrip) => {
@@ -741,14 +766,26 @@ export default function AssignedTripsScreen() {
                   <InfoLine label="Arrival" value={formatTime(trip.scheduledEnd)} />
                   {trip.actualStartAt ? <InfoLine label="Started" value={formatTime(trip.actualStartAt)} /> : null}
                   {trip.actualEndAt ? <InfoLine label="Ended" value={formatTime(trip.actualEndAt)} /> : null}
-                  <InfoLine label="Bus Number" value={trip.vehicle?.code || trip.vehicle?.plateNumber} />
+                  <InfoLine label="Bus Number" value={getTripVehicleLabel(trip)} />
                   <InfoLine label="Driver" value={trip.driver?.fullName} />
                   <InfoLine label="Bus Assistant" value={trip.busAssistant?.fullName} />
                   <InfoLine label="Your Role" value={copy.roleLabel} />
                 </View>
 
+                {hasVehicleReplacement(trip) ? (
+                  <View style={styles.replacementNotice}>
+                    <MaterialCommunityIcons color={colors.primary} name="swap-horizontal-bold" size={18} />
+                    <View style={styles.replacementTextWrap}>
+                      <Text style={styles.replacementTitle}>Xe thay thế đã được phân phối</Text>
+                      <Text style={styles.replacementText}>
+                        Xe cũ {getVehicleLabel(trip.vehicleReplacement?.previousVehicle)} đang bảo trì. Chuyến tiếp tục với xe {getVehicleLabel(trip.vehicleReplacement?.currentVehicle || trip.vehicle)}.
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+
                 <View style={styles.actionsRow}>
-                  <AppButton title="Xem chi tiết" variant="secondary" onPress={() => openDetail(trip)} style={styles.actionButton} />
+                  <AppButton title="Xem chi tiết" variant="secondary" onPress={() => void openFreshDetail(trip)} style={styles.actionButton} />
                   {showDecisionActions ? (
                     <>
                       <AppButton
@@ -772,7 +809,7 @@ export default function AssignedTripsScreen() {
                     <AppButton
                       title={isVehicleReady ? copy.startAction : copy.prepareAction}
                       loading={processingId === trip.id}
-                      onPress={() => (isVehicleReady ? openLifecycle(trip) : openInspection(trip))}
+                      onPress={() => void (isVehicleReady ? openFreshLifecycle(trip) : openFreshInspection(trip))}
                       style={styles.actionButton}
                     />
                   ) : null}
@@ -860,6 +897,18 @@ const styles = StyleSheet.create({
   infoLine: { width: '47%', gap: 3 },
   infoLabel: { color: colors.muted, fontSize: 10, fontWeight: '900' },
   infoValue: { color: colors.text, fontSize: 13, fontWeight: '800' },
+  replacementNotice: {
+    flexDirection: 'row',
+    gap: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#b8e8d0',
+    backgroundColor: '#e8f8ef',
+    padding: 12,
+  },
+  replacementTextWrap: { flex: 1, gap: 3 },
+  replacementTitle: { color: colors.primary, fontSize: 13, fontWeight: '900' },
+  replacementText: { color: colors.muted, fontSize: 12, lineHeight: 17, fontWeight: '700' },
   actionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   actionButton: { flex: 1 },
   assistantNotice: {

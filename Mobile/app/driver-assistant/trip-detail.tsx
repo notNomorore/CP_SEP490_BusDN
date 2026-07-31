@@ -18,6 +18,9 @@ import {
   getRoutePathPoints,
   getRouteStops,
   getTripStatus,
+  getTripVehicleLabel,
+  getVehicleLabel,
+  hasVehicleReplacement,
 } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
@@ -477,8 +480,19 @@ export default function TripDetailScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Vehicle & Crew</Text>
+        {hasVehicleReplacement(trip) ? (
+          <View style={styles.replacementNotice}>
+            <MaterialCommunityIcons color={colors.primary} name="swap-horizontal-bold" size={19} />
+            <View style={styles.replacementTextWrap}>
+              <Text style={styles.replacementTitle}>Xe thay thế đã được phân phối</Text>
+              <Text style={styles.replacementText}>
+                Xe cũ {getVehicleLabel(trip.vehicleReplacement?.previousVehicle)} đang bảo trì. Chuyến đang dùng xe {getVehicleLabel(trip.vehicleReplacement?.currentVehicle || trip.vehicle)}.
+              </Text>
+            </View>
+          </View>
+        ) : null}
         <View style={styles.detailsGrid}>
-          <DetailRow label="Bus Number" value={trip.vehicle?.code || trip.vehicle?.plateNumber} />
+          <DetailRow label="Bus Number" value={getTripVehicleLabel(trip)} />
           <DetailRow label="Passenger Capacity" value={trip.vehicle?.capacity || 'N/A'} />
           <DetailRow label="Current Occupancy" value="N/A" />
           <DetailRow label="Driver Name" value={trip.driver?.fullName} />
@@ -514,6 +528,18 @@ const styles = StyleSheet.create({
   sectionTitle: { color: colors.text, fontSize: 17, fontWeight: '900' },
   sectionHint: { marginTop: 3, color: colors.muted, fontSize: 12, fontWeight: '700' },
   detailsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 11 },
+  replacementNotice: {
+    flexDirection: 'row',
+    gap: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#b8e8d0',
+    backgroundColor: '#e8f8ef',
+    padding: 12,
+  },
+  replacementTextWrap: { flex: 1, gap: 3 },
+  replacementTitle: { color: colors.primary, fontSize: 13, fontWeight: '900' },
+  replacementText: { color: colors.muted, fontSize: 12, lineHeight: 17, fontWeight: '700' },
   detailRow: { width: '47%', gap: 4 },
   detailLabel: { color: colors.muted, fontSize: 10, fontWeight: '900' },
   detailValue: { color: colors.text, fontSize: 13, fontWeight: '800' },

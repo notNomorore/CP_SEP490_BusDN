@@ -76,6 +76,20 @@ export const getTripRouteLabel = (trip: AssignedTrip) => (
   trip.route?.routeNumber || trip.route?.name || trip.tripCode || 'Unassigned route'
 );
 
+type TripVehicle = NonNullable<AssignedTrip['vehicle']>;
+type ReplacementVehicle = NonNullable<NonNullable<AssignedTrip['vehicleReplacement']>['previousVehicle']>;
+
+export const getVehicleLabel = (vehicle?: TripVehicle | ReplacementVehicle | null) => (
+  vehicle?.plateNumber || vehicle?.code || 'N/A'
+);
+
+export const getTripVehicleLabel = (trip?: AssignedTrip | null) => getVehicleLabel(trip?.vehicle);
+
+export const hasVehicleReplacement = (trip?: AssignedTrip | null) => Boolean(
+  trip?.vehicleReplacement?.previousVehicle?.id
+  && trip?.vehicleReplacement?.currentVehicle?.id
+);
+
 export const getTripStatus = (trip: AssignedTrip) => {
   if (trip.actualEndAt) return 'COMPLETED';
   return trip.tripStatus || trip.shiftStatus || trip.acceptanceStatus || 'SCHEDULED';

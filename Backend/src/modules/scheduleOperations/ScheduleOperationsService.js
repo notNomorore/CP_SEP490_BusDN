@@ -548,9 +548,45 @@ export class ScheduleOperationsService {
       return;
     }
 
+    const scheduleById = assignments.reduce((map, assignment) => {
+      const scheduleId = String(assignment.trip?._id || assignment._id);
+      map.set(scheduleId, assignment.trip || assignment);
+      return map;
+    }, new Map());
+
     const inspections = await VehicleInspection.find({
       trip: { $in: assignments.map((assignment) => assignment.trip?._id || assignment._id) },
     });
+
+    await Promise.all(inspections.map(async (inspection) => {
+      const schedule = scheduleById.get(String(inspection.trip));
+      const currentVehicleId = getScheduleVehicleId(schedule);
+      const inspectionVehicleId = inspection.vehicle;
+      const shouldResetForReplacement = inspection.status === 'ISSUE_REPORTED'
+        && currentVehicleId
+        && inspectionVehicleId
+        && String(currentVehicleId) !== String(inspectionVehicleId);
+
+      if (!shouldResetForReplacement) return inspection;
+
+      inspection.vehicle = currentVehicleId;
+      inspection.status = 'IN_PROGRESS';
+      inspection.checklist = {
+        tires: false,
+        brakes: false,
+        lights: false,
+        fuelOrBattery: false,
+        safetyEquipment: false,
+        cleanliness: false,
+      };
+      inspection.issueCategory = null;
+      inspection.issueDescription = '';
+      inspection.startedAt = new Date();
+      inspection.confirmedAt = null;
+      inspection.reportedAt = null;
+      await inspection.save();
+      return inspection;
+    }));
 
     const inspectionByAssignment = inspections.reduce((map, inspection) => {
       map.set(String(inspection.trip), inspection);
@@ -1116,20 +1152,6 @@ export class ScheduleOperationsService {
       { upsert: true, new: true }
     );
 
-    await Promise.all([
-      VehicleIssueService.createFromDriverReport({
-        assignment,
-        inspection,
-        userId,
-        payload,
-      }),
-      TripSchedule.updateOne({ _id: assignment.trip._id }, { $set: { status: 'ASSIGNED' } }),
-      FleetBus.updateOne(
-        { _id: getScheduleVehicleId(assignment.trip) },
-        { $set: { status: 'MAINTENANCE' } }
-      ),
-    ]);
-
     const incident = await OperationIncident.create({
       incidentCode: this.buildIncidentCode(assignment, 'VEHICLE_ISSUE'),
       type: 'VEHICLE_ISSUE',
@@ -1146,6 +1168,21 @@ export class ScheduleOperationsService {
       ].join('\n'),
       reportedAt: new Date(),
     });
+
+    await Promise.all([
+      VehicleIssueService.createFromDriverReport({
+        assignment,
+        inspection,
+        userId,
+        payload,
+        operationIncident: incident,
+      }),
+      TripSchedule.updateOne({ _id: assignment.trip._id }, { $set: { status: 'ASSIGNED' } }),
+      FleetBus.updateOne(
+        { _id: getScheduleVehicleId(assignment.trip) },
+        { $set: { status: 'MAINTENANCE' } }
+      ),
+    ]);
 
     await this.syncToAdminIncidentReport({
       sourceType: 'OPERATION_VEHICLE_ISSUE',

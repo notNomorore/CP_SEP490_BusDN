@@ -12,7 +12,7 @@ import { useAuthStore } from '@/store/auth.store';
 import type { ShiftRevenue } from '@/types/busAssistant';
 import type { AssignedTrip, ShiftSchedule } from '@/types/scheduleOperations';
 import { isDriverAssistantRole, normalizeRole } from '@/utils/roleNavigation';
-import { formatDate, formatTime, getTodayRange, getTripStatus, isTripCompleted, isTripToday, toDateInput } from '@/utils/scheduleOperations';
+import { formatDate, formatTime, getTodayRange, getTripStatus, getTripVehicleLabel, isTripCompleted, isTripToday, toDateInput } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
 const assignedTripsRoute = '/driver-assistant/assigned-trips' as Href;
@@ -228,7 +228,7 @@ export default function DriverBusAssistantHomeScreen() {
                 <View style={styles.nextContent}>
                   <Text style={styles.routeBadge}>{nextTrip.route?.routeNumber || nextTrip.tripCode || 'Trip'}</Text>
                   <Text style={styles.nextTitle}>{nextTrip.route?.origin || 'Origin'} - {nextTrip.route?.destination || 'Destination'}</Text>
-                  <Text style={styles.nextMeta}>{formatTime(nextTrip.scheduledStart)} - {nextTrip.vehicle?.code || nextTrip.vehicle?.plateNumber || 'No bus'} - {getTripStatus(nextTrip)}</Text>
+                  <Text style={styles.nextMeta}>{formatTime(nextTrip.scheduledStart)} - {getTripVehicleLabel(nextTrip)} - {getTripStatus(nextTrip)}</Text>
                 </View>
                 {isDriver && canAcceptTrip(nextTrip) ? (
                   <Pressable
@@ -320,7 +320,6 @@ export default function DriverBusAssistantHomeScreen() {
               <View style={styles.actionGrid}>
                 <ActionTile title={upcomingShift?.shiftName || 'Shift schedule'} subtitle="View work hours and assignments" icon="calendar-month-outline" href={shiftScheduleRoute} />
                 <ActionTile title="Operation chat" subtitle="Message dispatch and crew" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
-                <ActionTile title="Incident report" subtitle="Open a trip to report issues" icon="alert-circle-outline" href={assignedTripsRoute} />
               </View>
             </View>
           ) : null}

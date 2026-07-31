@@ -1620,6 +1620,9 @@ const AssignmentCard = ({
             <p className="mt-1 text-sm text-slate-600">
               {assignment.route.origin} - {assignment.route.destination} | {formatTime(assignment.scheduledStart)} - {formatTime(assignment.scheduledEnd)}
             </p>
+            <p className="mt-2 text-sm font-bold text-slate-800">
+              Xe hiện tại: {assignment.vehicle?.plateNumber || 'Chưa có biển số'}
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <StatusBadge status={assignment.acceptanceStatus || 'ACCEPTED'} />

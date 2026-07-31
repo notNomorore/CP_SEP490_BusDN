@@ -28,17 +28,12 @@ const incidentTypes = [
   'ACCIDENT',
   'TRAFFIC_CONGESTION',
   'TRIP_REJECTION',
-  'VEHICLE_ISSUE',
-  'VEHICLE_BREAKDOWN',
-  'PASSENGER_VIOLATION',
-  'PASSENGER_CONFLICT',
-  'LOST_ITEM',
-  'FOUND_ITEM',
   'GPS_LOST_SIGNAL',
   'VEHICLE_IDLE_TOO_LONG',
   'SEVERE_DELAY',
   'OTHER',
 ];
+const INCIDENT_SCOPE = 'operations';
 const severityOptions = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 const statusOptions = ['PENDING', 'IN_PROGRESS', 'RESOLVED', 'REJECTED'];
 
@@ -56,6 +51,7 @@ const handlingActionOptions = [
 const defaultFilters = {
   page: 1,
   limit: 10,
+  scope: INCIDENT_SCOPE,
   keyword: '',
   incidentType: '',
   severity: '',
@@ -102,6 +98,9 @@ const incidentTypeLabel = {
   PASSENGER_CONFLICT: 'Xung đột hành khách',
   LOST_ITEM: 'Đồ thất lạc',
   FOUND_ITEM: 'Đồ tìm thấy',
+  GPS_LOST_SIGNAL: 'Mất tín hiệu GPS',
+  VEHICLE_IDLE_TOO_LONG: 'Xe chạy không tải quá lâu',
+  SEVERE_DELAY: 'Chậm trễ nghiêm trọng',
   OTHER: 'Khác',
 };
 
@@ -596,7 +595,7 @@ const IncidentReportsPage = () => {
     try {
       const [listResponse, statisticsResponse] = await Promise.all([
         incidentReportService.getIncidents(filters),
-        incidentReportService.getOverviewStatistics(),
+        incidentReportService.getOverviewStatistics({ scope: INCIDENT_SCOPE }),
       ]);
       setIncidents(listResponse.data || []);
       setMeta((current) => ({ ...current, ...(listResponse.meta || {}) }));

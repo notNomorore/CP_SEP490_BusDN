@@ -96,6 +96,15 @@ const emergencyStepLabel = {
   RESOLVED: 'Resolved',
 };
 
+const uc43NextActionLabel = {
+  new: 'Review pre-trip issue',
+  reviewed: 'Decide follow-up',
+  maintenance_required: 'Track maintenance',
+  no_action_needed: 'Ready to close',
+  resolved: 'Resolved',
+  dismissed: 'Dismissed',
+};
+
 const formatDateTime = (value) => {
   if (!value) return 'N/A';
   try {
@@ -116,6 +125,15 @@ const emergencyGuidance = {
   RESOLVED: 'Sự cố đã được xử lý xong.',
 };
 
+const uc43Guidance = {
+  new: 'UC43: Driver reported a vehicle issue during pre-trip inspection. Review the issue and choose an admin decision.',
+  reviewed: 'UC43 has been acknowledged. Choose maintenance, replacement vehicle, no action, or close after checking.',
+  maintenance_required: 'Maintenance is required. Track the maintenance task or replacement vehicle if the trip is affected.',
+  no_action_needed: 'Admin marked this issue as no action needed. Close it after final verification.',
+  resolved: 'UC43 has been resolved.',
+  dismissed: 'UC43 has been dismissed after review.',
+};
+
 const KpiCard = ({ label, value, detail, icon: Icon, critical = false }) => (
   <div className={`rounded-2xl border bg-white p-4 shadow-sm ${critical ? 'border-error/40' : 'border-outline-variant/35'}`}>
     <div className="flex items-center justify-between gap-3">
@@ -132,6 +150,7 @@ const KpiCard = ({ label, value, detail, icon: Icon, critical = false }) => (
 const VehicleIssueQueueCard = ({ issue, onOpen }) => {
   const emergency = issue.emergencyBreakdown?.isEmergency ? issue.emergencyBreakdown : null;
   const emergencyStatus = emergency?.incidentStatus;
+  const isUc43 = !emergency;
   const vehicleLabel = issue.vehicle?.plateNumber || issue.vehicle?.busCode || issue.vehicleId || 'N/A';
   const tripLabel = issue.trip?.scheduleCode || issue.tripId || 'N/A';
   const driverLabel = issue.reportedBy?.fullName || issue.trip?.driver?.fullName || 'Unknown';
@@ -140,7 +159,7 @@ const VehicleIssueQueueCard = ({ issue, onOpen }) => {
     : labelize(issue.issueType);
   const nextAction = emergency
     ? emergencyNextActionLabel[emergencyStatus] || 'View Detail'
-    : 'Review Issue';
+    : uc43NextActionLabel[issue.status] || 'Review pre-trip issue';
   const workflowPercent = emergencyStatus === 'REPORTED'
     ? '33%'
     : emergencyStatus === 'CONFIRMED'
@@ -158,6 +177,12 @@ const VehicleIssueQueueCard = ({ issue, onOpen }) => {
               <span className="inline-flex items-center gap-1 rounded-full bg-error px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.12em] text-white">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 UC48 Emergency
+              </span>
+            ) : null}
+            {isUc43 ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.12em] text-white">
+                <ClipboardCheck className="h-3.5 w-3.5" />
+                UC43 Pre-trip
               </span>
             ) : null}
             <span className={`rounded-full px-2.5 py-1 text-xs font-black ${severityClassName[issue.severity] || severityClassName.medium}`}>
@@ -197,7 +222,7 @@ const VehicleIssueQueueCard = ({ issue, onOpen }) => {
             <p className="text-[11px] font-black uppercase tracking-[0.14em] text-outline">Next admin action</p>
             <p className="mt-1 text-base font-headline font-black text-primary">{nextAction}</p>
             <p className="mt-1 text-xs font-bold text-on-surface-variant">
-              {emergency ? emergencyStepLabel[emergencyStatus] || 'Emergency workflow' : 'Vehicle issue workflow'}
+              {emergency ? emergencyStepLabel[emergencyStatus] || 'Emergency workflow' : 'UC43 vehicle inspection workflow'}
             </p>
           </div>
           {emergency ? (
@@ -356,6 +381,12 @@ const DetailDrawer = ({ issue, isLoading, onClose, onAction }) => {
   const tripAffected = ['PLANNED', 'ASSIGNED', 'IN_PROGRESS'].includes(issue?.trip?.status);
   const emergency = issue?.emergencyBreakdown?.isEmergency ? issue.emergencyBreakdown : null;
   const emergencyStatus = emergency?.incidentStatus;
+  const isClosedVehicleIssue = ['resolved', 'dismissed'].includes(issue?.status);
+  const canReviewAgain = ['new', 'no_action_needed'].includes(issue?.status);
+  const canRequireMaintenance = ['new', 'reviewed'].includes(issue?.status);
+  const canCloseAsNoAction = ['new', 'reviewed'].includes(issue?.status);
+  const canResolveIssue = ['new', 'reviewed', 'maintenance_required', 'no_action_needed'].includes(issue?.status);
+  const canDismissIssue = ['new', 'reviewed', 'maintenance_required'].includes(issue?.status);
 
   return (
     <div className="fixed inset-0 z-[60] flex justify-end bg-black/35">
@@ -440,6 +471,39 @@ const DetailDrawer = ({ issue, isLoading, onClose, onAction }) => {
               </div>
             ) : null}
 
+            {!emergency ? (
+              <div className="rounded-2xl border border-primary/20 bg-primary-fixed/35 p-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-primary">UC43 Pre-trip Vehicle Issue</p>
+                    <h3 className="mt-2 text-xl font-headline font-black text-primary">
+                      {labelize(issue?.issueType)}
+                    </h3>
+                    <p className="mt-1 text-sm text-on-surface-variant">
+                      {uc43Guidance[issue?.status] || 'Review this pre-trip vehicle issue and choose the next admin action.'}
+                    </p>
+                  </div>
+                  <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${statusClassName[issue?.status] || statusClassName.new}`}>
+                    {labelize(issue?.status)}
+                  </span>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl bg-white px-3 py-2">
+                    <p className="text-xs font-bold uppercase text-outline">Reported at</p>
+                    <p className="mt-1 text-sm font-bold text-on-surface">{formatDateTime(issue?.reportedAt)}</p>
+                  </div>
+                  <div className="rounded-xl bg-white px-3 py-2">
+                    <p className="text-xs font-bold uppercase text-outline">Decision</p>
+                    <p className="mt-1 text-sm font-bold text-on-surface">{labelize(issue?.decision || 'waiting')}</p>
+                  </div>
+                  <div className="rounded-xl bg-white px-3 py-2">
+                    <p className="text-xs font-bold uppercase text-outline">Reviewed at</p>
+                    <p className="mt-1 text-sm font-bold text-on-surface">{formatDateTime(issue?.reviewedAt)}</p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             <div className="rounded-2xl bg-surface-container-low p-4">
               <p className="text-sm leading-7 text-on-surface">{issue?.description}</p>
             </div>
@@ -470,16 +534,34 @@ const DetailDrawer = ({ issue, isLoading, onClose, onAction }) => {
                     <button type="button" onClick={() => onAction('resolve_emergency')} className="rounded-full bg-secondary px-4 py-2 text-sm font-bold text-white">Mark Resolved</button>
                   ) : null}
                 </>
-              ) : (
+              ) : !isClosedVehicleIssue ? (
                 <>
-                  <button type="button" onClick={() => onAction('mark_reviewed')} className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-white">Mark reviewed</button>
-                  <button type="button" onClick={() => onAction('no_action_needed')} className="rounded-full border px-4 py-2 text-sm font-bold">No action needed</button>
-                  <button type="button" onClick={() => onAction('create_maintenance_task')} className="rounded-full border px-4 py-2 text-sm font-bold">Create maintenance task</button>
-                  <button type="button" onClick={() => onAction('mark_vehicle_under_maintenance')} className="rounded-full border border-error/40 px-4 py-2 text-sm font-bold text-error">Mark vehicle under maintenance</button>
-                  {tripAffected ? (
+                  {canReviewAgain ? (
+                    <button type="button" onClick={() => onAction('mark_reviewed')} className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-white">Mark reviewed</button>
+                  ) : null}
+                  {canCloseAsNoAction ? (
+                    <button type="button" onClick={() => onAction('no_action_needed')} className="rounded-full border px-4 py-2 text-sm font-bold">No action needed</button>
+                  ) : null}
+                  {canRequireMaintenance ? (
+                    <button type="button" onClick={() => onAction('create_maintenance_task')} className="rounded-full border px-4 py-2 text-sm font-bold">Create maintenance task</button>
+                  ) : null}
+                  {canRequireMaintenance ? (
+                    <button type="button" onClick={() => onAction('mark_vehicle_under_maintenance')} className="rounded-full border border-error/40 px-4 py-2 text-sm font-bold text-error">Mark vehicle under maintenance</button>
+                  ) : null}
+                  {tripAffected && canRequireMaintenance ? (
                     <button type="button" onClick={() => onAction('assign_replacement_vehicle')} className="rounded-full border px-4 py-2 text-sm font-bold">Assign replacement vehicle</button>
                   ) : null}
+                  {canResolveIssue ? (
+                    <button type="button" onClick={() => onAction('resolved')} className="rounded-full bg-secondary px-4 py-2 text-sm font-bold text-white">Mark resolved</button>
+                  ) : null}
+                  {canDismissIssue ? (
+                    <button type="button" onClick={() => onAction('dismissed')} className="rounded-full border border-error/40 px-4 py-2 text-sm font-bold text-error">Dismiss issue</button>
+                  ) : null}
                 </>
+              ) : (
+                <span className="rounded-full bg-secondary-container px-4 py-2 text-sm font-bold text-on-secondary-container">
+                  This UC43 issue is closed
+                </span>
               )}
             </div>
 
@@ -545,6 +627,7 @@ const VehicleIssuesPage = () => {
     criticalIssues: 0,
     vehiclesAffected: 0,
     maintenanceRequired: 0,
+    preTripIssues: 0,
     emergencyReported: 0,
     emergencyConfirmed: 0,
     standbyDispatched: 0,
@@ -676,6 +759,7 @@ const VehicleIssuesPage = () => {
 
   const kpis = useMemo(() => ([
     ['New issues', meta.newIssues, 'Awaiting admin review', ClipboardCheck, false],
+    ['UC43 pre-trip', meta.preTripIssues, 'Vehicle inspection issues', ClipboardCheck, false],
     ['Critical issues', meta.criticalIssues, 'Safety priority', AlertTriangle, true],
     ['Vehicles affected', meta.vehiclesAffected, 'Unique vehicles in filter', ShieldAlert, false],
     ['Emergency UC48', meta.emergencyReported + meta.emergencyConfirmed, 'Reported or confirmed breakdowns', BellRing, true],
@@ -694,7 +778,7 @@ const VehicleIssuesPage = () => {
         </button>
       )}
     >
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-7">
         {kpis.map(([label, value, detailText, Icon, critical]) => (
           <KpiCard key={label} label={label} value={value} detail={detailText} icon={Icon} critical={critical} />
         ))}
@@ -718,7 +802,7 @@ const VehicleIssuesPage = () => {
           <select value={filters.emergency} onChange={(event) => updateFilter('emergency', event.target.value)} className={fieldClassName}>
             <option value="">All workflows</option>
             <option value="true">UC48 emergency only</option>
-            <option value="false">Regular vehicle issues</option>
+            <option value="false">UC43 pre-trip only</option>
           </select>
           <select value={filters.emergencyStatus} onChange={(event) => updateFilter('emergencyStatus', event.target.value)} className={fieldClassName}>
             <option value="">All emergency status</option>

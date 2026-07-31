@@ -14,7 +14,16 @@ import { useAuthStore } from '@/store/auth.store';
 import type { AssignedTrip, RoutePoint } from '@/types/scheduleOperations';
 import { getDeviceGpsPayload, type DeviceGpsPayload, watchDeviceGps } from '@/utils/deviceGps';
 import { goBackOrReplace } from '@/utils/navigation';
-import { formatCoordinate, formatTime, getRoutePathPoints, getRouteStops, getTripStatus } from '@/utils/scheduleOperations';
+import {
+  formatCoordinate,
+  formatTime,
+  getRoutePathPoints,
+  getRouteStops,
+  getTripStatus,
+  getTripVehicleLabel,
+  getVehicleLabel,
+  hasVehicleReplacement,
+} from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
 const ARRIVAL_RADIUS_METERS = 30;
@@ -652,6 +661,32 @@ export default function TripLifecycleScreen() {
   }, []);
 
   useEffect(() => {
+    if (!assignmentId) return undefined;
+
+    let isMounted = true;
+    const refreshTrip = async () => {
+      try {
+        const updatedTrip = await scheduleOperationsApi.getAssignedTripDetail(assignmentId);
+        if (isMounted) {
+          setTrip(updatedTrip);
+        }
+      } catch {
+        // Keep navigation available with the last known trip payload.
+      }
+    };
+
+    void refreshTrip();
+    const timer = setInterval(() => {
+      void refreshTrip();
+    }, 15000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, [assignmentId]);
+
+  useEffect(() => {
     if (!isTripInProgress) return undefined;
 
     let subscription: { remove: () => void } | null = null;
@@ -858,6 +893,14 @@ export default function TripLifecycleScreen() {
           <View style={styles.bottomSheet}>
             <View style={styles.sheetHandle} />
             <Text numberOfLines={1} style={styles.routeTitle}>{trip?.route?.name || 'Tuyen xe bus'}</Text>
+            {hasVehicleReplacement(trip) ? (
+              <View style={styles.replacementNotice}>
+                <MaterialCommunityIcons color={colors.primary} name="swap-horizontal-bold" size={17} />
+                <Text numberOfLines={2} style={styles.replacementText}>
+                  Xe thay thế: {getVehicleLabel(trip?.vehicleReplacement?.currentVehicle || trip?.vehicle)}. Xe cũ {getVehicleLabel(trip?.vehicleReplacement?.previousVehicle)} đang bảo trì.
+                </Text>
+              </View>
+            ) : null}
             <Text style={styles.sheetLabel}>Dang huong den</Text>
             <Text numberOfLines={2} style={styles.nextStopName}>
               {nextStop ? `Tram ${currentStopIndex + 1} - ${nextStop.name}` : 'Tat ca tram da hoan thanh'}
@@ -887,7 +930,7 @@ export default function TripLifecycleScreen() {
             </View>
 
             <View style={styles.driverInfoRow}>
-              <Text numberOfLines={1} style={styles.driverInfo}>Xe: {trip?.vehicle?.code || trip?.vehicle?.plateNumber || 'N/A'}</Text>
+              <Text numberOfLines={1} style={styles.driverInfo}>Xe: {getTripVehicleLabel(trip)}</Text>
               <Text numberOfLines={1} style={styles.driverInfo}>Gio: {formatTime(trip?.scheduledStart)}</Text>
             </View>
             <View style={styles.driverInfoRow}>
@@ -1226,6 +1269,17 @@ const styles = StyleSheet.create({
   },
   sheetHandle: { alignSelf: 'center', width: 48, height: 5, borderRadius: 999, backgroundColor: colors.outline, marginBottom: 10 },
   routeTitle: { color: colors.primary, fontSize: 15, fontWeight: '900' },
+  replacementNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    borderRadius: 14,
+    backgroundColor: '#e8f8ef',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  replacementText: { flex: 1, color: colors.primary, fontSize: 11, lineHeight: 16, fontWeight: '800' },
   sheetLabel: { marginTop: 8, color: colors.accent, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
   nextStopName: { marginTop: 3, color: colors.text, fontSize: 20, lineHeight: 25, fontWeight: '900' },
   metricsRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
