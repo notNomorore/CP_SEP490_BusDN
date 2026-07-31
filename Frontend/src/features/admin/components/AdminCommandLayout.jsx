@@ -18,7 +18,10 @@ const isNavigationItemActive = (location, item) => {
   const target = getNavigationTarget(item);
   const pathnameMatches = location.pathname === target.pathname
     || location.pathname.startsWith(`${target.pathname}/`)
-    || item.aliases?.some((alias) => location.pathname === alias || location.pathname.startsWith(`${alias}/`));
+    || item.aliases?.some((alias) => (
+      location.pathname === alias
+      || (alias !== '/admin' && location.pathname.startsWith(`${alias}/`))
+    ));
 
   if (!pathnameMatches) return false;
   if (target.search) return location.search === target.search;
@@ -157,7 +160,7 @@ const AdminCommandLayout = () => {
       .sort((left, right) => right.path.length - left.path.length)
       .find((item) => isNavigationItemActive(location, item))
       || adminNavigation[0];
-  }, [location]);
+  }, [location.pathname, location.search]);
 
   const activeGroup = useMemo(() => (
     adminNavGroups.find((group) => (
