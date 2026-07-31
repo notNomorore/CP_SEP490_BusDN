@@ -18,6 +18,8 @@ import { WebView } from 'react-native-webview';
 import passengerApi, {
   type BusRoute,
   type BusRouteStop,
+  type FavoriteRouteRecord,
+  type FavoriteStopRecord,
   type NearbyStopRecord,
   type NotificationRecord,
 } from '@/api/passenger.api';
@@ -72,6 +74,22 @@ const markerPositions = [
 ];
 
 const normalize = (value?: string) => String(value || '').trim().toLowerCase();
+
+const getRouteId = (route: BusRoute) => String(route.id || route._id || route.routeNumber);
+
+const routeFavoriteKeys = (route: {
+  id?: string;
+  _id?: string;
+  routeId?: string;
+  routeNumber?: string;
+}) => [
+  'id' in route ? route.id : undefined,
+  '_id' in route ? route._id : undefined,
+  route.routeId,
+  route.routeNumber,
+].filter(Boolean).map((value) => normalize(String(value)));
+
+const stopFavoriteKey = (routeNumber?: string, stopName?: string) => normalize(`${routeNumber || ''}-${stopName || ''}`);
 
 const formatDistance = (distanceKm?: number) => {
   if (typeof distanceKm !== 'number' || Number.isNaN(distanceKm)) return 'Unknown distance';
@@ -184,6 +202,10 @@ export default function SearchRoutesScreen() {
   const [nearbyError, setNearbyError] = useState('');
   const [mapFailed, setMapFailed] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
+  const [favoriteRoutes, setFavoriteRoutes] = useState<Record<string, FavoriteRouteRecord>>({});
+  const [favoriteStops, setFavoriteStops] = useState<Record<string, FavoriteStopRecord>>({});
+  const [favoriteBusyKey, setFavoriteBusyKey] = useState('');
+  const [favoriteMessage, setFavoriteMessage] = useState('');
   const requestSeq = useRef(0);
 
   const loadHistory = useCallback(async () => {
@@ -223,11 +245,40 @@ export default function SearchRoutesScreen() {
     }
   }, []);
 
+  const loadFavorites = useCallback(async () => {
+    try {
+      const [savedRoutes, savedStops] = await Promise.all([
+        passengerApi.getFavoriteRoutes(),
+        passengerApi.getFavoriteStops(),
+      ]);
+
+      const nextRouteMap: Record<string, FavoriteRouteRecord> = {};
+      savedRoutes.forEach((route) => {
+        routeFavoriteKeys(route).forEach((key) => {
+          nextRouteMap[key] = route;
+        });
+      });
+
+      const nextStopMap: Record<string, FavoriteStopRecord> = {};
+      savedStops.forEach((stop) => {
+        if (stop.stopId) nextStopMap[normalize(stop.stopId)] = stop;
+        nextStopMap[stopFavoriteKey(stop.routeNumber, stop.stopName)] = stop;
+      });
+
+      setFavoriteRoutes(nextRouteMap);
+      setFavoriteStops(nextStopMap);
+    } catch {
+      setFavoriteRoutes({});
+      setFavoriteStops({});
+    }
+  }, []);
+
   useEffect(() => {
     void loadHistory();
     void loadInitialRoutes();
     void loadNotificationCount();
-  }, [loadHistory, loadInitialRoutes, loadNotificationCount]);
+    void loadFavorites();
+  }, [loadHistory, loadInitialRoutes, loadNotificationCount, loadFavorites]);
 
   const buildResults = useCallback((routeList: BusRoute[], activeType: PassengerSearchType, activeQuery: string): SearchResult[] => {
     const normalizedQuery = normalize(activeQuery);
@@ -429,6 +480,77 @@ export default function SearchRoutesScreen() {
     setQuery(item.displayName);
   };
 
+  const getFavoriteRoute = useCallback((route: BusRoute) => (
+    routeFavoriteKeys(route).map((key) => favoriteRoutes[key]).find(Boolean)
+  ), [favoriteRoutes]);
+
+  const getFavoriteStop = useCallback((stop: NearbyStopView) => (
+    (stop.stopId ? favoriteStops[normalize(stop.stopId)] : undefined)
+    || favoriteStops[stopFavoriteKey(stop.route?.routeNumber, stop.name)]
+  ), [favoriteStops]);
+
+  const toggleFavoriteRoute = async (route: BusRoute) => {
+    const routeId = getRouteId(route);
+    const existing = getFavoriteRoute(route);
+    const busyKey = `route-${routeId}`;
+
+    setFavoriteBusyKey(busyKey);
+    setFavoriteMessage('');
+    try {
+      if (existing?.routeId) {
+        await passengerApi.removeFavoriteRoute(existing.routeId);
+        setFavoriteMessage('Đã bỏ lưu tuyến yêu thích.');
+      } else {
+        await passengerApi.saveFavoriteRoute(routeId);
+        setFavoriteMessage('Đã lưu tuyến yêu thích.');
+      }
+      await loadFavorites();
+    } catch {
+      setFavoriteMessage('Không thể cập nhật tuyến yêu thích. Vui lòng thử lại.');
+      await loadFavorites();
+    } finally {
+      setFavoriteBusyKey('');
+    }
+  };
+
+  const toggleFavoriteStop = async (stop: NearbyStopView) => {
+    const routeId = String(stop.route?.id || stop.route?.routeNumber || '');
+    const routeNumber = stop.route?.routeNumber || '';
+    const existing = getFavoriteStop(stop);
+    const busyKey = `stop-${routeNumber}-${stop.name}`;
+
+    if (!routeId && !routeNumber) {
+      setFavoriteMessage('Không đủ thông tin tuyến để lưu trạm.');
+      return;
+    }
+
+    setFavoriteBusyKey(busyKey);
+    setFavoriteMessage('');
+    try {
+      if (existing?.stopId) {
+        await passengerApi.removeFavoriteStop(existing.stopId);
+        setFavoriteMessage('Đã bỏ lưu trạm yêu thích.');
+      } else {
+        await passengerApi.saveFavoriteStop({
+          routeId,
+          routeNumber,
+          stopName: stop.name,
+          order: stop.order,
+          address: stop.route?.name || stop.name,
+          nearbyArrivalText: stop.etaText || stop.status || 'Theo lịch trình',
+          distanceMeters: typeof stop.distanceKm === 'number' ? Math.round(stop.distanceKm * 1000) : 0,
+        });
+        setFavoriteMessage('Đã lưu trạm yêu thích.');
+      }
+      await loadFavorites();
+    } catch {
+      setFavoriteMessage('Không thể cập nhật trạm yêu thích. Vui lòng thử lại.');
+      await loadFavorites();
+    } finally {
+      setFavoriteBusyKey('');
+    }
+  };
+
   const hasMapData = typeof location?.latitude === 'number' && typeof location?.longitude === 'number';
   const visibleRecentSearches = useMemo(() => recentSearches.slice(0, 4), [recentSearches]);
   const previewStops = useMemo<MapMarker[]>(() => {
@@ -556,22 +678,37 @@ export default function SearchRoutesScreen() {
                 <Text style={styles.sectionTitle}>Available Routes</Text>
                 <Text style={styles.mutedLink}>{routes.length} routes</Text>
               </View>
+              {favoriteMessage ? <Text style={styles.favoriteMessage}>{favoriteMessage}</Text> : null}
               <ScrollView contentContainerStyle={styles.routeStrip} horizontal showsHorizontalScrollIndicator={false}>
                 {routes.slice(0, 10).map((route) => {
-                  const routeId = String(route.id || route._id || route.routeNumber);
+                  const routeId = getRouteId(route);
+                  const isSaved = Boolean(getFavoriteRoute(route));
+                  const isBusy = favoriteBusyKey === `route-${routeId}`;
                   return (
-                    <Pressable
-                      key={routeId}
-                      onPress={() => router.push({ pathname: '/route-detail/[routeId]', params: { routeId } })}
-                      style={styles.routeCard}
-                    >
-                      <View style={styles.routeCodePill}>
-                        <Text style={styles.routeCodeText}>{route.routeNumber}</Text>
-                      </View>
-                      <Text numberOfLines={2} style={styles.routeCardTitle}>{route.name || `${route.origin} - ${route.destination}`}</Text>
-                      <Text numberOfLines={1} style={styles.routeCardMeta}>{route.origin} to {route.destination}</Text>
-                      <Text style={styles.routeCardMeta}>{route.estimatedDurationMinutes || 0} min - {Number(route.fare || 0).toLocaleString('vi-VN')} VND</Text>
-                    </Pressable>
+                    <View key={routeId} style={styles.routeCard}>
+                      <Pressable onPress={() => router.push({ pathname: '/route-detail/[routeId]', params: { routeId } })} style={styles.routeCardMain}>
+                        <View style={styles.routeCodePill}>
+                          <Text style={styles.routeCodeText}>{route.routeNumber}</Text>
+                        </View>
+                        <Text numberOfLines={2} style={styles.routeCardTitle}>{route.name || `${route.origin} - ${route.destination}`}</Text>
+                        <Text numberOfLines={1} style={styles.routeCardMeta}>{route.origin} to {route.destination}</Text>
+                        <Text style={styles.routeCardMeta}>{route.estimatedDurationMinutes || 0} min - {Number(route.fare || 0).toLocaleString('vi-VN')} VND</Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: isSaved, busy: isBusy }}
+                        disabled={isBusy}
+                        onPress={() => toggleFavoriteRoute(route)}
+                        style={[styles.favoriteButton, isSaved && styles.favoriteButtonSaved]}
+                      >
+                        {isBusy ? (
+                          <ActivityIndicator color={isSaved ? colors.primary : colors.white} size="small" />
+                        ) : (
+                          <MaterialCommunityIcons color={isSaved ? colors.primary : colors.white} name={isSaved ? 'heart' : 'heart-outline'} size={17} />
+                        )}
+                        <Text style={[styles.favoriteButtonText, isSaved && styles.favoriteButtonTextSaved]}>{isSaved ? 'Đã lưu tuyến' : 'Lưu tuyến'}</Text>
+                      </Pressable>
+                    </View>
                   );
                 })}
               </ScrollView>
@@ -649,27 +786,52 @@ export default function SearchRoutesScreen() {
             <Text style={styles.sectionTitle}>Nearby Stops</Text>
             {nearbyError ? <Pressable onPress={() => location && loadNearbyStops(location)}><Text style={styles.link}>Retry</Text></Pressable> : null}
           </View>
+          {favoriteMessage ? <Text style={styles.favoriteMessage}>{favoriteMessage}</Text> : null}
           {nearbyLoading ? <LoadingRows /> : null}
           {!nearbyLoading && nearbyError ? <StateText icon="alert-circle-outline" text={nearbyError} /> : null}
           {!nearbyLoading && !nearbyError && !nearbyStops.length ? <StateText icon="bus-stop" text="Tap the location button to find nearby stops." /> : null}
           {!nearbyLoading && !nearbyError && nearbyStops.map((stop) => (
-            <Pressable
-              key={`${stop.route?.routeNumber}-${stop.name}`}
-              onPress={() => router.push(`/live-tracking?routeId=${encodeURIComponent(String(stop.route?.id || stop.route?.routeNumber || ''))}`)}
-              style={styles.stopCard}
-            >
-              <View style={styles.routeBadge}>
-                <Text style={styles.routeBadgeText}>{stop.route?.routeNumber || 'BUS'}</Text>
+            <View key={`${stop.route?.routeNumber}-${stop.name}`} style={styles.stopCard}>
+              <Pressable
+                onPress={() => router.push(`/live-tracking?routeId=${encodeURIComponent(String(stop.route?.id || stop.route?.routeNumber || ''))}`)}
+                style={styles.stopMain}
+              >
+                <View style={styles.routeBadge}>
+                  <Text style={styles.routeBadgeText}>{stop.route?.routeNumber || 'BUS'}</Text>
+                </View>
+                <View style={styles.stopCopy}>
+                  <Text numberOfLines={1} style={styles.stopName}>{stop.name}</Text>
+                  <Text numberOfLines={1} style={styles.stopMeta}>{formatDistance(stop.distanceKm)} - {stop.route?.name || 'BusDN route'}</Text>
+                </View>
+                <View style={styles.etaCopy}>
+                  <Text style={styles.etaText}>{stop.etaText || 'No ETA data'}</Text>
+                  <Text style={[styles.statusText, stop.status === 'Delayed' && styles.statusDelayed]}>{stop.status || 'Scheduled'}</Text>
+                </View>
+              </Pressable>
+              <View style={styles.stopFavoriteRow}>
+                {(() => {
+                  const isSaved = Boolean(getFavoriteStop(stop));
+                  const busyKey = `stop-${stop.route?.routeNumber || ''}-${stop.name}`;
+                  const isBusy = favoriteBusyKey === busyKey;
+                  return (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isSaved, busy: isBusy }}
+                      disabled={isBusy}
+                      onPress={() => toggleFavoriteStop(stop)}
+                      style={[styles.favoriteButton, styles.stopFavoriteButton, isSaved && styles.favoriteButtonSaved]}
+                    >
+                      {isBusy ? (
+                        <ActivityIndicator color={isSaved ? colors.primary : colors.white} size="small" />
+                      ) : (
+                        <MaterialCommunityIcons color={isSaved ? colors.primary : colors.white} name={isSaved ? 'heart' : 'heart-outline'} size={17} />
+                      )}
+                      <Text style={[styles.favoriteButtonText, isSaved && styles.favoriteButtonTextSaved]}>{isSaved ? 'Đã lưu trạm' : 'Lưu trạm'}</Text>
+                    </Pressable>
+                  );
+                })()}
               </View>
-              <View style={styles.stopCopy}>
-                <Text numberOfLines={1} style={styles.stopName}>{stop.name}</Text>
-                <Text numberOfLines={1} style={styles.stopMeta}>{formatDistance(stop.distanceKm)} - {stop.route?.name || 'BusDN route'}</Text>
-              </View>
-              <View style={styles.etaCopy}>
-                <Text style={styles.etaText}>{stop.etaText || 'No ETA data'}</Text>
-                <Text style={[styles.statusText, stop.status === 'Delayed' && styles.statusDelayed]}>{stop.status || 'Scheduled'}</Text>
-              </View>
-            </Pressable>
+            </View>
           ))}
 
           <View style={styles.cta}>
@@ -736,11 +898,17 @@ const styles = StyleSheet.create({
   resultTitle: { color: '#0d1c2f', fontSize: 14, fontWeight: '900' },
   resultSubtitle: { marginTop: 2, color: '#6f7973', fontSize: 12, fontWeight: '700' },
   routeStrip: { gap: 12, paddingRight: 20 },
-  routeCard: { width: 230, minHeight: 134, gap: 8, borderWidth: 1, borderColor: '#d5e3fd', borderRadius: 22, backgroundColor: colors.white, padding: 14 },
+  routeCard: { width: 230, minHeight: 172, gap: 10, borderWidth: 1, borderColor: '#d5e3fd', borderRadius: 22, backgroundColor: colors.white, padding: 14 },
+  routeCardMain: { flex: 1, gap: 8 },
   routeCodePill: { alignSelf: 'flex-start', borderRadius: 999, backgroundColor: '#004532', paddingHorizontal: 11, paddingVertical: 6 },
   routeCodeText: { color: colors.white, fontSize: 12, fontWeight: '900' },
   routeCardTitle: { color: '#0d1c2f', fontSize: 15, lineHeight: 20, fontWeight: '900' },
   routeCardMeta: { color: '#6f7973', fontSize: 11, fontWeight: '800' },
+  favoriteMessage: { marginTop: -6, color: '#006c49', fontSize: 12, lineHeight: 17, fontWeight: '800' },
+  favoriteButton: { minHeight: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: 999, backgroundColor: '#006c49', paddingHorizontal: 12 },
+  favoriteButtonSaved: { borderWidth: 1, borderColor: '#8df3c3', backgroundColor: '#d8f6e7' },
+  favoriteButtonText: { color: colors.white, fontSize: 12, fontWeight: '900' },
+  favoriteButtonTextSaved: { color: colors.primary },
   mapCard: { height: 240, overflow: 'hidden', borderWidth: 1, borderColor: '#d5e3fd', borderRadius: 24, backgroundColor: '#d8e6ff' },
   webMap: { flex: 1, backgroundColor: '#d8e6ff' },
   mapCanvas: { flex: 1, backgroundColor: '#d8e6ff' },
@@ -762,7 +930,8 @@ const styles = StyleSheet.create({
   recentTitle: { color: '#0d1c2f', fontSize: 13, fontWeight: '900' },
   recentSubtitle: { color: '#6f7973', fontSize: 11, fontWeight: '700' },
   loadingBox: { minHeight: 92, alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 20, backgroundColor: colors.white },
-  stopCard: { minHeight: 82, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#d5e3fd', borderRadius: 20, backgroundColor: colors.white, padding: 14 },
+  stopCard: { minHeight: 116, gap: 12, borderWidth: 1, borderColor: '#d5e3fd', borderRadius: 20, backgroundColor: colors.white, padding: 14 },
+  stopMain: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 12 },
   routeBadge: { width: 50, height: 50, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: '#d8f6e7' },
   routeBadgeText: { color: '#006c49', fontSize: 12, fontWeight: '900' },
   stopCopy: { flex: 1 },
@@ -772,6 +941,8 @@ const styles = StyleSheet.create({
   etaText: { color: '#006c49', fontSize: 14, fontWeight: '900' },
   statusText: { marginTop: 2, color: '#6f7973', fontSize: 10, fontWeight: '900' },
   statusDelayed: { color: colors.error },
+  stopFavoriteRow: { alignItems: 'flex-end' },
+  stopFavoriteButton: { minWidth: 126 },
   cta: { gap: 10, overflow: 'hidden', borderRadius: 28, backgroundColor: '#065f46', padding: 20 },
   ctaTitle: { color: '#a6f2d1', fontSize: 20, fontWeight: '900' },
   ctaBody: { color: 'rgba(216,246,231,0.85)', fontSize: 14, lineHeight: 20, fontWeight: '700' },

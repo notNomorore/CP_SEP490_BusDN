@@ -17,6 +17,12 @@ export type BusRouteStop = {
   address?: string;
 };
 
+export type RoutePathPoint = {
+  latitude?: number;
+  longitude?: number;
+  name?: string;
+};
+
 export type BusRoute = {
   id: string;
   _id?: string;
@@ -33,15 +39,34 @@ export type BusRoute = {
     lastDeparture?: string;
     frequencyMinutes?: number;
   };
+  pathPoints?: RoutePathPoint[];
   status?: string;
 };
 
 export type LiveBus = {
   busId: string;
+  routeId?: string;
   routeNumber: string;
+  currentLocation?: {
+    latitude?: number;
+    longitude?: number;
+  };
   nextStop?: string;
   estimatedArrivalTime?: string;
   status?: string;
+  delay?: {
+    delayDurationMinutes?: number;
+    delayReason?: string;
+    updatedEta?: string;
+  } | null;
+  stopEtas?: Array<{
+    stopId?: string;
+    stopName?: string;
+    stopOrder?: number;
+    etaMinutes?: number | null;
+    estimatedArrivalTime?: string;
+    status?: string;
+  }>;
   lastUpdated?: string;
   tripProgress?: {
     progressPercent?: number;
@@ -52,6 +77,7 @@ export type LiveBus = {
 };
 
 export type NearbyStopRecord = {
+  stopId?: string;
   name: string;
   order?: number;
   latitude?: number;
@@ -67,6 +93,41 @@ export type NearbyStopRecord = {
     estimatedDurationMinutes?: number;
     fare?: number;
   };
+};
+
+export type FavoriteRouteRecord = {
+  routeId?: string;
+  routeNumber?: string;
+  destination?: string;
+  quickAccessPath?: string;
+  color?: string;
+  savedAt?: string;
+  favoriteStatus?: 'SAVED' | 'REMOVED' | string;
+};
+
+export type FavoriteStopRecord = {
+  stopId?: string;
+  routeId?: string;
+  routeNumber?: string;
+  stopName?: string;
+  address?: string;
+  nearbyArrivalText?: string;
+  distanceMeters?: number;
+  latitude?: number;
+  longitude?: number;
+  savedAt?: string;
+  favoriteStatus?: 'SAVED' | 'REMOVED' | string;
+};
+
+export type SaveFavoriteStopPayload = {
+  routeId?: string;
+  routeNumber?: string;
+  stopId?: string;
+  stopName: string;
+  order?: number;
+  address?: string;
+  nearbyArrivalText?: string;
+  distanceMeters?: number;
 };
 
 export type TicketRecord = {
@@ -269,6 +330,36 @@ export const passengerApi = {
       routeChange?: unknown;
       refreshedAt?: string;
     }>(response);
+  },
+
+  getFavoriteRoutes: async () => {
+    const response = await apiClient.get('/profile/favorites/routes') as unknown;
+    return unwrap<FavoriteRouteRecord[]>(response);
+  },
+
+  saveFavoriteRoute: async (routeId: string) => {
+    const response = await apiClient.post(`/profile/favorites/routes/${encodeURIComponent(routeId)}`) as unknown;
+    return unwrap<FavoriteRouteRecord>(response);
+  },
+
+  removeFavoriteRoute: async (routeId: string) => {
+    const response = await apiClient.delete(`/profile/favorites/routes/${encodeURIComponent(routeId)}`) as unknown;
+    return unwrap<FavoriteRouteRecord>(response);
+  },
+
+  getFavoriteStops: async () => {
+    const response = await apiClient.get('/profile/favorites/stops') as unknown;
+    return unwrap<FavoriteStopRecord[]>(response);
+  },
+
+  saveFavoriteStop: async (payload: SaveFavoriteStopPayload) => {
+    const response = await apiClient.post('/profile/favorites/stops', payload) as unknown;
+    return unwrap<FavoriteStopRecord>(response);
+  },
+
+  removeFavoriteStop: async (stopId: string) => {
+    const response = await apiClient.delete(`/profile/favorites/stops/${encodeURIComponent(stopId)}`) as unknown;
+    return unwrap<FavoriteStopRecord>(response);
   },
 
   getTickets: async () => {
