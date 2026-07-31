@@ -82,6 +82,12 @@ const SupportCaseSchema = new mongoose.Schema(
       default: 'OPEN',
       index: true,
     },
+    replyStatus: {
+      type: String,
+      enum: ['UNREPLIED', 'REPLIED', 'WAITING_FOR_PASSENGER', 'CUSTOMER_REPLIED'],
+      default: 'UNREPLIED',
+      index: true,
+    },
     routeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Route',
@@ -207,6 +213,13 @@ const SupportCaseSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    adminResponseBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    adminResponseAt: Date,
+    firstResponseAt: Date,
+    lastResponseAt: Date,
     resolutionSummary: {
       type: String,
       trim: true,
@@ -214,6 +227,39 @@ const SupportCaseSchema = new mongoose.Schema(
     },
     resolvedAt: Date,
     closedAt: Date,
+    auditTrail: [
+      {
+        actorId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        actorRole: {
+          type: String,
+          enum: ['PASSENGER', 'ADMIN', 'SYSTEM'],
+          required: true,
+        },
+        action: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+        previousStatus: String,
+        newStatus: String,
+        message: {
+          type: String,
+          trim: true,
+          default: '',
+        },
+        metadata: {
+          type: mongoose.Schema.Types.Mixed,
+          default: {},
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
   },
   {
     timestamps: true,
@@ -224,5 +270,7 @@ SupportCaseSchema.index({ createdAt: -1 });
 SupportCaseSchema.index({ type: 1, status: 1, createdAt: -1 });
 SupportCaseSchema.index({ passenger: 1, type: 1, createdAt: -1 });
 SupportCaseSchema.index({ assignedTo: 1, status: 1, createdAt: -1 });
+SupportCaseSchema.index({ referenceNumber: 1, passenger: 1 });
+SupportCaseSchema.index({ type: 1, replyStatus: 1, createdAt: -1 });
 
 export default mongoose.model('SupportCase', SupportCaseSchema);

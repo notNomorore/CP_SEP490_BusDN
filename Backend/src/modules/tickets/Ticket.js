@@ -26,6 +26,12 @@ const TicketSchema = new mongoose.Schema(
     routeCode: { type: String, trim: true, default: '', index: true },
     routeNumber: { type: String, required: true, trim: true },
     tripId: { type: String, required: true, trim: true, index: true },
+    direction: {
+      type: String,
+      enum: ['OUTBOUND', 'INBOUND'],
+      default: 'OUTBOUND',
+      index: true,
+    },
     departureLocation: { type: String, required: true, trim: true },
     destinationLocation: { type: String, required: true, trim: true },
     passengerType: {

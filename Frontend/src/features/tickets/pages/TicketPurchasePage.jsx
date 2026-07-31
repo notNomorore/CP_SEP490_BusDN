@@ -61,6 +61,7 @@ const TicketPurchasePage = () => {
   const currentMonth = new Date().getMonth() + 1;
   const currentYear = new Date().getFullYear();
   const [form, setForm] = useState({
+    direction: 'OUTBOUND',
     departureLocation: '',
     destinationLocation: '',
     serviceDate: getVietnamDate(),
@@ -102,14 +103,16 @@ const TicketPurchasePage = () => {
 
   useEffect(() => {
     if (!selectedRoute) return;
-    const stops = selectedRoute.stops || [];
+    const outboundStops = selectedRoute.directions?.OUTBOUND?.stops || selectedRoute.stops || [];
+    const stops = selectedRoute.directions?.[form.direction]?.stops
+      || (form.direction === 'INBOUND' ? [...outboundStops].reverse() : outboundStops);
     setForm((current) => ({
       ...current,
       departureLocation: stops[0]?.name || selectedRoute.origin || '',
       destinationLocation: stops[stops.length - 1]?.name || selectedRoute.destination || '',
       departureTime: selectedRoute.operatingHours?.firstDeparture || current.departureTime || '05:30',
     }));
-  }, [selectedRoute]);
+  }, [form.direction, selectedRoute]);
 
   const monthlyBounds = useMemo(() => buildMonthBounds(form.year, form.month), [form.year, form.month]);
   const monthlyPrice = {
@@ -117,7 +120,9 @@ const TicketPurchasePage = () => {
     STUDENT: 120000,
     PRIORITY: 0,
   }[form.passengerType] || 250000;
-  const routeStops = selectedRoute?.stops || [];
+  const outboundStops = selectedRoute?.directions?.OUTBOUND?.stops || selectedRoute?.stops || [];
+  const routeStops = selectedRoute?.directions?.[form.direction]?.stops
+    || (form.direction === 'INBOUND' ? [...outboundStops].reverse().map((stop, index) => ({ ...stop, order: index + 1 })) : outboundStops);
   const departureStop = routeStops.find((stop) => stop.name === form.departureLocation);
   const arrivalStop = routeStops.find((stop) => stop.name === form.destinationLocation);
   const oneWayEstimatedPrice = useMemo(() => {
@@ -141,6 +146,7 @@ const TicketPurchasePage = () => {
   }, [
     mode,
     selectedRoute?.id,
+    form.direction,
     form.departureLocation,
     form.destinationLocation,
     form.passengerType,
@@ -194,7 +200,10 @@ const TicketPurchasePage = () => {
       return;
     }
 
-    const routeStops = selectedRoute?.stops || [];
+    const routeStops = selectedRoute?.directions?.[form.direction]?.stops
+      || (form.direction === 'INBOUND'
+        ? [...(selectedRoute?.stops || [])].reverse().map((stop, index) => ({ ...stop, order: index + 1 }))
+        : selectedRoute?.stops || []);
     const departureStop = routeStops.find((stop) => stop.name === form.departureLocation);
     const arrivalStop = routeStops.find((stop) => stop.name === form.destinationLocation);
 
@@ -232,6 +241,7 @@ const TicketPurchasePage = () => {
 
     const order = {
       ticketType: mode,
+      direction: form.direction,
       route: selectedRoute,
       routeNumber: selectedRoute?.routeNumber || 'BusDN',
       routeName: selectedRoute?.name || 'Vé tháng BusDN',
@@ -300,16 +310,11 @@ const TicketPurchasePage = () => {
 
               {mode === 'ONE_WAY' ? (
                 <>
-                  <label className="text-sm font-bold">
-                    Điểm đi
-                    <select value={form.departureLocation} onChange={(event) => updateForm({ departureLocation: event.target.value })} disabled={!selectedRoute} className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3">
-                      {(selectedRoute?.stops || []).map((stop) => <option key={`from-${stop.order}-${stop.name}`} value={stop.name}>{stop.name}</option>)}
-                    </select>
-                  </label>
-                  <label className="text-sm font-bold">
-                    Điểm đến
-                    <select value={form.destinationLocation} onChange={(event) => updateForm({ destinationLocation: event.target.value })} disabled={!selectedRoute} className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3">
-                      {(selectedRoute?.stops || []).map((stop) => <option key={`to-${stop.order}-${stop.name}`} value={stop.name}>{stop.name}</option>)}
+                  <label className="text-sm font-bold sm:col-span-2">
+                    Chiều tuyến
+                    <select value={form.direction} onChange={(event) => updateForm({ direction: event.target.value })} disabled={!selectedRoute} className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3">
+                      <option value="OUTBOUND">Chiều đi: {outboundStops[0]?.name || '-'} → {outboundStops[outboundStops.length - 1]?.name || '-'}</option>
+                      <option value="INBOUND">Chiều về: {outboundStops[outboundStops.length - 1]?.name || '-'} → {outboundStops[0]?.name || '-'}</option>
                     </select>
                   </label>
                   <label className="text-sm font-bold">

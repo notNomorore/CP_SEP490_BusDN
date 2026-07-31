@@ -33,6 +33,18 @@ const formatDateTime = (value) => (
 
 const getLabel = (items, value) => items.find((item) => item.value === value)?.label || value || 'Chua co';
 
+const getAttachmentUrl = (attachment) => {
+  const path = attachment?.path || attachment?.url;
+  if (!path) return '';
+  if (/^https?:\/\//i.test(path)) return path;
+
+  const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+  const apiOrigin = apiBase.replace(/\/api\/?$/, '') || import.meta.env.VITE_API_URL || 'http://localhost:3000';
+  return `${apiOrigin.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
+};
+
+const isImageAttachment = (attachment) => String(attachment?.mimeType || '').startsWith('image/');
+
 const getErrorMessage = (error) => {
   if (!error) return 'Khong the xu ly yeu cau.';
   if (typeof error === 'string') return error;
@@ -251,12 +263,50 @@ const MyFeedbackPage = () => {
                 <p className="mt-2 text-sm leading-6 text-on-surface-variant">{selectedFeedback.description}</p>
               </div>
 
-              {selectedFeedback.adminResponse || selectedFeedback.resolutionSummary ? (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                  {selectedFeedback.adminResponse ? <p><strong>Admin response:</strong> {selectedFeedback.adminResponse}</p> : null}
-                  {selectedFeedback.resolutionSummary ? <p className="mt-2"><strong>Resolution:</strong> {selectedFeedback.resolutionSummary}</p> : null}
-                </div>
+              {selectedFeedback.attachments?.length ? (
+                <section className="rounded-xl border border-outline-variant/40 bg-white p-4">
+                  <p className="text-sm font-black text-primary">Attachments</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    {selectedFeedback.attachments.map((attachment) => {
+                      const url = getAttachmentUrl(attachment);
+                      return (
+                        <a
+                          key={attachment._id || attachment.fileName || attachment.path}
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container-low text-sm font-bold text-primary"
+                        >
+                          {isImageAttachment(attachment) ? (
+                            <img src={url} alt={attachment.originalName || 'Feedback attachment'} className="h-36 w-full object-cover" />
+                          ) : null}
+                          <span className="block truncate px-3 py-2">{attachment.originalName || attachment.fileName || 'Attachment'}</span>
+                        </a>
+                      );
+                    })}
+                  </div>
+                </section>
               ) : null}
+
+              <section className={`rounded-xl border p-4 text-sm ${
+                selectedFeedback.adminResponse
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                  : 'border-outline-variant/40 bg-surface-container-low text-on-surface-variant'
+              }`}
+              >
+                <p className="font-black text-primary">Admin Response</p>
+                {selectedFeedback.adminResponse ? (
+                  <>
+                    <p className="mt-2 leading-6">{selectedFeedback.adminResponse}</p>
+                    <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] opacity-75">
+                      {selectedFeedback.adminResponseBy?.fullName || 'Admin'} - {formatDateTime(selectedFeedback.adminResponseAt)}
+                    </p>
+                    {selectedFeedback.resolutionSummary ? <p className="mt-2"><strong>Resolution:</strong> {selectedFeedback.resolutionSummary}</p> : null}
+                  </>
+                ) : (
+                  <p className="mt-2">No response from Admin yet.</p>
+                )}
+              </section>
 
               <section>
                 <h3 className="flex items-center gap-2 text-lg font-headline font-black text-primary">

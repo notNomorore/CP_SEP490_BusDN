@@ -564,6 +564,8 @@ export default function TripLifecycleScreen() {
   const [injuriesReported, setInjuriesReported] = useState(false);
   const [policeNotified, setPoliceNotified] = useState(false);
   const [breakdownType, setBreakdownType] = useState<BreakdownType>('ENGINE_FAILURE');
+  const [canVehicleContinue, setCanVehicleContinue] = useState(false);
+  const [requiresReplacementVehicle, setRequiresReplacementVehicle] = useState(true);
   const [incidentDescription, setIncidentDescription] = useState('');
   const [evidenceFiles, setEvidenceFiles] = useState<EvidenceFile[]>([]);
   const [routeInfo, setRouteInfo] = useState<RouteInstruction>({
@@ -809,8 +811,8 @@ export default function TripLifecycleScreen() {
 
     if (incidentType === 'VEHICLE_BREAKDOWN') {
       payload.breakdownType = breakdownType;
-      payload.canContinue = false;
-      payload.requiresReplacementVehicle = true;
+      payload.canContinue = canVehicleContinue;
+      payload.requiresReplacementVehicle = requiresReplacementVehicle;
     }
 
     setProcessingAction('incident');
@@ -1100,6 +1102,24 @@ export default function TripLifecycleScreen() {
                         </Pressable>
                       );
                     })}
+                  </View>
+                  <View style={styles.checkboxGrid}>
+                    <Pressable
+                      disabled={!isTripInProgress || Boolean(processingAction)}
+                      onPress={() => setCanVehicleContinue((value) => !value)}
+                      style={styles.checkboxRow}
+                    >
+                      <MaterialCommunityIcons color={canVehicleContinue ? colors.error : colors.muted} name={canVehicleContinue ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} />
+                      <Text style={styles.checkboxText}>Xe con co the tiep tuc chay</Text>
+                    </Pressable>
+                    <Pressable
+                      disabled={!isTripInProgress || Boolean(processingAction)}
+                      onPress={() => setRequiresReplacementVehicle((value) => !value)}
+                      style={styles.checkboxRow}
+                    >
+                      <MaterialCommunityIcons color={requiresReplacementVehicle ? colors.error : colors.muted} name={requiresReplacementVehicle ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} />
+                      <Text style={styles.checkboxText}>Can xe thay the</Text>
+                    </Pressable>
                   </View>
                   <Text style={styles.fileHelp}>GPS hien tai, ma chuyen, xe, tai xe va thoi gian se duoc gui tu dong.</Text>
                 </View>

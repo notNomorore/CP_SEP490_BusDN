@@ -86,6 +86,11 @@ const SubmitFeedbackPage = () => {
     } else if (Number(form.ratingScore) < 1 || Number(form.ratingScore) > 5) {
       nextErrors.ratingScore = 'Điểm đánh giá phải từ 1 đến 5.';
     }
+    if (!form.relatedTripId) {
+      nextErrors.relatedTripId = 'Vui long chon mot chuyen/tuyen lien quan truoc khi gui gop y.';
+    } else if (!selectedTrip) {
+      nextErrors.relatedTripId = 'Chuyen/tuyen da chon khong hop le. Vui long chon lai.';
+    }
     if (attachments.length > 5) {
       nextErrors.attachments = 'Bạn chỉ có thể tải lên tối đa 5 tệp đính kèm.';
     }
@@ -238,13 +243,17 @@ const SubmitFeedbackPage = () => {
                   className={fieldClassName}
                   disabled={isLoadingTrips}
                 >
-                  <option value="">Không chọn chuyến liên quan</option>
+                  <option value="" disabled>{isLoadingTrips ? 'Dang tai danh sach chuyen...' : 'Chon mot chuyen/tuyen lien quan'}</option>
                   {travelRecords.map((record) => (
                     <option key={record.id} value={record.tripId || record.ticketId}>
                       {formatTripLabel(record)}
                     </option>
                   ))}
                 </select>
+                {travelRecords.length === 0 && !isLoadingTrips ? (
+                  <p className="text-sm font-semibold text-red-700">Tai khoan chua co lich su chuyen di nen chua the gui gop y dich vu.</p>
+                ) : null}
+                {errors.relatedTripId ? <p className="text-sm font-semibold text-red-700">{errors.relatedTripId}</p> : null}
               </label>
 
               <label className="space-y-2">
@@ -312,7 +321,7 @@ const SubmitFeedbackPage = () => {
               <div className="flex flex-col gap-3">
                 <button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isLoadingTrips || travelRecords.length === 0}
                   className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-black text-white hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isSubmitting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

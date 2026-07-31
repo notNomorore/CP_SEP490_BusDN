@@ -627,8 +627,20 @@ export class RouteService {
 
   static formatManagedRoute(route) {
     const outboundStops = route.outboundRoute?.orderedStops || [];
+    const inboundStops = route.inboundRoute?.orderedStops?.length
+      ? route.inboundRoute.orderedStops
+      : [...outboundStops].reverse();
     const startStation = route.outboundRoute?.startStation || outboundStops[0] || {};
     const endStation = route.outboundRoute?.endStation || outboundStops[outboundStops.length - 1] || {};
+    const formatStops = (stops) => stops.map((stop, index) => ({
+      name: stop.stopName,
+      order: index + 1,
+      estimatedOffsetMinutes: stop.arrivalOffsetMinutes || index * 6,
+      latitude: stop.latitude,
+      longitude: stop.longitude,
+    }));
+    const formattedOutboundStops = formatStops(outboundStops);
+    const formattedInboundStops = formatStops(inboundStops);
 
     return {
       _id: route._id,
@@ -637,13 +649,17 @@ export class RouteService {
       name: route.routeName,
       origin: startStation.stopName || '',
       destination: endStation.stopName || '',
-      stops: outboundStops.map((stop, index) => ({
-        name: stop.stopName,
-        order: stop.stopOrder || index + 1,
-        estimatedOffsetMinutes: stop.arrivalOffsetMinutes || index * 6,
-        latitude: stop.latitude,
-        longitude: stop.longitude,
-      })),
+      stops: formattedOutboundStops,
+      directions: {
+        OUTBOUND: {
+          label: 'Chiều đi',
+          stops: formattedOutboundStops,
+        },
+        INBOUND: {
+          label: 'Chiều về',
+          stops: formattedInboundStops,
+        },
+      },
       distanceKm: route.outboundRoute?.estimatedDistanceKm || 0,
       estimatedDurationMinutes: route.outboundRoute?.estimatedDurationMinutes || 0,
       fare: route.fareConfig?.baseFare || 0,
