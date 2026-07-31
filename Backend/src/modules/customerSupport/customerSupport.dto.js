@@ -13,6 +13,13 @@ const CASE_STATUSES = [
   'RESPONDED',
 ];
 const FEEDBACK_STATUSES = ['PENDING', 'IN_PROGRESS', 'WAITING_FOR_PASSENGER', 'RESOLVED', 'REJECTED', 'CLOSED'];
+const ADMIN_REPLY_MAX_LENGTH = 2000;
+const RESOLUTION_SUMMARY_MAX_LENGTH = 1000;
+const TITLE_MIN_LENGTH = 5;
+const TITLE_MAX_LENGTH = 150;
+const DESCRIPTION_MIN_LENGTH = 10;
+const DESCRIPTION_MAX_LENGTH = 5000;
+const PASSENGER_REPLY_MAX_LENGTH = 2000;
 const CASE_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'NORMAL', 'URGENT'];
 const RECOVERY_STATUSES = ['REPORTED', 'SEARCHING', 'FOUND', 'RETURNED', 'UNRECOVERED'];
 const LOST_ITEM_RECOVERY_STATUSES = ['REPORTED', 'STORED', 'RETURNED', 'CANCELLED'];
@@ -48,8 +55,24 @@ export const CreateSupportCaseDTO = {
       errors.title = 'Title is required';
     }
 
+    if (body.title?.trim() && body.title.trim().length < TITLE_MIN_LENGTH) {
+      errors.title = `Title must be at least ${TITLE_MIN_LENGTH} characters`;
+    }
+
+    if (body.title?.trim() && body.title.trim().length > TITLE_MAX_LENGTH) {
+      errors.title = `Title must not exceed ${TITLE_MAX_LENGTH} characters`;
+    }
+
     if (!body.description?.trim()) {
       errors.description = 'Description is required';
+    }
+
+    if (body.description?.trim() && body.description.trim().length < DESCRIPTION_MIN_LENGTH) {
+      errors.description = `Description must be at least ${DESCRIPTION_MIN_LENGTH} characters`;
+    }
+
+    if (body.description?.trim() && body.description.trim().length > DESCRIPTION_MAX_LENGTH) {
+      errors.description = `Description must not exceed ${DESCRIPTION_MAX_LENGTH} characters`;
     }
 
     if (body.priority && !CASE_PRIORITIES.includes(body.priority)) {
@@ -58,6 +81,10 @@ export const CreateSupportCaseDTO = {
 
     if (body.type === 'SERVICE_FEEDBACK' && !FEEDBACK_CATEGORIES.includes(body.category)) {
       errors.category = 'Feedback category is invalid';
+    }
+
+    if (body.type === 'SERVICE_FEEDBACK' && !body.relatedTripId?.trim()) {
+      errors.relatedTripId = 'Related trip or route is required for service feedback';
     }
 
     if (body.type === 'SERVICE_FEEDBACK' && (body.ratingScore === undefined || body.ratingScore === '')) {
@@ -105,8 +132,16 @@ export const FeedbackAdminActionDTO = {
       errors.message = 'Message cannot be empty';
     }
 
+    if (body.message?.trim() && body.message.trim().length > ADMIN_REPLY_MAX_LENGTH) {
+      errors.message = `Message must not exceed ${ADMIN_REPLY_MAX_LENGTH} characters`;
+    }
+
     if (body.resolutionSummary !== undefined && !body.resolutionSummary?.trim()) {
       errors.resolutionSummary = 'Resolution summary cannot be empty';
+    }
+
+    if (body.resolutionSummary?.trim() && body.resolutionSummary.trim().length > RESOLUTION_SUMMARY_MAX_LENGTH) {
+      errors.resolutionSummary = `Resolution summary must not exceed ${RESOLUTION_SUMMARY_MAX_LENGTH} characters`;
     }
 
     return Object.keys(errors).length === 0 ? null : errors;
@@ -119,6 +154,10 @@ export const PassengerFeedbackReplyDTO = {
 
     if (!body.message?.trim()) {
       errors.message = 'Reply message is required';
+    }
+
+    if (body.message?.trim() && body.message.trim().length > PASSENGER_REPLY_MAX_LENGTH) {
+      errors.message = `Reply message must not exceed ${PASSENGER_REPLY_MAX_LENGTH} characters`;
     }
 
     return Object.keys(errors).length === 0 ? null : errors;
@@ -146,7 +185,7 @@ export const RespondSupportCaseDTO = {
 };
 
 export const SupportCaseResponseDTO = {
-  format: (supportCase) => ({
+  format: (supportCase, { includeInternal = false } = {}) => ({
     id: supportCase._id,
     referenceNumber: supportCase.referenceNumber,
     type: supportCase.type,
@@ -165,6 +204,7 @@ export const SupportCaseResponseDTO = {
     rating: supportCase.ratingScore,
     priority: supportCase.priority,
     status: supportCase.status,
+    replyStatus: supportCase.replyStatus || 'UNREPLIED',
     routeId: supportCase.routeId,
     tripId: supportCase.tripId,
     ticketId: supportCase.ticketId,
@@ -177,7 +217,9 @@ export const SupportCaseResponseDTO = {
     contactEmail: supportCase.contactEmail,
     attachments: supportCase.attachments || [],
     lostItem: supportCase.lostItem,
-    responses: supportCase.responses || [],
+    responses: includeInternal
+      ? supportCase.responses || []
+      : (supportCase.responses || []).filter((response) => response.visibleToPassenger !== false),
     conversation: (supportCase.conversation || []).map((message) => ({
       id: message._id,
       senderId: message.senderId?._id || message.senderId,
@@ -196,9 +238,30 @@ export const SupportCaseResponseDTO = {
     assignedTo: supportCase.assignedTo,
     assignedAt: supportCase.assignedAt,
     adminResponse: supportCase.adminResponse,
+    adminResponseBy: supportCase.adminResponseBy
+      ? {
+        id: supportCase.adminResponseBy._id || supportCase.adminResponseBy,
+        fullName: supportCase.adminResponseBy.fullName,
+        email: supportCase.adminResponseBy.email,
+        role: supportCase.adminResponseBy.role || 'ADMIN',
+      }
+      : null,
+    adminResponseAt: supportCase.adminResponseAt,
+    firstResponseAt: supportCase.firstResponseAt,
+    lastResponseAt: supportCase.lastResponseAt,
     resolutionSummary: supportCase.resolutionSummary,
     resolvedAt: supportCase.resolvedAt,
     closedAt: supportCase.closedAt,
+    publicTimeline: (supportCase.auditTrail || [])
+      .filter((entry) => includeInternal || !['INTERNAL_NOTE', 'REASSIGN', 'CHANGE_PRIORITY'].includes(entry.action))
+      .map((entry) => ({
+        action: entry.action,
+        actorRole: entry.actorRole,
+        previousStatus: entry.previousStatus,
+        newStatus: entry.newStatus,
+        message: entry.message,
+        createdAt: entry.createdAt,
+      })),
     createdAt: supportCase.createdAt,
     updatedAt: supportCase.updatedAt,
   }),

@@ -46,6 +46,7 @@ const buildPaymentPayload = (order) => {
   return {
     ticketType: 'ONE_WAY',
     routeId: order.route?.id || order.route?._id,
+    direction: order.direction || 'OUTBOUND',
     departureLocation: order.departureLocation,
     destinationLocation: order.destinationLocation,
     serviceDate: order.serviceDate,

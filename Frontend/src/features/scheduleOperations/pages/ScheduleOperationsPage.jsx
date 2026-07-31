@@ -110,6 +110,14 @@ const TRAFFIC_CATEGORIES = [
   { value: 'OTHER', label: 'Khác' },
 ];
 
+const BREAKDOWN_TYPES = [
+  { value: 'ENGINE_FAILURE', label: 'Engine Failure' },
+  { value: 'BRAKE_FAILURE', label: 'Brake Failure' },
+  { value: 'FLAT_TIRE', label: 'Flat Tire' },
+  { value: 'ACCIDENT', label: 'Accident' },
+  { value: 'OTHER', label: 'Other' },
+];
+
 const PASSENGER_CONFLICT_CATEGORIES = [
   { value: 'ARGUMENT', label: 'Cãi vã / gây rối' },
   { value: 'FARE_DISPUTE', label: 'Tranh chấp vé / thanh toán' },
@@ -970,8 +978,9 @@ const IncidentReportingPanel = ({
     description: '',
     injuriesReported: false,
     policeNotified: false,
-    canContinue: true,
-    requiresReplacementVehicle: false,
+    breakdownType: 'ENGINE_FAILURE',
+    canContinue: false,
+    requiresReplacementVehicle: true,
     violationCategory: 'NO_TICKET',
     passengerDescription: '',
     conflictCategory: 'ARGUMENT',
@@ -1016,7 +1025,7 @@ const IncidentReportingPanel = ({
   const canSubmit = canReportIncident
     && canUseIncidentForm
     && selectedIncidentType
-    && form.locationText.trim().length >= 3
+    && (form.type === 'VEHICLE_BREAKDOWN' || form.locationText.trim().length >= 3)
     && form.description.trim().length >= 10
     && (form.type !== 'ACCIDENT' || form.severity !== 'LOW')
     && (
@@ -1047,8 +1056,16 @@ const IncidentReportingPanel = ({
   };
 
   const submitIncidentReport = async () => {
+    const autoLocationText = form.locationText.trim()
+      || assignment.currentLocation?.name
+      || assignment.route?.name
+      || assignment.tripCode
+      || 'Current GPS location';
     await onReportIncident(assignment.id, {
       ...form,
+      locationText: form.type === 'VEHICLE_BREAKDOWN' ? autoLocationText : form.locationText,
+      canContinue: form.type === 'VEHICLE_BREAKDOWN' ? false : form.canContinue,
+      requiresReplacementVehicle: form.type === 'VEHICLE_BREAKDOWN' ? true : form.requiresReplacementVehicle,
       evidenceFiles,
     });
     setSelectedIncidentType(null);
@@ -1244,6 +1261,27 @@ const IncidentReportingPanel = ({
 
       {form.type === 'VEHICLE_BREAKDOWN' && (
         <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <label className="space-y-1">
+            <span className="text-xs font-bold uppercase text-slate-500">Breakdown Type</span>
+            <select
+              value={form.breakdownType}
+              onChange={(event) => updateForm('breakdownType', event.target.value)}
+              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+            >
+              {BREAKDOWN_TYPES.map((type) => (
+                <option key={type.value} value={type.value}>{type.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">
+            Current trip, vehicle, driver, GPS location, and timestamp will be attached automatically.
+          </div>
+        </div>
+      )}
+
+      {form.type === 'VEHICLE_BREAKDOWN' && (
+        <div className="hidden">
           <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
             <input
               type="checkbox"

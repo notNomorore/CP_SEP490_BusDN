@@ -8,6 +8,7 @@ import {
   Send,
   UsersRound,
 } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import useTheme from '../../../shared/hooks/useTheme.js';
 import scheduleOperationsService from '../../scheduleOperations/services/scheduleOperationsService.js';
 
@@ -142,6 +143,8 @@ const statusMeta = {
 
 const IncidentReportPage = () => {
   const { isDarkMode } = useTheme();
+  const [searchParams] = useSearchParams();
+  const requestedAssignmentId = searchParams.get('assignmentId') || '';
   const [filters, setFilters] = useState(getDefaultRange);
   const [assignments, setAssignments] = useState([]);
   const [selectedId, setSelectedId] = useState('');
@@ -169,7 +172,9 @@ const IncidentReportPage = () => {
       setAssignments(trips);
 
       setSelectedId((current) => (
-        trips.some((assignment) => assignment.id === current)
+        requestedAssignmentId && trips.some((assignment) => assignment.id === requestedAssignmentId)
+          ? requestedAssignmentId
+          : trips.some((assignment) => assignment.id === current)
           ? current
           : trips[0]?.id || ''
       ));
@@ -178,7 +183,7 @@ const IncidentReportPage = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [filters]);
+  }, [filters, requestedAssignmentId]);
 
   useEffect(() => {
     loadAssignments();

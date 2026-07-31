@@ -6,12 +6,14 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  FileWarning,
   Plus,
   RefreshCw,
   Route,
   UserRound,
   XCircle,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import useTheme from '../../../shared/hooks/useTheme.js';
 import useAuthStore from '../../auth/stores/authStore.js';
 import scheduleOperationsService from '../../scheduleOperations/services/scheduleOperationsService.js';
@@ -234,6 +236,7 @@ const PageShell = ({
 
 const TripCard = ({ assignment, onAccept, onReject, isProcessing }) => {
   const { isDarkMode } = useTheme();
+  const navigate = useNavigate();
   const mutedText = isDarkMode ? 'text-slate-400' : 'text-slate-500';
   const status = assignment.acceptanceStatus || assignment.shiftStatus || assignment.tripStatus;
   const canDecide = ['PENDING', 'ASSIGNED'].includes(assignment.acceptanceStatus || assignment.shiftStatus);
@@ -242,6 +245,9 @@ const TripCard = ({ assignment, onAccept, onReject, isProcessing }) => {
     && !['IN_PROGRESS', 'COMPLETED'].includes(assignment.tripStatus);
   const isAssistantRejected = assignment.actorRole === 'BUS_ASSISTANT'
     && assignment.acceptanceStatus === 'REJECTED';
+  const canOpenIncidentReports = assignment.actorRole === 'BUS_ASSISTANT'
+    && assignment.acceptanceStatus === 'ACCEPTED'
+    && ['IN_PROGRESS', 'COMPLETED'].includes(assignment.tripStatus);
 
   return (
     <article className={isDarkMode ? 'rounded border border-white/10 bg-slate-950 p-4' : 'rounded border border-slate-200 bg-white p-4'}>
@@ -309,6 +315,27 @@ const TripCard = ({ assignment, onAccept, onReject, isProcessing }) => {
           >
             <CheckCircle2 size={16} />
             Tiếp nhận chuyến
+          </button>
+        </div>
+      ) : null}
+
+      {canOpenIncidentReports ? (
+        <div className="mt-4 flex flex-col gap-3 rounded border border-cyan-200 bg-cyan-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-black text-cyan-950">
+              Chuyến đang mở cho phụ xe.
+            </p>
+            <p className="mt-1 text-sm font-semibold text-cyan-800">
+              Vào màn báo cáo để gửi UC50, UC51 hoặc UC52 cho đúng chuyến này.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate(`/bus-assistant/incident-reports?assignmentId=${assignment.id}`)}
+            className="inline-flex items-center justify-center gap-2 rounded bg-cyan-700 px-4 py-2 text-sm font-black text-white hover:bg-cyan-800"
+          >
+            <FileWarning size={16} />
+            Vào chuyến / Báo cáo
           </button>
         </div>
       ) : null}

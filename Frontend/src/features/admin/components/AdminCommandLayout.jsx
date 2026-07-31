@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../../auth/stores/authStore.js';
+import vehicleIssueService from '../vehicleIssues/services/vehicleIssueService.js';
 import useAdminI18n, { getAdminMessage } from '../../../shared/i18n/adminI18n.js';
 import { adminNavGroups, adminNavigation } from '../../../shared/i18n/adminMessages.js';
 
@@ -27,7 +28,27 @@ const isNavigationItemActive = (location, item) => {
     return candidateTarget.pathname === location.pathname && candidateTarget.search === location.search;
   });
 };
-const SidebarItem = ({ item, isActive, label, onNavigate }) => (
+
+const isVehicleIssuesRoute = (location) => (
+  location.pathname === '/admin/vehicle-issues'
+  || location.pathname.startsWith('/admin/vehicle-issues/')
+);
+
+const AttentionBadge = ({ compact = false }) => (
+  <span
+    className={`inline-flex shrink-0 items-center justify-center rounded-full bg-error text-on-error shadow-sm shadow-error/30 ${
+      compact ? 'h-4 w-4 text-[12px]' : 'h-5 w-5 text-[14px]'
+    }`}
+    aria-label="Cần chú ý"
+    title="Cần chú ý"
+  >
+    <span className="material-symbols-outlined text-[inherit] leading-none" aria-hidden="true">
+      priority_high
+    </span>
+  </span>
+);
+
+const SidebarItem = ({ item, isActive, label, onNavigate, showAttention = false }) => (
   <NavLink
     to={item.path}
     onClick={onNavigate}
@@ -41,7 +62,8 @@ const SidebarItem = ({ item, isActive, label, onNavigate }) => (
     <span className="material-symbols-outlined shrink-0 text-[18px]" aria-hidden="true">
       {item.icon}
     </span>
-    <span>{label}</span>
+    <span className="min-w-0 flex-1">{label}</span>
+    {showAttention ? <AttentionBadge compact /> : null}
   </NavLink>
 );
 
@@ -53,6 +75,7 @@ const SidebarGroup = ({
   t,
   onToggle,
   onNavigate,
+  showAttention = false,
 }) => {
   const groupLabel = t(group.key);
   const toggleLabel = t(
@@ -77,6 +100,7 @@ const SidebarGroup = ({
           {group.icon}
         </span>
         <span className="min-w-0 flex-1">{groupLabel}</span>
+        {showAttention ? <AttentionBadge /> : null}
         <span
           className={`material-symbols-outlined shrink-0 text-[18px] transition-transform duration-200 ${
             isExpanded ? 'rotate-180' : ''
@@ -102,6 +126,10 @@ const SidebarGroup = ({
                 isActive={activeItemPath === item.path}
                 label={t(item.key)}
                 onNavigate={onNavigate}
+                showAttention={
+                  showAttention
+                  && item.key === 'admin.sidebar.vehicleIssues'
+                }
               />
             ))}
           </div>
@@ -118,8 +146,10 @@ const AdminCommandLayout = () => {
   const { language, toggleLanguage, t } = useAdminI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [hasPendingVehicleIssues, setHasPendingVehicleIssues] = useState(false);
   const displayName = user?.fullName?.trim() || 'Admin';
   const initial = displayName.charAt(0).toUpperCase();
+  const showVehicleIssueAttention = hasPendingVehicleIssues && !isVehicleIssuesRoute(location);
 
   const activeItem = useMemo(() => {
     return [...adminNavigation]
@@ -169,6 +199,31 @@ const AdminCommandLayout = () => {
   }, [activeGroup.id, location.pathname]);
 
   useEffect(() => {
+    let isMounted = true;
+    const loadVehicleIssueAttention = async () => {
+      try {
+        const statuses = ['new', 'reviewed', 'maintenance_required'];
+        const results = await Promise.all(
+          statuses.map((status) => vehicleIssueService.getIssues({ status, limit: 1 }))
+        );
+        const hasPending = results.some((response) => (
+          Number(response.meta?.total || response.data?.length || 0) > 0
+        ));
+        if (isMounted) setHasPendingVehicleIssues(hasPending);
+      } catch {
+        if (isMounted) setHasPendingVehicleIssues(false);
+      }
+    };
+
+    loadVehicleIssueAttention();
+    const intervalId = window.setInterval(loadVehicleIssueAttention, 30000);
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [location.pathname]);
+
+  useEffect(() => {
     if (!mobileOpen) return undefined;
 
     const handleKeyDown = (event) => {
@@ -199,6 +254,7 @@ const AdminCommandLayout = () => {
             t={t}
             onToggle={() => setOpenGroupId((current) => (current === group.id ? '' : group.id))}
             onNavigate={() => setMobileOpen(false)}
+            showAttention={showVehicleIssueAttention && group.id === 'incidents-maintenance'}
           />
         ))}
         {!visibleGroups.length ? (

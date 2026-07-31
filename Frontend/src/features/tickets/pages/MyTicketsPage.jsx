@@ -91,6 +91,20 @@ const ticketTypeLabel = (type) => ({
   MONTHLY_PASS: 'Vé tháng',
 }[type] || type || 'Vé một lượt');
 
+const getTicketDisplayStatus = (ticket) => {
+  if (['CANCELLED', 'USED', 'REFUNDED'].includes(ticket?.status)) {
+    return ticket.status;
+  }
+
+  const serviceDate = String(ticket?.serviceDate || '').slice(0, 10);
+  const departureTime = String(ticket?.departureTime || '23:59');
+  const journeyTime = new Date(`${serviceDate}T${departureTime}:00+07:00`).getTime();
+
+  return Number.isFinite(journeyTime) && journeyTime <= Date.now()
+    ? 'EXPIRED'
+    : ticket?.status;
+};
+
 const isPendingPaymentTicket = (ticket) => (
   ticket?.status === 'PENDING'
   && ticket?.paymentStatus === 'PENDING'
@@ -157,7 +171,10 @@ const MyTicketsPage = () => {
         ticketService.getMyTickets(),
         ticketService.getMyMonthlyPasses(),
       ]);
-      setTickets(ticketPayload.tickets || []);
+      setTickets((ticketPayload.tickets || []).map((ticket) => ({
+        ...ticket,
+        status: getTicketDisplayStatus(ticket),
+      })));
       setMonthlyPasses(passPayload.passes || []);
     } catch (err) {
       setError(err.message || 'Không thể tải lịch sử vé. Vui lòng thử lại sau.');

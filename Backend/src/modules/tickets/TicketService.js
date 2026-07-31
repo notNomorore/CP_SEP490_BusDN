@@ -104,15 +104,7 @@ const roundFareToNearestThousand = (value) => {
   return Math.max(Math.round(amount / 1000) * 1000, 1000);
 };
 
-const getTicketExpiryDate = (ticket) => {
-  if (ticket.validUntil) {
-    return new Date(ticket.validUntil);
-  }
-
-  if (ticket.expiresAt || ticket.digitalTicket?.expiresAt) {
-    return new Date(ticket.expiresAt || ticket.digitalTicket.expiresAt);
-  }
-
+const getTicketDepartureDate = (ticket) => {
   const serviceDate = new Date(ticket.serviceDate);
   const dateValue = [
     serviceDate.getUTCFullYear(),
@@ -587,8 +579,15 @@ export class TicketService {
       throw new CustomError('Chuyến đi hoặc tuyến xe đã chọn không tồn tại', HTTP_STATUS.NOT_FOUND);
     }
 
-    const startStop = this.findStop(route, payload.departureLocation);
-    const endStop = this.findStop(route, payload.destinationLocation);
+    const direction = String(payload.direction || 'OUTBOUND').trim().toUpperCase();
+    if (!['OUTBOUND', 'INBOUND'].includes(direction)) {
+      throw new CustomError('Chiều tuyến không hợp lệ', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const directionStops = route.directions?.[direction]?.stops || route.stops || [];
+    const directionalRoute = { ...route, stops: directionStops };
+    const startStop = this.findStop(directionalRoute, payload.departureLocation);
+    const endStop = this.findStop(directionalRoute, payload.destinationLocation);
 
     if (!startStop || !endStop) {
       throw new CustomError('Diem di hoac diem den khong thuoc tuyen da chon', HTTP_STATUS.BAD_REQUEST);
@@ -625,9 +624,9 @@ export class TicketService {
       throw new CustomError('Ngày đi không hợp lệ', HTTP_STATUS.BAD_REQUEST);
     }
     const serviceDateValue = String(payload.serviceDate || '').slice(0, 10);
-    const tripId = `${route.routeNumber}-${serviceDateValue}-${departureTime}`;
+    const tripId = `${route.routeNumber}-${serviceDateValue}-${departureTime}-${direction}`;
 
-    const originalPrice = this.calculatePrice(route, startStop, endStop);
+    const originalPrice = this.calculatePrice(directionalRoute, startStop, endStop);
     const promotion = await this.applyPromotionToAmount(userId, {
       promotionCode: payload.promotionCode,
       ticketType: 'ONE_WAY',
@@ -640,6 +639,7 @@ export class TicketService {
       passenger: user._id,
       routeId: route._id,
       tripId,
+      direction,
       departureLocation: startStop.name,
       destinationLocation: endStop.name,
       passengerType,
@@ -679,6 +679,7 @@ export class TicketService {
       routeCode: route.routeNumber,
       routeNumber: route.routeNumber,
       tripId,
+      direction,
       departureLocation: startStop.name,
       destinationLocation: endStop.name,
       passengerType,
@@ -746,12 +747,14 @@ export class TicketService {
       return 'USED';
     }
 
-    if (ticket.paymentStatus !== 'PAID' || ticket.bookingStatus !== 'SUCCESS') {
-      return 'PENDING';
+    // Expiration is based on the scheduled departure time, even when the
+    // reservation has not been paid yet. Keep this before the PENDING check.
+    if (getTicketDepartureDate(ticket) <= new Date()) {
+      return 'EXPIRED';
     }
 
-    if (getTicketExpiryDate(ticket) < new Date()) {
-      return 'EXPIRED';
+    if (ticket.paymentStatus !== 'PAID' || ticket.bookingStatus !== 'SUCCESS') {
+      return 'PENDING';
     }
 
     return 'ACTIVE';
@@ -1261,6 +1264,14 @@ export class TicketService {
 
     if (!ticket) {
       throw new CustomError('Không tìm thấy vé chưa thanh toán.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    if (this.getCurrentTicketStatus(ticket) === 'EXPIRED') {
+      if (ticket.ticketStatus !== 'EXPIRED') {
+        ticket.ticketStatus = 'EXPIRED';
+        await ticket.save();
+      }
+      throw new CustomError('Vé này đã hết hạn nên không thể thanh toán.', HTTP_STATUS.BAD_REQUEST);
     }
 
     let paymentOrder = await PaymentOrder.findOne({

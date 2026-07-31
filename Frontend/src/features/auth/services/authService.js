@@ -1,5 +1,7 @@
 import apiClient from '../../../shared/services/apiClient.js';
 
+/* global __FRONTEND_RUN_ID__ */
+
 const FRONTEND_RUN_ID_KEY = 'frontendRunId';
 const AUTH_STORAGE_KEYS = ['authToken', 'authUser'];
 
@@ -25,8 +27,14 @@ const clearStoredAuthSession = () => {
 };
 
 const clearAuthSessionAfterFrontendRestart = () => {
-  const currentRunId = import.meta.env.VITE_FRONTEND_RUN_ID;
+  const currentRunId = typeof __FRONTEND_RUN_ID__ !== 'undefined'
+    ? __FRONTEND_RUN_ID__
+    : import.meta.env.VITE_FRONTEND_RUN_ID;
   const previousRunId = localStorage.getItem(FRONTEND_RUN_ID_KEY);
+
+  if (!currentRunId) {
+    return;
+  }
 
   if (previousRunId !== currentRunId) {
     clearStoredAuthSession();

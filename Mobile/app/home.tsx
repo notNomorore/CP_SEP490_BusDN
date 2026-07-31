@@ -39,6 +39,7 @@ const destinations = [
 
 const priorityPassengerRoute = '/priority-passenger' as Href;
 const driverAssistantRoute = '/driver-assistant' as Href;
+const routeSearchRoute = '/route-search' as Href;
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
@@ -82,12 +83,13 @@ export default function HomeScreen() {
   }, [isHydrated, isAuthenticated, user?.role]);
 
   const searchRoutes = () => {
-    Alert.alert(
-      'Route search',
-      destination.trim()
-        ? `Searching trips from ${departure} to ${destination}.`
-        : 'Choose a destination before searching.',
-    );
+    router.push({
+      pathname: routeSearchRoute,
+      params: {
+        from: departure.trim(),
+        to: destination.trim(),
+      },
+    } as unknown as Href);
   };
 
   if (isHydrated && isAuthenticated && isDriverAssistantRole(user?.role)) {
