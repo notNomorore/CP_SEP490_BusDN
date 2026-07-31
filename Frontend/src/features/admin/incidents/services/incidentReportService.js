@@ -26,6 +26,10 @@ export const incidentReportService = {
     return apiClient.patch(`/admin/incidents/${id}/reassign-assistant`, payload);
   },
 
+  async reassignStaff(id, payload) {
+    return apiClient.patch(`/admin/incidents/${id}/reassign-staff`, payload);
+  },
+
   async getOverviewStatistics() {
     return apiClient.get('/admin/incidents/statistics/overview');
   },

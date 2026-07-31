@@ -1,4 +1,4 @@
-﻿import { Link, router } from 'expo-router';
+import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -55,10 +55,10 @@ export default function RegisterScreen() {
     <Screen>
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.kicker}>Tài khoản mới</Text>
-          <Text style={styles.title}>Tạo tài khoản BusDN</Text>
+          <Text style={styles.kicker}>New Account</Text>
+          <Text style={styles.title}>Create your BusDN account</Text>
           <Text style={styles.subtitle}>
-            Đăng ký cần xác thực OTP trước khi đăng nhập.
+            Registration follows the web flow and requires OTP verification before login.
           </Text>
         </View>
 
@@ -70,7 +70,7 @@ export default function RegisterScreen() {
 
         <View style={styles.form}>
           <AppInput
-            label="Họ và tên"
+            label="Full name"
             value={fullName}
             onChangeText={setFullName}
             placeholder="Nguyen Van A"
@@ -78,7 +78,7 @@ export default function RegisterScreen() {
             autoComplete="name"
           />
           <AppInput
-            label="Email hoặc số điện thoại"
+            label="Email or phone number"
             value={identifier}
             onChangeText={setIdentifier}
             placeholder="name@example.com or 0912345678"
@@ -87,10 +87,10 @@ export default function RegisterScreen() {
             autoComplete="username"
           />
           <AppInput
-            label="Mật khẩu"
+            label="Password"
             value={password}
             onChangeText={setPassword}
-            placeholder="Mật khẩu"
+            placeholder="Password"
             secureTextEntry
             textContentType="newPassword"
             autoComplete="password-new"
@@ -99,38 +99,38 @@ export default function RegisterScreen() {
           <View style={styles.rules}>
             {passwordValidation.checks.map((check) => (
               <Text key={check.key} style={[styles.rule, check.valid && styles.ruleValid]}>
-                {check.valid ? 'âœ“' : '-'} {check.label}
+                {check.valid ? '✓' : '-'} {check.label}
               </Text>
             ))}
           </View>
 
           <AppInput
-            label="Xác nhận mật khẩu"
+            label="Confirm password"
             value={confirmPassword}
             onChangeText={setConfirmPassword}
-            placeholder="Xác nhận mật khẩu"
+            placeholder="Confirm password"
             secureTextEntry
             textContentType="newPassword"
             autoComplete="password-new"
-            error={confirmPassword && !passwordsMatch ? 'Mật khẩu không khớp.' : undefined}
+            error={confirmPassword && !passwordsMatch ? 'Passwords do not match.' : undefined}
           />
 
           <Pressable
             accessibilityRole="checkbox"
             accessibilityState={{ checked: agreeToTerms }}
-            accessibilityLabel="I agree to the Điều khoản dịch vụ and Chính sách quyền riêng tư"
+            accessibilityLabel="I agree to the Terms of Service and Privacy Policy"
             hitSlop={8}
             style={styles.termsRow}
             onPress={() => setAgreeToTerms((value) => !value)}
           >
             <View style={[styles.checkbox, agreeToTerms && styles.checkboxChecked]}>
-              {agreeToTerms ? <Text style={styles.checkboxText}>âœ“</Text> : null}
+              {agreeToTerms ? <Text style={styles.checkboxText}>✓</Text> : null}
             </View>
-            <Text style={styles.termsText}>Tôi đồng ý với Điều khoản dịch vụ và Chính sách quyền riêng tư.</Text>
+            <Text style={styles.termsText}>I agree to the Terms of Service and Privacy Policy.</Text>
           </Pressable>
 
           <AppButton
-            title="Tạo tài khoản"
+            title="Create Account"
             loading={isLoading}
             disabled={!canSubmit}
             onPress={handleRegister}
@@ -138,9 +138,9 @@ export default function RegisterScreen() {
         </View>
 
         <Text style={styles.footerText}>
-          Đã có tài khoản?{' '}
+          Already have an account?{' '}
           <Link href="/auth/login" style={styles.link}>
-            Đăng nhập
+            Sign in
           </Link>
         </Text>
       </View>

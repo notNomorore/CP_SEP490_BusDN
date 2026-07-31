@@ -1,5 +1,5 @@
-﻿import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { router, type Href } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -13,12 +13,14 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
+import { isDriverAssistantRole } from '@/utils/roleNavigation';
 
 const destinations = [
   {
-    title: 'Đà Nẵng - Sa Pa',
+    title: 'Hà Nội - Sa Pa',
     detail: '4.8 rating',
     price: 'From $24.00',
     badge: 'Popular',
@@ -29,11 +31,14 @@ const destinations = [
     title: 'Đà Nẵng - Hội An',
     detail: '12 trips/day',
     price: 'From $12.00',
-    badge: 'Xu hướng',
+    badge: 'Trending',
     image:
       'https://lh3.googleusercontent.com/aida-public/AB6AXuBTclYWEMmSc9NLTgUwDv9on7AFX-SSpA5gPI1ogZN-TD9umRy6yxhLhY05HSnXwdnhNvtc5WOT_HWHnMvrQMl2CevyJtJwtUnTAWXtWdT3b0nQwKCki3s72wp73yTo9qn2sRdNen8AIa2e9n8CBbLOyU2DCghI_mQ2qJrCuGChKthcFGUc7k2ZJ5R6-NwZczM_XHtBDmCcV9s9rm2D0OrHdW-p-xAe3p1CQ7ZhiFTcC8JsrDLcPXA_mFT0glXrCoHpVvKmhNtQwoE',
   },
 ];
+
+const priorityPassengerRoute = '/priority-passenger' as Href;
+const driverAssistantRoute = '/driver-assistant' as Href;
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
@@ -57,54 +62,38 @@ function SearchField({
   );
 }
 
-function NavItem({
-  icon,
-  label,
-  active = false,
-  onPress,
-}: {
-  icon: IconName;
-  label: string;
-  active?: boolean;
-  onPress?: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={[styles.navItem, active && styles.navItemActive]}
-    >
-      <MaterialCommunityIcons
-        color={active ? colors.white : '#527064'}
-        name={icon}
-        size={21}
-      />
-      <Text style={[styles.navLabel, active && styles.navLabelActive]}>{label}</Text>
-    </Pressable>
-  );
-}
-
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isHydrated = useAuthStore((state) => state.isHydrated);
-  const [departure, setDeparture] = useState('Đà Nẵng');
+  const [departure, setDeparture] = useState('Hà Nội');
   const [destination, setDestination] = useState('');
 
   useEffect(() => {
     if (isHydrated && !isAuthenticated) {
       router.replace('/auth/login');
-    }
-  }, [isHydrated, isAuthenticated]);
-
-  const searchRoutes = () => {
-    if (destination.trim()) {
-      router.push({ pathname: '/plan-trip', params: { from: departure, to: destination } } as any);
       return;
     }
-    router.push('/search-routes' as any);
+
+    if (isHydrated && isAuthenticated && isDriverAssistantRole(user?.role)) {
+      router.replace(driverAssistantRoute);
+    }
+  }, [isHydrated, isAuthenticated, user?.role]);
+
+  const searchRoutes = () => {
+    router.push({
+      pathname: '/route-search',
+      params: {
+        from: departure.trim(),
+        to: destination.trim(),
+      },
+    });
   };
+
+  if (isHydrated && isAuthenticated && isDriverAssistantRole(user?.role)) {
+    return null;
+  }
 
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
@@ -116,13 +105,13 @@ export default function HomeScreen() {
         >
           <View style={styles.header}>
             <View style={styles.brand}>
-              <Pressable accessibilityLabel="Mở menu" hitSlop={10}>
+              <Pressable accessibilityLabel="Open menu" hitSlop={10}>
                 <MaterialCommunityIcons color={colors.primary} name="menu" size={25} />
               </Pressable>
-              <Text style={styles.brandName}>BusDN Transit</Text>
+              <Text style={styles.brandName}>Veridian Transit</Text>
             </View>
             <Pressable
-              accessibilityLabel="Mở hồ sơ"
+              accessibilityLabel="Open profile"
               onPress={() => router.push('/profile')}
               style={styles.avatar}
             >
@@ -137,24 +126,24 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.hero}>
-            <Text style={styles.kicker}>DI CHUYỂN THÔNG MINH</Text>
-            <Text style={styles.title}>Hôm nay bạn muốn đi đâu?</Text>
+            <Text style={styles.kicker}>PREMIUM TRAVEL</Text>
+            <Text style={styles.title}>Where shall we lead you today?</Text>
           </View>
 
           <View style={styles.searchCard}>
-            <SearchField icon="map-marker-outline" label="ĐIỂM ĐI">
+            <SearchField icon="map-marker-outline" label="DEPARTURE">
               <TextInput
-                accessibilityLabel="Điểm đi"
+                accessibilityLabel="Departure"
                 onChangeText={setDeparture}
                 style={styles.fieldInput}
                 value={departure}
               />
             </SearchField>
-            <SearchField icon="map-outline" label="ĐIỂM ĐẾN">
+            <SearchField icon="map-outline" label="DESTINATION">
               <TextInput
-                accessibilityLabel="Điểm đến"
+                accessibilityLabel="Destination"
                 onChangeText={setDestination}
-                placeholder="Bạn muốn đến đâu?"
+                placeholder="Where to?"
                 placeholderTextColor="#65766f"
                 style={styles.fieldInput}
                 value={destination}
@@ -163,17 +152,17 @@ export default function HomeScreen() {
 
             <View style={styles.compactFields}>
               <View style={styles.compactField}>
-                <Text style={styles.fieldLabel}>NGÀY</Text>
+                <Text style={styles.fieldLabel}>DATE</Text>
                 <View style={styles.fieldContent}>
                   <MaterialCommunityIcons color="#237356" name="calendar-blank-outline" size={17} />
-                  <Text style={styles.compactValue}>Hôm nay</Text>
+                  <Text style={styles.compactValue}>Oct 24</Text>
                 </View>
               </View>
               <View style={styles.compactField}>
-                <Text style={styles.fieldLabel}>HÀNH KHÁCH</Text>
+                <Text style={styles.fieldLabel}>PASSENGERS</Text>
                 <View style={styles.fieldContent}>
                   <MaterialCommunityIcons color="#237356" name="account-outline" size={17} />
-                  <Text style={styles.compactValue}>1 người lớn</Text>
+                  <Text style={styles.compactValue}>1 Adult</Text>
                 </View>
               </View>
             </View>
@@ -183,15 +172,15 @@ export default function HomeScreen() {
               onPress={searchRoutes}
               style={({ pressed }) => [styles.searchButton, pressed && styles.pressed]}
             >
-              <Text style={styles.searchButtonText}>Tìm tuyến xe</Text>
+              <Text style={styles.searchButtonText}>Search Routes</Text>
               <MaterialCommunityIcons color={colors.white} name="arrow-right" size={21} />
             </Pressable>
           </View>
 
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Tuyến nổi bật</Text>
-            <Pressable onPress={() => Alert.alert('Tuyến nổi bật', 'Danh sách tuyến khác sẽ sớm được cập nhật.')}>
-              <Text style={styles.viewAll}>Xem tất cả ↗</Text>
+            <Text style={styles.sectionTitle}>Trending Now</Text>
+            <Pressable onPress={() => Alert.alert('Trending routes', 'More routes are coming soon.')}>
+              <Text style={styles.viewAll}>View all ↗</Text>
             </Pressable>
           </View>
 
@@ -219,7 +208,7 @@ export default function HomeScreen() {
             ))}
           </ScrollView>
 
-          <Text style={[styles.sectionTitle, styles.flashTitle]}>Ưu đãi nhanh</Text>
+          <Text style={[styles.sectionTitle, styles.flashTitle]}>Flash Sales</Text>
           <Pressable style={styles.mainSale}>
             <MaterialCommunityIcons
               color="rgba(255,255,255,0.08)"
@@ -228,48 +217,51 @@ export default function HomeScreen() {
               style={styles.saleWatermark}
             />
             <View style={styles.saleCopy}>
-              <Text style={styles.saleKicker}>ƯU ĐÃI CÓ HẠN</Text>
-              <Text style={styles.saleTitle}>GIẢM 50%</Text>
-              <Text style={styles.saleDescription}>Áp dụng cho một số tuyến nội thành</Text>
+              <Text style={styles.saleKicker}>LIMITED TIME ONLY</Text>
+              <Text style={styles.saleTitle}>50% OFF</Text>
+              <Text style={styles.saleDescription}>All sleeper cabins to Central Highlands</Text>
             </View>
           </Pressable>
 
           <View style={styles.smallSales}>
+            {isDriverAssistantRole(user?.role) ? (
+              <Pressable
+                onPress={() => router.push(driverAssistantRoute)}
+                style={[styles.smallSale, styles.workSale]}
+              >
+                <MaterialCommunityIcons color={colors.white} name="bus-clock" size={30} />
+                <View>
+                  <Text style={[styles.smallSaleTitle, styles.workSaleTitle]}>Work Dashboard</Text>
+                  <Text style={[styles.smallSaleText, styles.workSaleText]}>Trips and shift schedule</Text>
+                </View>
+              </Pressable>
+            ) : null}
             <Pressable style={[styles.smallSale, styles.firstRide]}>
               <MaterialCommunityIcons color="#34725a" name="tag-outline" size={30} />
               <View>
-                <Text style={styles.smallSaleTitle}>Chuyến đầu</Text>
-                <Text style={styles.smallSaleText}>Dùng mã: BUSDN1</Text>
+                <Text style={styles.smallSaleTitle}>First Ride</Text>
+                <Text style={styles.smallSaleText}>Use code: VERIDIAN1</Text>
               </View>
             </Pressable>
             <Pressable style={[styles.smallSale, styles.groupSale]}>
               <MaterialCommunityIcons color={colors.primary} name="account-group" size={30} />
               <View>
-                <Text style={styles.smallSaleTitle}>Đi nhóm</Text>
-                <Text style={styles.smallSaleText}>Tiết kiệm 15% từ 4 vé</Text>
+                <Text style={styles.smallSaleTitle}>Group Special</Text>
+                <Text style={styles.smallSaleText}>Save 15% on 4+ seats</Text>
               </View>
             </Pressable>
           </View>
         </ScrollView>
 
         <Pressable
-          accessibilityLabel="Liên hệ hỗ trợ"
-          onPress={() => router.push('/notifications' as any)}
+          accessibilityLabel="Contact support"
+          onPress={() => router.push(priorityPassengerRoute)}
           style={[styles.supportButton, { bottom: 82 + insets.bottom }]}
         >
-          <MaterialCommunityIcons color={colors.white} name="headset" size={23} />
+          <MaterialCommunityIcons color={colors.white} name="shield-star-outline" size={23} />
         </Pressable>
 
-        <View style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-          <NavItem active icon="home" label="Trang chủ" />
-          <NavItem icon="compass-outline" label="Khám phá" onPress={() => router.push('/search-routes' as any)} />
-          <NavItem icon="ticket-confirmation-outline" label="Vé" onPress={() => router.push('/my-tickets' as any)} />
-          <NavItem
-            icon="account-outline"
-            label="Tài khoản"
-            onPress={() => router.push('/profile')}
-          />
-        </View>
+        <RoleBottomNav active="home" role={user?.role} />
       </View>
     </SafeAreaView>
   );
@@ -354,6 +346,9 @@ const styles = StyleSheet.create({
   smallSale: { flex: 1, height: 126, justifyContent: 'space-between', padding: 15, borderRadius: 20 },
   firstRide: { backgroundColor: '#bfead5' },
   groupSale: { backgroundColor: '#e1eae6' },
+  workSale: { backgroundColor: colors.primary },
+  workSaleTitle: { color: colors.white },
+  workSaleText: { color: '#bfead5' },
   smallSaleTitle: { color: colors.primary, fontSize: 12, fontWeight: '800' },
   smallSaleText: { marginTop: 3, color: '#52675e', fontSize: 9 },
   supportButton: { position: 'absolute', right: 19, zIndex: 3, width: 49, height: 49, alignItems: 'center', justifyContent: 'center', borderRadius: 25, backgroundColor: '#174c39', shadowColor: '#001a0f', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.22, shadowRadius: 12, elevation: 7 },

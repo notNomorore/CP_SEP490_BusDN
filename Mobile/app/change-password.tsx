@@ -1,4 +1,4 @@
-﻿import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
@@ -83,10 +83,10 @@ function passwordStrength(value: string) {
   if (/\d/.test(value)) score += 1;
   if (/[@$!%*?&]/.test(value)) score += 1;
 
-  if (score === 0) return { label: 'Trống', progress: 0, color: colors.outline };
-  if (score <= 2) return { label: 'Yếu', progress: 0.4, color: colors.error };
-  if (score <= 4) return { label: 'Tốt', progress: 0.78, color: colors.secondary };
-  return { label: 'Rất mạnh', progress: 1, color: colors.accent };
+  if (score === 0) return { label: 'Empty', progress: 0, color: colors.outline };
+  if (score <= 2) return { label: 'Weak', progress: 0.4, color: colors.error };
+  if (score <= 4) return { label: 'Good', progress: 0.78, color: colors.secondary };
+  return { label: 'Excellent', progress: 1, color: colors.accent };
 }
 
 export default function ChangePasswordScreen() {
@@ -108,20 +108,20 @@ export default function ChangePasswordScreen() {
 
   const validate = () => {
     const nextErrors: Partial<Record<FieldName, string>> = {};
-    if (!currentPassword) nextErrors.current = 'Vui lòng nhập mật khẩu hiện tại.';
+    if (!currentPassword) nextErrors.current = 'Current password is required.';
     if (!newPassword) {
-      nextErrors.new = 'Vui lòng nhập mật khẩu mới.';
+      nextErrors.new = 'New password is required.';
     } else if (newPassword.length < 8) {
-      nextErrors.new = 'Mật khẩu mới phải có ít nhất 8 ký tự.';
+      nextErrors.new = 'New password must be at least 8 characters.';
     } else if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])/.test(newPassword)) {
-      nextErrors.new = 'Cần có chữ hoa, chữ thường, số và ký tự đặc biệt.';
+      nextErrors.new = 'Include uppercase, lowercase, number, and special character.';
     } else if (newPassword === currentPassword) {
-      nextErrors.new = 'Mật khẩu mới phải khác mật khẩu hiện tại.';
+      nextErrors.new = 'New password must be different from the current password.';
     }
     if (!confirmPassword) {
-      nextErrors.confirm = 'Vui lòng xác nhận mật khẩu mới.';
+      nextErrors.confirm = 'Please confirm your new password.';
     } else if (confirmPassword !== newPassword) {
-      nextErrors.confirm = 'Mật khẩu không khớp.';
+      nextErrors.confirm = 'Passwords do not match.';
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -140,11 +140,11 @@ export default function ChangePasswordScreen() {
       setNewPassword('');
       setConfirmPassword('');
       setErrors({});
-      Alert.alert('Đã cập nhật mật khẩu', 'Mật khẩu của bạn đã được thay đổi thành công.', [
-        { text: 'Xong', onPress: () => router.back() },
+      Alert.alert('Password Updated', 'Your password was changed successfully.', [
+        { text: 'Done', onPress: () => router.back() },
       ]);
     } catch (error) {
-      Alert.alert('Không thể cập nhật mật khẩu', getErrorMessage(error, 'Vui lòng thử lại.'));
+      Alert.alert('Unable to Update Password', getErrorMessage(error, 'Please try again.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -157,10 +157,10 @@ export default function ChangePasswordScreen() {
         style={styles.keyboardView}
       >
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Quay lại" hitSlop={8} onPress={() => router.back()} style={styles.headerButton}>
+          <Pressable accessibilityLabel="Go back" hitSlop={8} onPress={() => router.back()} style={styles.headerButton}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={24} />
           </Pressable>
-          <Text style={styles.headerTitle}>Change Mật khẩu</Text>
+          <Text style={styles.headerTitle}>Change Password</Text>
           <View style={styles.headerButton} />
         </View>
 
@@ -173,9 +173,9 @@ export default function ChangePasswordScreen() {
             <View style={styles.lockCircle}>
               <MaterialCommunityIcons color="#b5efd1" name="lock" size={37} />
             </View>
-            <Text style={styles.heroTitle}>Bảo vệ tài khoản của bạn</Text>
+            <Text style={styles.heroTitle}>Secure Your Account</Text>
             <Text style={styles.heroSubtitle}>
-              Cập nhật mật khẩu định kỳ giúp bảo vệ dữ liệu di chuyển và phương thức thanh toán của bạn.
+              Updating your password regularly helps keep your transit data and payment methods safe.
             </Text>
           </View>
 
@@ -183,13 +183,13 @@ export default function ChangePasswordScreen() {
             <PasswordInput
               error={errors.current}
               icon="key-outline"
-              label="Mật khẩu hiện tại"
+              label="Current Password"
               onChangeText={(value) => {
                 setCurrentPassword(value);
                 if (errors.current) setErrors((current) => ({ ...current, current: undefined }));
               }}
               onToggle={() => toggle('current')}
-              placeholder="Nhập mật khẩu hiện tại"
+              placeholder="Enter current password"
               value={currentPassword}
               visible={visible.current}
             />
@@ -197,20 +197,20 @@ export default function ChangePasswordScreen() {
             <PasswordInput
               error={errors.new}
               icon="shield-lock-outline"
-              label="Mật khẩu mới"
+              label="New Password"
               onChangeText={(value) => {
                 setNewPassword(value);
                 if (errors.new) setErrors((current) => ({ ...current, new: undefined }));
               }}
               onToggle={() => toggle('new')}
-              placeholder="Tối thiểu 8 ký tự"
+              placeholder="Min. 8 characters"
               value={newPassword}
               visible={visible.new}
             />
 
             <View style={styles.strengthArea}>
               <View style={styles.strengthLabels}>
-                <Text style={styles.strengthTitle}>ĐỘ MẠNH MẬT KHẨU</Text>
+                <Text style={styles.strengthTitle}>PASSWORD STRENGTH</Text>
                 <Text style={[styles.strengthValue, { color: strength.color }]}>{strength.label}</Text>
               </View>
               <View style={styles.strengthTrack}>
@@ -226,13 +226,13 @@ export default function ChangePasswordScreen() {
             <PasswordInput
               error={errors.confirm}
               icon="shield-check-outline"
-              label="Confirm Mật khẩu mới"
+              label="Confirm New Password"
               onChangeText={(value) => {
                 setConfirmPassword(value);
                 if (errors.confirm) setErrors((current) => ({ ...current, confirm: undefined }));
               }}
               onToggle={() => toggle('confirm')}
-              placeholder="Nhập lại mật khẩu mới"
+              placeholder="Repeat new password"
               value={confirmPassword}
               visible={visible.confirm}
             />
@@ -251,7 +251,7 @@ export default function ChangePasswordScreen() {
                 {isSubmitting ? (
                   <ActivityIndicator color={colors.white} />
                 ) : (
-                  <Text style={styles.updateText}>Cập nhật mật khẩu</Text>
+                  <Text style={styles.updateText}>Update Password</Text>
                 )}
               </Pressable>
               <Pressable
@@ -260,7 +260,7 @@ export default function ChangePasswordScreen() {
                 onPress={() => router.back()}
                 style={({ pressed }) => [styles.cancelButton, pressed && styles.pressed]}
               >
-                <Text style={styles.cancelText}>Hủy</Text>
+                <Text style={styles.cancelText}>Cancel</Text>
               </Pressable>
             </View>
           </View>
@@ -268,9 +268,9 @@ export default function ChangePasswordScreen() {
           <View style={styles.noticeCard}>
             <MaterialCommunityIcons color={colors.accent} name="information" size={22} />
             <Text style={styles.noticeText}>
-              <Text style={styles.noticeStrong}>Vì sự an toàn của bạn, </Text>
-              hãy dùng mật khẩu mạnh gồm chữ, số và ký tự đặc biệt. Tránh dùng từ phổ biến
-              hoặc chuỗi dễ đoán.
+              <Text style={styles.noticeStrong}>For your safety, </Text>
+              use a strong password containing letters, numbers, and special characters. Avoid common
+              words or easily guessed sequences.
             </Text>
           </View>
 

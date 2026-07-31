@@ -44,7 +44,7 @@ const paginate = async (model, filter, query = {}, populateRoute = true) => {
 
   let findQuery = model.find(filter).sort({ status: 1, effectiveFrom: -1, createdAt: -1 }).skip(skip).limit(limit).lean();
   if (populateRoute) {
-    findQuery = findQuery.populate('routeId', 'routeNumber name distanceKm fare');
+    findQuery = findQuery.populate('routeId', 'routeNumber name distanceKm fare routeCode routeName outboundRoute fareConfig scheduleConfig');
   }
 
   const [items, total] = await Promise.all([findQuery, model.countDocuments(filter)]);

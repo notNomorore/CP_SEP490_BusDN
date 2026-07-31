@@ -188,24 +188,27 @@ const IncidentDetailModal = ({
   isSaving,
   onClose,
   onUpdateStatus,
-  onReassignAssistant,
+  onReassignStaff,
 }) => {
   const [status, setStatus] = useState(incident?.status || 'PENDING');
   const [adminNote, setAdminNote] = useState(incident?.adminNote || '');
   const [handlingAction, setHandlingAction] = useState(incident?.handlingAction || 'TRIAGE_ONLY');
   const [resolutionSummary, setResolutionSummary] = useState(incident?.resolutionSummary || '');
   const [viewerFile, setViewerFile] = useState(null);
-  const [assistantOptions, setAssistantOptions] = useState([]);
-  const [replacementAssistantId, setReplacementAssistantId] = useState('');
-  const [isLoadingAssistants, setIsLoadingAssistants] = useState(false);
+  const [staffOptions, setStaffOptions] = useState([]);
+  const [replacementStaffId, setReplacementStaffId] = useState('');
+  const [isLoadingStaff, setIsLoadingStaff] = useState(false);
   const isPendingIncident = incident?.status === 'PENDING';
   const isClosedIncident = ['RESOLVED', 'REJECTED'].includes(incident?.status);
-  const isAssistantTripRejection = (
+  const isStaffTripRejection = (
     incident?.incidentType === 'TRIP_REJECTION'
-    && incident?.reporterRole === 'BUS_ASSISTANT'
+    && ['DRIVER', 'BUS_ASSISTANT'].includes(incident?.reporterRole)
   );
+  const isDriverTripRejection = isStaffTripRejection && incident?.reporterRole === 'DRIVER';
+  const replacementRoleLabel = isDriverTripRejection ? 'tài xế' : 'phụ xe';
+  const replacementRoleLabelCapitalized = isDriverTripRejection ? 'Tài xế' : 'Phụ xe';
   const isWaitingReplacementAssistant = (
-    isAssistantTripRejection
+    isStaffTripRejection
     && incident?.status === 'IN_PROGRESS'
     && incident?.handlingAction === 'REASSIGN_TRIP'
     && !incident?.resolutionSummary
@@ -216,49 +219,57 @@ const IncidentDetailModal = ({
     setAdminNote(incident?.adminNote || '');
     setHandlingAction(incident?.handlingAction || 'TRIAGE_ONLY');
     setResolutionSummary(incident?.resolutionSummary || '');
-    setReplacementAssistantId('');
+    setReplacementStaffId('');
   }, [incident]);
 
   useEffect(() => {
-    if (!isAssistantTripRejection || isClosedIncident) {
+    if (!isStaffTripRejection || isClosedIncident) {
       return;
     }
 
     let isMounted = true;
-    setIsLoadingAssistants(true);
+    setIsLoadingStaff(true);
     adminService.getDrivers()
       .then((response) => {
         if (!isMounted) return;
-        const assistants = (
+        const staff = isDriverTripRejection ? (
+          response?.drivers
+          || response?.data?.drivers
+          || response?.data?.data?.drivers
+          || response?.driverStaff
+          || response?.data?.driverStaff
+          || response?.data?.data?.driverStaff
+          || []
+        ) : (
           response?.assistantStaff
           || response?.data?.assistantStaff
           || response?.data?.data?.assistantStaff
           || []
         );
         const reporterId = String(incident?.reporterId || incident?.reporter?._id || '');
-        setAssistantOptions(
-          assistants.filter((assistant) => String(assistant._id || assistant.id) !== reporterId)
+        setStaffOptions(
+          staff.filter((member) => String(member._id || member.id) !== reporterId)
         );
       })
       .catch((error) => {
         if (isMounted) {
-          toast.error(error.message || 'Không tải được danh sách phụ xe');
+          toast.error(error.message || `Không tải được danh sách ${replacementRoleLabel}`);
         }
       })
       .finally(() => {
         if (isMounted) {
-          setIsLoadingAssistants(false);
+          setIsLoadingStaff(false);
         }
       });
 
     return () => {
       isMounted = false;
     };
-  }, [incident, isAssistantTripRejection, isClosedIncident]);
+  }, [incident, isClosedIncident, isDriverTripRejection, isStaffTripRejection, replacementRoleLabel]);
 
   const submitStatus = (nextStatus = status, overrides = {}) => {
     if (isWaitingReplacementAssistant && nextStatus === 'RESOLVED') {
-      toast.error('Chỉ hoàn tất khi phụ xe thay thế tiếp nhận chuyến');
+      toast.error(`Chỉ hoàn tất khi ${replacementRoleLabel} thay thế tiếp nhận chuyến`);
       return;
     }
 
@@ -274,14 +285,14 @@ const IncidentDetailModal = ({
     });
   };
 
-  const submitReassignAssistant = () => {
-    if (!replacementAssistantId) {
-      toast.error('Vui lòng chọn phụ xe thay thế');
+  const submitReassignStaff = () => {
+    if (!replacementStaffId) {
+      toast.error(`Vui lòng chọn ${replacementRoleLabel} thay thế`);
       return;
     }
 
-    onReassignAssistant({
-      assistantId: replacementAssistantId,
+    onReassignStaff({
+      staffId: replacementStaffId,
       adminNote: adminNote.trim(),
     });
   };
@@ -446,41 +457,41 @@ const IncidentDetailModal = ({
                     </select>
                   </label>
 
-                  {isAssistantTripRejection && !isClosedIncident ? (
+                  {isStaffTripRejection && !isClosedIncident ? (
                     <div className="mt-4 rounded-[20px] border border-outline-variant/40 bg-white p-4">
-                      <p className="text-sm font-bold text-primary">Phân công phụ xe thay thế</p>
+                      <p className="text-sm font-bold text-primary">Phân công {replacementRoleLabel} thay thế</p>
                       <p className="mt-1 text-xs leading-5 text-on-surface-variant">
-                        Sau khi phân công, báo cáo giữ trạng thái Đang xử lý. Khi phụ xe mới tiếp nhận chuyến, hệ thống tự chuyển báo cáo sang Đã xử lý.
+                        Sau khi phân công, báo cáo giữ trạng thái Đang xử lý. Khi {replacementRoleLabel} mới tiếp nhận chuyến, hệ thống tự chuyển báo cáo sang Đã xử lý.
                       </p>
                       <label className="mt-3 block space-y-2">
-                        <span className="text-xs font-bold uppercase tracking-[0.12em] text-outline">Phụ xe mới</span>
+                        <span className="text-xs font-bold uppercase tracking-[0.12em] text-outline">{replacementRoleLabelCapitalized} mới</span>
                         <select
-                          value={replacementAssistantId}
+                          value={replacementStaffId}
                           onChange={(event) => {
-                            setReplacementAssistantId(event.target.value);
+                            setReplacementStaffId(event.target.value);
                             setHandlingAction('REASSIGN_TRIP');
                           }}
-                          disabled={isSaving || isLoadingAssistants}
+                          disabled={isSaving || isLoadingStaff}
                           className={fieldClassName}
                         >
                           <option value="">
-                            {isLoadingAssistants ? 'Đang tải phụ xe...' : 'Chọn phụ xe thay thế'}
+                            {isLoadingStaff ? `Đang tải ${replacementRoleLabel}...` : `Chọn ${replacementRoleLabel} thay thế`}
                           </option>
-                          {assistantOptions.map((assistant) => (
-                            <option key={assistant._id || assistant.id} value={assistant._id || assistant.id}>
-                              {assistant.fullName || assistant.email || 'Phụ xe'}
+                          {staffOptions.map((member) => (
+                            <option key={member._id || member.id} value={member._id || member.id}>
+                              {member.fullName || member.email || replacementRoleLabelCapitalized}
                             </option>
                           ))}
                         </select>
                       </label>
                       <button
                         type="button"
-                        onClick={submitReassignAssistant}
-                        disabled={isSaving || isLoadingAssistants || !replacementAssistantId}
+                        onClick={submitReassignStaff}
+                        disabled={isSaving || isLoadingStaff || !replacementStaffId}
                         className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full bg-blue-700 px-5 py-3 text-sm font-bold text-white disabled:opacity-60"
                       >
                         {isSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-                        Phân công phụ xe mới
+                        Phân công {replacementRoleLabel} mới
                       </button>
                     </div>
                   ) : null}
@@ -507,7 +518,7 @@ const IncidentDetailModal = ({
                     />
                     {isWaitingReplacementAssistant ? (
                       <span className="block text-xs leading-5 text-on-surface-variant">
-                        Kết quả xử lý sẽ được hệ thống tự ghi khi phụ xe thay thế tiếp nhận chuyến.
+                        Kết quả xử lý sẽ được hệ thống tự ghi khi {replacementRoleLabel} thay thế tiếp nhận chuyến.
                       </span>
                     ) : null}
                   </label>
@@ -634,15 +645,15 @@ const IncidentReportsPage = () => {
     }
   };
 
-  const reassignAssistant = async (payload) => {
+  const reassignStaff = async (payload) => {
     setIsSaving(true);
     try {
-      const response = await incidentReportService.reassignAssistant(selectedId, payload);
+      const response = await incidentReportService.reassignStaff(selectedId, payload);
       setDetail(response.data);
-      toast.success('Đã phân công phụ xe thay thế. Chờ phụ xe mới tiếp nhận chuyến.');
+      toast.success('Đã phân công nhân sự thay thế. Chờ nhân sự mới tiếp nhận chuyến.');
       await loadData();
     } catch (error) {
-      toast.error(error.message || 'Không thể phân công phụ xe thay thế');
+      toast.error(error.message || 'Không thể phân công nhân sự thay thế');
     } finally {
       setIsSaving(false);
     }
@@ -784,7 +795,7 @@ const IncidentReportsPage = () => {
             setDetail(null);
           }}
           onUpdateStatus={updateStatus}
-          onReassignAssistant={reassignAssistant}
+          onReassignStaff={reassignStaff}
         />
       ) : null}
     </AdminPromotionShell>

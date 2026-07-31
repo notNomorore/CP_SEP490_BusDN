@@ -13,10 +13,21 @@ router.post(
   asyncHandler(TicketController.validateQRCode)
 );
 
+router.get(
+  '/validation-history',
+  authorizeRole('BUS_ASSISTANT', 'ADMIN'),
+  asyncHandler(TicketController.getValidationHistory)
+);
+
 router.post('/one-way', authorizeRole('PASSENGER'), asyncHandler(TicketController.purchaseOneWay));
 router.get('/me', authorizeRole('PASSENGER'), asyncHandler(TicketController.listMyTickets));
 router.post('/monthly-pass', authorizeRole('PASSENGER'), asyncHandler(TicketController.purchaseMonthlyPass));
 router.get('/monthly-passes/me', authorizeRole('PASSENGER'), asyncHandler(TicketController.listMyMonthlyPasses));
+router.post('/promotions/apply', authorizeRole('PASSENGER'), asyncHandler(TicketController.previewPromotion));
+router.post('/payments', authorizeRole('PASSENGER'), asyncHandler(TicketController.createPayment));
+router.get('/payments/:orderCode', authorizeRole('PASSENGER'), asyncHandler(TicketController.getPaymentStatus));
+router.get('/transactions/me', authorizeRole('PASSENGER'), asyncHandler(TicketController.listMyTransactions));
+router.post('/:ticketId/payment', authorizeRole('PASSENGER'), asyncHandler(TicketController.createPendingTicketPayment));
 router.get('/:ticketId', authorizeRole('PASSENGER'), asyncHandler(TicketController.getMyTicket));
 router.patch('/:ticketId/cancel', authorizeRole('PASSENGER'), asyncHandler(TicketController.cancelMyTicket));
 

@@ -162,6 +162,14 @@ export const buildStopSignature = (stops = []) => stops
   .map((stop) => `${Number(stop.latitude).toFixed(6)},${Number(stop.longitude).toFixed(6)}`)
   .join('|');
 
+const estimateUrbanBusDurationMinutes = (distanceKm, stopCount = 0) => {
+  const effectiveDistanceKm = Math.max(0, Number(distanceKm) || 0);
+  if (!effectiveDistanceKm) return 0;
+  const baseTravelMinutes = (effectiveDistanceKm / 20) * 60;
+  const stopDwellMinutes = Math.max(0, Number(stopCount || 0) - 2) * 0.75;
+  return Math.ceil(baseTravelMinutes + stopDwellMinutes);
+};
+
 export const routeStreetPath = async (stops = [], { signal } = {}) => {
   const waypoints = stops.filter((stop) => isInsideDaNang(stop.latitude, stop.longitude));
   if (waypoints.length < 2) {
@@ -202,11 +210,14 @@ export const routeStreetPath = async (stops = [], { signal } = {}) => {
   const fallbackDistanceKm = polylinePath.reduce((total, point, index) => (
     index === 0 ? total : total + distanceKm(polylinePath[index - 1], point)
   ), 0);
+  const estimatedDistanceKm = Number(((route?.distance || 0) / 1000 || fallbackDistanceKm).toFixed(1));
+  const mapDurationMinutes = Math.max(1, Math.round((route?.duration || 0) / 60));
+  const busDurationMinutes = estimateUrbanBusDurationMinutes(estimatedDistanceKm, waypoints.length);
 
   return {
     polylinePath,
-    estimatedDistanceKm: Number(((route?.distance || 0) / 1000 || fallbackDistanceKm).toFixed(1)),
-    estimatedDurationMinutes: Math.max(1, Math.round((route?.duration || 0) / 60)),
+    estimatedDistanceKm,
+    estimatedDurationMinutes: Math.max(mapDurationMinutes, busDurationMinutes),
   };
 };
 
@@ -302,6 +313,7 @@ export const buildSuggestedStops = ({
   maxDistanceKm = 0.18,
   minSpacingKm = 0.45,
   limit = 10,
+  requireRightSide = true,
 }) => {
   const start = direction?.startStation;
   const end = direction?.endStation;
@@ -349,7 +361,8 @@ export const buildSuggestedStops = ({
       };
     })
     .filter((station) => station
-      && station.corridorDistanceKm <= maxDistanceKm)
+      && station.corridorDistanceKm <= maxDistanceKm
+      && (!requireRightSide || station.sideOfTravel === 'right'))
     .sort((left, right) => (
       left.corridorProgress - right.corridorProgress
         || left.sideRank - right.sideRank
@@ -389,9 +402,7 @@ export const computeDirection = (direction) => {
     index === 0 ? total : total + distanceKm(polylinePath[index - 1], point)
   ), 0);
   const effectiveDistanceKm = Number(direction?.estimatedDistanceKm) || estimatedDistanceKm;
-  const urbanBusDurationMinutes = effectiveDistanceKm > 0
-    ? Math.ceil((effectiveDistanceKm / 22) * 60 + Math.max(0, stops.length - 2) * 0.75)
-    : 0;
+  const urbanBusDurationMinutes = estimateUrbanBusDurationMinutes(effectiveDistanceKm, stops.length);
 
   return {
     ...direction,

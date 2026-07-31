@@ -169,6 +169,7 @@ export const resolveNotificationRecipients = async (payload) => {
 
 const buildSocketPayload = (notification) => ({
   _id: normalizeId(notification._id),
+  id: normalizeId(notification._id),
   title: notification.title,
   message: notification.message,
   type: notification.type,
@@ -176,6 +177,10 @@ const buildSocketPayload = (notification) => ({
   targetAudience: notification.targetAudience,
   routeId: normalizeId(notification.routeId) || null,
   tripId: normalizeId(notification.tripId) || null,
+  relatedPromotionId: normalizeId(notification.relatedPromotionId) || null,
+  promotionCode: notification.promotionCode || '',
+  actionUrl: notification.actionUrl || '',
+  metadata: notification.metadata || {},
   recipientUserIds: (notification.recipientUserIds || []).map(normalizeId),
   createdAt: notification.createdAt,
   sentAt: notification.deliverySummary?.sentAt || new Date(),
@@ -183,7 +188,7 @@ const buildSocketPayload = (notification) => ({
 });
 
 export const sendNotificationNow = async (notificationId, io = null) => {
-  const notification = await Notification.findById(notificationId);
+  let notification = await Notification.findById(notificationId);
 
   if (!notification) {
     throw new CustomError('Notification not found', HTTP_STATUS.NOT_FOUND);
@@ -191,6 +196,20 @@ export const sendNotificationNow = async (notificationId, io = null) => {
 
   if (notification.status === 'cancelled') {
     throw new CustomError('Cancelled notification cannot be sent', HTTP_STATUS.CONFLICT);
+  }
+
+  if (notification.status === 'sent') {
+    return notification;
+  }
+
+  notification = await Notification.findOneAndUpdate(
+    { _id: notificationId, status: { $ne: 'sent' } },
+    { $set: { status: 'sent' } },
+    { new: true }
+  );
+
+  if (!notification) {
+    return Notification.findById(notificationId);
   }
 
   const recipientIds = await resolveNotificationRecipients(notification);
@@ -224,6 +243,12 @@ export const createBroadcastNotification = async (payload, adminId, io = null) =
     targetAudience: payload.targetAudience,
     routeId: payload.routeId || null,
     tripId: payload.tripId || null,
+    relatedPromotionId: payload.relatedPromotionId || null,
+    promotionCode: payload.promotionCode || '',
+    actionUrl: payload.actionUrl || '',
+    sourceType: payload.sourceType || '',
+    sourceId: payload.sourceId || null,
+    metadata: payload.metadata || {},
     userIds: payload.userIds || [],
     scheduledAt,
     expiresAt: payload.expiresAt ? new Date(payload.expiresAt) : null,
@@ -247,6 +272,67 @@ export const createBroadcastNotification = async (payload, adminId, io = null) =
   }
 };
 
+export const createPromotionNotificationOnce = async (promotion, io = null) => {
+  const discountText = promotion.discountType === 'PERCENTAGE'
+    ? `${promotion.discountValue}%`
+    : `${Number(promotion.discountValue || 0).toLocaleString('vi-VN')} VND`;
+  const validUntil = new Intl.DateTimeFormat('vi-VN').format(new Date(promotion.endDate));
+  const message = [
+    `Use code ${promotion.code} to get ${discountText} off your next BusDN ticket.`,
+    `Valid until ${validUntil}.`,
+    promotion.description || '',
+  ].filter(Boolean).join(' ');
+
+  let notification;
+  try {
+    notification = await Notification.findOneAndUpdate(
+      { type: 'promotion', relatedPromotionId: promotion._id },
+      {
+        $setOnInsert: {
+          title: promotion.name || 'New promotion available',
+          message,
+          type: 'promotion',
+          priority: 'normal',
+          targetAudience: 'passengers',
+          relatedPromotionId: promotion._id,
+          promotionCode: promotion.code,
+          actionUrl: '/tickets/purchase',
+          sourceType: 'Promotion',
+          sourceId: promotion._id,
+          scheduledAt: promotion.notificationScheduledAt,
+          expiresAt: promotion.endDate,
+          createdBy: promotion.updatedBy || promotion.createdBy,
+          status: 'draft',
+          metadata: {
+            promotionId: normalizeId(promotion._id),
+            promotionCode: promotion.code,
+            discountType: promotion.discountType,
+            discountValue: promotion.discountValue,
+            startDate: promotion.startDate,
+            endDate: promotion.endDate,
+          },
+        },
+      },
+      { upsert: true, new: true }
+    );
+  } catch (error) {
+    if (error?.code === 11000) {
+      notification = await Notification.findOne({
+        type: 'promotion',
+        relatedPromotionId: promotion._id,
+      });
+    } else {
+      throw error;
+    }
+  }
+
+  if (notification.status === 'sent') {
+    return notification;
+  }
+
+  return sendNotificationNow(notification._id, io);
+};
+
 export const listNotifications = async (query = {}) => {
   const page = Math.max(Number(query.page) || 1, 1);
   const limit = Math.min(Math.max(Number(query.limit) || 10, 1), 100);
@@ -268,6 +354,57 @@ export const listNotifications = async (query = {}) => {
     Notification.find(filter)
       .populate('createdBy', 'fullName email role')
       .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    Notification.countDocuments(filter),
+  ]);
+
+  return {
+    items,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    },
+  };
+};
+
+export const listMyNotifications = async (user, query = {}) => {
+  const page = Math.max(Number(query.page) || 1, 1);
+  const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
+  const role = String(user?.role || '').toUpperCase();
+  const userId = user?.userId || user?._id;
+  const audienceByRole = {
+    PASSENGER: 'passengers',
+    DRIVER: 'drivers',
+    BUS_ASSISTANT: 'bus_assistants',
+    ADMIN: 'admins',
+  };
+
+  const filter = {
+    status: 'sent',
+    $and: [
+      {
+        $or: [
+          { expiresAt: null },
+          { expiresAt: { $gte: new Date() } },
+        ],
+      },
+      {
+        $or: [
+          { targetAudience: 'all' },
+          { targetAudience: audienceByRole[role] || '' },
+          { recipientUserIds: userId },
+        ],
+      },
+    ],
+  };
+
+  const [items, total] = await Promise.all([
+    Notification.find(filter)
+      .sort({ 'deliverySummary.sentAt': -1, createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .lean(),
@@ -324,8 +461,10 @@ export const cancelNotification = async (id, adminId) => {
 export default {
   resolveNotificationRecipients,
   createBroadcastNotification,
+  createPromotionNotificationOnce,
   sendNotificationNow,
   listNotifications,
+  listMyNotifications,
   getNotificationById,
   cancelNotification,
 };

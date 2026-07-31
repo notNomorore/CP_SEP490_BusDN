@@ -9,13 +9,28 @@
     "newArchEnabled": true,
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "BusDN uses your current location to sync driver GPS during active trips."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "BusDN needs camera access so bus assistants can scan passenger QR tickets."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "BusDN uses your current location to sync driver GPS during active trips."
+      }
     },
     "android": {
       "adaptiveIcon": {

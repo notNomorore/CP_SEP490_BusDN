@@ -1,4 +1,4 @@
-﻿import { router } from 'expo-router';
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -43,7 +43,7 @@ export default function VerifyOtpScreen() {
         phone: pendingRegistration.phone,
         otp,
       });
-      setMessage('Đăng ký hoàn tất. Bạn có thể đăng nhập ngay.');
+      setMessage('Registration completed. You can sign in now.');
       setTimeout(() => router.replace('/auth/login'), 900);
     } catch {
       // Store owns the visible error message.
@@ -56,7 +56,7 @@ export default function VerifyOtpScreen() {
       await resendOtp();
       setOtp('');
       setCountdown(60);
-      setMessage('Mã OTP mới đã được gửi.');
+      setMessage('A new OTP was sent.');
     } catch {
       // Store owns the visible error message.
     }
@@ -66,10 +66,10 @@ export default function VerifyOtpScreen() {
     <Screen>
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.kicker}>Xác thực tài khoản</Text>
-          <Text style={styles.title}>Nhập mã OTP 6 số</Text>
+          <Text style={styles.kicker}>Verify Account</Text>
+          <Text style={styles.title}>Enter the 6-digit OTP</Text>
           <Text style={styles.subtitle}>
-            Chúng tôi đã gửi mã xác thực đến {pendingRegistration?.identifier || 'tài khoản của bạn'}.
+            We sent a verification code to {pendingRegistration?.identifier || 'your account'}.
           </Text>
         </View>
 
@@ -82,7 +82,7 @@ export default function VerifyOtpScreen() {
 
         <View style={styles.form}>
           <AppInput
-            label="Mã xác thực"
+            label="Verification code"
             value={otp}
             onChangeText={(value) => setOtp(value.replace(/\D/g, '').slice(0, 6))}
             placeholder="000000"
@@ -92,21 +92,21 @@ export default function VerifyOtpScreen() {
           />
 
           <AppButton
-            title="Xác thực tài khoản"
+            title="Verify Account"
             loading={isLoading}
             disabled={otp.length !== 6}
             onPress={handleVerify}
           />
 
           <AppButton
-            title={countdown > 0 ? `Gửi lại sau ${countdown}s` : 'Gửi lại OTP'}
+            title={countdown > 0 ? `Resend in ${countdown}s` : 'Resend OTP'}
             variant="secondary"
             disabled={isLoading || countdown > 0}
             onPress={handleResend}
           />
 
           <AppButton
-            title="Quay lại đăng ký"
+            title="Back to Register"
             variant="secondary"
             onPress={() => router.replace('/auth/register')}
           />

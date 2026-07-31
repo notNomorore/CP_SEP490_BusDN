@@ -13,6 +13,9 @@ export type AuthUser = {
   isFirstLogin?: boolean;
   walletBalance?: number;
   notificationEnabled?: boolean;
+  gender?: string;
+  dateOfBirth?: string;
+  address?: string;
   monthlyPassStatus?: string;
   monthlyPassExpireDate?: string;
   createdAt?: string;

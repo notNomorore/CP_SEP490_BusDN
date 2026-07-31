@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { io } from 'socket.io-client';
 import fleetMonitoringService from '../services/fleetMonitoringService.js';
+import { acquireFleetSocket, releaseFleetSocket } from '../services/fleetSocket.js';
 import toast from '../../../../shared/utils/toast.js';
 
 const POLL_INTERVAL_MS = 20000;
@@ -21,12 +21,6 @@ const REASON_LABELS = {
   late_departure: 'Late departure',
   status_marked_delayed: 'Marked delayed',
   reported_delay: 'Reported delay',
-};
-
-const getApiOrigin = () => {
-  const configured = import.meta.env.VITE_API_URL?.trim();
-  if (configured) return configured.replace(/\/$/, '');
-  return 'http://localhost:3000';
 };
 
 const formatDateTime = (value) => {
@@ -171,7 +165,7 @@ const AdminDelayedTripsPage = () => {
   const [loading, setLoading] = useState(true);
   const [socketConnected, setSocketConnected] = useState(false);
   const [ackTrip, setAckTrip] = useState(null);
-  const socketRef = useRef(null);
+  const loadTripsRef = useRef(null);
 
   const loadTrips = useCallback(async () => {
     const params = Object.fromEntries(Object.entries(filters).filter(([, value]) => value));
@@ -190,30 +184,39 @@ const AdminDelayedTripsPage = () => {
   }, [loadTrips]);
 
   useEffect(() => {
-    const token = localStorage.getItem('authToken');
-    const socket = io(getApiOrigin(), {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
-    socketRef.current = socket;
+    loadTripsRef.current = loadTrips;
+  }, [loadTrips]);
 
-    socket.on('connect', () => {
+  useEffect(() => {
+    const socket = acquireFleetSocket();
+    const handleConnect = () => {
       setSocketConnected(true);
       socket.emit('admin:fleet:subscribe');
-    });
-    socket.on('disconnect', () => setSocketConnected(false));
-    socket.on('connect_error', () => setSocketConnected(false));
-    socket.on('server:trip:delayed', () => loadTrips().catch(() => {}));
-    socket.on('server:trip:statusUpdated', () => loadTrips().catch(() => {}));
-    socket.on('server:incident:new', () => loadTrips().catch(() => {}));
-    socket.on('server:incident:updated', () => loadTrips().catch(() => {}));
+    };
+    const handleDisconnect = () => setSocketConnected(false);
+    const reloadTrips = () => loadTripsRef.current?.().catch(() => {});
+
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('connect_error', handleDisconnect);
+    socket.on('server:trip:delayed', reloadTrips);
+    socket.on('server:trip:statusUpdated', reloadTrips);
+    socket.on('server:incident:new', reloadTrips);
+    socket.on('server:incident:updated', reloadTrips);
+    if (socket.connected) handleConnect();
 
     return () => {
-      socket.emit('admin:fleet:unsubscribe');
-      socket.disconnect();
-      socketRef.current = null;
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('connect_error', handleDisconnect);
+      socket.off('server:trip:delayed', reloadTrips);
+      socket.off('server:trip:statusUpdated', reloadTrips);
+      socket.off('server:incident:new', reloadTrips);
+      socket.off('server:incident:updated', reloadTrips);
+      setSocketConnected(false);
+      releaseFleetSocket();
     };
-  }, [loadTrips]);
+  }, []);
 
   useEffect(() => {
     if (socketConnected) return undefined;

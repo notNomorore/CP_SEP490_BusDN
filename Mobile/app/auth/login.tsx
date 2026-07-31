@@ -1,4 +1,4 @@
-﻿import { FontAwesome, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { FontAwesome, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
+import { getRoleHomeRoute } from '@/utils/roleNavigation';
 
 const BRAND_GREEN = '#003120';
 const SOFT_MINT = '#ecf6f2';
@@ -34,6 +35,7 @@ export default function LoginScreen() {
   const clearError = useAuthStore((state) => state.clearError);
   const isLoading = useAuthStore((state) => state.isLoading);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const user = useAuthStore((state) => state.user);
   const error = useAuthStore((state) => state.error);
   const canSubmit = Boolean(identifier.trim() && password);
 
@@ -41,15 +43,16 @@ export default function LoginScreen() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      router.replace('/home');
+      router.replace(getRoleHomeRoute(user?.role));
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user?.role]);
 
   const handleLogin = async () => {
     clearError();
     try {
       await login(identifier.trim(), password);
-      router.replace('/home');
+      const loggedInUser = useAuthStore.getState().user;
+      router.replace(getRoleHomeRoute(loggedInUser?.role));
     } catch {
       // The auth store owns the visible API error message.
     }
@@ -57,12 +60,12 @@ export default function LoginScreen() {
 
   const handleForgotPassword = () => {
     // TODO: Navigate here when a mobile forgot-password route is added.
-    Alert.alert('Quên mật khẩu', 'Tính năng khôi phục mật khẩu hiện chưa khả dụng trên ứng dụng di động.');
+    Alert.alert('Forgot Password', 'Password recovery is not available in the mobile app yet.');
   };
 
   const handleGoogleLogin = () => {
     // TODO: Connect the Google auth provider when the mobile auth service exposes it.
-    Alert.alert('Đăng nhập Google', 'Đăng nhập Google hiện chưa khả dụng trên ứng dụng di động.');
+    Alert.alert('Google Sign-In', 'Google sign-in is not available in the mobile app yet.');
   };
 
   return (
@@ -96,7 +99,7 @@ export default function LoginScreen() {
               <Text style={[styles.brandName, compact ? styles.brandNameCompact : null]}>
                 BusDN
               </Text>
-              <Text style={styles.tagline}>Hành trình thông minh trong thành phố.</Text>
+              <Text style={styles.tagline}>Your premium path through the city.</Text>
             </View>
 
             <View style={[styles.card, compact ? styles.cardCompact : null]}>
@@ -108,7 +111,7 @@ export default function LoginScreen() {
               ) : null}
 
               <View style={styles.fieldGroup}>
-                <Text style={styles.label}>Email hoặc số điện thoại</Text>
+                <Text style={styles.label}>Email or Phone Number</Text>
                 <View
                   style={[
                     styles.inputShell,
@@ -121,7 +124,7 @@ export default function LoginScreen() {
                     color={focusedField === 'identifier' ? colors.accent : '#717974'}
                   />
                   <TextInput
-                    accessibilityLabel="Email hoặc số điện thoại"
+                    accessibilityLabel="Email or Phone Number"
                     autoCapitalize="none"
                     autoComplete="username"
                     keyboardType="email-address"
@@ -141,13 +144,13 @@ export default function LoginScreen() {
 
               <View style={styles.fieldGroup}>
                 <View style={styles.passwordLabelRow}>
-                  <Text style={styles.label}>Mật khẩu</Text>
+                  <Text style={styles.label}>Password</Text>
                   <Pressable
                     accessibilityRole="button"
                     hitSlop={8}
                     onPress={handleForgotPassword}
                   >
-                    <Text style={styles.forgotLink}>Quên mật khẩu?</Text>
+                    <Text style={styles.forgotLink}>Forgot Password?</Text>
                   </Pressable>
                 </View>
                 <View
@@ -162,7 +165,7 @@ export default function LoginScreen() {
                     color={focusedField === 'password' ? colors.accent : '#717974'}
                   />
                   <TextInput
-                    accessibilityLabel="Mật khẩu"
+                    accessibilityLabel="Password"
                     autoCapitalize="none"
                     autoComplete="password"
                     onBlur={() => setFocusedField(null)}
@@ -171,7 +174,7 @@ export default function LoginScreen() {
                     onSubmitEditing={() => {
                       if (canSubmit && !isLoading) void handleLogin();
                     }}
-                    placeholder="Mật khẩu"
+                    placeholder="Password"
                     placeholderTextColor="#89918d"
                     returnKeyType="done"
                     secureTextEntry={!showPassword}
@@ -180,7 +183,7 @@ export default function LoginScreen() {
                     value={password}
                   />
                   <Pressable
-                    accessibilityLabel={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                    accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
                     accessibilityRole="button"
                     hitSlop={10}
                     onPress={() => setShowPassword((visible) => !visible)}
@@ -209,7 +212,7 @@ export default function LoginScreen() {
                   <ActivityIndicator color={colors.white} />
                 ) : (
                   <>
-                    <Text style={styles.signInText}>Đăng nhập</Text>
+                    <Text style={styles.signInText}>Sign In</Text>
                     <Ionicons name="arrow-forward" size={20} color={colors.white} />
                   </>
                 )}
@@ -217,7 +220,7 @@ export default function LoginScreen() {
 
               <View style={styles.dividerRow}>
                 <View style={styles.divider} />
-                <Text style={styles.dividerText}>Hoặc tiếp tục với</Text>
+                <Text style={styles.dividerText}>Or continue with</Text>
                 <View style={styles.divider} />
               </View>
 
@@ -230,34 +233,34 @@ export default function LoginScreen() {
                 ]}
               >
                 <FontAwesome name="google" size={19} color="#4285f4" />
-                <Text style={styles.googleText}>Đăng nhập bằng Google</Text>
+                <Text style={styles.googleText}>Sign in with Google</Text>
               </Pressable>
             </View>
 
             <View style={styles.registerRow}>
-              <Text style={styles.registerPrompt}>Bạn mới dùng BusDN?</Text>
+              <Text style={styles.registerPrompt}>New to BusDN?</Text>
               <Pressable
                 accessibilityRole="link"
                 hitSlop={8}
                 onPress={() => router.push('/auth/register')}
               >
-                <Text style={styles.registerLink}>Đăng ký ngay</Text>
+                <Text style={styles.registerLink}>Register Now</Text>
               </Pressable>
             </View>
 
             <View style={[styles.trustRow, compact ? styles.trustRowCompact : null]}>
               <View style={styles.trustCard}>
                 <MaterialCommunityIcons name="shield-check" size={21} color="#466a5a" />
-                <Text style={styles.trustText}>Dữ liệu an toàn</Text>
+                <Text style={styles.trustText}>Secure Data</Text>
               </View>
               <View style={styles.trustCard}>
                 <MaterialCommunityIcons name="headset" size={21} color="#466a5a" />
-                <Text style={styles.trustText}>Hỗ trợ 24/7</Text>
+                <Text style={styles.trustText}>24/7 Help</Text>
               </View>
             </View>
 
             <Text style={styles.footer}>
-              {'\u00A9 2024 BusDN Transit Systems. Di chuyển đô thị thông minh.'}
+              {'\u00A9 2024 BusDN Transit Systems. Premium Urban Mobility.'}
             </Text>
           </View>
         </ScrollView>
