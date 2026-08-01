@@ -265,6 +265,7 @@ export default function ProfileScreen() {
           <View style={styles.actionGrid}>
             <ActionCard icon="ticket-confirmation-outline" label="My Tickets" onPress={() => router.push('/my-tickets')} />
             <ActionCard icon="history" label="Travel History" onPress={() => router.push('/travel-history')} />
+            <ActionCard icon="heart-outline" label="Yêu thích" onPress={() => router.push('/favorites' as Href)} />
             <ActionCard icon="bell-ring-outline" label="Alerts" onPress={() => router.push('/notifications')} />
             <ActionCard icon="message-plus-outline" label="Send Feedback" onPress={() => router.push('/submit-feedback')} />
             <ActionCard icon="message-text-outline" label="My Feedback" onPress={() => router.push('/my-feedback' as Href)} />
