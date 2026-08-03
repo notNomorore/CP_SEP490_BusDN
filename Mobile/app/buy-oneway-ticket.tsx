@@ -5,6 +5,7 @@ import {
   Alert,
   AppState,
   Linking,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -21,6 +22,7 @@ import useAuthStore from '@/store/auth.store';
 type TicketType = 'ONE_WAY' | 'MONTHLY_PASS';
 type Direction = 'OUTBOUND' | 'INBOUND';
 type PassengerType = 'STANDARD' | 'STUDENT' | 'PRIORITY';
+type MonthOption = { value: string; label: string; startDate: string; endDate: string };
 type FormErrors = Partial<Record<
   | 'auth'
   | 'route'
@@ -72,6 +74,25 @@ const getCurrentMonthStart = () => {
   return `${today.slice(0, 7)}-01`;
 };
 
+const formatMonthDate = (date: Date) => (
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+);
+
+const buildStartMonthOptions = (): MonthOption[] => {
+  const [currentYear, currentMonth] = getVietnamDate().split('-').map(Number);
+  return Array.from({ length: 6 }, (_, offset) => {
+    const monthDate = new Date(currentYear, currentMonth - 1 + offset, 1);
+    const startDate = formatMonthDate(monthDate);
+    const endDate = formatMonthDate(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0));
+    return {
+      value: startDate.slice(0, 7),
+      label: `${String(monthDate.getMonth() + 1).padStart(2, '0')}/${monthDate.getFullYear()}`,
+      startDate,
+      endDate,
+    };
+  });
+};
+
 const toRouteId = (route?: BusRoute | null) => String(route?.id || route?._id || '');
 
 const roundFare = (value: number) => {
@@ -79,13 +100,10 @@ const roundFare = (value: number) => {
   return Math.max(Math.round(value / 1000) * 1000, 1000);
 };
 
-const buildMonthEnd = (startDate: string, months: number) => {
+const buildMonthEnd = (startDate: string) => {
   const [year, month, day] = startDate.split('-').map(Number);
   const start = new Date(year, month - 1, day || 1);
-  const end = new Date(start);
-  end.setMonth(end.getMonth() + Math.max(months, 1));
-  end.setDate(end.getDate() - 1);
-  return end.toISOString().slice(0, 10);
+  return formatMonthDate(new Date(start.getFullYear(), start.getMonth() + 1, 0));
 };
 
 const addMinutesToTime = (time: string, minutes: number) => {
@@ -146,7 +164,7 @@ export default function BuyOneWayTicketScreen() {
   const [departureTime, setDepartureTime] = useState('');
   const [passengerType, setPassengerType] = useState<PassengerType>('STANDARD');
   const [monthlyStartDate, setMonthlyStartDate] = useState(getCurrentMonthStart());
-  const [validityMonths, setValidityMonths] = useState('1');
+  const [startMonthOpen, setStartMonthOpen] = useState(false);
   const [promotionCode, setPromotionCode] = useState('');
   const [appliedPromotion, setAppliedPromotion] = useState<PromotionPreview | null>(null);
   const [payment, setPayment] = useState<PaymentOrder | null>(null);
@@ -188,12 +206,21 @@ export default function BuyOneWayTicketScreen() {
   )) || null, [routeId, routes]);
   const stops = useMemo(() => getDirectionStops(selectedRoute, direction), [direction, selectedRoute]);
   const departureTimes = useMemo(() => buildDepartureTimes(selectedRoute, serviceDate), [selectedRoute, serviceDate]);
+  const startMonthOptions = useMemo(() => buildStartMonthOptions(), []);
+  const selectedStartMonth = startMonthOptions.find((option) => option.startDate === monthlyStartDate)
+    || startMonthOptions[0]
+    || {
+      value: getCurrentMonthStart().slice(0, 7),
+      label: getCurrentMonthStart().slice(5, 7) + '/' + getCurrentMonthStart().slice(0, 4),
+      startDate: getCurrentMonthStart(),
+      endDate: buildMonthEnd(getCurrentMonthStart()),
+    };
   const selectedPassengerType = passengerTypes.find((item) => item.id === passengerType) || passengerTypes[0];
   const basePrice = useMemo(() => (
     ticketType === 'MONTHLY_PASS'
-      ? monthlyPrices[passengerType] * Math.max(Number(validityMonths) || 1, 1)
+      ? monthlyPrices[passengerType]
       : calculateOneWayPrice(selectedRoute, stops, boardingStop, destinationStop)
-  ), [boardingStop, destinationStop, passengerType, selectedRoute, stops, ticketType, validityMonths]);
+  ), [boardingStop, destinationStop, passengerType, selectedRoute, stops, ticketType]);
   const finalPrice = Math.max(Number(appliedPromotion?.finalAmount ?? basePrice) || 0, 0);
   const discountAmount = Math.max(Number(appliedPromotion?.discountAmount || 0), 0);
 
@@ -217,7 +244,7 @@ export default function BuyOneWayTicketScreen() {
     setAppliedPromotion(null);
     setErrors((current) => ({ ...current, promotion: undefined, price: undefined }));
     setPayment(null);
-  }, [ticketType, routeId, direction, boardingStop, destinationStop, serviceDate, departureTime, passengerType, monthlyStartDate, validityMonths]);
+  }, [ticketType, routeId, direction, boardingStop, destinationStop, serviceDate, departureTime, passengerType, monthlyStartDate]);
 
   const validate = useCallback(() => {
     const nextErrors: FormErrors = {};
@@ -240,8 +267,9 @@ export default function BuyOneWayTicketScreen() {
     }
     if (!passengerType) nextErrors.passengerType = 'Vui lòng chọn loại hành khách.';
     if (ticketType === 'MONTHLY_PASS') {
-      if (monthlyStartDate < getCurrentMonthStart()) nextErrors.serviceDate = 'Không thể đặt vé tháng cho tháng đã qua.';
-      if ((Number(validityMonths) || 0) < 1) nextErrors.serviceDate = 'Thời hạn vé tháng không hợp lệ.';
+      if (!startMonthOptions.some((option) => option.startDate === monthlyStartDate)) {
+        nextErrors.serviceDate = 'Start Month không hợp lệ. Vui lòng chọn từ tháng hiện tại đến 5 tháng tới.';
+      }
     }
     if (promotionCode.trim() && !appliedPromotion) nextErrors.promotion = 'Vui lòng áp dụng mã khuyến mãi trước khi thanh toán.';
     if (basePrice < 0) nextErrors.price = 'Không tính được giá vé.';
@@ -260,9 +288,9 @@ export default function BuyOneWayTicketScreen() {
     promotionCode,
     selectedRoute,
     serviceDate,
+    startMonthOptions,
     stops,
     ticketType,
-    validityMonths,
   ]);
 
   const chooseRoute = (route: BusRoute) => {
@@ -360,7 +388,7 @@ export default function BuyOneWayTicketScreen() {
           routeId: routeId || undefined,
           routeCode: routeId ? undefined : 'ALL',
           startDate: monthlyStartDate,
-          validityMonths: Math.max(Number(validityMonths) || 1, 1),
+          validityMonths: 1,
           promotionCode: appliedPromotion?.promotionCode || '',
         }
         : {
@@ -490,8 +518,22 @@ export default function BuyOneWayTicketScreen() {
             </>
           ) : (
             <>
-              <Field label="Ngày bắt đầu" minLabel={`Từ ${getCurrentMonthStart()}`} value={monthlyStartDate} onChangeText={setMonthlyStartDate} placeholder="YYYY-MM-DD" />
-              <Field label="Số tháng hiệu lực" value={validityMonths} onChangeText={setValidityMonths} keyboardType="number-pad" />
+              <StartMonthDropdown
+                label="Start Month"
+                options={startMonthOptions}
+                selected={selectedStartMonth}
+                visible={startMonthOpen}
+                onClose={() => setStartMonthOpen(false)}
+                onOpen={() => setStartMonthOpen(true)}
+                onSelect={(option) => {
+                  setMonthlyStartDate(option.startDate);
+                  setStartMonthOpen(false);
+                }}
+              />
+              <View style={styles.emptyInline}>
+                <MaterialCommunityIcons color={colors.secondary} name="calendar-range-outline" size={20} />
+                <Text style={styles.emptyInlineText}>Hiệu lực từ {selectedStartMonth.startDate} đến {selectedStartMonth.endDate}</Text>
+              </View>
               {errors.serviceDate ? <FieldError message={errors.serviceDate} /> : null}
             </>
           )}
@@ -551,8 +593,8 @@ export default function BuyOneWayTicketScreen() {
             </View>
             <SummaryLine label="Tuyến" value={selectedRoute ? `${selectedRoute.routeNumber} - ${selectedRoute.name}` : 'Chưa chọn'} />
             <SummaryLine label="Chiều tuyến" value={ticketType === 'ONE_WAY' ? `${stops[0]?.name || '-'} → ${stops[stops.length - 1]?.name || '-'}` : selectedRoute ? selectedRoute.routeNumber : 'Toàn mạng'} />
-            <SummaryLine label="Hành trình" value={ticketType === 'ONE_WAY' ? `${boardingStop || '-'} → ${destinationStop || '-'}` : `${monthlyStartDate} → ${buildMonthEnd(monthlyStartDate, Number(validityMonths) || 1)}`} />
-            <SummaryLine label="Khởi hành" value={ticketType === 'ONE_WAY' ? `${serviceDate} ${departureTime || '--:--'}` : `${Math.max(Number(validityMonths) || 1, 1)} tháng`} />
+            <SummaryLine label="Hành trình" value={ticketType === 'ONE_WAY' ? `${boardingStop || '-'} → ${destinationStop || '-'}` : `${monthlyStartDate} → ${buildMonthEnd(monthlyStartDate)}`} />
+            <SummaryLine label="Khởi hành" value={ticketType === 'ONE_WAY' ? `${serviceDate} ${departureTime || '--:--'}` : selectedStartMonth.label} />
             <View style={styles.priceBox}>
               <SummaryLine label="Giá gốc" value={currency.format(basePrice)} />
               <SummaryLine label="Khuyến mãi" value={discountAmount ? `-${currency.format(discountAmount)}` : 'Không có'} />
@@ -625,6 +667,50 @@ function Field({
         style={styles.input}
         value={value}
       />
+    </View>
+  );
+}
+
+function StartMonthDropdown({
+  label,
+  options,
+  selected,
+  visible,
+  onOpen,
+  onClose,
+  onSelect,
+}: {
+  label: string;
+  options: MonthOption[];
+  selected: MonthOption;
+  visible: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onSelect: (option: MonthOption) => void;
+}) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.label}>{label}</Text>
+      <Pressable accessibilityRole="button" onPress={onOpen} style={styles.dropdownButton}>
+        <Text style={styles.dropdownValue}>{selected.label}</Text>
+        <MaterialCommunityIcons color={colors.secondary} name="chevron-down" size={20} />
+      </Pressable>
+      <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
+        <Pressable style={styles.modalScrim} onPress={onClose}>
+          <View style={styles.monthMenu}>
+            <Text style={styles.monthMenuTitle}>{label}</Text>
+            {options.map((option) => {
+              const active = option.value === selected.value;
+              return (
+                <Pressable key={option.value} onPress={() => onSelect(option)} style={[styles.monthOption, active && styles.monthOptionActive]}>
+                  <Text style={[styles.monthOptionText, active && styles.monthOptionTextActive]}>{option.label}</Text>
+                  {active ? <MaterialCommunityIcons color={colors.white} name="check" size={18} /> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -714,6 +800,15 @@ const styles = StyleSheet.create({
   stopText: { color: colors.secondary, fontSize: 12, fontWeight: '800' },
   stopTextActive: { color: colors.primary },
   input: { minHeight: 52, borderRadius: 16, backgroundColor: colors.card, paddingHorizontal: 14, color: colors.text, fontSize: 14, fontWeight: '800' },
+  dropdownButton: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderRadius: 16, backgroundColor: colors.card, paddingHorizontal: 14 },
+  dropdownValue: { color: colors.text, fontSize: 14, fontWeight: '900' },
+  modalScrim: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.24)', padding: 22 },
+  monthMenu: { gap: 8, borderRadius: 20, backgroundColor: colors.card, padding: 16 },
+  monthMenuTitle: { marginBottom: 4, color: colors.primary, fontSize: 15, fontWeight: '900' },
+  monthOption: { minHeight: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 14, backgroundColor: colors.surfaceLow, paddingHorizontal: 14 },
+  monthOptionActive: { backgroundColor: colors.primaryContainer },
+  monthOptionText: { color: colors.primary, fontSize: 13, fontWeight: '900' },
+  monthOptionTextActive: { color: colors.white },
   timeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   timeChip: { minWidth: 72, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: colors.card, paddingHorizontal: 10 },
   timeChipActive: { backgroundColor: colors.primaryContainer },

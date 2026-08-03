@@ -46,6 +46,11 @@ export class TicketController {
     return res.success(promotion, 'Promotion applied successfully');
   }
 
+  static async quotePurchase(req, res) {
+    const quote = await TicketService.quoteTicketPurchase(req.user.userId, req.body);
+    return res.success(quote, 'Ticket price calculated successfully');
+  }
+
   static async createPayment(req, res) {
     const payment = await TicketService.createPaymentOrder(req.user.userId, req.body);
     return res.success(payment, 'Payment QR created successfully', 201);

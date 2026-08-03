@@ -37,12 +37,34 @@ const passengerTypeLabel = (type) => ({
   PRIORITY: 'Đối tượng ưu tiên',
 }[type] || 'Phổ thông');
 
-const buildMonthBounds = (year, month) => {
-  const start = new Date(Number(year), Number(month) - 1, 1);
-  const end = new Date(Number(year), Number(month), 0);
+const formatMonthDate = (date) => [
+  date.getFullYear(),
+  String(date.getMonth() + 1).padStart(2, '0'),
+  String(date.getDate()).padStart(2, '0'),
+].join('-');
+
+const buildStartMonthOptions = () => {
+  const [currentYear, currentMonth] = getVietnamDate().split('-').map(Number);
+  return Array.from({ length: 6 }, (_, offset) => {
+    const monthDate = new Date(currentYear, currentMonth - 1 + offset, 1);
+    const startDate = formatMonthDate(monthDate);
+    const endDate = formatMonthDate(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0));
+    return {
+      value: startDate.slice(0, 7),
+      label: `${String(monthDate.getMonth() + 1).padStart(2, '0')}/${monthDate.getFullYear()}`,
+      startDate,
+      endDate,
+    };
+  });
+};
+
+const buildMonthBounds = (startMonth) => {
+  const [year, month] = String(startMonth || '').split('-').map(Number);
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 0);
   return {
-    startDate: start.toISOString().slice(0, 10),
-    endDate: end.toISOString().slice(0, 10),
+    startDate: formatMonthDate(start),
+    endDate: formatMonthDate(end),
   };
 };
 
@@ -58,17 +80,16 @@ const TicketPurchasePage = () => {
   const [appliedPromotion, setAppliedPromotion] = useState(null);
   const [promotionError, setPromotionError] = useState('');
   const [isApplyingPromotion, setIsApplyingPromotion] = useState(false);
-  const currentMonth = new Date().getMonth() + 1;
-  const currentYear = new Date().getFullYear();
+  const [priceQuote, setPriceQuote] = useState(null);
+  const [isLoadingQuote, setIsLoadingQuote] = useState(false);
+  const startMonthOptions = useMemo(() => buildStartMonthOptions(), []);
   const [form, setForm] = useState({
     direction: 'OUTBOUND',
     departureLocation: '',
     destinationLocation: '',
     serviceDate: getVietnamDate(),
     departureTime: '05:30',
-    passengerType: 'STANDARD',
-    month: currentMonth,
-    year: currentYear,
+    startMonth: startMonthOptions[0]?.value || getVietnamDate().slice(0, 7),
   });
 
   useEffect(() => {
@@ -114,12 +135,7 @@ const TicketPurchasePage = () => {
     }));
   }, [form.direction, selectedRoute]);
 
-  const monthlyBounds = useMemo(() => buildMonthBounds(form.year, form.month), [form.year, form.month]);
-  const monthlyPrice = {
-    STANDARD: 250000,
-    STUDENT: 120000,
-    PRIORITY: 0,
-  }[form.passengerType] || 250000;
+  const monthlyBounds = useMemo(() => buildMonthBounds(form.startMonth), [form.startMonth]);
   const outboundStops = selectedRoute?.directions?.OUTBOUND?.stops || selectedRoute?.stops || [];
   const routeStops = selectedRoute?.directions?.[form.direction]?.stops
     || (form.direction === 'INBOUND' ? [...outboundStops].reverse().map((stop, index) => ({ ...stop, order: index + 1 })) : outboundStops);
@@ -136,9 +152,58 @@ const TicketPurchasePage = () => {
     const minimumFare = Number(selectedRoute.fare || 0) * 0.35;
     return roundFare(Math.max(proportionalFare, minimumFare));
   }, [arrivalStop, departureStop, selectedRoute]);
-  const baseEstimatedPrice = mode === 'MONTHLY_PASS' ? monthlyPrice : oneWayEstimatedPrice;
-  const estimatedPrice = appliedPromotion?.finalAmount ?? baseEstimatedPrice;
-  const discountAmount = appliedPromotion?.discountAmount || 0;
+  const baseEstimatedPrice = priceQuote?.originalPrice ?? (mode === 'MONTHLY_PASS' ? 0 : oneWayEstimatedPrice);
+  const priceAfterAutomaticDiscount = priceQuote?.finalPrice ?? baseEstimatedPrice;
+  const estimatedPrice = appliedPromotion?.finalAmount ?? priceAfterAutomaticDiscount;
+  const automaticDiscountAmount = Number(priceQuote?.discountAmount || 0);
+  const promotionDiscountAmount = Number(appliedPromotion?.discountAmount || 0);
+  const discountAmount = automaticDiscountAmount + promotionDiscountAmount;
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadQuote = async () => {
+      if (!selectedRoute) {
+        setPriceQuote(null);
+        return;
+      }
+
+      if (mode === 'ONE_WAY' && (!form.departureLocation || !form.destinationLocation || form.departureLocation === form.destinationLocation)) {
+        setPriceQuote(null);
+        return;
+      }
+
+      setIsLoadingQuote(true);
+      try {
+        const quote = await ticketService.quotePurchase({
+          ticketType: mode,
+          routeId: selectedRoute?.id || selectedRoute?._id,
+          direction: form.direction,
+          departureLocation: form.departureLocation,
+          destinationLocation: form.destinationLocation,
+          startDate: monthlyBounds.startDate,
+        });
+        if (isMounted) setPriceQuote(quote);
+      } catch {
+        if (isMounted) setPriceQuote(null);
+      } finally {
+        if (isMounted) setIsLoadingQuote(false);
+      }
+    };
+
+    loadQuote();
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    mode,
+    selectedRoute?.id,
+    selectedRoute?._id,
+    form.direction,
+    form.departureLocation,
+    form.destinationLocation,
+    monthlyBounds.startDate,
+  ]);
 
   useEffect(() => {
     setAppliedPromotion(null);
@@ -149,9 +214,7 @@ const TicketPurchasePage = () => {
     form.direction,
     form.departureLocation,
     form.destinationLocation,
-    form.passengerType,
-    form.month,
-    form.year,
+    form.startMonth,
     baseEstimatedPrice,
   ]);
 
@@ -177,7 +240,7 @@ const TicketPurchasePage = () => {
         promotionCode: code,
         ticketType: mode,
         routeId: selectedRoute?.id || selectedRoute?._id || '',
-        amount: baseEstimatedPrice,
+        amount: priceAfterAutomaticDiscount,
       });
       setAppliedPromotion(promotion);
       setPromotionCode(promotion.promotionCode || code);
@@ -226,15 +289,8 @@ const TicketPurchasePage = () => {
     }
 
     if (mode === 'MONTHLY_PASS') {
-      const selectedYear = Number(form.year);
-      const selectedMonth = Number(form.month);
-      if (!selectedYear || selectedMonth < 1 || selectedMonth > 12) {
-        setError('Thang/nam ap dung khong hop le.');
-        return;
-      }
-
-      if (selectedYear < currentYear || (selectedYear === currentYear && selectedMonth < currentMonth)) {
-        setError('Khong the dat ve thang cho thang da qua.');
+      if (!startMonthOptions.some((option) => option.value === form.startMonth)) {
+        setError('Start Month khong hop le. Vui long chon tu thang hien tai den 5 thang toi.');
         return;
       }
     }
@@ -250,10 +306,11 @@ const TicketPurchasePage = () => {
       serviceDate: mode === 'ONE_WAY' ? form.serviceDate : monthlyBounds.startDate,
       expiryDate: mode === 'MONTHLY_PASS' ? monthlyBounds.endDate : form.serviceDate,
       departureTime: mode === 'ONE_WAY' ? form.departureTime : '',
-      passengerType: form.passengerType,
-      passengerTypeLabel: passengerTypeLabel(form.passengerType),
       originalPrice: baseEstimatedPrice,
       discountAmount,
+      priorityDiscountAmount: automaticDiscountAmount,
+      appliedDiscount: priceQuote?.appliedDiscount || null,
+      dailyRideLimit: priceQuote?.dailyRideLimit,
       promotionCode: appliedPromotion?.promotionCode || '',
       promotionName: appliedPromotion?.promotionName || '',
       price: estimatedPrice,
@@ -328,16 +385,10 @@ const TicketPurchasePage = () => {
                 </>
               ) : (
                 <>
-                  <label className="text-sm font-bold">
-                    Tháng áp dụng
-                    <select value={form.month} onChange={(event) => updateForm({ month: event.target.value })} className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3">
-                      {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={month}>Tháng {month}</option>)}
-                    </select>
-                  </label>
-                  <label className="text-sm font-bold">
-                    Năm áp dụng
-                    <select value={form.year} onChange={(event) => updateForm({ year: event.target.value })} className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3">
-                      {[currentYear, currentYear + 1].map((year) => <option key={year} value={year}>{year}</option>)}
+                  <label className="text-sm font-bold sm:col-span-2">
+                    Start Month
+                    <select value={form.startMonth} onChange={(event) => updateForm({ startMonth: event.target.value })} className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3">
+                      {startMonthOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </select>
                   </label>
                   <div className="rounded-xl bg-surface-container-low px-4 py-3 text-sm font-bold">

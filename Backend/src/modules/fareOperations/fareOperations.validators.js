@@ -143,6 +143,17 @@ export const validateStatusPayload = (body) => {
   return errors;
 };
 
+export const validateMonthlyPassSettingsPayload = (body) => {
+  const errors = {};
+  const maxRidesPerDay = Number(body.maxRidesPerDay);
+
+  if (!Number.isInteger(maxRidesPerDay) || maxRidesPerDay < 1 || maxRidesPerDay > 20) {
+    errors.maxRidesPerDay = 'Maximum rides per day must be an integer from 1 to 20';
+  }
+
+  return errors;
+};
+
 export const validateObjectIdParam = (params) => {
   const errors = {};
 

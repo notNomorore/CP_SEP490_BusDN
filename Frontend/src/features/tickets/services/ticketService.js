@@ -46,6 +46,11 @@ export const ticketService = {
     return response.data;
   },
 
+  quotePurchase: async (payload) => {
+    const response = await apiClient.post('/tickets/quote', payload);
+    return response.data;
+  },
+
   createPayment: async (payload) => {
     const response = await apiClient.post('/tickets/payments', payload);
     return response.data;

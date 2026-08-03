@@ -8,6 +8,12 @@ const normalizeParams = (params = {}) => Object.entries(params).reduce((acc, [ke
 }, {});
 
 export const fareOperationsService = {
+  getMonthlyPassSettings() {
+    return apiClient.get('/admin/fares/monthly-pass-settings');
+  },
+  updateMonthlyPassSettings(payload) {
+    return apiClient.put('/admin/fares/monthly-pass-settings', payload);
+  },
   listFareMatrix(params) {
     return apiClient.get('/admin/fares/matrix', { params: normalizeParams(params) });
   },
