@@ -205,13 +205,12 @@ export default function HomeScreen() {
             <ServiceTile icon="compass-outline" label="Explore" onPress={() => router.push('/search-routes')} />
             <ServiceTile icon="crosshairs-gps" label="Live Track" onPress={() => router.push('/live-tracking')} />
             <ServiceTile icon="ticket-outline" label="Buy Ticket" onPress={() => router.push('/buy-oneway-ticket')} />
-            <ServiceTile icon="calendar-month-outline" label="Monthly Pass" onPress={() => router.push('/buy-monthly-pass')} />
+            <ServiceTile icon="package-variant-closed" label="Đồ thất lạc" onPress={() => router.push('/my-lost-items' as Href)} />
             <ServiceTile icon="ticket-confirmation-outline" label="My Tickets" onPress={() => router.push('/my-tickets')} />
             <ServiceTile icon="bell-ring-outline" label="Alerts" onPress={() => router.push('/notifications')} />
             <ServiceTile icon="directions" label="Plan Trip" onPress={() => router.push('/plan-trip')} />
             <ServiceTile icon="history" label="History" onPress={() => router.push('/travel-history')} />
-            <ServiceTile icon="message-plus-outline" label="Send Feedback" onPress={() => router.push('/submit-feedback')} />
-            <ServiceTile icon="message-text-outline" label="My Feedback" onPress={() => router.push('/my-feedback' as Href)} />
+            <ServiceTile icon="message-text-outline" label="Góp ý" onPress={() => router.push('/my-feedback' as Href)} />
           </View>
 
           <View style={styles.sectionHeader}>

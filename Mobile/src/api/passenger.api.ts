@@ -278,6 +278,14 @@ export type FeedbackCategory =
   | 'PAYMENT_ISSUE'
   | 'OTHER';
 
+export type LostItemCategory =
+  | 'PERSONAL_BELONGINGS'
+  | 'ELECTRONICS'
+  | 'WALLET_DOCUMENTS'
+  | 'CLOTHING'
+  | 'BAGS_LUGGAGE'
+  | 'OTHER_ITEMS';
+
 export type PassengerFeedbackConversation = {
   id?: string;
   senderRole?: 'PASSENGER' | 'ADMIN' | string;
@@ -320,6 +328,78 @@ export type SubmitFeedbackPayload = {
   relatedTripId: string;
   tripCode?: string;
   routeName?: string;
+};
+
+export type LostItemAttachmentAsset = {
+  uri: string;
+  name?: string;
+  fileName?: string;
+  type?: string;
+  mimeType?: string;
+};
+
+export type LostItemTimelineRecord = {
+  label?: string;
+  status?: string;
+  message?: string;
+  timestamp?: string;
+};
+
+export type LostItemAdminNote = {
+  message?: string;
+  createdAt?: string;
+  responder?: {
+    fullName?: string;
+    email?: string;
+    role?: string;
+  };
+};
+
+export type LostItemCase = {
+  id: string;
+  _id?: string;
+  caseId?: string;
+  referenceNumber?: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  currentCaseStatus?: string;
+  relatedTripId?: string;
+  routeName?: string;
+  tripCode?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  attachments?: Array<{ originalName?: string; fileName?: string; filename?: string; path?: string; url?: string; mimeType?: string; size?: number }>;
+  lostItem?: {
+    itemName?: string;
+    itemCategory?: LostItemCategory | string;
+    itemDescription?: string;
+    lastSeenLocation?: string;
+    lostAt?: string;
+    recoveryStatus?: string;
+    foundAt?: string;
+    returnedAt?: string;
+  };
+  timeline?: LostItemTimelineRecord[];
+  administratorNotes?: LostItemAdminNote[];
+  collectionInstructions?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  lastUpdatedAt?: string;
+};
+
+export type SubmitLostItemPayload = {
+  itemName: string;
+  itemCategory: LostItemCategory;
+  itemDescription: string;
+  lastSeenLocation: string;
+  lostAt: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  relatedTripId?: string;
+  tripCode?: string;
+  routeName?: string;
+  attachments?: LostItemAttachmentAsset[];
 };
 
 export type PaymentOrder = {
@@ -574,6 +654,55 @@ export const passengerApi = {
       ...payload,
     }) as unknown;
     return unwrap<PassengerFeedback>(response);
+  },
+
+  submitLostItem: async (payload: SubmitLostItemPayload) => {
+    const formData = new FormData();
+    formData.append('type', 'LOST_ITEM');
+    formData.append('title', `Đồ thất lạc: ${payload.itemName.trim()}`);
+    formData.append('description', payload.itemDescription.trim());
+    formData.append('category', 'LOST_ITEM');
+    formData.append('priority', 'NORMAL');
+    formData.append('incidentAt', payload.lostAt);
+    formData.append('lostItem', JSON.stringify({
+      itemName: payload.itemName.trim(),
+      itemCategory: payload.itemCategory,
+      itemDescription: payload.itemDescription.trim(),
+      lastSeenLocation: payload.lastSeenLocation.trim(),
+      lostAt: payload.lostAt,
+    }));
+
+    if (payload.relatedTripId) formData.append('relatedTripId', payload.relatedTripId);
+    if (payload.tripCode) formData.append('tripCode', payload.tripCode);
+    if (payload.routeName) formData.append('routeName', payload.routeName);
+    if (payload.contactPhone) formData.append('contactPhone', payload.contactPhone.trim());
+    if (payload.contactEmail) formData.append('contactEmail', payload.contactEmail.trim());
+    (payload.attachments || []).forEach((asset, index) => {
+      formData.append('attachments', {
+        uri: asset.uri,
+        name: asset.fileName || asset.name || `lost-item-${index + 1}.jpg`,
+        type: asset.mimeType || asset.type || 'image/jpeg',
+      } as unknown as Blob);
+    });
+
+    const response = await apiClient.post('/customer-support/cases', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }) as unknown;
+    return unwrap<LostItemCase>(response);
+  },
+
+  getMyLostItems: async () => {
+    const response = await apiClient.get('/customer-support/lost-items/me') as unknown;
+    const envelope = response as ApiEnvelope<LostItemCase[]> & { meta?: { total?: number } };
+    return {
+      items: envelope.data || [],
+      meta: envelope.meta || { total: envelope.data?.length || 0 },
+    };
+  },
+
+  getLostItemDetail: async (caseId: string) => {
+    const response = await apiClient.get(`/customer-support/lost-items/${encodeURIComponent(caseId)}`) as unknown;
+    return unwrap<LostItemCase>(response);
   },
 
   getMyFeedback: async (params: { status?: string; search?: string; page?: number; limit?: number } = {}) => {

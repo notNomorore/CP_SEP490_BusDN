@@ -238,8 +238,8 @@ export default function ProfileScreen() {
             <ActionCard icon="history" label="Travel History" onPress={() => router.push('/travel-history')} />
             <ActionCard icon="heart-outline" label="Yêu thích" onPress={() => router.push('/favorites' as Href)} />
             <ActionCard icon="bell-ring-outline" label="Alerts" onPress={() => router.push('/notifications')} />
-            <ActionCard icon="message-plus-outline" label="Send Feedback" onPress={() => router.push('/submit-feedback')} />
-            <ActionCard icon="message-text-outline" label="My Feedback" onPress={() => router.push('/my-feedback' as Href)} />
+            <ActionCard icon="message-text-outline" label="Góp ý" onPress={() => router.push('/my-feedback' as Href)} />
+            <ActionCard icon="package-variant-closed" label="Đồ thất lạc" onPress={() => router.push('/my-lost-items' as Href)} />
             <ActionCard icon="lock-outline" label="Security" onPress={() => router.push('/change-password')} />
           </View>
 
