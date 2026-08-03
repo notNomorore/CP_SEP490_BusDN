@@ -3,6 +3,8 @@ import { HTTP_STATUS } from '../../constants/index.js';
 import { CustomError } from '../../middleware/errorHandler.js';
 import FleetBus from '../admin/FleetBus.js';
 import TripSchedule from '../admin/TripSchedule.js';
+import OperationNotification from '../scheduleOperations/OperationNotification.js';
+import VehicleInspection from '../scheduleOperations/VehicleInspection.js';
 import { createBroadcastNotification } from '../systemNotifications/systemNotification.service.js';
 import Trip from '../fleetOperations/Trip.js';
 import Vehicle from '../fleetOperations/Vehicle.js';
@@ -33,7 +35,7 @@ const mapFleetBusStatus = (status) => {
 };
 
 const getVehicleLabel = (vehicle = {}) => (
-  vehicle.vehicleCode || vehicle.busCode || vehicle.plateNumber || vehicle._id?.toString()
+  vehicle.plateNumber || vehicle.vehicleCode || vehicle.busCode || vehicle._id?.toString()
 );
 
 const serviceDateBounds = (serviceDate) => {
@@ -333,9 +335,47 @@ export class VehicleReassignmentService {
     return schedule.toObject();
   }
 
+  static async resetReportedInspectionForReplacement(scheduleId, replacement) {
+    if (!scheduleId || !replacement?._id) return null;
+
+    return VehicleInspection.findOneAndUpdate(
+      {
+        trip: scheduleId,
+        status: 'ISSUE_REPORTED',
+      },
+      {
+        $set: {
+          vehicle: replacement._id,
+          status: 'IN_PROGRESS',
+          checklist: {
+            tires: false,
+            brakes: false,
+            lights: false,
+            fuelOrBattery: false,
+            safetyEquipment: false,
+            cleanliness: false,
+          },
+          issueCategory: null,
+          issueDescription: '',
+          startedAt: new Date(),
+          confirmedAt: null,
+          reportedAt: null,
+        },
+      },
+      { new: true }
+    ).lean();
+  }
+
   static async updateVehicleStatuses({ target, replacement, payload }) {
     const oldVehicleId = target.oldVehicleId;
-    const newStatus = target.kind === 'trip' && ['active', 'delayed', 'incident', 'paused'].includes(target.trip.status)
+    const targetIsRunning = (
+      target.kind === 'trip'
+      && ['active', 'delayed', 'incident', 'paused'].includes(target.trip.status)
+    ) || (
+      target.kind === 'schedule'
+      && target.schedule.status === 'IN_PROGRESS'
+    );
+    const newStatus = targetIsRunning
       ? 'active'
       : 'assigned';
     const oldStatus = OLD_VEHICLE_MAINTENANCE_REASONS.has(payload.reason) ? 'maintenance' : 'inactive';
@@ -380,6 +420,60 @@ export class VehicleReassignmentService {
     return notifications;
   }
 
+  static async notifyTripStaffVehicleReassigned({ target, replacement, oldVehicle, payload, adminId, sourceId }) {
+    const schedule = target.schedule || (
+      target.trip?.scheduleId ? await TripSchedule.findById(target.trip.scheduleId).lean() : null
+    );
+    const tripId = target.schedule?._id || target.trip?._id || schedule?._id;
+    const routeId = target.routeId || schedule?.routeId || null;
+    const targetUsers = [...new Set([
+      schedule?.driver?.userId,
+      schedule?.assistant?.userId,
+      target.trip?.driverId,
+      target.trip?.assistantId,
+    ].map((id) => String(id || '').trim()).filter(Boolean))];
+
+    if (!tripId || !targetUsers.length) return null;
+
+    return OperationNotification.findOneAndUpdate(
+      {
+        sourceType: 'TRIP_VEHICLE_REASSIGNED_STAFF',
+        sourceId: sourceId || tripId,
+      },
+      {
+        $set: {
+          title: 'Xe thay thế đã được phân phối',
+          message: [
+            `Chuyến ${schedule?.scheduleCode || target.trip?.tripCode || tripId} tiếp tục vận hành bằng xe ${getVehicleLabel(replacement)}.`,
+            `Xe cũ: ${getVehicleLabel(oldVehicle)}.`,
+            payload.note ? `Ghi chú điều hành: ${payload.note}` : '',
+          ].filter(Boolean).join('\n'),
+          category: 'EMERGENCY_INSTRUCTION',
+          priority: 'CRITICAL',
+          targetRoles: ['DRIVER', 'BUS_ASSISTANT'],
+          targetUsers,
+          route: routeId,
+          trip: schedule?._id || (target.kind === 'schedule' ? target.schedule._id : null),
+          vehicle: replacement._id,
+          activeFrom: new Date(),
+          expiresAt: null,
+          status: 'ACTIVE',
+          createdBy: adminId,
+          sourceType: 'TRIP_VEHICLE_REASSIGNED_STAFF',
+          sourceId: sourceId || tripId,
+          metadata: {
+            notificationKind: 'TRIP_VEHICLE_REASSIGNED',
+            oldVehicleId: oldVehicle?._id || null,
+            replacementVehicleId: replacement._id,
+            scheduleCode: schedule?.scheduleCode || '',
+            reason: payload.reason,
+          },
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+  }
+
   static async assignReplacementVehicle(tripId, replacementVehicleId, payload, adminId, io = null) {
     const target = await this.resolveTargetTrip(tripId);
     this.assertReplaceable(target);
@@ -410,15 +504,15 @@ export class VehicleReassignmentService {
         { new: true }
       ).lean();
 
-      const shouldUpdateSchedule = !target.trip.actualStartTime
-        || target.trip.status === 'scheduled'
-        || Boolean(payload.updateSchedule);
-      if (shouldUpdateSchedule && target.trip.scheduleId) {
+      if (target.trip.scheduleId) {
         updatedSchedule = await this.syncScheduleVehicle(target.trip.scheduleId, replacement, adminId, payload.reason);
       }
     } else {
       updatedSchedule = await this.syncScheduleVehicle(target.schedule._id, replacement, adminId, payload.reason);
     }
+
+    const inspectionScheduleId = updatedSchedule?._id || target.schedule?._id || target.trip?.scheduleId;
+    const resetInspection = await this.resetReportedInspectionForReplacement(inspectionScheduleId, replacement);
 
     await this.updateVehicleStatuses({ target, replacement, payload });
 
@@ -440,6 +534,14 @@ export class VehicleReassignmentService {
       replacement,
       io,
     });
+    const staffOperationNotification = await this.notifyTripStaffVehicleReassigned({
+      target,
+      replacement,
+      oldVehicle,
+      payload,
+      adminId,
+      sourceId: log._id,
+    });
 
     const socketPayload = {
       tripId: target.trip?._id?.toString() || null,
@@ -459,6 +561,7 @@ export class VehicleReassignmentService {
       note: payload.note,
       changedBy: adminId?.toString(),
       changedAt: log.changedAt,
+      inspectionReset: Boolean(resetInspection),
     };
 
     io?.to('fleet:operations').emit(SOCKET_EVENTS.TRIP_VEHICLE_REASSIGNED, socketPayload);
@@ -476,7 +579,12 @@ export class VehicleReassignmentService {
         targetAudience: notification.targetAudience,
         resolvedCount: notification.deliverySummary?.resolvedCount || 0,
       })),
+      staffOperationNotification: staffOperationNotification ? {
+        id: staffOperationNotification._id?.toString(),
+        resolvedCount: staffOperationNotification.targetUsers?.length || 0,
+      } : null,
       event: socketPayload,
+      inspection: resetInspection,
     };
   }
 }

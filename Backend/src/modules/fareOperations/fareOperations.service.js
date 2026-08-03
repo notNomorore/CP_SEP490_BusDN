@@ -5,6 +5,7 @@ import User from '../auth/User.js';
 import FareMatrix from './FareMatrix.js';
 import MonthlyPassPricing from './MonthlyPassPricing.js';
 import PriorityDiscount from './PriorityDiscount.js';
+import MonthlyPassSettings, { MONTHLY_PASS_SETTINGS_KEY, DEFAULT_MONTHLY_PASS_DAILY_RIDE_LIMIT } from './MonthlyPassSettings.js';
 import { assertPassengerCanPurchase } from '../passengerCompliance/passengerCompliance.service.js';
 
 const getActorId = (actor) => actor?.userId || actor?._id || null;
@@ -188,7 +189,51 @@ const getActivePriorityDiscount = async (passengerId, baseAmount, date = new Dat
   return { discountAmount, discount, priorityType };
 };
 
+const normalizeMonthlyPassSettings = (settings) => ({
+  maxRidesPerDay: Number(settings?.maxRidesPerDay || DEFAULT_MONTHLY_PASS_DAILY_RIDE_LIMIT),
+  updatedAt: settings?.updatedAt || null,
+  updatedBy: settings?.updatedBy || null,
+});
+
 export class FareOperationsService {
+  static async getMonthlyPassSettings() {
+    const settings = await MonthlyPassSettings.findOneAndUpdate(
+      { settingsKey: MONTHLY_PASS_SETTINGS_KEY },
+      {
+        $setOnInsert: {
+          settingsKey: MONTHLY_PASS_SETTINGS_KEY,
+          maxRidesPerDay: DEFAULT_MONTHLY_PASS_DAILY_RIDE_LIMIT,
+        },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    return normalizeMonthlyPassSettings(settings);
+  }
+
+  static async updateMonthlyPassSettings(payload, actor) {
+    const maxRidesPerDay = Number(payload.maxRidesPerDay);
+    if (!Number.isInteger(maxRidesPerDay) || maxRidesPerDay < 1 || maxRidesPerDay > 20) {
+      throw new CustomError('Maximum rides per day must be an integer from 1 to 20', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const settings = await MonthlyPassSettings.findOneAndUpdate(
+      { settingsKey: MONTHLY_PASS_SETTINGS_KEY },
+      {
+        $set: {
+          maxRidesPerDay,
+          updatedBy: getActorId(actor),
+        },
+        $setOnInsert: {
+          settingsKey: MONTHLY_PASS_SETTINGS_KEY,
+        },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    return normalizeMonthlyPassSettings(settings);
+  }
+
   static listFareMatrix(query) {
     return paginate(FareMatrix, buildListFilter(query), query);
   }
@@ -422,5 +467,7 @@ export class FareOperationsService {
 
 export const calculateOneWayFare = FareOperationsService.calculateOneWayFare;
 export const calculateMonthlyPassPrice = FareOperationsService.calculateMonthlyPassPrice;
+export const calculatePriorityDiscount = getActivePriorityDiscount;
+export const getMonthlyPassSettings = FareOperationsService.getMonthlyPassSettings;
 
 export default FareOperationsService;

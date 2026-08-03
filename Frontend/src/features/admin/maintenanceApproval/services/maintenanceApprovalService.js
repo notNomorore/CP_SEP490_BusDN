@@ -16,6 +16,14 @@ export const maintenanceApprovalService = {
     return apiClient.patch(`/admin/maintenance/tasks/${id}/approve`, payload);
   },
 
+  startTask(id, payload = {}) {
+    return apiClient.patch(`/admin/maintenance/tasks/${id}/start`, payload);
+  },
+
+  completeTask(id, payload = {}) {
+    return apiClient.patch(`/admin/maintenance/tasks/${id}/complete`, payload);
+  },
+
   rejectTask(id, payload) {
     return apiClient.patch(`/admin/maintenance/tasks/${id}/reject`, payload);
   },

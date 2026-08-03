@@ -197,6 +197,7 @@ function App() {
             <Route path="staff-performance" element={<StaffPerformancePage />} />
             <Route path="priority-verification" element={<AdminPriorityVerificationPage />} />
             <Route path="customer-support" element={<AdminCustomerSupportPage />} />
+            <Route path="lost-items" element={<AdminLostItemCasesPage />} />
             <Route path="system-notifications" element={<SystemNotificationsPage />} />
             <Route path="promotions" element={<PromotionManagementPage />} />
             <Route path="promotions/statistics" element={<PromotionStatisticsPage />} />

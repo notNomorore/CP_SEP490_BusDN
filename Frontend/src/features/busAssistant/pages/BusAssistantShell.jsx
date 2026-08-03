@@ -6,6 +6,7 @@ import {
   BellRing,
   CalendarDays,
   FileWarning,
+  ClipboardCheck,
   LogOut,
   MessageCircle,
   Pencil,
@@ -29,14 +30,12 @@ const navItems = [
   { to: '/bus-assistant/operation-chat', labelKey: 'operationChat', label: 'Nhóm trò chuyện', icon: MessageCircle },
   { to: '/bus-assistant/validate-ticket', labelKey: 'validateQr', icon: QrCode },
   { to: '/bus-assistant/walkin-ticket', labelKey: 'walkInTicket', icon: ReceiptText },
-  { to: '/bus-assistant/incident-reports', labelKey: 'incidentReports', label: 'Báo cáo sự cố', icon: FileWarning },
   { to: '/bus-assistant/shift-revenue', labelKey: 'shiftRevenue', icon: Banknote },
 ];
 
 const navItemOrder = [
   '/bus-assistant/validate-ticket',
   '/bus-assistant/walkin-ticket',
-  '/bus-assistant/incident-reports',
   '/bus-assistant/shift-revenue',
   '/bus-assistant/assigned-trips',
   '/bus-assistant/shift-schedule',

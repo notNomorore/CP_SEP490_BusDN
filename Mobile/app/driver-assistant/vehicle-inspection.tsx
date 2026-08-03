@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, type Href, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import scheduleOperationsApi from '@/api/scheduleOperations.api';
@@ -11,7 +11,7 @@ import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
 import type { AssignedTrip, VehicleInspection } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
-import { formatTime, getTripStatus } from '@/utils/scheduleOperations';
+import { formatTime, getTripStatus, getTripVehicleLabel, getVehicleLabel, hasVehicleReplacement } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
 type ChecklistKey = 'tires' | 'brakes' | 'lights' | 'fuelOrBattery' | 'safetyEquipment' | 'cleanliness';
@@ -51,7 +51,8 @@ function parseTripParam(value: unknown): AssignedTrip | null {
 export default function VehicleInspectionScreen() {
   const params = useLocalSearchParams<{ trip?: string; assignmentId?: string }>();
   const user = useAuthStore((state) => state.user);
-  const trip = useMemo(() => parseTripParam(params.trip), [params.trip]);
+  const initialTrip = useMemo(() => parseTripParam(params.trip), [params.trip]);
+  const [trip, setTrip] = useState<AssignedTrip | null>(initialTrip);
   const assignmentId = trip?.id || params.assignmentId || '';
   const [checklist, setChecklist] = useState<Record<ChecklistKey, boolean>>({
     ...emptyChecklist,
@@ -61,6 +62,25 @@ export default function VehicleInspectionScreen() {
   const [issueCategory, setIssueCategory] = useState('OTHER');
   const [issueDescription, setIssueDescription] = useState('');
   const [processingAction, setProcessingAction] = useState('');
+
+  const refreshTrip = useCallback(async () => {
+    if (!assignmentId) return;
+    try {
+      const updatedTrip = await scheduleOperationsApi.getAssignedTripDetail(assignmentId);
+      setTrip(updatedTrip);
+      setInspection(updatedTrip.inspection);
+      setChecklist({
+        ...emptyChecklist,
+        ...(updatedTrip.inspection?.checklist || {}),
+      });
+    } catch {
+      // Keep the navigation payload visible when refresh is temporarily unavailable.
+    }
+  }, [assignmentId]);
+
+  useEffect(() => {
+    void refreshTrip();
+  }, [refreshTrip]);
 
   const allChecked = checklistItems.every((item) => checklist[item.key]);
   const inspectionStatus = inspection?.status || 'NOT_STARTED';
@@ -187,10 +207,22 @@ export default function VehicleInspectionScreen() {
           <Text style={styles.routeName}>{trip?.route?.name || 'Unnamed route'}</Text>
           <View style={styles.summaryGrid}>
             <Text style={styles.summaryText}>Departure: {formatTime(trip?.scheduledStart)}</Text>
-            <Text style={styles.summaryText}>Vehicle: {trip?.vehicle?.code || trip?.vehicle?.plateNumber || 'N/A'}</Text>
+            <Text style={styles.summaryText}>Vehicle: {getTripVehicleLabel(trip)}</Text>
             <Text style={styles.summaryText}>Inspection: {inspectionStatus}</Text>
           </View>
         </View>
+
+        {hasVehicleReplacement(trip) ? (
+          <View style={styles.replacementNotice}>
+            <MaterialCommunityIcons color={colors.primary} name="swap-horizontal-bold" size={19} />
+            <View style={styles.replacementTextWrap}>
+              <Text style={styles.replacementTitle}>Xe thay thế đã được phân phối</Text>
+              <Text style={styles.replacementText}>
+                Xe cũ {getVehicleLabel(trip?.vehicleReplacement?.previousVehicle)} đang bảo trì. Hãy kiểm tra lại xe {getVehicleLabel(trip?.vehicleReplacement?.currentVehicle || trip?.vehicle)} trước khi tiếp tục.
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         {isNotStarted ? (
           <View style={styles.section}>
@@ -241,9 +273,21 @@ export default function VehicleInspectionScreen() {
               </>
             ) : null}
             {isIssueReported ? (
-              <Text style={styles.errorText}>
-                Da bao loi xe. Phuong tien duoc chuyen sang trang thai bao tri. {inspection?.issueDescription || ''}
-              </Text>
+              <>
+                <Text style={styles.errorText}>
+                  Da bao loi xe. Phuong tien duoc chuyen sang trang thai bao tri. {inspection?.issueDescription || ''}
+                </Text>
+                <AppButton
+                  title="Tai lai trang thai xe"
+                  loading={processingAction === 'refresh'}
+                  onPress={async () => {
+                    setProcessingAction('refresh');
+                    await refreshTrip();
+                    setProcessingAction('');
+                  }}
+                  variant="secondary"
+                />
+              </>
             ) : null}
 
             <View style={styles.checklist}>
@@ -349,6 +393,19 @@ const styles = StyleSheet.create({
   routeName: { color: colors.muted, fontSize: 13, fontWeight: '800' },
   summaryGrid: { gap: 4, marginTop: 4 },
   summaryText: { color: colors.text, fontSize: 13, fontWeight: '800' },
+  replacementNotice: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#b8e8d0',
+    backgroundColor: '#e8f8ef',
+    padding: 14,
+  },
+  replacementTextWrap: { flex: 1, gap: 3 },
+  replacementTitle: { color: colors.primary, fontSize: 14, fontWeight: '900' },
+  replacementText: { color: colors.muted, fontSize: 12, lineHeight: 18, fontWeight: '700' },
   section: { gap: 12, marginTop: 18, borderRadius: 22, backgroundColor: colors.card, padding: 16 },
   sectionHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
   sectionTitleRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },

@@ -47,6 +47,7 @@ const Register = () => {
   const passedRules = passwordRules.filter((rule) => rule.test(password));
   const isPasswordValid = passedRules.length === passwordRules.length;
   const passwordsMatch = password === confirmPassword;
+  const showPasswordFollowup = password.length > 0;
 
   // Handle personal info submission
   const handlePersonalInfoSubmit = async (e) => {
@@ -214,7 +215,8 @@ const Register = () => {
             </label>
 
             {/* Password Rules */}
-            <div className="space-y-2">
+            {showPasswordFollowup ? (
+              <div className="space-y-2">
               <p className="text-xs font-semibold text-on-surface-variant">
                 Password must include:
               </p>
@@ -238,10 +240,12 @@ const Register = () => {
                   );
                 })}
               </div>
-            </div>
+              </div>
+            ) : null}
 
             {/* Confirm Password */}
-            <label className="block space-y-2">
+            {showPasswordFollowup ? (
+              <label className="block space-y-2">
               <span className="text-sm font-semibold text-on-surface">
                 Confirm password
               </span>
@@ -255,7 +259,8 @@ const Register = () => {
               {confirmPassword && !passwordsMatch && (
                 <p className="text-xs text-red-600">Passwords do not match</p>
               )}
-            </label>
+              </label>
+            ) : null}
 
             {/* Submit Button */}
             <button

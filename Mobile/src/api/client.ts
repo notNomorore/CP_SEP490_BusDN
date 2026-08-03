@@ -6,6 +6,12 @@ import { config } from '@/constants/config';
 export const AUTH_TOKEN_KEY = 'authToken';
 export const AUTH_USER_KEY = 'authUser';
 
+let currentAuthToken: string | null = null;
+
+export const setApiAuthToken = (token: string | null) => {
+  currentAuthToken = token;
+};
+
 export const apiClient = axios.create({
   baseURL: config.apiBaseUrl,
   headers: {
@@ -14,7 +20,7 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use(async (requestConfig) => {
-  const token = await authStorage.getItem(AUTH_TOKEN_KEY);
+  const token = currentAuthToken || await authStorage.getItem(AUTH_TOKEN_KEY);
 
   if (token) {
     requestConfig.headers.Authorization = `Bearer ${token}`;
@@ -37,6 +43,7 @@ apiClient.interceptors.response.use(
     ].some((path) => requestUrl.includes(path));
 
     if (error.response?.status === 401 && !isPublicAuthRequest) {
+      setApiAuthToken(null);
       await authStorage.deleteItem(AUTH_TOKEN_KEY);
       await authStorage.deleteItem(AUTH_USER_KEY);
     }

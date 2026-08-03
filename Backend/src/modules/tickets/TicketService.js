@@ -12,13 +12,12 @@ import PaymentOrder from './PaymentOrder.js';
 import PayOSService from './PayOSService.js';
 import Promotion from '../promotions/Promotion.js';
 import PromotionUsage from '../promotions/PromotionUsage.js';
-
-const PASSENGER_TYPES = new Set(['STANDARD', 'STUDENT', 'PRIORITY']);
-const MONTHLY_PASS_PRICES = {
-  STANDARD: 250000,
-  STUDENT: 120000,
-  PRIORITY: 0,
-};
+import TripSchedule from '../admin/TripSchedule.js';
+import {
+  calculateMonthlyPassPrice,
+  calculatePriorityDiscount,
+  getMonthlyPassSettings,
+} from '../fareOperations/fareOperations.service.js';
 
 const parseServiceDateParts = (value) => {
   const dateMatch = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -125,6 +124,50 @@ const normalizeDate = (value) => {
   return date;
 };
 
+const getVietnamMonthParts = () => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(new Date()).reduce((result, part) => {
+    result[part.type] = part.value;
+    return result;
+  }, {});
+
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+  };
+};
+
+const normalizeMonthlyPassStartMonth = (payload = {}) => {
+  const monthText = String(payload.startMonth || payload.startDate || '').trim();
+  const match = monthText.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/);
+  if (!match) {
+    throw new CustomError('Start Month khong hop le', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = match[3] ? Number(match[3]) : 1;
+  if (!year || month < 1 || month > 12 || day !== 1) {
+    throw new CustomError('Start Month khong hop le', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  const current = getVietnamMonthParts();
+  const monthOffset = (year - current.year) * 12 + (month - current.month);
+  if (monthOffset < 0 || monthOffset > 5) {
+    throw new CustomError('Chi duoc dat ve thang tu thang hien tai den 5 thang tiep theo', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  const startDate = new Date(year, month - 1, 1);
+  startDate.setHours(0, 0, 0, 0);
+  const expiryDate = new Date(year, month, 0);
+  expiryDate.setHours(23, 59, 59, 999);
+
+  return { startDate, expiryDate };
+};
+
 const formatVietnamOffsetDateTime = (date) => {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Ho_Chi_Minh',
@@ -162,6 +205,14 @@ const toValidationDateRange = (dateValue) => {
     start: new Date(`${dateText}T00:00:00+07:00`),
     end: new Date(`${dateText}T23:59:59.999+07:00`),
   };
+};
+
+const getServerDayRange = (date = new Date()) => {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(date);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
 };
 
 const buildTicketValidationInfo = (ticket, route) => ({
@@ -227,6 +278,115 @@ const buildMonthlyPassValidationInfo = (monthlyPass) => ({
   },
 });
 
+const buildAppliedPriorityDiscount = ({ discount, priorityType, discountAmount }) => {
+  if (!discount || !discountAmount) {
+    return null;
+  }
+
+  return {
+    type: 'PRIORITY',
+    priorityType,
+    label: priorityType === 'STUDENT' ? 'Student Discount' : 'Priority Discount Applied',
+    discountPercent: Number(discount.discountPercent || 0),
+    discountAmount,
+    maxDiscountAmount: discount.maxDiscountAmount ?? null,
+    policyId: discount._id,
+  };
+};
+
+const deriveStoredPassengerType = (priorityType) => {
+  if (priorityType === 'STUDENT') {
+    return 'STUDENT';
+  }
+
+  return priorityType ? 'PRIORITY' : 'STANDARD';
+};
+
+const SCHEDULE_STATUSES_ALLOWED_FOR_PURCHASE = ['PLANNED', 'ASSIGNED', 'SCHEDULED', 'BOARDING'];
+const SCHEDULE_STATUSES_BLOCKED_FOR_PURCHASE = ['COMPLETED', 'DEPARTED', 'CANCELLED', 'IN_PROGRESS'];
+
+const getVietnamDateString = (date = new Date()) => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Ho_Chi_Minh',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+}).format(date);
+
+const getVietnamTimeString = (date = new Date()) => new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Ho_Chi_Minh',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+}).format(date);
+
+const toVietnamDayBounds = (dateText) => ({
+  start: new Date(`${dateText}T00:00:00+07:00`),
+  end: new Date(`${dateText}T23:59:59.999+07:00`),
+});
+
+const isScheduleStatusPurchasable = (status) => {
+  const normalized = String(status || '').trim().toUpperCase();
+  if (SCHEDULE_STATUSES_BLOCKED_FOR_PURCHASE.includes(normalized)) return false;
+  return SCHEDULE_STATUSES_ALLOWED_FOR_PURCHASE.includes(normalized);
+};
+
+const formatPurchasableSchedule = (schedule) => ({
+  id: schedule._id?.toString(),
+  scheduleId: schedule._id?.toString(),
+  scheduleCode: schedule.scheduleCode,
+  routeId: schedule.routeId?._id?.toString?.() || schedule.routeId?.toString?.() || '',
+  routeCode: schedule.routeCode,
+  routeName: schedule.routeName,
+  direction: schedule.direction,
+  serviceDate: getVietnamDateString(schedule.serviceDate),
+  departureTime: schedule.departureTime,
+  expectedArrivalTime: schedule.expectedArrivalTime,
+  status: schedule.status,
+  statusLabel: String(schedule.status || '').toUpperCase() === 'BOARDING' ? 'Boarding' : 'Scheduled',
+  vehicle: schedule.vehicle ? {
+    busId: schedule.vehicle.busId?.toString?.() || '',
+    busCode: schedule.vehicle.busCode || '',
+    plateNumber: schedule.vehicle.plateNumber || '',
+  } : null,
+});
+
+const buildPricingResponse = ({
+  originalPrice,
+  priorityDiscountAmount = 0,
+  promotionDiscountAmount = 0,
+  finalPrice,
+  appliedDiscount = null,
+  promotion = null,
+  dailyRideLimit,
+}) => {
+  const discountAmount = Math.max(Number(priorityDiscountAmount || 0), 0)
+    + Math.max(Number(promotionDiscountAmount || 0), 0);
+  const result = {
+    originalPrice,
+    priorityDiscountAmount,
+    promotionDiscountAmount,
+    discountAmount,
+    finalPrice,
+    appliedDiscount,
+  };
+
+  if (promotion?.promotionCode) {
+    result.appliedPromotion = {
+      promotionCode: promotion.promotionCode,
+      promotionName: promotion.promotionName,
+      discountType: promotion.discountType,
+      discountValue: promotion.discountValue,
+      discountAmount: promotionDiscountAmount,
+    };
+  }
+
+  if (dailyRideLimit !== undefined) {
+    result.dailyRideLimit = dailyRideLimit;
+  }
+
+  return result;
+};
+
 export class TicketService {
   static async findRoute(routeId) {
     try {
@@ -234,6 +394,94 @@ export class TicketService {
     } catch {
       return null;
     }
+  }
+
+  static async listPurchasableTripSchedules(payload = {}) {
+    const route = await this.findRoute(payload.routeId);
+    if (!route) {
+      throw new CustomError('Tuyen xe da chon khong ton tai', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const serviceDateText = String(payload.serviceDate || '').slice(0, 10);
+    if (!parseServiceDateParts(serviceDateText)) {
+      throw new CustomError('Ngay khoi hanh khong hop le', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const todayText = getVietnamDateString();
+    if (serviceDateText < todayText) {
+      return {
+        schedules: [],
+        count: 0,
+        serverTime: new Date().toISOString(),
+        serverDate: todayText,
+      };
+    }
+
+    const direction = String(payload.direction || 'OUTBOUND').trim().toUpperCase();
+    const { start, end } = toVietnamDayBounds(serviceDateText);
+    const now = new Date();
+    const serverTime = getVietnamTimeString(now);
+    const schedules = await TripSchedule.find({
+      routeId: route._id,
+      direction,
+      serviceDate: { $gte: start, $lte: end },
+      departureTime: { $regex: /^\d{2}:\d{2}$/ },
+      status: { $nin: SCHEDULE_STATUSES_BLOCKED_FOR_PURCHASE },
+    })
+      .sort({ departureTime: 1 })
+      .lean();
+
+    const purchasable = schedules.filter((schedule) => {
+      if (!isScheduleStatusPurchasable(schedule.status)) return false;
+      return serviceDateText > todayText || String(schedule.departureTime || '') >= serverTime;
+    });
+
+    return {
+      schedules: purchasable.map(formatPurchasableSchedule),
+      count: purchasable.length,
+      serverTime: now.toISOString(),
+      serverClock: serverTime,
+      serverDate: todayText,
+    };
+  }
+
+  static async findPurchasableTripSchedule(route, { serviceDate, departureTime, direction }) {
+    const serviceDateText = String(serviceDate || '').slice(0, 10);
+    if (!parseServiceDateParts(serviceDateText)) {
+      throw new CustomError('Ngay khoi hanh khong hop le', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const todayText = getVietnamDateString();
+    const serverTime = getVietnamTimeString();
+    const departureDate = buildVietnamDepartureDate(serviceDateText, departureTime);
+    if (!departureDate) {
+      throw new CustomError('Ngay di hoac gio khoi hanh khong hop le', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    if (serviceDateText < todayText || (serviceDateText === todayText && String(departureTime || '') < serverTime)) {
+      throw new CustomError(
+        'Khong the mua ve cho chuyen xe da khoi hanh. Vui long chon chuyen hop le.',
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    const { start, end } = toVietnamDayBounds(serviceDateText);
+    const schedule = await TripSchedule.findOne({
+      routeId: route._id,
+      direction,
+      serviceDate: { $gte: start, $lte: end },
+      departureTime,
+      status: { $nin: SCHEDULE_STATUSES_BLOCKED_FOR_PURCHASE },
+    }).lean();
+
+    if (!schedule || !isScheduleStatusPurchasable(schedule.status)) {
+      throw new CustomError(
+        'Chuyen xe da chon khong con mo ban ve. Vui long chon chuyen khac.',
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    return { schedule, departureDate, serviceDateText };
   }
 
   static findStop(route, stopName) {
@@ -525,6 +773,112 @@ export class TicketService {
     };
   }
 
+  static async quoteTicketPurchase(userId, payload = {}) {
+    const ticketType = String(payload.ticketType || 'ONE_WAY').trim().toUpperCase();
+
+    if (ticketType === 'ONE_WAY') {
+      const route = await this.findRoute(payload.routeId);
+      if (!route) {
+        throw new CustomError('Chuyen di hoac tuyen xe da chon khong ton tai', HTTP_STATUS.NOT_FOUND);
+      }
+
+      const direction = String(payload.direction || 'OUTBOUND').trim().toUpperCase();
+      if (payload.serviceDate && payload.departureTime) {
+        await this.findPurchasableTripSchedule(route, {
+          serviceDate: payload.serviceDate,
+          departureTime: payload.departureTime,
+          direction,
+        });
+      }
+      const directionStops = route.directions?.[direction]?.stops || route.stops || [];
+      const directionalRoute = { ...route, stops: directionStops };
+      const startStop = this.findStop(directionalRoute, payload.departureLocation);
+      const endStop = this.findStop(directionalRoute, payload.destinationLocation);
+      if (!startStop || !endStop || startStop.order >= endStop.order) {
+        throw new CustomError('Diem di hoac diem den khong hop le', HTTP_STATUS.BAD_REQUEST);
+      }
+
+      const originalPrice = this.calculatePrice(directionalRoute, startStop, endStop);
+      const departureDate = payload.serviceDate && payload.departureTime
+        ? buildVietnamDepartureDate(payload.serviceDate, payload.departureTime)
+        : new Date();
+      const priority = await calculatePriorityDiscount(userId, originalPrice, departureDate || new Date());
+      const priorityDiscountAmount = Math.max(Number(priority.discountAmount || 0), 0);
+      const appliedDiscount = buildAppliedPriorityDiscount({
+        discount: priority.discount,
+        priorityType: priority.priorityType,
+        discountAmount: priorityDiscountAmount,
+      });
+      const priceAfterPriority = Math.max(originalPrice - priorityDiscountAmount, 0);
+      const promotion = await this.applyPromotionToAmount(userId, {
+        promotionCode: payload.promotionCode,
+        ticketType: 'ONE_WAY',
+        routeId: route._id,
+        amount: priceAfterPriority,
+        strict: Boolean(payload.promotionCode),
+      });
+      const promotionDiscountAmount = Math.max(Number(promotion.discountAmount || 0), 0);
+
+      return buildPricingResponse({
+        originalPrice,
+        priorityDiscountAmount,
+        promotionDiscountAmount,
+        finalPrice: promotion.finalAmount,
+        appliedDiscount,
+        promotion,
+      });
+    }
+
+    if (ticketType === 'MONTHLY_PASS') {
+      const selectedRoute = payload.routeId ? await this.findRoute(payload.routeId) : null;
+      if (payload.routeId && !selectedRoute) {
+        throw new CustomError('Tuyen xe da chon khong ton tai', HTTP_STATUS.NOT_FOUND);
+      }
+
+      const { startDate, expiryDate } = normalizeMonthlyPassStartMonth(payload);
+      const monthlyPricingType = selectedRoute ? 'ROUTE_PASS' : 'NETWORK_PASS';
+      const pricing = await calculateMonthlyPassPrice({
+        routeId: selectedRoute?._id,
+        passType: monthlyPricingType,
+        passengerId: userId,
+        purchaseDate: startDate,
+      });
+      const originalPrice = pricing.basePrice;
+      const priorityDiscountAmount = Math.max(Number(pricing.discountAmount || 0), 0);
+      const appliedDiscount = buildAppliedPriorityDiscount({
+        discount: pricing.priorityDiscount,
+        priorityType: pricing.priorityType,
+        discountAmount: priorityDiscountAmount,
+      });
+      const priceAfterPriority = Math.max(originalPrice - priorityDiscountAmount, 0);
+      const promotion = await this.applyPromotionToAmount(userId, {
+        promotionCode: payload.promotionCode,
+        ticketType: 'MONTHLY_PASS',
+        routeId: selectedRoute?._id,
+        amount: priceAfterPriority,
+        strict: Boolean(payload.promotionCode),
+      });
+      const promotionDiscountAmount = Math.max(Number(promotion.discountAmount || 0), 0);
+      const settings = await getMonthlyPassSettings();
+
+      return {
+        ...buildPricingResponse({
+          originalPrice,
+          priorityDiscountAmount,
+          promotionDiscountAmount,
+          finalPrice: promotion.finalAmount,
+          appliedDiscount,
+          promotion,
+          dailyRideLimit: settings.maxRidesPerDay,
+        }),
+        startDate,
+        expiryDate,
+      };
+    }
+
+    throw new CustomError('Loai ve khong hop le', HTTP_STATUS.BAD_REQUEST);
+  }
+
   static async recordPromotionUsage({ promotionId, userId, ticketId, routeId, ticketType, paymentMethod, discountAmount, originalAmount, finalAmount }) {
     if (!promotionId || !discountAmount) {
       return;
@@ -585,9 +939,16 @@ export class TicketService {
     }
 
     const directionStops = route.directions?.[direction]?.stops || route.stops || [];
+    if (directionStops.length < 2) {
+      throw new CustomError('Chiá»u tuyáº¿n khÃ´ng cÃ³ Ä‘á»§ Ä‘iá»ƒm dá»«ng Ä‘á»ƒ táº¡o vÃ©', HTTP_STATUS.BAD_REQUEST);
+    }
     const directionalRoute = { ...route, stops: directionStops };
-    const startStop = this.findStop(directionalRoute, payload.departureLocation);
-    const endStop = this.findStop(directionalRoute, payload.destinationLocation);
+    const startStop = payload.departureLocation
+      ? this.findStop(directionalRoute, payload.departureLocation)
+      : directionStops[0];
+    const endStop = payload.destinationLocation
+      ? this.findStop(directionalRoute, payload.destinationLocation)
+      : directionStops[directionStops.length - 1];
 
     if (!startStop || !endStop) {
       throw new CustomError('Diem di hoac diem den khong thuoc tuyen da chon', HTTP_STATUS.BAD_REQUEST);
@@ -597,44 +958,45 @@ export class TicketService {
       throw new CustomError('Điểm đi hoặc điểm đến không hợp lệ', HTTP_STATUS.BAD_REQUEST);
     }
 
-    const passengerType = String(payload.passengerType || 'STANDARD').trim().toUpperCase();
-    if (!PASSENGER_TYPES.has(passengerType)) {
-      throw new CustomError('Loại vé không hợp lệ', HTTP_STATUS.BAD_REQUEST);
-    }
-
     const paymentMethod = String(payload.paymentMethod || 'PAYOS').trim().toUpperCase();
 
-
-    const departureTime = payload.departureTime || route.operatingHours?.firstDeparture || '05:30';
-    const departureDate = buildVietnamDepartureDate(payload.serviceDate, departureTime);
-
-    if (!departureDate) {
-      throw new CustomError('Ngày đi hoặc giờ khởi hành không hợp lệ', HTTP_STATUS.BAD_REQUEST);
+    if (!payload.departureTime) {
+      throw new CustomError('Vui long chon chuyen khoi hanh hop le', HTTP_STATUS.BAD_REQUEST);
     }
 
-    if (departureDate.getTime() <= Date.now()) {
-      throw new CustomError(
-        'Không thể mua vé cho chuyến xe đã khởi hành. Vui lòng chọn thời gian trong tương lai.',
-        HTTP_STATUS.BAD_REQUEST
-      );
-    }
+    const departureTime = String(payload.departureTime).trim();
+    const { departureDate, serviceDateText } = await this.findPurchasableTripSchedule(route, {
+      serviceDate: payload.serviceDate,
+      departureTime,
+      direction,
+    });
 
     const serviceDate = buildStoredServiceDate(payload.serviceDate);
     if (!serviceDate) {
       throw new CustomError('Ngày đi không hợp lệ', HTTP_STATUS.BAD_REQUEST);
     }
-    const serviceDateValue = String(payload.serviceDate || '').slice(0, 10);
-    const tripId = `${route.routeNumber}-${serviceDateValue}-${departureTime}-${direction}`;
+    const tripId = `${route.routeNumber}-${serviceDateText}-${departureTime}-${direction}`;
 
     const originalPrice = this.calculatePrice(directionalRoute, startStop, endStop);
+    const priority = await calculatePriorityDiscount(userId, originalPrice, departureDate);
+    const priorityDiscountAmount = Math.max(Number(priority.discountAmount || 0), 0);
+    const appliedDiscount = buildAppliedPriorityDiscount({
+      discount: priority.discount,
+      priorityType: priority.priorityType,
+      discountAmount: priorityDiscountAmount,
+    });
+    const passengerType = deriveStoredPassengerType(priority.priorityType);
+    const priceAfterPriority = Math.max(originalPrice - priorityDiscountAmount, 0);
     const promotion = await this.applyPromotionToAmount(userId, {
       promotionCode: payload.promotionCode,
       ticketType: 'ONE_WAY',
       routeId: route._id,
-      amount: originalPrice,
+      amount: priceAfterPriority,
       strict: true,
     });
+    const promotionDiscountAmount = Math.max(Number(promotion.discountAmount || 0), 0);
     const ticketPrice = promotion.finalAmount;
+    const totalDiscountAmount = priorityDiscountAmount + promotionDiscountAmount;
     const duplicateTicketQuery = {
       passenger: user._id,
       routeId: route._id,
@@ -684,7 +1046,10 @@ export class TicketService {
       destinationLocation: endStop.name,
       passengerType,
       originalPrice,
-      discountAmount: promotion.discountAmount,
+      discountAmount: totalDiscountAmount,
+      priorityDiscountAmount,
+      promotionDiscountAmount,
+      appliedDiscount,
       promotionCode: promotion.promotionCode || '',
       promotionId: promotion.promotionId || null,
       ticketPrice,
@@ -720,7 +1085,16 @@ export class TicketService {
 
     await ticket.save();
 
-    return ticket.toObject();
+    const ticketObject = ticket.toObject();
+    ticketObject.pricing = buildPricingResponse({
+      originalPrice,
+      priorityDiscountAmount,
+      promotionDiscountAmount,
+      finalPrice: ticketPrice,
+      appliedDiscount,
+      promotion,
+    });
+    return ticketObject;
   }
 
   static async listMyTickets(userId) {
@@ -954,30 +1328,40 @@ export class TicketService {
     return this.getMyTicketById(userId, ticket._id);
   }
 
-  static normalizePassType(value) {
-    const passType = String(value || 'STANDARD').trim().toUpperCase();
-    return Object.keys(MONTHLY_PASS_PRICES).includes(passType) ? passType : null;
-  }
-
-  static addMonths(date, months) {
-    const nextDate = new Date(date);
-    nextDate.setMonth(nextDate.getMonth() + months);
-    return nextDate;
-  }
-
   static async purchaseMonthlyPass(userId, payload) {
     const user = await User.findById(userId);
     if (!user) {
       throw new CustomError('Không tìm thấy người dùng', HTTP_STATUS.NOT_FOUND);
     }
 
-    const passType = this.normalizePassType(payload.passType);
-    if (!passType) {
-      throw new CustomError('Loại vé tháng đã chọn không khả dụng', HTTP_STATUS.BAD_REQUEST);
-    }
-
     const paymentMethod = String(payload.paymentMethod || 'PAYOS').trim().toUpperCase();
 
+
+    const selectedRoute = payload.routeId ? await this.findRoute(payload.routeId) : null;
+    if (payload.routeId && !selectedRoute) {
+      throw new CustomError('Tuyen xe da chon khong ton tai', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const routeCode = selectedRoute?.routeNumber || String(payload.routeCode || 'ALL').trim().toUpperCase();
+    const { startDate, expiryDate } = normalizeMonthlyPassStartMonth(payload);
+    const monthlyPricingType = selectedRoute ? 'ROUTE_PASS' : 'NETWORK_PASS';
+    const pricing = await calculateMonthlyPassPrice({
+      routeId: selectedRoute?._id,
+      passType: monthlyPricingType,
+      passengerId: userId,
+      purchaseDate: startDate,
+    });
+    const originalPrice = pricing.basePrice;
+    const priorityDiscountAmount = Math.max(Number(pricing.discountAmount || 0), 0);
+    const appliedDiscount = buildAppliedPriorityDiscount({
+      discount: pricing.priorityDiscount,
+      priorityType: pricing.priorityType,
+      discountAmount: priorityDiscountAmount,
+    });
+    const passType = deriveStoredPassengerType(pricing.priorityType);
+    const priceAfterPriority = Math.max(originalPrice - priorityDiscountAmount, 0);
+    const settings = await getMonthlyPassSettings();
+    const dailyRideLimit = settings.maxRidesPerDay;
 
     const activePass = await MonthlyPass.findOne({
       passenger: user._id,
@@ -987,34 +1371,19 @@ export class TicketService {
     }).lean();
 
     if (activePass && !payload.renew) {
-      throw new CustomError('Bạn đang có một vé tháng cùng loại còn hiệu lực.', HTTP_STATUS.CONFLICT);
+      throw new CustomError('Báº¡n Ä‘ang cÃ³ má»™t vÃ© thÃ¡ng cÃ¹ng loáº¡i cÃ²n hiá»‡u lá»±c.', HTTP_STATUS.CONFLICT);
     }
 
-    const selectedRoute = payload.routeId ? await this.findRoute(payload.routeId) : null;
-    if (payload.routeId && !selectedRoute) {
-      throw new CustomError('Tuyen xe da chon khong ton tai', HTTP_STATUS.NOT_FOUND);
-    }
-
-    const routeCode = selectedRoute?.routeNumber || String(payload.routeCode || 'ALL').trim().toUpperCase();
-    const startDate = normalizeDate(payload.startDate);
-    const currentMonthStart = new Date();
-    currentMonthStart.setDate(1);
-    currentMonthStart.setHours(0, 0, 0, 0);
-    if (startDate < currentMonthStart) {
-      throw new CustomError('Khong the dat ve thang cho thang da qua', HTTP_STATUS.BAD_REQUEST);
-    }
-
-    const validityMonths = Math.max(Number(payload.validityMonths) || 1, 1);
-    const expiryDate = new Date(this.addMonths(startDate, validityMonths).getTime() - 1);
-    const originalPrice = MONTHLY_PASS_PRICES[passType] * validityMonths;
     const promotion = await this.applyPromotionToAmount(userId, {
       promotionCode: payload.promotionCode,
       ticketType: 'MONTHLY_PASS',
       routeId: selectedRoute?._id,
-      amount: originalPrice,
+      amount: priceAfterPriority,
       strict: true,
     });
+    const promotionDiscountAmount = Math.max(Number(promotion.discountAmount || 0), 0);
     const passPrice = promotion.finalAmount;
+    const totalDiscountAmount = priorityDiscountAmount + promotionDiscountAmount;
     const duplicatePendingPass = await MonthlyPass.findOne({
       passenger: user._id,
       passType,
@@ -1044,7 +1413,10 @@ export class TicketService {
       validFrom: startDate,
       validUntil: expiryDate,
       originalPrice,
-      discountAmount: promotion.discountAmount,
+      discountAmount: totalDiscountAmount,
+      priorityDiscountAmount,
+      promotionDiscountAmount,
+      appliedDiscount,
       promotionCode: promotion.promotionCode || '',
       promotionId: promotion.promotionId || null,
       passPrice,
@@ -1073,7 +1445,18 @@ export class TicketService {
 
     await monthlyPass.save();
 
-    return monthlyPass.toObject();
+    const monthlyPassObject = monthlyPass.toObject();
+    monthlyPassObject.pricing = buildPricingResponse({
+      originalPrice,
+      priorityDiscountAmount,
+      promotionDiscountAmount,
+      finalPrice: passPrice,
+      appliedDiscount,
+      promotion,
+      dailyRideLimit,
+    });
+    monthlyPassObject.dailyRideLimit = dailyRideLimit;
+    return monthlyPassObject;
   }
 
   static async listMyMonthlyPasses(userId) {
@@ -1172,6 +1555,14 @@ export class TicketService {
       throw new CustomError('Loại vé thanh toán không hợp lệ', HTTP_STATUS.BAD_REQUEST);
     }
 
+    const pricing = orderTarget.pricing || buildPricingResponse({
+      originalPrice: orderTarget.originalPrice || amount,
+      priorityDiscountAmount: orderTarget.priorityDiscountAmount || 0,
+      promotionDiscountAmount: orderTarget.promotionDiscountAmount || 0,
+      finalPrice: amount,
+      appliedDiscount: orderTarget.appliedDiscount || null,
+      dailyRideLimit: orderTarget.dailyRideLimit,
+    });
     const orderCode = this.buildPayOSOrderCode();
     const description = ticketType === 'ONE_WAY'
       ? `BusDN ${orderTarget.ticketCode}`
@@ -1205,6 +1596,8 @@ export class TicketService {
         checkoutUrl: '',
         qrCode: '',
         message: 'Vé miễn phí đã được kích hoạt.',
+        ...pricing,
+        pricing,
       };
     }
 
@@ -1247,6 +1640,8 @@ export class TicketService {
         })
         : '',
       paymentLinkId: paymentOrder.payos.paymentLinkId,
+      ...pricing,
+      pricing,
     };
   }
 
@@ -1412,8 +1807,8 @@ export class TicketService {
         routeId: ticket.routeId,
         ticketType: 'ONE_WAY',
         paymentMethod: 'PAYOS',
-        discountAmount: ticket.discountAmount,
-        originalAmount: ticket.originalPrice || ticket.ticketPrice,
+        discountAmount: ticket.promotionDiscountAmount ?? ticket.discountAmount,
+        originalAmount: Math.max(Number(ticket.originalPrice || ticket.ticketPrice) - Number(ticket.priorityDiscountAmount || 0), 0),
         finalAmount: ticket.ticketPrice,
       });
       await this.cancelDuplicatePendingTicketsForPaidTicket(ticket);
@@ -1459,8 +1854,8 @@ export class TicketService {
         routeId: monthlyPass.routeId,
         ticketType: 'MONTHLY_PASS',
         paymentMethod: 'PAYOS',
-        discountAmount: monthlyPass.discountAmount,
-        originalAmount: monthlyPass.originalPrice || monthlyPass.passPrice,
+        discountAmount: monthlyPass.promotionDiscountAmount ?? monthlyPass.discountAmount,
+        originalAmount: Math.max(Number(monthlyPass.originalPrice || monthlyPass.passPrice) - Number(monthlyPass.priorityDiscountAmount || 0), 0),
         finalAmount: monthlyPass.passPrice,
       });
 
@@ -1902,6 +2297,25 @@ export class TicketService {
       });
     }
 
+    const settings = await getMonthlyPassSettings();
+    const dailyRideLimit = settings.maxRidesPerDay;
+    const todayRange = getServerDayRange(now);
+    const ridesUsedToday = (monthlyPass.validationLogs || []).filter((log) => (
+      log.result === 'VALID'
+      && log.validatedAt
+      && new Date(log.validatedAt) >= todayRange.start
+      && new Date(log.validatedAt) <= todayRange.end
+    )).length;
+
+    if (ridesUsedToday >= dailyRideLimit) {
+      return buildValidationResult('LIMIT_REACHED', 'Daily ride limit has been reached.', {
+        passCode: monthlyPass.passCode,
+        dailyRideLimit,
+        ridesUsedToday,
+        ...validationInfo,
+      });
+    }
+
     const validationMessage = 'Monthly pass is valid for boarding.';
     monthlyPass.validationLogs.push({
       validatedAt: new Date(),
@@ -1922,6 +2336,8 @@ export class TicketService {
       validatedBy: validatorUserId,
       validFrom: monthlyPass.validFrom || monthlyPass.startDate,
       validUntil: monthlyPass.validUntil || monthlyPass.expiryDate,
+      dailyRideLimit,
+      ridesUsedToday: ridesUsedToday + 1,
       validationStatus: 'VALIDATED',
       ...validationInfo,
     });

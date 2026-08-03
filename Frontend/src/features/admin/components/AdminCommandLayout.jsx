@@ -14,11 +14,19 @@ const getNavigationTarget = (item) => {
   };
 };
 
+const pathnameMatchesAlias = (pathname, alias) => (
+  pathname === alias
+  || (alias !== '/admin' && pathname.startsWith(`${alias}/`))
+);
+
 const isNavigationItemActive = (location, item) => {
   const target = getNavigationTarget(item);
   const pathnameMatches = location.pathname === target.pathname
     || location.pathname.startsWith(`${target.pathname}/`)
-    || item.aliases?.some((alias) => location.pathname === alias || location.pathname.startsWith(`${alias}/`));
+    || item.aliases?.some((alias) => (
+      location.pathname === alias
+      || (alias !== '/admin' && location.pathname.startsWith(`${alias}/`))
+    ));
 
   if (!pathnameMatches) return false;
   if (target.search) return location.search === target.search;
@@ -157,13 +165,19 @@ const AdminCommandLayout = () => {
       .sort((left, right) => right.path.length - left.path.length)
       .find((item) => isNavigationItemActive(location, item))
       || adminNavigation[0];
-  }, [location]);
+  }, [location.pathname, location.search]);
 
-  const activeGroup = useMemo(() => (
-    adminNavGroups.find((group) => (
+  const activeGroup = useMemo(() => {
+    const groupByLocation = adminNavGroups.find((group) => (
+      group.children.some((item) => isNavigationItemActive(location, item))
+    ));
+
+    if (groupByLocation) return groupByLocation;
+
+    return adminNavGroups.find((group) => (
       group.children.some((item) => item.path === activeItem.path)
-    )) || adminNavGroups[0]
-  ), [activeItem.path]);
+    )) || adminNavGroups[0];
+  }, [activeItem.path, location]);
 
   const [openGroupId, setOpenGroupId] = useState(() => activeGroup.id);
 

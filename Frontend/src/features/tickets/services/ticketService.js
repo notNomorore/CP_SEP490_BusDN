@@ -16,6 +16,11 @@ export const ticketService = {
     return response.data;
   },
 
+  getPurchasableSchedules: async (params) => {
+    const response = await apiClient.get('/tickets/purchasable-schedules', { params });
+    return response.data;
+  },
+
   getMyTickets: async () => {
     const response = await apiClient.get('/tickets/me');
     return response.data;
@@ -43,6 +48,11 @@ export const ticketService = {
 
   applyPromotion: async (payload) => {
     const response = await apiClient.post('/tickets/promotions/apply', payload);
+    return response.data;
+  },
+
+  quotePurchase: async (payload) => {
+    const response = await apiClient.post('/tickets/quote', payload);
     return response.data;
   },
 

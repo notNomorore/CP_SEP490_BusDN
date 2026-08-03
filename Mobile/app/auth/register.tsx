@@ -1,55 +1,31 @@
-import { Link, router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useRegister } from '@/auth/hooks/useRegister';
 import { AppButton } from '@/components/AppButton';
 import { AppInput } from '@/components/AppInput';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
-import { useAuthStore } from '@/store/auth.store';
-import { splitIdentifier, validatePassword } from '@/utils/validation';
 
 export default function RegisterScreen() {
-  const [fullName, setFullName] = useState('');
-  const [identifier, setIdentifier] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [agreeToTerms, setAgreeToTerms] = useState(false);
-
-  const register = useAuthStore((state) => state.register);
-  const clearError = useAuthStore((state) => state.clearError);
-  const isLoading = useAuthStore((state) => state.isLoading);
-  const error = useAuthStore((state) => state.error);
-
-  const passwordValidation = useMemo(() => validatePassword(password), [password]);
-  const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
-  const canSubmit =
-    Boolean(fullName.trim()) &&
-    Boolean(identifier.trim()) &&
-    passwordValidation.isValid &&
-    passwordsMatch &&
-    agreeToTerms;
-
-  useEffect(() => () => clearError(), [clearError]);
-
-  const handleRegister = async () => {
-    clearError();
-    const { email, phone } = splitIdentifier(identifier);
-
-    try {
-      await register({
-        fullName: fullName.trim(),
-        identifier: identifier.trim(),
-        email,
-        phone,
-        password,
-        confirmPassword,
-      });
-      router.push('/auth/verify-otp');
-    } catch {
-      // Store owns the visible error message.
-    }
-  };
+  const {
+    fullName,
+    setFullName,
+    identifier,
+    setIdentifier,
+    password,
+    setPassword,
+    confirmPassword,
+    setConfirmPassword,
+    agreeToTerms,
+    toggleAgreeToTerms,
+    canSubmit,
+    confirmPasswordError,
+    error,
+    loading,
+    passwordValidation,
+    register,
+  } = useRegister();
 
   return (
     <Screen>
@@ -112,7 +88,7 @@ export default function RegisterScreen() {
             secureTextEntry
             textContentType="newPassword"
             autoComplete="password-new"
-            error={confirmPassword && !passwordsMatch ? 'Passwords do not match.' : undefined}
+            error={confirmPasswordError}
           />
 
           <Pressable
@@ -121,7 +97,7 @@ export default function RegisterScreen() {
             accessibilityLabel="I agree to the Terms of Service and Privacy Policy"
             hitSlop={8}
             style={styles.termsRow}
-            onPress={() => setAgreeToTerms((value) => !value)}
+            onPress={toggleAgreeToTerms}
           >
             <View style={[styles.checkbox, agreeToTerms && styles.checkboxChecked]}>
               {agreeToTerms ? <Text style={styles.checkboxText}>✓</Text> : null}
@@ -131,9 +107,9 @@ export default function RegisterScreen() {
 
           <AppButton
             title="Create Account"
-            loading={isLoading}
+            loading={loading}
             disabled={!canSubmit}
-            onPress={handleRegister}
+            onPress={register}
           />
         </View>
 

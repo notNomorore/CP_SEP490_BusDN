@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { adminNavGroups, adminNavigation } from './adminMessages.js';
 
 const expectedGroups = [
-  ['operations-monitoring', 5],
+  ['operations-monitoring', 8],
   ['analytics-statistics', 5],
   ['fares-promotions', 3],
   ['incidents-maintenance', 4],
-  ['users-support', 3],
+  ['users-support', 4],
   ['system', 2],
 ];
 
@@ -15,6 +15,9 @@ const expectedPaths = [
   '/admin/fleet/active-trips',
   '/admin/fleet/delayed-trips',
   '/admin/routes',
+  '/admin/trip-schedules',
+  '/admin/shifts',
+  '/admin/operation-chat',
   '/admin/analytics/congested-routes',
   '/admin/analytics/route-efficiency',
   '/admin/analytics/feedback',
@@ -31,6 +34,7 @@ const expectedPaths = [
   '/admin/users',
   '/admin/priority-verification',
   '/admin/customer-support',
+  '/admin/lost-items',
   '/admin/system-notifications',
   '/admin/system-monitoring',
 ];

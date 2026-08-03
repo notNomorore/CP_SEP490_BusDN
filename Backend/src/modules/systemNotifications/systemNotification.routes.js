@@ -19,6 +19,16 @@ router.get(
   asyncHandler(SystemNotificationController.listMine)
 );
 
+router.get('/me/unread-count', asyncHandler(SystemNotificationController.unreadCountMine));
+
+router.patch('/me/read-all', asyncHandler(SystemNotificationController.markAllMineRead));
+
+router.patch(
+  '/me/:id/read',
+  validateRequest(validateObjectIdParam, 'params'),
+  asyncHandler(SystemNotificationController.markMineRead)
+);
+
 router.use(authorizeRole('ADMIN'));
 
 router.post(

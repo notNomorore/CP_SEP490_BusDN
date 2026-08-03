@@ -7,6 +7,7 @@ import {
   validateApproveMaintenanceTask,
   validateMaintenanceTaskIdParam,
   validateRejectMaintenanceTask,
+  validateUpdateMaintenanceTaskProgress,
 } from './maintenanceApproval.validators.js';
 
 const router = express.Router();
@@ -16,6 +17,20 @@ router.use(authMiddleware, authorizeRole('ADMIN'));
 router.get(
   '/pending-approval',
   asyncHandler(MaintenanceApprovalController.getPendingApprovalTasks)
+);
+
+router.patch(
+  '/tasks/:id/start',
+  validateRequest(validateMaintenanceTaskIdParam, 'params'),
+  validateRequest(validateUpdateMaintenanceTaskProgress),
+  asyncHandler(MaintenanceApprovalController.startMaintenanceTask)
+);
+
+router.patch(
+  '/tasks/:id/complete',
+  validateRequest(validateMaintenanceTaskIdParam, 'params'),
+  validateRequest(validateUpdateMaintenanceTaskProgress),
+  asyncHandler(MaintenanceApprovalController.completeMaintenanceTask)
 );
 
 router.patch(

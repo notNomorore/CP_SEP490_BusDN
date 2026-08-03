@@ -14,6 +14,21 @@ export class SystemNotificationController {
     );
   }
 
+  static async unreadCountMine(req, res) {
+    const result = await SystemNotificationService.getMyUnreadCount(req.user);
+    return res.success(result, 'Unread notification count retrieved successfully');
+  }
+
+  static async markMineRead(req, res) {
+    const notification = await SystemNotificationService.markMyNotificationRead(req.user, req.params.id);
+    return res.success(notification, 'Notification marked as read');
+  }
+
+  static async markAllMineRead(req, res) {
+    const result = await SystemNotificationService.markAllMyNotificationsRead(req.user);
+    return res.success(result, 'Notifications marked as read');
+  }
+
   static async broadcast(req, res) {
     const notification = await SystemNotificationService.createBroadcastNotification(
       req.body,
