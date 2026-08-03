@@ -869,7 +869,7 @@ export class TicketService {
           finalPrice: promotion.finalAmount,
           appliedDiscount,
           promotion,
-          dailyRideLimit: settings.maxRidesPerDay,
+          dailyRideLimit: Math.min(Number(settings.maxRidesPerDay) || 6, 6),
         }),
         startDate,
         expiryDate,
@@ -1361,7 +1361,7 @@ export class TicketService {
     const passType = deriveStoredPassengerType(pricing.priorityType);
     const priceAfterPriority = Math.max(originalPrice - priorityDiscountAmount, 0);
     const settings = await getMonthlyPassSettings();
-    const dailyRideLimit = settings.maxRidesPerDay;
+    const dailyRideLimit = Math.min(Number(settings.maxRidesPerDay) || 6, 6);
 
     const activePass = await MonthlyPass.findOne({
       passenger: user._id,
@@ -1507,8 +1507,21 @@ export class TicketService {
 
   static async listMyMonthlyPasses(userId) {
     await this.reconcilePendingPaymentOrders(userId);
-
-    return MonthlyPass.find({ passenger: userId }).sort({ purchasedAt: -1 }).lean();
+    const [passes, settings] = await Promise.all([
+      MonthlyPass.find({ passenger: userId }).sort({ purchasedAt: -1 }).lean(),
+      getMonthlyPassSettings(),
+    ]);
+    const todayRange = getServerDayRange(new Date());
+    return passes.map((pass) => ({
+      ...pass,
+      dailyRideLimit: Math.min(Number(settings.maxRidesPerDay) || 6, 6),
+      ridesUsedToday: (pass.validationLogs || []).filter((log) => (
+        log.result === 'VALID'
+        && log.validatedAt
+        && new Date(log.validatedAt) >= todayRange.start
+        && new Date(log.validatedAt) <= todayRange.end
+      )).length,
+    }));
   }
 
   static async cancelMyMonthlyPass(userId, passId) {
@@ -2443,6 +2456,9 @@ export class TicketService {
     if (monthlyPass.passStatus === 'CANCELLED') {
       return buildValidationResult('CANCELLED', 'Cancelled ticket', { passCode: monthlyPass.passCode, ...validationInfo });
     }
+    if (monthlyPass.paymentStatus !== 'PAID') {
+      return buildValidationResult('INVALID_QR', 'Vé tháng chưa được thanh toán.', { passCode: monthlyPass.passCode, ...validationInfo });
+    }
     if (monthlyPass.passStatus !== 'ACTIVE') {
       return buildValidationResult('INVALID_QR', 'Ticket is not active', { passCode: monthlyPass.passCode, ...validationInfo });
     }
@@ -2455,7 +2471,7 @@ export class TicketService {
     }
 
     const settings = await getMonthlyPassSettings();
-    const dailyRideLimit = settings.maxRidesPerDay;
+    const dailyRideLimit = Math.min(Number(settings.maxRidesPerDay) || 6, 6);
     const todayRange = getServerDayRange(now);
     const ridesUsedToday = (monthlyPass.validationLogs || []).filter((log) => (
       log.result === 'VALID'
@@ -2473,15 +2489,67 @@ export class TicketService {
       });
     }
 
+    const latestValidScan = (monthlyPass.validationLogs || [])
+      .filter((log) => log.result === 'VALID' && log.validatedAt)
+      .sort((left, right) => new Date(right.validatedAt) - new Date(left.validatedAt))[0];
+    const cooldownMilliseconds = 30 * 60 * 1000;
+    if (latestValidScan && now.getTime() - new Date(latestValidScan.validatedAt).getTime() < cooldownMilliseconds) {
+      const retryAt = new Date(new Date(latestValidScan.validatedAt).getTime() + cooldownMilliseconds);
+      return buildValidationResult('SCAN_COOLDOWN', 'Vé tháng chỉ được quét lại sau 30 phút.', {
+        passCode: monthlyPass.passCode,
+        dailyRideLimit,
+        ridesUsedToday,
+        retryAt,
+        ...validationInfo,
+      });
+    }
+
     const validationMessage = 'Monthly pass is valid for boarding.';
-    monthlyPass.validationLogs.push({
-      validatedAt: new Date(),
-      validatedBy: validatorUserId,
-      result: 'VALID',
-      routeCode: routeCode || monthlyPass.routeCode || 'ALL',
-      message: validationMessage,
-    });
-    await monthlyPass.save();
+    const cooldownStart = new Date(now.getTime() - cooldownMilliseconds);
+    const nextScanAllowedAt = new Date(now.getTime() + cooldownMilliseconds);
+    const updateResult = await MonthlyPass.updateOne(
+      {
+        _id: monthlyPass._id,
+        passStatus: 'ACTIVE',
+        paymentStatus: 'PAID',
+        $and: [
+          {
+            $or: [
+              { nextScanAllowedAt: null },
+              { nextScanAllowedAt: { $exists: false } },
+              { nextScanAllowedAt: { $lte: now } },
+            ],
+          },
+          {
+            validationLogs: {
+              $not: {
+                $elemMatch: { result: 'VALID', validatedAt: { $gte: cooldownStart } },
+              },
+            },
+          },
+        ],
+      },
+      {
+        $set: { nextScanAllowedAt },
+        $push: {
+          validationLogs: {
+            validatedAt: now,
+            validatedBy: validatorUserId,
+            result: 'VALID',
+            routeCode: routeCode || monthlyPass.routeCode || 'ALL',
+            message: validationMessage,
+          },
+        },
+      }
+    );
+    if (!updateResult.modifiedCount) {
+      return buildValidationResult('SCAN_COOLDOWN', 'Vé tháng vừa được sử dụng. Vui lòng quét lại sau 30 phút.', {
+        passCode: monthlyPass.passCode,
+        dailyRideLimit,
+        ridesUsedToday,
+        ...validationInfo,
+      });
+    }
 
     return buildValidationResult('VALID', validationMessage, {
       ticketType: 'MONTHLY_PASS',
@@ -2495,6 +2563,7 @@ export class TicketService {
       validUntil: monthlyPass.validUntil || monthlyPass.expiryDate,
       dailyRideLimit,
       ridesUsedToday: ridesUsedToday + 1,
+      nextScanAllowedAt,
       validationStatus: 'VALIDATED',
       ...validationInfo,
     });

@@ -20,6 +20,34 @@ const displayStatus = (ticket: TicketRecord) => {
 };
 const isPending = (ticket: TicketRecord) => displayStatus(ticket) === 'PENDING' && String(ticket.paymentStatus).toUpperCase() === 'PENDING';
 const canViewQr = (ticket: TicketRecord) => String(ticket.paymentStatus).toUpperCase() === 'PAID' && displayStatus(ticket) === 'ACTIVE';
+const monthlyPassStatus = (pass: MonthlyPassRecord) => {
+  const explicit = String(pass.passStatus || '').toUpperCase();
+  if (['CANCELLED', 'REFUNDED'].includes(explicit)) return explicit;
+  if (String(pass.paymentStatus || '').toUpperCase() !== 'PAID') return 'PENDING';
+  const now = Date.now();
+  const start = new Date(pass.startDate || '').getTime();
+  const end = new Date(pass.expiryDate || '').getTime();
+  if (Number.isFinite(start) && start > now) return 'UPCOMING';
+  if (Number.isFinite(end) && end < now) return 'EXPIRED';
+  return explicit || 'ACTIVE';
+};
+const isPendingMonthlyPass = (pass: MonthlyPassRecord) => monthlyPassStatus(pass) === 'PENDING';
+const canViewMonthlyPassQr = (pass: MonthlyPassRecord) => (
+  String(pass.paymentStatus || '').toUpperCase() === 'PAID'
+  && monthlyPassStatus(pass) === 'ACTIVE'
+  && Boolean(pass.digitalPass?.qrCodeImage)
+);
+const getMonthlyRidesUsedToday = (pass: MonthlyPassRecord) => {
+  if (Number.isFinite(Number(pass.ridesUsedToday))) return Number(pass.ridesUsedToday);
+  const today = new Date();
+  return (pass.validationLogs || []).filter((log) => {
+    if (String(log.result || '').toUpperCase() !== 'VALID' || !log.validatedAt) return false;
+    const scannedAt = new Date(log.validatedAt);
+    return scannedAt.getFullYear() === today.getFullYear()
+      && scannedAt.getMonth() === today.getMonth()
+      && scannedAt.getDate() === today.getDate();
+  }).length;
+};
 
 export default function MyTicketsScreen() {
   const [tickets, setTickets] = useState<TicketRecord[]>([]);
@@ -94,6 +122,34 @@ export default function MyTicketsScreen() {
       { text: 'Hủy vé', style: 'destructive', onPress: async () => {
         setProcessingId(id);
         try { await passengerApi.cancelTicket(id); await load(); }
+        catch (err) { Alert.alert('Không thể hủy vé', (err as { message?: string })?.message || 'Vui lòng thử lại.'); }
+        finally { setProcessingId(''); }
+      } },
+    ]);
+  };
+
+  const payPendingMonthlyPass = async (pass: MonthlyPassRecord) => {
+    const id = String(pass.id || pass._id || '');
+    if (!id) return;
+    setProcessingId(id);
+    try {
+      const payment = await passengerApi.createPendingMonthlyPassPayment(id);
+      if (payment.status === 'PAID') await load();
+      else if (payment.checkoutUrl) await Linking.openURL(payment.checkoutUrl);
+      else Alert.alert('Đang chờ thanh toán', payment.message || 'Đơn thanh toán đang được xử lý.');
+    } catch (err) {
+      Alert.alert('Không thể thanh toán', (err as { message?: string })?.message || 'Vui lòng thử lại.');
+    } finally { setProcessingId(''); }
+  };
+
+  const cancelPendingMonthlyPass = (pass: MonthlyPassRecord) => {
+    const id = String(pass.id || pass._id || '');
+    if (!id) return;
+    Alert.alert('Hủy vé tháng?', 'Vé tháng chưa thanh toán sẽ bị hủy.', [
+      { text: 'Không', style: 'cancel' },
+      { text: 'Hủy vé', style: 'destructive', onPress: async () => {
+        setProcessingId(id);
+        try { await passengerApi.cancelMonthlyPass(id); await load(); }
         catch (err) { Alert.alert('Không thể hủy vé', (err as { message?: string })?.message || 'Vui lòng thử lại.'); }
         finally { setProcessingId(''); }
       } },
@@ -203,12 +259,41 @@ export default function MyTicketsScreen() {
         <View key={String(pass.id || pass._id || pass.passCode)} style={styles.ticketCard}>
           <View style={styles.ticketTop}>
             <Text style={styles.code}>{pass.passCode || 'Vé tháng'}</Text>
-            <StatusPill label={statusLabel(pass.passStatus || pass.paymentStatus)} tone={pass.paymentStatus === 'PAID' ? 'success' : 'warning'} />
+            <StatusPill label={statusLabel(monthlyPassStatus(pass))} tone={monthlyPassStatus(pass) === 'ACTIVE' ? 'success' : monthlyPassStatus(pass) === 'CANCELLED' ? 'danger' : 'warning'} />
           </View>
           <Text style={styles.path}>{pass.passType || 'Tiêu chuẩn'} - {pass.routeCode || 'Tất cả tuyến'}</Text>
           <Text style={styles.meta}>{new Date(pass.startDate || Date.now()).toLocaleDateString('vi-VN')} đến {new Date(pass.expiryDate || Date.now()).toLocaleDateString('vi-VN')}</Text>
           <Text style={styles.meta}>{currency.format(Number(pass.passPrice || 0))} - Thanh toán: {statusLabel(pass.paymentStatus)}</Text>
-          {pass.digitalPass?.qrCodeImage ? <View style={styles.passQrBlock}><Image resizeMode="contain" source={{ uri: pass.digitalPass.qrCodeImage }} style={styles.passQrImage} /><Text style={styles.qrHint}>Mã QR vé tháng</Text></View> : null}
+          {canViewMonthlyPassQr(pass) ? (
+            <View style={styles.passQrBlock}>
+              <Text style={styles.passQrTitle}>Mã QR vé tháng</Text>
+              <Image resizeMode="contain" source={{ uri: pass.digitalPass!.qrCodeImage! }} style={styles.passQrImage} />
+            </View>
+          ) : (
+            <View style={styles.monthlyQrUnavailable}>
+              <MaterialCommunityIcons color={colors.muted} name="qrcode-remove" size={28} />
+              <Text style={styles.monthlyQrUnavailableText}>QR chưa khả dụng cho vé chưa thanh toán hoặc không còn hiệu lực.</Text>
+            </View>
+          )}
+          <View style={styles.monthlyUsageCard}>
+            <View>
+              <Text style={styles.monthlyUsageLabel}>Lượt đi hôm nay</Text>
+              <Text style={styles.monthlyUsageValue}>{Math.min(getMonthlyRidesUsedToday(pass), Number(pass.dailyRideLimit) || 6)} / {Number(pass.dailyRideLimit) || 6} lượt</Text>
+            </View>
+
+          </View>
+          {isPendingMonthlyPass(pass) ? (
+            <View style={styles.pendingActions}>
+              <Pressable disabled={processingId === String(pass.id || pass._id)} onPress={() => void payPendingMonthlyPass(pass)} style={styles.payButton}>
+                <MaterialCommunityIcons color={colors.white} name="credit-card-outline" size={17} />
+                <Text style={styles.payButtonText}>Thanh toán lại</Text>
+              </Pressable>
+              <Pressable disabled={processingId === String(pass.id || pass._id)} onPress={() => cancelPendingMonthlyPass(pass)} style={styles.cancelButton}>
+                <MaterialCommunityIcons color={colors.error} name="trash-can-outline" size={17} />
+                <Text style={styles.cancelButtonText}>Hủy vé</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
       ))}
     </PassengerLayout>
@@ -261,7 +346,14 @@ const styles = StyleSheet.create({
   cancelButton: { flex: 1, minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 14, borderWidth: 1, borderColor: '#f1b8b8', backgroundColor: '#fff7f7' },
   cancelButtonText: { color: colors.error, fontSize: 11, fontWeight: '900' },
   passQrBlock: { alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.outline, paddingTop: 10 },
+  passQrTitle: { alignSelf: 'flex-start', color: colors.muted, fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
   passQrImage: { width: 180, height: 180, borderRadius: 14, backgroundColor: colors.white },
+  monthlyQrUnavailable: { minHeight: 94, alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 16, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.outline, backgroundColor: colors.surfaceLow, padding: 14 },
+  monthlyQrUnavailableText: { color: colors.muted, fontSize: 11, lineHeight: 16, fontWeight: '700', textAlign: 'center' },
+  monthlyUsageCard: { minHeight: 62, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderRadius: 15, backgroundColor: colors.surfaceLow, paddingHorizontal: 13, paddingVertical: 10 },
+  monthlyUsageLabel: { color: colors.muted, fontSize: 9, fontWeight: '900', textTransform: 'uppercase' },
+  monthlyUsageValue: { marginTop: 3, color: colors.primary, fontSize: 14, fontWeight: '900' },
+  monthlyUsageHint: { maxWidth: '52%', color: colors.secondary, fontSize: 9, lineHeight: 13, fontWeight: '700', textAlign: 'right' },
   detailLoading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, padding: 12 },
   modalShade: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 25, 16, .45)' },
   detailSheet: { height: '94%', borderTopLeftRadius: 28, borderTopRightRadius: 28, backgroundColor: colors.surface, padding: 18, paddingBottom: 20 },

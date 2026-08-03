@@ -390,7 +390,7 @@ export default function BuyOneWayTicketScreen() {
     }
     if (ticketType === 'MONTHLY_PASS') {
       if (!startMonthOptions.some((option) => option.startDate === monthlyStartDate)) {
-        nextErrors.serviceDate = 'Start Month không hợp lệ. Vui lòng chọn từ tháng hiện tại đến 5 tháng tới.';
+        nextErrors.serviceDate = 'Tháng bắt đầu không hợp lệ. Vui lòng chọn từ tháng hiện tại đến 5 tháng tới.';
       }
     }
     if (promotionCode.trim() && !appliedPromotion) nextErrors.promotion = 'Vui lòng áp dụng mã khuyến mãi trước khi thanh toán.';
@@ -630,7 +630,7 @@ export default function BuyOneWayTicketScreen() {
           ) : (
             <>
               <StartMonthDropdown
-                label="Start Month"
+                label="Tháng bắt đầu"
                 options={startMonthOptions}
                 selected={selectedStartMonth}
                 visible={startMonthOpen}

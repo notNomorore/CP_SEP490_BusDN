@@ -231,6 +231,14 @@ export type MonthlyPassRecord = {
   startDate?: string;
   expiryDate?: string;
   paymentMethod?: string;
+  dailyRideLimit?: number;
+  ridesUsedToday?: number;
+  nextScanAllowedAt?: string;
+  validationLogs?: Array<{
+    validatedAt?: string;
+    result?: string;
+    routeCode?: string;
+  }>;
   digitalPass?: { qrPayload?: string; qrCodeImage?: string };
 };
 
@@ -616,6 +624,16 @@ export const passengerApi = {
   getMonthlyPasses: async () => {
     const response = await apiClient.get('/tickets/monthly-passes/me') as unknown;
     return unwrap<{ passes: MonthlyPassRecord[]; count: number }>(response);
+  },
+
+  createPendingMonthlyPassPayment: async (passId: string) => {
+    const response = await apiClient.post(`/tickets/monthly-passes/${encodeURIComponent(passId)}/payment`) as unknown;
+    return unwrap<PaymentOrder>(response);
+  },
+
+  cancelMonthlyPass: async (passId: string) => {
+    const response = await apiClient.patch(`/tickets/monthly-passes/${encodeURIComponent(passId)}/cancel`) as unknown;
+    return unwrap<MonthlyPassRecord>(response);
   },
 
   getPurchasableSchedules: async (params: { routeId: string; direction: string; serviceDate: string }) => {

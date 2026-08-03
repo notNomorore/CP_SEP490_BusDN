@@ -60,6 +60,7 @@ const MonthlyPassSchema = new mongoose.Schema(
       expiresAt: Date,
     },
     validationLogs: { type: [ValidationLogSchema], default: [] },
+    nextScanAllowedAt: { type: Date, default: null, index: true },
     purchasedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }

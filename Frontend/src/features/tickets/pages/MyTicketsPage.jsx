@@ -151,6 +151,15 @@ const isPendingMonthlyPass = (pass) => (
   pass?.passStatus === 'PENDING' && pass?.paymentStatus === 'PENDING'
 );
 
+const canShowMonthlyPassQr = (pass) => {
+  if (pass?.paymentStatus !== 'PAID' || pass?.passStatus !== 'ACTIVE') return false;
+  const now = Date.now();
+  const validFrom = new Date(pass.validFrom || pass.startDate).getTime();
+  const validUntil = new Date(pass.validUntil || pass.expiryDate).getTime();
+  return Number.isFinite(validFrom) && Number.isFinite(validUntil)
+    && validFrom <= now && validUntil >= now;
+};
+
 const buildCheckoutOrderFromMonthlyPass = (pass) => ({
   monthlyPassId: pass._id,
   ticketType: 'MONTHLY_PASS',
@@ -167,6 +176,7 @@ const MyTicketsPage = () => {
   const navigate = useNavigate();
   const [tickets, setTickets] = useState([]);
   const [monthlyPasses, setMonthlyPasses] = useState([]);
+  const [ticketView, setTicketView] = useState('ONE_WAY');
   const [query, setQuery] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -414,7 +424,9 @@ const MyTicketsPage = () => {
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.22em] text-on-tertiary-container">Hoạt động hành khách</p>
-              <h1 className="mt-2 text-3xl font-headline font-black text-primary">Tất cả vé của tôi</h1>
+              <h1 className="mt-2 text-3xl font-headline font-black text-primary">
+                {ticketView === 'ONE_WAY' ? 'Vé một lượt của tôi' : 'Vé tháng của tôi'}
+              </h1>
               <p className="mt-2 max-w-2xl text-sm text-on-surface-variant">
                 Xem và quản lý vé đang hiệu lực, vé sắp dùng, vé đã sử dụng, vé hết hạn và vé tháng.
               </p>
@@ -453,6 +465,24 @@ const MyTicketsPage = () => {
             ))}
           </div>
 
+          <div className="mt-6 grid grid-cols-2 gap-3 rounded-[22px] bg-surface-container-low p-2">
+            <button
+              type="button"
+              onClick={() => setTicketView('ONE_WAY')}
+              className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl px-5 text-sm font-black transition ${ticketView === 'ONE_WAY' ? 'bg-primary text-white shadow-md' : 'bg-transparent text-primary hover:bg-white'}`}
+            >
+              <Ticket className="h-4 w-4" /> Vé một lượt
+            </button>
+            <button
+              type="button"
+              onClick={() => setTicketView('MONTHLY_PASS')}
+              className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl px-5 text-sm font-black transition ${ticketView === 'MONTHLY_PASS' ? 'bg-primary text-white shadow-md' : 'bg-transparent text-primary hover:bg-white'}`}
+            >
+              <CalendarDays className="h-4 w-4" /> Vé tháng
+            </button>
+          </div>
+
+          <div className={ticketView === 'ONE_WAY' ? 'block' : 'hidden'}>
           <div className="mt-6 grid gap-3 border-y border-outline-variant/40 py-5 lg:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(150px,0.7fr))]">
             <label className="flex items-center gap-3 rounded-2xl border border-outline-variant/50 bg-surface px-4 py-3">
               <Search className="h-5 w-5 text-outline" />
@@ -658,7 +688,9 @@ const MyTicketsPage = () => {
             </div>
           )}
 
-          <div className="mt-10 border-t border-outline-variant/40 pt-8">
+          </div>
+
+          <div className={ticketView === 'MONTHLY_PASS' ? 'mt-6' : 'hidden'}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 
@@ -689,15 +721,18 @@ const MyTicketsPage = () => {
                         </span>
                       </div>
                       <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
-                        {pass.digitalPass?.qrCodeImage ? (
+                        {canShowMonthlyPassQr(pass) && pass.digitalPass?.qrCodeImage ? (
                           <div className="rounded-2xl bg-white px-4 py-3 sm:col-span-2">
-                            <p className="text-xs font-black uppercase tracking-wide text-outline">Mã QR vé tháng</p>
                             <img src={pass.digitalPass.qrCodeImage} alt="Monthly pass QR code" className="mx-auto mt-3 h-44 w-44 object-contain" />
-                            <p className="mt-2 break-all text-center font-mono text-[11px] font-bold text-outline">
-                              {pass.digitalPass.qrPayload?.slice(0, 32)}...
+                          </div>
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-outline-variant bg-surface-container-low px-4 py-6 text-center sm:col-span-2">
+                            <QrCode className="mx-auto h-8 w-8 text-outline" />
+                            <p className="mt-2 text-sm font-bold text-on-surface-variant">
+                              QR chưa khả dụng cho vé chưa thanh toán hoặc không còn hiệu lực.
                             </p>
                           </div>
-                        ) : null}
+                        )}
                         <div className="rounded-2xl bg-white px-4 py-3">
                           <p className="text-xs font-black uppercase tracking-wide text-outline">Đối tượng</p>
                           <p className="mt-1 font-bold text-primary">{passengerTypeLabel(pass.passType)}</p>
@@ -715,6 +750,14 @@ const MyTicketsPage = () => {
                           <p className="mt-1 font-bold text-primary">
                             {paymentStatusLabel(pass.paymentStatus)} - {paymentMethodLabel(pass.paymentMethod)}
                           </p>
+                        </div>
+                        <div className="rounded-2xl bg-white px-4 py-3 sm:col-span-2">
+                          <p className="text-xs font-black uppercase tracking-wide text-outline">Lượt đi hôm nay</p>
+                          <div className="mt-2 flex items-center justify-between gap-3">
+                            <p className="font-bold text-primary">
+                              {Math.min(Number(pass.ridesUsedToday) || 0, Number(pass.dailyRideLimit) || 6)} / {Number(pass.dailyRideLimit) || 6} lượt
+                            </p>
+                          </div>
                         </div>
                       </div>
                       {isPendingMonthlyPass(pass) ? (
