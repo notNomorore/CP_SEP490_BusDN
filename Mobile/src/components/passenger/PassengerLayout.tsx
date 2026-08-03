@@ -14,9 +14,10 @@ type PassengerLayoutProps = PropsWithChildren<{
   subtitle?: string;
   rightAction?: React.ReactNode;
   refreshControl?: React.ReactElement<RefreshControlProps>;
+  unreadCount?: number;
 }>;
 
-export function PassengerLayout({ active, title, subtitle, rightAction, refreshControl, children }: PassengerLayoutProps) {
+export function PassengerLayout({ active, title, subtitle, rightAction, refreshControl, unreadCount = 0, children }: PassengerLayoutProps) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -40,7 +41,7 @@ export function PassengerLayout({ active, title, subtitle, rightAction, refreshC
         >
           {children}
         </ScrollView>
-        <PassengerBottomNav active={active} />
+        <PassengerBottomNav active={active} unreadCount={unreadCount} />
       </View>
     </SafeAreaView>
   );
