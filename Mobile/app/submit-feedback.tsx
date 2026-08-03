@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, type Href, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import passengerApi, { type FeedbackCategory, type TravelHistoryRecord } from '@/api/passenger.api';
 import { AppButton } from '@/components/AppButton';
@@ -11,11 +11,20 @@ import { feedbackCategories } from '@/utils/feedbackDisplay';
 
 type FormErrors = Partial<Record<'category' | 'title' | 'description' | 'ratingScore' | 'relatedTripId', string>>;
 
+const tripValueOf = (record: TravelHistoryRecord) => record.tripId || record.ticketId || record.id || '';
+const countCharacters = (value: string) => value.trim().length;
+
 const formatTripLabel = (record: TravelHistoryRecord) => {
   const date = record.travelDate || record.boardingTime
     ? new Date(record.travelDate || record.boardingTime || '').toLocaleDateString('vi-VN')
     : 'Chưa có ngày';
   return `${record.routeNumber || 'Tuyến'} - ${record.boardingStop || 'Điểm lên'} đến ${record.destinationStop || 'Điểm xuống'} (${date})`;
+};
+
+const isFeedbackEligibleTrip = (record: TravelHistoryRecord) => {
+  const routeNumber = record.routeNumber?.trim().toUpperCase();
+  if (routeNumber === 'DN10') return false;
+  return !formatTripLabel(record).trim().toUpperCase().startsWith('DN10 ');
 };
 
 export default function SubmitFeedbackScreen() {
@@ -30,6 +39,7 @@ export default function SubmitFeedbackScreen() {
   const [isLoadingTrips, setIsLoadingTrips] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [tripDropdownOpen, setTripDropdownOpen] = useState(false);
 
   useEffect(() => {
     const loadTrips = async () => {
@@ -46,9 +56,17 @@ export default function SubmitFeedbackScreen() {
     void loadTrips();
   }, []);
 
-  const selectedTrip = useMemo(() => travelRecords.find((record) => (
-    record.tripId === relatedTripId || record.ticketId === relatedTripId
-  )), [relatedTripId, travelRecords]);
+  const tripOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return travelRecords.filter((record) => {
+      if (!isFeedbackEligibleTrip(record)) return false;
+      const value = tripValueOf(record);
+      if (!value || seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
+  }, [travelRecords]);
+  const selectedTrip = useMemo(() => tripOptions.find((record) => tripValueOf(record) === relatedTripId), [relatedTripId, tripOptions]);
 
   const validate = () => {
     const nextErrors: FormErrors = {};
@@ -60,8 +78,8 @@ export default function SubmitFeedbackScreen() {
     }
     if (!description.trim()) {
       nextErrors.description = 'Vui lòng nhập nội dung.';
-    } else if (description.trim().length < 20) {
-      nextErrors.description = 'Nội dung cần ít nhất 20 ký tự.';
+    } else if (countCharacters(description) < 10) {
+      nextErrors.description = 'Nội dung cần ít nhất 10 chữ.';
     }
     if (!ratingScore) {
       nextErrors.ratingScore = 'Vui lòng chọn điểm đánh giá.';
@@ -142,19 +160,22 @@ export default function SubmitFeedbackScreen() {
 
       <Text style={styles.label}>Chuyến liên quan</Text>
       {isLoadingTrips ? <LoadingState label="Đang tải lịch sử chuyến" /> : null}
-      {!isLoadingTrips && !travelRecords.length ? (
+      {!isLoadingTrips && !tripOptions.length ? (
         <EmptyState title="Chưa có chuyến phù hợp" detail="Bạn cần có lịch sử chuyến đi trước khi gửi feedback dịch vụ." />
       ) : null}
-      {!isLoadingTrips && travelRecords.map((record) => {
-        const value = record.tripId || record.ticketId || record.id;
-        const active = value === relatedTripId;
-        return (
-          <Pressable key={record.id} onPress={() => setRelatedTripId(value || '')} style={[styles.tripCard, active && styles.tripCardActive]}>
-            <Text style={styles.tripTitle}>{formatTripLabel(record)}</Text>
-            <Text style={styles.tripMeta}>{record.ticketId || record.tripId || 'Không có mã vé'}</Text>
-          </Pressable>
-        );
-      })}
+      {!isLoadingTrips && tripOptions.length ? (
+        <TripDropdown
+          onSelect={(record) => {
+            setRelatedTripId(tripValueOf(record));
+            setTripDropdownOpen(false);
+          }}
+          open={tripDropdownOpen}
+          records={tripOptions}
+          selectedRecord={selectedTrip}
+          selectedValue={relatedTripId}
+          onToggle={() => setTripDropdownOpen((current) => !current)}
+        />
+      ) : null}
       {errors.relatedTripId ? <FieldError message={errors.relatedTripId} /> : null}
 
       <Text style={styles.label}>Đánh giá dịch vụ</Text>
@@ -175,6 +196,71 @@ export default function SubmitFeedbackScreen() {
 
       <AppButton disabled={isSubmitting || isLoadingTrips} loading={isSubmitting} onPress={submit} title="Gửi góp ý" />
     </PassengerLayout>
+  );
+}
+
+function TripDropdown({
+  onSelect,
+  onToggle,
+  open,
+  records,
+  selectedRecord,
+  selectedValue,
+}: {
+  onSelect: (record: TravelHistoryRecord) => void;
+  onToggle: () => void;
+  open: boolean;
+  records: TravelHistoryRecord[];
+  selectedRecord?: TravelHistoryRecord;
+  selectedValue: string;
+}) {
+  return (
+    <View style={styles.dropdownWrap}>
+      <Pressable
+        accessibilityLabel="Chọn một chuyến hoặc tuyến liên quan"
+        accessibilityRole="button"
+        onPress={onToggle}
+        style={[styles.dropdownField, open && styles.dropdownFieldOpen]}
+      >
+        <View style={styles.dropdownValue}>
+          <Text numberOfLines={2} style={[styles.dropdownTitle, !selectedRecord && styles.dropdownPlaceholder]}>
+            {selectedRecord ? formatTripLabel(selectedRecord) : 'Chọn một chuyến/tuyến liên quan'}
+          </Text>
+        </View>
+        <MaterialCommunityIcons color={colors.primary} name={open ? 'chevron-up' : 'chevron-down'} size={22} />
+      </Pressable>
+
+      {open ? (
+        <View style={styles.dropdownMenu}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={records.length > 5}
+            style={styles.dropdownScroll}
+          >
+            {records.map((record) => {
+              const value = tripValueOf(record);
+              const active = value === selectedValue;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  key={value}
+                  onPress={() => onSelect(record)}
+                  style={[styles.dropdownOption, active && styles.dropdownOptionActive]}
+                >
+                  <View style={styles.dropdownOptionCopy}>
+                    <Text numberOfLines={2} style={[styles.dropdownOptionTitle, active && styles.dropdownOptionTitleActive]}>
+                      {formatTripLabel(record)}
+                    </Text>
+                  </View>
+                  {active ? <MaterialCommunityIcons color={colors.white} name="check-circle" size={20} /> : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -231,10 +317,19 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.primaryContainer },
   chipText: { color: colors.secondary, fontSize: 12, fontWeight: '900' },
   chipTextActive: { color: colors.white },
-  tripCard: { gap: 5, borderWidth: 1, borderColor: 'transparent', borderRadius: 18, backgroundColor: colors.card, padding: 14 },
-  tripCardActive: { borderColor: '#006c49', backgroundColor: '#d8f6e7' },
-  tripTitle: { color: colors.primary, fontSize: 13, fontWeight: '900' },
-  tripMeta: { color: colors.secondary, fontSize: 11, fontWeight: '700' },
+  dropdownWrap: { gap: 8 },
+  dropdownField: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: 'transparent', borderRadius: 18, backgroundColor: colors.card, paddingHorizontal: 14, paddingVertical: 10 },
+  dropdownFieldOpen: { borderColor: '#006c49' },
+  dropdownValue: { flex: 1 },
+  dropdownTitle: { color: colors.primary, fontSize: 13, lineHeight: 18, fontWeight: '900' },
+  dropdownPlaceholder: { color: colors.secondary },
+  dropdownMenu: { overflow: 'hidden', borderWidth: 1, borderColor: '#d5e4dd', borderRadius: 18, backgroundColor: colors.card },
+  dropdownScroll: { maxHeight: 360 },
+  dropdownOption: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d5e4dd', paddingHorizontal: 14, paddingVertical: 11 },
+  dropdownOptionActive: { backgroundColor: colors.primaryContainer },
+  dropdownOptionCopy: { flex: 1 },
+  dropdownOptionTitle: { color: colors.primary, fontSize: 13, lineHeight: 18, fontWeight: '900' },
+  dropdownOptionTitleActive: { color: colors.white },
   ratingRow: { flexDirection: 'row', gap: 8 },
   ratingButton: { flex: 1, minHeight: 58, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: colors.card },
   ratingButtonActive: { backgroundColor: '#d8f6e7' },

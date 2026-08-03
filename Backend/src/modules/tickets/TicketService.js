@@ -585,9 +585,16 @@ export class TicketService {
     }
 
     const directionStops = route.directions?.[direction]?.stops || route.stops || [];
+    if (directionStops.length < 2) {
+      throw new CustomError('Chiá»u tuyáº¿n khÃ´ng cÃ³ Ä‘á»§ Ä‘iá»ƒm dá»«ng Ä‘á»ƒ táº¡o vÃ©', HTTP_STATUS.BAD_REQUEST);
+    }
     const directionalRoute = { ...route, stops: directionStops };
-    const startStop = this.findStop(directionalRoute, payload.departureLocation);
-    const endStop = this.findStop(directionalRoute, payload.destinationLocation);
+    const startStop = payload.departureLocation
+      ? this.findStop(directionalRoute, payload.departureLocation)
+      : directionStops[0];
+    const endStop = payload.destinationLocation
+      ? this.findStop(directionalRoute, payload.destinationLocation)
+      : directionStops[directionStops.length - 1];
 
     if (!startStop || !endStop) {
       throw new CustomError('Diem di hoac diem den khong thuoc tuyen da chon', HTTP_STATUS.BAD_REQUEST);
