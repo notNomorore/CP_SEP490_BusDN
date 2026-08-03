@@ -69,6 +69,9 @@ const phraseOverrides = {
   'No buses match the current filters.': { en: 'No buses match the current filters.', vi: 'Không có xe nào phù hợp với bộ lọc hiện tại.' },
   'Live connection': { en: 'Live connection', vi: 'Kết nối trực tiếp' },
   'Sample data': { en: 'Sample data', vi: 'Dữ liệu mẫu' },
+  'No completed walk-in tickets': { en: 'No completed walk-in tickets', vi: 'Không có vé mua trực tiếp đã hoàn thành' },
+  'Try changing the date range or other filters to see more records.': { en: 'Try changing the date range or other filters to see more records.', vi: 'Hãy thay đổi khoảng ngày hoặc bộ lọc để xem thêm dữ liệu.' },
+  'completed tickets in the selected period': { en: 'completed tickets in the selected period', vi: 'vé hoàn thành trong khoảng thời gian đã chọn' },
 };
 
 const statusTranslations = {
@@ -87,6 +90,7 @@ const statusTranslations = {
     CLOSED: 'Closed',
     RESOLVED: 'Resolved',
     URGENT: 'Urgent',
+    NORMAL: 'Normal',
     HIGH: 'High',
     MEDIUM: 'Medium',
     LOW: 'Low',
@@ -106,6 +110,7 @@ const statusTranslations = {
     CLOSED: 'Đã đóng',
     RESOLVED: 'Đã xử lý',
     URGENT: 'Khẩn cấp',
+    NORMAL: 'Bình thường',
     HIGH: 'Cao',
     MEDIUM: 'Trung bình',
     LOW: 'Thấp',

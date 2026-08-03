@@ -52,6 +52,8 @@ const formatRoute = (trip) => {
     direction: trip?.direction || 'OUTBOUND',
     estimatedDistanceKm: directionDetail?.estimatedDistanceKm || 0,
     estimatedDurationMinutes: directionDetail?.estimatedDurationMinutes || 0,
+    fareConfig: routeDocument?.fareConfig || {},
+    fare: routeDocument?.fare || routeDocument?.baseFare || 0,
     stops,
     pathPoints,
   };

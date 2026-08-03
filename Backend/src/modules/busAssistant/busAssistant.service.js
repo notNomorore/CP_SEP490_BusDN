@@ -14,6 +14,9 @@ import BoardingRecord from './BoardingRecord.js';
 import RevenueSummary from './RevenueSummary.js';
 import Ticket from './Ticket.js';
 import Transaction from './Transaction.js';
+import QRCode from 'qrcode';
+import PayOSService from '../tickets/PayOSService.js';
+import { config } from '../../config/environment.js';
 
 const ACTIVE_TICKET_STATUSES = ['ACTIVE', 'VALID', 'PAID', 'CONFIRMED'];
 const USED_TICKET_STATUSES = ['USED', 'BOARDED', 'CONSUMED'];
@@ -341,9 +344,16 @@ export class BusAssistantService {
       tripId: payload.tripId,
     });
     const fare = calculateFare(route, payload.passengerType, payload.amount, passengerQuantity);
+    const cashReceived = number(payload.cashReceived);
+    if (payload.paymentMethod === 'CASH' && cashReceived < fare.totalAmount) {
+      throw new CustomError('Cash received is less than the ticket total', HTTP_STATUS.BAD_REQUEST);
+    }
+    const changeAmount = payload.paymentMethod === 'CASH' ? cashReceived - fare.totalAmount : 0;
 
+    const ticketCode = createCode('WI');
+    const isBankTransfer = payload.paymentMethod === 'BANK_TRANSFER';
     const ticket = await WalkInTicket.create({
-      ticketCode: createCode('WI'),
+      ticketCode,
       busAssistantId: actor.userId,
       routeId: payload.routeId,
       tripId: payload.tripId,
@@ -351,9 +361,9 @@ export class BusAssistantService {
       passengerCount: passengerQuantity,
       farePerPassenger: fare.farePerPassenger,
       totalAmount: fare.totalAmount,
-      collectedAmount: fare.totalAmount,
+      collectedAmount: isBankTransfer ? 0 : fare.totalAmount,
       paymentMethod: payload.paymentMethod,
-      status: 'COMPLETED',
+      status: isBankTransfer ? 'PENDING' : 'COMPLETED',
       notes: `fromStopId=${payload.fromStopId}; toStopId=${payload.toStopId}; passengerType=${payload.passengerType}; ticketType=${payload.ticketType}; nonRefundable=true`,
     });
 
@@ -365,18 +375,36 @@ export class BusAssistantService {
       tripId: payload.tripId,
       shiftId: shiftContext.shiftId || null,
       ticketType: 'WALK_IN',
-      paymentMethod: payload.paymentMethod,
+      paymentMethod: isBankTransfer ? 'QR' : 'CASH',
       amount: fare.totalAmount,
       discountAmount: fare.discountAmount,
       finalAmount: fare.totalAmount,
-      status: 'COMPLETED',
-      completedAt: new Date(),
+      status: isBankTransfer ? 'PENDING' : 'COMPLETED',
+      completedAt: isBankTransfer ? null : new Date(),
       source: 'BUS_ASSISTANT',
       nonRefundable: true,
+      cashReceived: isBankTransfer ? null : cashReceived,
+      changeAmount: isBankTransfer ? 0 : changeAmount,
     });
 
     ticket.transactionId = transaction._id;
     await ticket.save();
+
+    let payment = null;
+    let qrCodeImage = null;
+    if (isBankTransfer) {
+      const orderCode = Number(String(Date.now()).slice(-10));
+      payment = await PayOSService.createPaymentLink({
+        orderCode,
+        amount: Math.round(fare.totalAmount),
+        description: `BusDN ${ticketCode}`,
+        returnUrl: `${config.frontend.url}/bus-assistant/walkin-ticket?payment=success`,
+        cancelUrl: `${config.frontend.url}/bus-assistant/walkin-ticket?payment=cancelled`,
+      });
+      qrCodeImage = payment.qrCode ? await QRCode.toDataURL(payment.qrCode, { width: 360, margin: 2 }) : null;
+      transaction.set({ orderCode, checkoutUrl: payment.checkoutUrl, paymentQrCode: payment.qrCode });
+      await transaction.save();
+    }
 
     await createAuditLog({
       req,
@@ -393,7 +421,121 @@ export class BusAssistantService {
       ticketData: ticket.toObject(),
       transactionData: transaction.toObject(),
       totalAmount: fare.totalAmount,
+      qrCodeImage,
+      checkoutUrl: payment?.checkoutUrl || null,
+      requiresPaymentConfirmation: isBankTransfer,
+      cashReceived: isBankTransfer ? null : cashReceived,
+      changeAmount: isBankTransfer ? 0 : changeAmount,
       message: 'Walk-in ticket created successfully',
+    };
+  }
+
+  static async confirmWalkInPayment(ticketId, actor, req) {
+    if (!mongoose.isValidObjectId(ticketId)) throw new CustomError('Invalid walk-in ticket identifier', HTTP_STATUS.BAD_REQUEST);
+    const ticket = await WalkInTicket.findOne({ _id: ticketId, busAssistantId: actor.userId });
+    if (!ticket) throw new CustomError('Walk-in ticket not found', HTTP_STATUS.NOT_FOUND);
+    if (ticket.status === 'COMPLETED') {
+      return { ticketData: ticket.toObject(), message: 'Walk-in ticket payment was already confirmed' };
+    }
+    const transaction = await Transaction.findOne({ walkInTicketId: ticket._id, busAssistantId: actor.userId });
+    if (!transaction?.orderCode) {
+      throw new CustomError('Payment order was not found', HTTP_STATUS.NOT_FOUND);
+    }
+    const paymentInfo = await PayOSService.getPaymentLinkInformation(transaction.orderCode);
+    if (String(paymentInfo?.status || '').toUpperCase() !== 'PAID') {
+      throw new CustomError('Bank transfer has not been completed', HTTP_STATUS.CONFLICT);
+    }
+    ticket.status = 'COMPLETED';
+    ticket.collectedAmount = ticket.totalAmount;
+    await ticket.save();
+    if (transaction) {
+      transaction.status = 'COMPLETED';
+      transaction.completedAt = new Date();
+      await transaction.save();
+    }
+    await createAuditLog({
+      req,
+      user: actor,
+      action: 'CONFIRM_WALKIN_PAYMENT',
+      module: 'BUS_ASSISTANT',
+      description: 'Bus assistant confirmed a walk-in bank transfer payment.',
+      resourceType: 'WalkInTicket',
+      resourceId: ticket._id,
+      metadata: { transactionId: transaction?._id, totalAmount: ticket.totalAmount },
+    });
+    return { ticketData: ticket.toObject(), transactionData: transaction?.toObject(), message: 'Walk-in payment confirmed successfully' };
+  }
+
+  static async getWalkInTicketHistory(query, actor) {
+    const selectedDate = query.date ? new Date(`${query.date}T00:00:00`) : new Date();
+    if (Number.isNaN(selectedDate.getTime())) {
+      throw new CustomError('Invalid history date', HTTP_STATUS.BAD_REQUEST);
+    }
+    const { start, end } = todayRange(selectedDate);
+    const tickets = await WalkInTicket.find({
+      busAssistantId: actor.userId,
+      issuedAt: { $gte: start, $lte: end },
+    })
+      .populate('routeId', 'routeCode routeName name')
+      .populate('transactionId', 'checkoutUrl paymentQrCode orderCode status')
+      .sort({ issuedAt: -1 })
+      .limit(200)
+      .lean();
+
+    return {
+      date: start.toISOString().slice(0, 10),
+      count: tickets.length,
+      totalRevenue: tickets.filter((ticket) => ticket.status === 'COMPLETED').reduce((sum, ticket) => sum + number(ticket.collectedAmount), 0),
+      tickets: tickets.map((ticket) => ({
+        _id: ticket._id,
+        ticketCode: ticket.ticketCode,
+        issuedAt: ticket.issuedAt,
+        routeCode: ticket.routeId?.routeCode || '',
+        routeName: ticket.routeId?.routeName || ticket.routeId?.name || '',
+        tripId: ticket.tripId,
+        passengerCount: ticket.passengerCount,
+        paymentMethod: ticket.paymentMethod,
+        totalAmount: ticket.totalAmount,
+        collectedAmount: ticket.collectedAmount,
+        status: ticket.status,
+        canResumePayment: ticket.status === 'PENDING' && ticket.paymentMethod === 'BANK_TRANSFER' && Boolean(ticket.transactionId?.checkoutUrl),
+      })),
+    };
+  }
+
+  static async resumeWalkInPayment(ticketId, actor) {
+    if (!mongoose.isValidObjectId(ticketId)) throw new CustomError('Invalid walk-in ticket identifier', HTTP_STATUS.BAD_REQUEST);
+    const ticket = await WalkInTicket.findOne({ _id: ticketId, busAssistantId: actor.userId });
+    if (!ticket) throw new CustomError('Walk-in ticket not found', HTTP_STATUS.NOT_FOUND);
+    const transaction = await Transaction.findOne({ walkInTicketId: ticket._id, busAssistantId: actor.userId });
+    if (!transaction?.orderCode || !transaction?.checkoutUrl || !transaction?.paymentQrCode) {
+      throw new CustomError('Payment QR is no longer available', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const paymentInfo = await PayOSService.getPaymentLinkInformation(transaction.orderCode);
+    if (String(paymentInfo?.status || '').toUpperCase() === 'PAID') {
+      ticket.status = 'COMPLETED';
+      ticket.collectedAmount = ticket.totalAmount;
+      transaction.status = 'COMPLETED';
+      transaction.completedAt = new Date();
+      await Promise.all([ticket.save(), transaction.save()]);
+      return {
+        ticketData: ticket.toObject(),
+        totalAmount: ticket.totalAmount,
+        requiresPaymentConfirmation: false,
+        paymentCompleted: true,
+        message: 'Walk-in payment completed successfully',
+      };
+    }
+
+    return {
+      ticketData: ticket.toObject(),
+      totalAmount: ticket.totalAmount,
+      qrCodeImage: await QRCode.toDataURL(transaction.paymentQrCode, { width: 360, margin: 2 }),
+      checkoutUrl: transaction.checkoutUrl,
+      requiresPaymentConfirmation: true,
+      resumed: true,
+      message: 'Walk-in payment resumed successfully',
     };
   }
 

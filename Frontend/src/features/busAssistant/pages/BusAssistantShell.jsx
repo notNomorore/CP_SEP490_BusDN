@@ -5,7 +5,6 @@ import {
   Banknote,
   BellRing,
   CalendarDays,
-  ClipboardCheck,
   FileWarning,
   LogOut,
   MessageCircle,
@@ -32,7 +31,6 @@ const navItems = [
   { to: '/bus-assistant/walkin-ticket', labelKey: 'walkInTicket', icon: ReceiptText },
   { to: '/bus-assistant/incident-reports', labelKey: 'incidentReports', label: 'Báo cáo sự cố', icon: FileWarning },
   { to: '/bus-assistant/shift-revenue', labelKey: 'shiftRevenue', icon: Banknote },
-  { to: '/bus-assistant/revenue-summary', labelKey: 'revenueSummary', icon: ClipboardCheck },
 ];
 
 const navItemOrder = [
@@ -40,7 +38,6 @@ const navItemOrder = [
   '/bus-assistant/walkin-ticket',
   '/bus-assistant/incident-reports',
   '/bus-assistant/shift-revenue',
-  '/bus-assistant/revenue-summary',
   '/bus-assistant/assigned-trips',
   '/bus-assistant/shift-schedule',
   '/bus-assistant/operation-notifications',
@@ -125,7 +122,7 @@ const BusAssistantShell = () => {
         <div className="flex w-full flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between xl:px-10 2xl:px-12">
           <button
             type="button"
-            onClick={() => navigate('/bus-assistant/assigned-trips')}
+            onClick={() => navigate('/bus-assistant/validate-ticket')}
             className="flex items-center gap-3 text-left"
           >
             <span className="grid h-10 w-10 place-items-center rounded bg-emerald-400 text-slate-950">

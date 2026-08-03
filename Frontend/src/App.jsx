@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Navigate, Routes, Route } from 'react-router-dom';
 import AppInitializer from './shared/components/AppInitializer';
 import { HomePage } from './features/home';
 import { AdminPriorityVerificationPage, PriorityProfilePage } from './features/priorityProfile';
@@ -54,7 +54,6 @@ import {
   CreateWalkInTicketPage,
   IncidentReportPage,
   OperationNotificationsPage,
-  RevenueSummaryPage,
   ShiftRevenuePage,
   ShiftSchedulePage,
   ValidateQrTicketPage,
@@ -345,7 +344,7 @@ function App() {
               </BusAssistantRoute>
             )}
           >
-            <Route index element={<AssignedTripsPage />} />
+            <Route index element={<Navigate to="validate-ticket" replace />} />
             <Route path="assigned-trips" element={<AssignedTripsPage />} />
             <Route path="shift-schedule" element={<ShiftSchedulePage />} />
             <Route path="operation-notifications" element={<OperationNotificationsPage />} />
@@ -354,7 +353,7 @@ function App() {
             <Route path="walkin-ticket" element={<CreateWalkInTicketPage />} />
             <Route path="incident-reports" element={<IncidentReportPage />} />
             <Route path="shift-revenue" element={<ShiftRevenuePage />} />
-            <Route path="revenue-summary" element={<RevenueSummaryPage />} />
+            <Route path="revenue-summary" element={<Navigate to="/bus-assistant/validate-ticket" replace />} />
           </Route>
           <Route
             path="/admin/staff-performance"
