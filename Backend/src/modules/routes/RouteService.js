@@ -1,4 +1,8 @@
 import Route from './Route.js';
+import Trip from '../fleetOperations/Trip.js';
+import Vehicle from '../fleetOperations/Vehicle.js';
+
+const ACTIVE_PASSENGER_TRIP_STATUSES = ['scheduled', 'active', 'paused', 'delayed', 'incident', 'completed', 'cancelled'];
 
 const sampleRoutes = [
   {
@@ -997,11 +1001,144 @@ export class RouteService {
     };
   }
 
+  static normalizeTripStatus(status) {
+    const normalized = String(status || '').toLowerCase();
+    const statusMap = {
+      scheduled: 'SCHEDULED',
+      active: 'IN_PROGRESS',
+      in_progress: 'IN_PROGRESS',
+      paused: 'PAUSED',
+      delayed: 'DELAYED',
+      incident: 'DELAYED',
+      completed: 'COMPLETED',
+      cancelled: 'CANCELLED',
+    };
+
+    return statusMap[normalized] || 'UNKNOWN';
+  }
+
+  static calculateProgressPercentFromTrip(route, trip) {
+    if (trip.progressPercent !== undefined && trip.progressPercent !== null) {
+      return Math.min(Math.max(Math.round(Number(trip.progressPercent) || 0), 0), 100);
+    }
+
+    const stops = route.stops || [];
+    const currentStopIndex = Number(trip.currentStopIndex);
+
+    if (stops.length > 1 && Number.isFinite(currentStopIndex)) {
+      return Math.min(Math.max(Math.round((currentStopIndex / (stops.length - 1)) * 100), 0), 100);
+    }
+
+    return 0;
+  }
+
+  static buildTripStopProgress(route, trip, busId) {
+    const stops = route.stops || [];
+    const currentStopIndex = Math.min(Math.max(Number(trip.currentStopIndex) || 0, 0), Math.max(stops.length - 1, 0));
+    const status = this.normalizeTripStatus(trip.status);
+    const completedTrip = status === 'COMPLETED';
+    const cancelledTrip = status === 'CANCELLED';
+    const nextStop = stops.find((stop, index) => (
+      trip.nextStopId
+        ? String(stop.stopId || stop.id || this.buildStopId(route, stop)) === String(trip.nextStopId)
+        : index === Math.min(currentStopIndex + 1, stops.length - 1)
+    ));
+    const completedStops = stops
+      .filter((_stop, index) => completedTrip || (!cancelledTrip && index < currentStopIndex))
+      .map((stop) => ({
+        stopId: this.buildStopId(route, stop),
+        stopName: stop.name,
+        stopOrder: stop.order,
+      }));
+    const remainingStops = stops
+      .filter((_stop, index) => !completedTrip && index > currentStopIndex)
+      .map((stop) => ({
+        stopId: this.buildStopId(route, stop),
+        stopName: stop.name,
+        stopOrder: stop.order,
+      }));
+
+    return {
+      tripId: trip._id?.toString(),
+      tripCode: trip.tripCode || trip._id?.toString(),
+      busId,
+      routeId: String(route._id || route.id),
+      progressPercent: completedTrip ? 100 : this.calculateProgressPercentFromTrip(route, trip),
+      completedStops,
+      remainingStops,
+      tripStatus: status,
+      estimatedRemainingTime: trip.plannedEndTime ? new Date(trip.plannedEndTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '',
+      currentStop: completedTrip ? stops[stops.length - 1]?.name : stops[currentStopIndex]?.name,
+      currentStopIndex,
+      nextStop: completedTrip || cancelledTrip ? '' : nextStop?.name || '',
+      totalStops: stops.length,
+    };
+  }
+
   static async getLiveBusLocations(routeId) {
     const route = await this.findActiveRoute(routeId, routeId);
 
     if (!route) {
       throw new Error('Bus not found');
+    }
+
+    const routeObjectId = route._id || route.id;
+    const activeTrips = await Trip.find({
+      routeId: routeObjectId,
+      status: { $in: ACTIVE_PASSENGER_TRIP_STATUSES },
+    })
+      .sort({ lastGpsAt: -1, plannedStartTime: 1 })
+      .limit(10)
+      .lean();
+
+    if (activeTrips.length) {
+      const vehicles = await Vehicle.find({
+        _id: { $in: [...new Set(activeTrips.map((trip) => String(trip.vehicleId)).filter(Boolean))] },
+      }).lean();
+      const vehicleMap = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle]));
+      const buses = activeTrips.map((trip) => {
+        const vehicle = vehicleMap.get(String(trip.vehicleId));
+        const busId = vehicle?.vehicleCode || vehicle?.plateNumber || trip.vehicleId?.toString() || trip._id?.toString();
+        const tripProgress = this.buildTripStopProgress(route, trip, busId);
+        const status = this.normalizeTripStatus(trip.status);
+        const currentLocation = typeof vehicle?.currentLocation?.lat === 'number' && typeof vehicle?.currentLocation?.lng === 'number'
+          ? {
+            latitude: vehicle.currentLocation.lat,
+            longitude: vehicle.currentLocation.lng,
+            heading: vehicle.currentLocation.heading,
+          }
+          : undefined;
+
+        return {
+          busId,
+          vehicleId: vehicle?._id?.toString() || trip.vehicleId?.toString(),
+          plateNumber: vehicle?.plateNumber,
+          tripId: trip._id?.toString(),
+          tripCode: trip.tripCode || trip._id?.toString(),
+          routeId: String(route._id || route.id),
+          routeNumber: route.routeNumber,
+          currentLocation,
+          estimatedArrivalTime: tripProgress.estimatedRemainingTime || '',
+          nextStop: tripProgress.nextStop,
+          stopEtas: this.calculateStopEtas(route, (tripProgress.progressPercent || 0) / 100, status),
+          tripProgress,
+          status,
+          delay: Number(trip.delayMinutes || 0) > 0 ? {
+            delayDurationMinutes: trip.delayMinutes,
+            delayReason: trip.delayReason || 'Trip delayed',
+          } : null,
+          lastUpdated: trip.lastGpsAt || vehicle?.currentLocation?.updatedAt || new Date().toISOString(),
+        };
+      });
+
+      return {
+        route: this.formatRoute(route),
+        buses,
+        stopEtaSummary: [],
+        routeChange: this.getRouteChangeNotice(route),
+        count: buses.length,
+        refreshedAt: new Date().toISOString(),
+      };
     }
 
     const pathPoints = route.pathPoints?.length ? route.pathPoints : route.stops;
@@ -1010,7 +1147,10 @@ export class RouteService {
       return {
         route: this.formatRoute(route),
         buses: [],
-        message: 'Live location unavailable',
+        stopEtaSummary: [],
+        routeChange: this.getRouteChangeNotice(route),
+        count: 0,
+        message: 'No active trips found for this route',
         refreshedAt: new Date().toISOString(),
       };
     }
@@ -1022,7 +1162,7 @@ export class RouteService {
       const progress = ((now % cycleMs) / cycleMs + offset) % 1;
       const currentLocation = this.interpolatePathPosition(pathPoints, progress);
       const nextStop = this.findNextStop(route, progress);
-      const status = index === 1 && progress > 0.82 ? 'Delayed' : 'Running';
+      const status = index === 1 && progress > 0.82 ? 'DELAYED' : 'IN_PROGRESS';
       const busId = `${route.routeNumber}-BUS-${index + 1}`;
       const remainingMinutes = Math.max(
         Math.round((1 - progress) * (route.estimatedDurationMinutes || 30)),
@@ -1033,7 +1173,7 @@ export class RouteService {
         : remainingMinutes;
       const stopEtas = this.calculateStopEtas(route, progress, status);
       const tripProgress = this.calculateTripProgress(route, progress, busId, status);
-      const delayDurationMinutes = status === 'Delayed'
+      const delayDurationMinutes = status === 'DELAYED'
         ? Math.max(Math.round((progress - 0.82) * (route.estimatedDurationMinutes || 30)) + 5, 5)
         : 0;
 
@@ -1047,7 +1187,7 @@ export class RouteService {
         stopEtas,
         tripProgress,
         status,
-        delay: status === 'Delayed' ? {
+        delay: status === 'DELAYED' ? {
           delayDurationMinutes,
           delayReason: 'Traffic congestion',
           updatedEta: `${Math.max(arrivalToNextStopMinutes + delayDurationMinutes, 1)} min`,
@@ -1073,14 +1213,14 @@ export class RouteService {
         status: activeEtas[0]?.status || 'Unavailable',
       };
     });
-    const routeChange = this.getRouteChangeNotice(route);
 
     return {
       route: this.formatRoute(route),
       buses,
       stopEtaSummary,
-      routeChange,
+      routeChange: this.getRouteChangeNotice(route),
       count: buses.length,
+      message: 'No active trips found for this route; returning route-based estimates',
       refreshedAt: new Date(now).toISOString(),
     };
   }

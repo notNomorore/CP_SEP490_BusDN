@@ -875,6 +875,7 @@ const TripLifecyclePanel = ({
   onStartTrip,
   onCompleteTrip,
   onSyncTripGps,
+  embedded = false,
 }) => {
   const isTripReady = assignment.tripStatus === 'READY';
   const isTripInProgress = assignment.tripStatus === 'IN_PROGRESS';
@@ -899,7 +900,7 @@ const TripLifecyclePanel = ({
   }
 
   return (
-    <div className="mt-5 rounded-lg border border-blue-100 bg-blue-50/70 p-4">
+    <div className={`${embedded ? 'mt-0' : 'mt-5'} rounded-lg border border-blue-100 bg-blue-50/70 p-4`}>
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -967,6 +968,7 @@ const IncidentReportingPanel = ({
   canReportIncident,
   isProcessing,
   onReportIncident,
+  embedded = false,
 }) => {
   const [form, setForm] = useState({
     type: 'TRAFFIC_CONGESTION',
@@ -1085,7 +1087,7 @@ const IncidentReportingPanel = ({
   };
 
   return (
-    <div className="mt-5 rounded-lg border border-red-100 bg-red-50/60 p-4">
+    <div className={`${embedded ? 'mt-4' : 'mt-5'} rounded-lg border border-red-100 bg-red-50/60 p-4`}>
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -1502,6 +1504,45 @@ const AssignmentCard = ({
       ? 'Xe đã sẵn sàng - chuẩn bị vận hành'
       : 'Đã tiếp nhận chuyến - chuyển sang kiểm tra xe';
 
+  const showAssignmentFlow = showLifecycleStep || showIncidentStep;
+  const assignmentFlow = showAssignmentFlow ? (
+    <section className="mt-5 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
+      <div className="flex flex-col gap-2 border-b border-emerald-100 pb-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">LUỒNG CHUYẾN ĐƯỢC PHÂN CÔNG</p>
+          <h4 className="mt-1 text-lg font-black text-slate-950">Vận hành và báo cáo trong cùng một chuyến</h4>
+          <p className="mt-1 text-sm text-slate-600">
+            Bắt đầu chuyến, theo dõi GPS, hoàn thành chuyến và gửi báo cáo sự cố ngay trong card phân công này.
+          </p>
+        </div>
+        <StatusBadge status={assignment.tripStatus} />
+      </div>
+
+      <div className="pt-4">
+        {showLifecycleStep && (
+          <TripLifecyclePanel
+            assignment={assignment}
+            canStartTrip={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+            isProcessing={isProcessing}
+            onStartTrip={onStartTrip}
+            onCompleteTrip={onCompleteTrip}
+            onSyncTripGps={onSyncTripGps}
+            embedded
+          />
+        )}
+        {showIncidentStep && (
+          <IncidentReportingPanel
+            assignment={assignment}
+            canReportIncident={['DRIVER', 'BUS_ASSISTANT'].includes(assignment.actorRole)}
+            isProcessing={isProcessing}
+            onReportIncident={onReportIncident}
+            embedded
+          />
+        )}
+      </div>
+    </section>
+  ) : null;
+
   if (assignment.tripStatus === 'COMPLETED') {
     return (
       <article className="rounded-lg border border-emerald-100 bg-white p-5 shadow-sm">
@@ -1557,14 +1598,7 @@ const AssignmentCard = ({
             </div>
           </div>
         </div>
-        {showIncidentStep && (
-          <IncidentReportingPanel
-            assignment={assignment}
-            canReportIncident={assignment.actorRole === 'BUS_ASSISTANT'}
-            isProcessing={isProcessing}
-            onReportIncident={onReportIncident}
-          />
-        )}
+        {assignmentFlow}
       </article>
     );
   }
@@ -1586,6 +1620,9 @@ const AssignmentCard = ({
             <p className="mt-1 text-sm text-slate-600">
               {assignment.route.origin} - {assignment.route.destination} | {formatTime(assignment.scheduledStart)} - {formatTime(assignment.scheduledEnd)}
             </p>
+            <p className="mt-2 text-sm font-bold text-slate-800">
+              Xe hiện tại: {assignment.vehicle?.plateNumber || 'Chưa có biển số'}
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <StatusBadge status={assignment.acceptanceStatus || 'ACCEPTED'} />
@@ -1604,24 +1641,7 @@ const AssignmentCard = ({
             onReportIssue={onReportIssue}
           />
         )}
-        {showLifecycleStep && (
-          <TripLifecyclePanel
-            assignment={assignment}
-            canStartTrip={canOperateVehicle && assignment.actorRole === 'DRIVER'}
-            isProcessing={isProcessing}
-            onStartTrip={onStartTrip}
-            onCompleteTrip={onCompleteTrip}
-            onSyncTripGps={onSyncTripGps}
-          />
-        )}
-        {showIncidentStep && (
-          <IncidentReportingPanel
-            assignment={assignment}
-            canReportIncident={['DRIVER', 'BUS_ASSISTANT'].includes(assignment.actorRole)}
-            isProcessing={isProcessing}
-            onReportIncident={onReportIncident}
-          />
-        )}
+        {assignmentFlow}
       </article>
     );
   }
@@ -1725,24 +1745,7 @@ const AssignmentCard = ({
         onReportIssue={onReportIssue}
       />
     )}
-    {showLifecycleStep && (
-      <TripLifecyclePanel
-        assignment={assignment}
-        canStartTrip={canOperateVehicle && assignment.actorRole === 'DRIVER'}
-        isProcessing={isProcessing}
-        onStartTrip={onStartTrip}
-        onCompleteTrip={onCompleteTrip}
-        onSyncTripGps={onSyncTripGps}
-      />
-    )}
-    {showIncidentStep && (
-      <IncidentReportingPanel
-        assignment={assignment}
-        canReportIncident={['DRIVER', 'BUS_ASSISTANT'].includes(assignment.actorRole)}
-        isProcessing={isProcessing}
-        onReportIncident={onReportIncident}
-      />
-    )}
+    {assignmentFlow}
   </article>
   );
 };
@@ -2021,9 +2024,9 @@ const ScheduleOperationsPage = () => {
   const canOperateVehicle = user?.role === 'DRIVER';
 
   return (
-    <div className="driver-dark-shell min-h-screen bg-[#020617] text-slate-100">
-      <header className="border-b border-white/10 bg-slate-950/95">
-        <div className="flex w-full flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between xl:px-10">
+    <div className="min-h-screen bg-[#f4f8f6] text-slate-950">
+      <header className="border-b border-emerald-100 bg-white shadow-sm">
+        <div className="flex w-full flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between xl:px-10 2xl:px-12">
           <button
             type="button"
             onClick={() => setActiveTab('trips')}
@@ -2033,20 +2036,20 @@ const ScheduleOperationsPage = () => {
               <BusFront size={22} />
             </span>
             <span>
-              <span className="block text-lg font-semibold text-white">Driver BusDN</span>
-              <span className="block text-xs text-slate-400">Vận hành xe buýt Đà Nẵng</span>
+              <span className="block text-lg font-semibold text-emerald-950">Driver BusDN</span>
+              <span className="block text-xs text-slate-500">Vận hành xe buýt Đà Nẵng</span>
             </span>
           </button>
 
           <div className="flex items-center gap-3">
-            <span className="rounded border border-white/10 bg-white/5 px-3 py-2 text-sm font-bold text-slate-200">VN</span>
-            <div className="flex items-center gap-2 rounded border border-white/10 bg-white/[0.04] px-2 py-1.5">
+            <span className="rounded border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800">VN</span>
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50/70 px-2 py-1.5 shadow-sm">
               <span className="grid h-9 w-9 place-items-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800">
                 {(user?.fullName || 'D').charAt(0).toUpperCase()}
               </span>
               <div className="hidden min-w-0 sm:block">
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Đã đăng nhập</p>
-                <p className="max-w-[180px] truncate text-sm font-semibold text-white">{user?.fullName || 'Tài xế'}</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-900/55">Đã đăng nhập</p>
+                <p className="max-w-[180px] truncate text-sm font-semibold text-emerald-950">{user?.fullName || 'Tài xế'}</p>
                 <p className="text-xs font-semibold text-emerald-400">{actorLabel}</p>
               </div>
             </div>
@@ -2054,15 +2057,15 @@ const ScheduleOperationsPage = () => {
         </div>
       </header>
 
-      <main className="grid w-full gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[215px_minmax(0,1fr)] xl:px-10">
-        <nav className="flex h-fit flex-col gap-2 rounded border border-white/10 bg-white/[0.04] p-3 lg:sticky lg:top-6">
+      <main className="grid w-full gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[215px_minmax(0,1fr)] xl:px-10 2xl:px-12">
+        <nav className="flex h-fit flex-col gap-2 rounded-2xl border border-emerald-100 bg-white p-3 shadow-sm lg:sticky lg:top-6">
           <button
             type="button"
             onClick={() => setActiveTab('trips')}
             className={`inline-flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium transition ${
               activeTab === 'trips'
-                ? 'bg-emerald-400 text-slate-950'
-                : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                ? 'bg-emerald-400 text-slate-950 shadow-sm'
+                : 'bg-emerald-50/60 text-emerald-950 hover:bg-emerald-100'
             }`}
           >
             <Route size={16} /> Chuyến được phân công
@@ -2072,8 +2075,8 @@ const ScheduleOperationsPage = () => {
             onClick={() => openShiftWeek(filters.from)}
             className={`inline-flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium transition ${
               activeTab === 'shifts'
-                ? 'bg-emerald-400 text-slate-950'
-                : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                ? 'bg-emerald-400 text-slate-950 shadow-sm'
+                : 'bg-emerald-50/60 text-emerald-950 hover:bg-emerald-100'
             }`}
           >
             <CalendarDays size={16} /> Lịch ca làm việc
@@ -2083,8 +2086,8 @@ const ScheduleOperationsPage = () => {
             onClick={() => setActiveTab('notifications')}
             className={`inline-flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium transition ${
               activeTab === 'notifications'
-                ? 'bg-emerald-400 text-slate-950'
-                : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                ? 'bg-emerald-400 text-slate-950 shadow-sm'
+                : 'bg-emerald-50/60 text-emerald-950 hover:bg-emerald-100'
             }`}
           >
             <BellRing size={16} /> Thông báo vận hành
@@ -2094,21 +2097,21 @@ const ScheduleOperationsPage = () => {
             onClick={() => setActiveTab('chat')}
             className={`inline-flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium transition ${
               activeTab === 'chat'
-                ? 'bg-emerald-400 text-slate-950'
-                : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                ? 'bg-emerald-400 text-slate-950 shadow-sm'
+                : 'bg-emerald-50/60 text-emerald-950 hover:bg-emerald-100'
             }`}
           >
             <MessageCircle size={16} /> Nhóm trò chuyện
           </button>
-          <div className="mt-2 border-t border-white/10 pt-3 text-xs leading-5 text-slate-400">
+          <div className="mt-2 border-t border-emerald-100 pt-3 text-xs leading-5 text-emerald-950/60">
             Theo dõi chuyến được phân công, kiểm tra xe, lịch ca làm việc và trao đổi vận hành.
           </div>
         </nav>
 
         <section className="min-w-0">
-          <section className="mb-5 rounded border border-white/10 bg-white/[0.04] px-4 py-4">
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-400">Driver Operations</p>
-            <h1 className="mt-1 text-2xl font-black text-white">
+          <section className="mb-5 rounded-[32px] bg-[#effaf5] px-5 py-6 text-[#061c13] shadow-[0_24px_60px_rgba(0,26,15,0.08)] lg:px-8">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">Driver Operations</p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight lg:text-4xl">
               {activeTab === 'trips'
                 ? 'Chuyến được phân công'
                 : activeTab === 'shifts'
@@ -2117,7 +2120,7 @@ const ScheduleOperationsPage = () => {
                     ? 'Nhóm trò chuyện vận hành'
                     : 'Thông báo vận hành'}
             </h1>
-            <p className="mt-1 text-sm text-slate-400">
+            <p className="mt-3 max-w-3xl text-base text-emerald-950/72">
               {activeTab === 'trips'
                 ? 'Tiếp nhận chuyến, kiểm tra xe và vận hành theo phân công.'
                 : activeTab === 'shifts'
@@ -2130,25 +2133,25 @@ const ScheduleOperationsPage = () => {
 
           <section className="space-y-6">
           {activeTab !== 'chat' && (
-          <div className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-end md:justify-between">
+          <div className="flex flex-col gap-4 rounded-[24px] border border-emerald-100 bg-white p-4 shadow-sm md:flex-row md:items-end md:justify-between">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1">
-                <span className="text-xs font-bold uppercase text-slate-500">Từ ngày</span>
+                <span className="text-xs font-bold uppercase text-emerald-900/60">Từ ngày</span>
                 <input
                   type="date"
                   value={filters.from}
                   onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))}
-                  className="rounded-lg border-slate-300 text-sm focus:border-emerald-600 focus:ring-emerald-600"
+                  className="rounded-xl border-emerald-100 bg-emerald-50/40 text-sm font-semibold text-emerald-950 focus:border-emerald-600 focus:ring-emerald-600"
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs font-bold uppercase text-slate-500">Đến ngày</span>
+                <span className="text-xs font-bold uppercase text-emerald-900/60">Đến ngày</span>
                 <input
                   type="date"
                   value={filters.to}
                   min={filters.from}
                   onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))}
-                  className="rounded-lg border-slate-300 text-sm focus:border-emerald-600 focus:ring-emerald-600"
+                  className="rounded-xl border-emerald-100 bg-emerald-50/40 text-sm font-semibold text-emerald-950 focus:border-emerald-600 focus:ring-emerald-600"
                 />
               </label>
             </div>
@@ -2156,7 +2159,7 @@ const ScheduleOperationsPage = () => {
               type="button"
               onClick={loadData}
               disabled={isLoading}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#001f14] px-5 py-3 text-sm font-black text-white shadow-[0_14px_28px_rgba(0,26,15,0.18)] hover:bg-emerald-950 disabled:opacity-60"
             >
               <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
               Làm mới lịch
@@ -2207,43 +2210,43 @@ const ScheduleOperationsPage = () => {
               )}
             </div>
           ) : activeTab === 'shifts' ? (
-            <section className="mt-6 overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
-              <div className="flex flex-col gap-4 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
+            <section className="mt-6 rounded-[32px] bg-[#effaf5] p-5 text-[#061c13] shadow-[0_24px_60px_rgba(0,26,15,0.08)] lg:p-8">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">UC40 - Lịch ca làm việc</p>
-                  <h2 className="mt-1 text-xl font-black text-slate-950">Lịch làm việc theo tuần</h2>
-                  <p className="mt-1 text-sm text-slate-500">Chỉ hiển thị các ca admin đã phân công cho bạn.</p>
+                  <h2 className="mt-1 text-xl font-black">Lịch làm việc theo tuần</h2>
+                  <p className="mt-1 text-sm font-semibold text-emerald-950/60">Chỉ hiển thị các ca admin đã phân công cho bạn.</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button type="button" onClick={() => openShiftWeek(addInputDays(filters.from, -7))} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-200 text-emerald-700" title="Tuần trước"><ChevronLeft size={18} /></button>
-                  <button type="button" onClick={() => openShiftWeek(new Date())} className="h-10 rounded-lg border border-emerald-200 px-3 text-sm font-bold text-emerald-700">Tuần này</button>
-                  <button type="button" onClick={() => openShiftWeek(addInputDays(filters.from, 7))} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-200 text-emerald-700" title="Tuần sau"><ChevronRight size={18} /></button>
+                  <button type="button" onClick={() => openShiftWeek(addInputDays(filters.from, -7))} className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-white text-emerald-950 shadow-[0_10px_24px_rgba(0,26,15,0.06)]" title="Tuần trước"><ChevronLeft size={20} /></button>
+                  <button type="button" onClick={() => openShiftWeek(new Date())} className="h-12 rounded-xl bg-white px-5 text-sm font-black text-emerald-950 shadow-[0_10px_24px_rgba(0,26,15,0.06)]">Tuần này</button>
+                  <button type="button" onClick={() => openShiftWeek(addInputDays(filters.from, 7))} className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-white text-emerald-950 shadow-[0_10px_24px_rgba(0,26,15,0.06)]" title="Tuần sau"><ChevronRight size={20} /></button>
                 </div>
               </div>
-              <div className="overflow-x-auto p-4">
-                <div className="grid min-w-[980px] grid-cols-7 gap-3">
+              <div className="mt-5 overflow-x-auto pb-2">
+                <div className="grid min-w-[1120px] grid-cols-7 gap-4">
                   {weekDays.map((date) => {
                     const dayShifts = scheduleByDate[date] || [];
                     const today = getDateInputValue(new Date()) === date;
                     return (
-                      <div key={date} className={`min-h-[260px] overflow-hidden rounded-xl border ${today ? 'border-emerald-400 ring-1 ring-emerald-200' : 'border-slate-200'}`}>
-                        <div className={today ? 'border-b border-emerald-200 bg-emerald-50 px-3 py-3 text-emerald-800' : 'border-b border-slate-200 bg-slate-50 px-3 py-3 text-slate-700'}>
-                          <p className="text-xs font-black uppercase tracking-[0.12em]">{new Date(`${date}T00:00:00`).toLocaleDateString('vi-VN', { weekday: 'short' })}</p>
-                          <p className="mt-1 text-lg font-black">{date.slice(8, 10)}/{date.slice(5, 7)}</p>
+                      <div key={date} className={`min-h-[290px] rounded-[28px] p-5 shadow-[0_16px_32px_rgba(0,26,15,0.05)] ${today ? 'bg-[#00452d] text-white ring-4 ring-emerald-100' : 'bg-[#e8f4ef] text-emerald-950'}`}>
+                        <div>
+                          <p className={`text-xs font-black uppercase tracking-[0.18em] ${today ? 'text-emerald-300' : 'text-emerald-900/55'}`}>{new Date(`${date}T00:00:00`).toLocaleDateString('vi-VN', { weekday: 'short' })}</p>
+                          <p className="mt-1 text-2xl font-black">{date.slice(8, 10)}/{date.slice(5, 7)}</p>
                         </div>
-                        <div className="space-y-2 p-2">
+                        <div className="mt-5 space-y-3">
                           {dayShifts.length ? dayShifts.map((shift) => (
-                            <article key={shift.id} className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                            <article key={shift.id} className={`rounded-2xl p-5 shadow-[0_12px_24px_rgba(0,26,15,0.08)] ${today ? 'bg-white/12 text-white' : 'bg-white text-emerald-950'}`}>
                               <div className="flex items-start justify-between gap-2">
-                                <p className="text-sm font-black text-slate-950">{shift.startTime} - {shift.endTime}</p>
+                                <p className="text-lg font-black">{shift.startTime} - {shift.endTime}</p>
                                 <StatusBadge status={shift.assignmentStatus} />
                               </div>
-                              <p className="mt-2 text-sm font-bold text-slate-950">{shift.shiftName}</p>
-                              <p className="mt-1 text-xs font-semibold text-slate-600">{shift.shiftCode}</p>
-                              {shift.route?.routeName ? <p className="mt-2 text-xs text-emerald-800">{shift.route.routeCode} · {shift.route.routeName}</p> : null}
-                              {shift.description ? <p className="mt-2 line-clamp-3 text-xs text-slate-500">{shift.description}</p> : null}
+                              <p className="mt-3 text-sm font-black">{shift.shiftName}</p>
+                              <p className={`mt-1 text-xs font-semibold ${today ? 'text-emerald-300' : 'text-emerald-700'}`}>{shift.shiftCode}</p>
+                              {shift.route?.routeName ? <p className={`mt-3 text-xs font-semibold ${today ? 'text-white/80' : 'text-emerald-800'}`}>{shift.route.routeCode} · {shift.route.routeName}</p> : null}
+                              {shift.description ? <p className={`mt-4 line-clamp-3 text-xs leading-5 ${today ? 'text-white/78' : 'text-emerald-950/62'}`}>{shift.description}</p> : null}
                             </article>
-                          )) : <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-center text-xs text-slate-400">Không có ca</div>}
+                          )) : <div className={`rounded-2xl px-4 py-8 text-center text-sm font-semibold ${today ? 'bg-white/12 text-white/70' : 'bg-white/70 text-emerald-950/45'}`}>Không có ca</div>}
                         </div>
                       </div>
                     );

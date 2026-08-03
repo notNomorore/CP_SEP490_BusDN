@@ -94,6 +94,12 @@ const VehicleIssueSchema = new mongoose.Schema(
       ref: 'VehicleInspection',
       default: null,
     },
+    sourceIncidentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'OperationIncident',
+      default: null,
+      index: true,
+    },
     reportedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

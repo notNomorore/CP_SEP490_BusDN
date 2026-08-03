@@ -21,6 +21,39 @@ const endOfDay = (value) => {
   return date;
 };
 
+export const INCIDENT_REPORT_SCOPES = {
+  operations: [
+    'ACCIDENT',
+    'TRAFFIC_CONGESTION',
+    'TRIP_REJECTION',
+    'GPS_LOST_SIGNAL',
+    'VEHICLE_IDLE_TOO_LONG',
+    'SEVERE_DELAY',
+    'OTHER',
+  ],
+  vehicle: ['VEHICLE_ISSUE', 'VEHICLE_BREAKDOWN'],
+  passenger: ['PASSENGER_VIOLATION', 'PASSENGER_CONFLICT'],
+  customerSupport: ['LOST_ITEM', 'FOUND_ITEM'],
+};
+
+const applyIncidentScope = (filter, query) => {
+  const allowedTypes = INCIDENT_REPORT_SCOPES[query.scope];
+
+  if (!allowedTypes) {
+    return filter;
+  }
+
+  if (query.incidentType) {
+    filter.incidentType = allowedTypes.includes(query.incidentType)
+      ? query.incidentType
+      : { $in: [] };
+    return filter;
+  }
+
+  filter.incidentType = { $in: allowedTypes };
+  return filter;
+};
+
 const buildFilter = (query) => {
   const filter = {};
 
@@ -55,7 +88,7 @@ const buildFilter = (query) => {
     }
   }
 
-  return filter;
+  return applyIncidentScope(filter, query);
 };
 
 const safeUser = (user) => {
@@ -456,6 +489,7 @@ export class IncidentReportService {
         .lean(),
       IncidentReport.countDocuments(filter),
       IncidentReport.aggregate([
+        { $match: filter },
         {
           $group: {
             _id: null,
@@ -1011,9 +1045,10 @@ export class IncidentReportService {
     return this.getIncidentById(id, actor);
   }
 
-  static async getOverviewStatistics() {
+  static async getOverviewStatistics(query = {}) {
     await this.syncOperationalSources();
 
+    const filter = buildFilter(query);
     const [
       totalIncidents,
       incidentsByType,
@@ -1023,28 +1058,33 @@ export class IncidentReportService {
       incidentTrendByDate,
       resolutionSummary,
     ] = await Promise.all([
-      IncidentReport.countDocuments(),
+      IncidentReport.countDocuments(filter),
       IncidentReport.aggregate([
+        { $match: filter },
         { $group: { _id: '$incidentType', count: { $sum: 1 } } },
         { $sort: { count: -1 } },
         { $project: { _id: 0, incidentType: '$_id', count: 1 } },
       ]),
       IncidentReport.aggregate([
+        { $match: filter },
         { $group: { _id: '$severity', count: { $sum: 1 } } },
         { $sort: { count: -1 } },
         { $project: { _id: 0, severity: '$_id', count: 1 } },
       ]),
       IncidentReport.aggregate([
+        { $match: filter },
         { $group: { _id: '$status', count: { $sum: 1 } } },
         { $sort: { count: -1 } },
         { $project: { _id: 0, status: '$_id', count: 1 } },
       ]),
       IncidentReport.aggregate([
+        { $match: filter },
         { $group: { _id: '$routeId', count: { $sum: 1 } } },
         { $sort: { count: -1 } },
         { $project: { _id: 0, routeId: '$_id', count: 1 } },
       ]),
       IncidentReport.aggregate([
+        { $match: filter },
         {
           $group: {
             _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
@@ -1055,6 +1095,7 @@ export class IncidentReportService {
         { $project: { _id: 0, date: '$_id', count: 1 } },
       ]),
       IncidentReport.aggregate([
+        { $match: filter },
         {
           $match: {
             status: 'RESOLVED',

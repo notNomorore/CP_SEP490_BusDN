@@ -2,7 +2,6 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, type Href } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -60,6 +59,29 @@ function SearchField({
         {children}
       </View>
     </View>
+  );
+}
+
+function ServiceTile({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.serviceTile, pressed && styles.pressed]}
+    >
+      <View style={styles.serviceIcon}>
+        <MaterialCommunityIcons color={colors.primary} name={icon} size={21} />
+      </View>
+      <Text numberOfLines={2} style={styles.serviceLabel}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -178,9 +200,19 @@ export default function HomeScreen() {
             </Pressable>
           </View>
 
+          <Text style={[styles.sectionTitle, styles.servicesTitle]}>Quick Actions</Text>
+          <View style={styles.serviceGrid}>
+            <ServiceTile icon="crosshairs-gps" label="Live Track" onPress={() => router.push('/live-tracking')} />
+            <ServiceTile icon="ticket-outline" label="Buy Ticket" onPress={() => router.push('/buy-oneway-ticket')} />
+            <ServiceTile icon="calendar-month-outline" label="Monthly Pass" onPress={() => router.push('/buy-monthly-pass')} />
+            <ServiceTile icon="directions" label="Plan Trip" onPress={() => router.push('/plan-trip')} />
+            <ServiceTile icon="message-plus-outline" label="Send Feedback" onPress={() => router.push('/submit-feedback')} />
+            <ServiceTile icon="bell-ring-outline" label="Alerts" onPress={() => router.push('/notifications')} />
+          </View>
+
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Trending Now</Text>
-            <Pressable onPress={() => Alert.alert('Trending routes', 'More routes are coming soon.')}>
+            <Pressable onPress={() => router.push('/search-routes')}>
               <Text style={styles.viewAll}>View all ↗</Text>
             </Pressable>
           </View>
@@ -325,6 +357,11 @@ const styles = StyleSheet.create({
   searchButton: { height: 49, marginTop: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 25, backgroundColor: colors.primaryContainer },
   searchButtonText: { color: colors.white, fontSize: 14, fontWeight: '900' },
   pressed: { opacity: 0.82, transform: [{ scale: 0.99 }] },
+  servicesTitle: { marginTop: 28, marginBottom: 13 },
+  serviceGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  serviceTile: { width: '31%', minWidth: 72, flexGrow: 1, minHeight: 82, alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 18, backgroundColor: colors.card, padding: 9 },
+  serviceIcon: { width: 39, height: 39, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: '#d8f6e7' },
+  serviceLabel: { color: colors.primary, fontSize: 10, lineHeight: 13, fontWeight: '900', textAlign: 'center' },
   sectionHeader: { marginTop: 31, marginBottom: 14, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   sectionTitle: { color: colors.primary, fontSize: 20, fontWeight: '900', letterSpacing: -0.6 },
   viewAll: { color: '#16865b', fontSize: 10, fontWeight: '800' },

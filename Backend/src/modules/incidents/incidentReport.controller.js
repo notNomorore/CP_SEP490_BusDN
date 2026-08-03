@@ -53,7 +53,7 @@ export class IncidentReportController {
   }
 
   static async getOverviewStatistics(req, res) {
-    const statistics = await IncidentReportService.getOverviewStatistics();
+    const statistics = await IncidentReportService.getOverviewStatistics(req.query);
     return res.success(statistics, 'Incident overview statistics retrieved successfully');
   }
 }

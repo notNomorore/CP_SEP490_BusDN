@@ -5,6 +5,8 @@ import FleetBus from '../admin/FleetBus.js';
 import TripSchedule from '../admin/TripSchedule.js';
 import Vehicle from '../fleetOperations/Vehicle.js';
 import PassengerTicket from '../tickets/Ticket.js';
+import OperationIncident from '../scheduleOperations/OperationIncident.js';
+import OperationNotification from '../scheduleOperations/OperationNotification.js';
 import { createBroadcastNotification } from '../systemNotifications/systemNotification.service.js';
 import VehicleReassignmentService from '../vehicleReassignments/vehicleReassignment.service.js';
 import VehicleIssue from './VehicleIssue.js';
@@ -45,6 +47,19 @@ const endOfDay = (value) => {
 
 const normalizeIssueType = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
+  const validTypes = new Set([
+    'engine',
+    'brake',
+    'tire',
+    'accident',
+    'door',
+    'air_conditioner',
+    'gps_device',
+    'ticket_scanner',
+    'cleanliness',
+    'safety_equipment',
+    'other',
+  ]);
   const legacyMap = {
     ENGINE: 'engine',
     BRAKE: 'brake',
@@ -65,7 +80,13 @@ const normalizeIssueType = (value) => {
     SAFETY_EQUIPMENT: 'safety_equipment',
     OTHER: 'other',
   };
-  return legacyMap[String(value || '').trim().toUpperCase()] || normalized || 'other';
+  const mapped = legacyMap[String(value || '').trim().toUpperCase()] || normalized;
+  return validTypes.has(mapped) ? mapped : 'other';
+};
+
+const extractIssueCategory = (description = '') => {
+  const match = String(description).match(/Nh[oó]m l[oỗ]i:\s*([A-Z_]+)/i);
+  return match?.[1] || '';
 };
 
 const normalizeBreakdownType = (value) => {
@@ -100,6 +121,22 @@ const normalizeSeverity = (value) => {
   const severity = String(value || '').trim().toLowerCase();
   return ['low', 'medium', 'high', 'critical'].includes(severity) ? severity : 'medium';
 };
+
+const severityFromOperationIncident = (severity) => ({
+  LOW: 'low',
+  MEDIUM: 'medium',
+  HIGH: 'high',
+  CRITICAL: 'critical',
+}[String(severity || '').trim().toUpperCase()] || 'medium');
+
+const vehicleIssueStatusToOperationIncidentStatus = (status) => ({
+  new: 'OPEN',
+  reviewed: 'ACKNOWLEDGED',
+  maintenance_required: 'ACKNOWLEDGED',
+  no_action_needed: 'RESOLVED',
+  resolved: 'RESOLVED',
+  dismissed: 'CANCELLED',
+}[status] || 'OPEN');
 
 const buildFilter = (query = {}) => {
   const filter = {};
@@ -222,6 +259,69 @@ const logAudit = async ({ action, actorId, issueId, metadata = {} }) => {
 };
 
 export class VehicleIssueService {
+  static getTripVehicleLabel(assignment = {}) {
+    const vehicle = assignment?.trip?.vehicle || {};
+    return vehicle.plateNumber || vehicle.busCode || 'chưa có biển số';
+  }
+
+  static async syncPreTripIssuesFromOperationIncidents() {
+    const incidents = await OperationIncident.find({
+      type: 'VEHICLE_ISSUE',
+      driver: { $ne: null },
+      vehicle: { $ne: null },
+    }).sort({ reportedAt: -1, updatedAt: -1 }).limit(300).lean();
+
+    await Promise.all(incidents.map(async (incident) => {
+      const existing = await VehicleIssue.findOne({
+        $or: [
+          { sourceIncidentId: incident._id },
+          {
+            tripId: incident.trip || null,
+            vehicleId: incident.vehicle,
+            reportedBy: incident.driver,
+            'emergencyBreakdown.isEmergency': { $ne: true },
+          },
+        ],
+      });
+
+      const description = String(incident.description || '').trim() || 'Driver reported a pre-trip vehicle issue.';
+      const issueType = normalizeIssueType(
+        incident.issueCategory
+        || incident.issueType
+        || extractIssueCategory(description)
+      );
+      const locationText = String(incident.locationText || '').trim();
+      const latitude = Number(incident.latitude);
+      const longitude = Number(incident.longitude);
+
+      if (existing) {
+        if (!existing.sourceIncidentId) {
+          existing.sourceIncidentId = incident._id;
+          await existing.save();
+        }
+        return;
+      }
+
+      await VehicleIssue.create({
+        vehicleId: incident.vehicle,
+        tripId: incident.trip || null,
+        sourceIncidentId: incident._id,
+        reportedBy: incident.driver,
+        reportedAt: incident.reportedAt || incident.createdAt || new Date(),
+        issueType,
+        severity: severityFromOperationIncident(incident.severity),
+        description,
+        photos: (incident.evidenceFiles || []).map((file) => file.url).filter(Boolean),
+        location: {
+          text: locationText,
+          latitude: Number.isFinite(latitude) ? latitude : null,
+          longitude: Number.isFinite(longitude) ? longitude : null,
+        },
+        status: 'new',
+      });
+    }));
+  }
+
   static async createEmergencyBreakdownFromOperationIncident({
     assignment,
     userId,
@@ -265,6 +365,12 @@ export class VehicleIssueService {
     });
 
     await this.markVehicleUnderMaintenance(vehicleId);
+    issue.maintenanceTaskId = await this.createMaintenanceTask(
+      issue,
+      { userId },
+      'Emergency breakdown reported. Broken vehicle is waiting for maintenance handling.'
+    );
+    await issue.save();
 
     try {
       await createBroadcastNotification({
@@ -287,12 +393,22 @@ export class VehicleIssueService {
       // The emergency issue itself must still be stored even if realtime notification fails.
     }
 
+    await this.notifyTripStaffOfVehicleIssue({
+      assignment,
+      issue,
+      title: 'Sự cố xe khẩn cấp trong chuyến',
+      message: `Chuyến ${assignment.trip.scheduleCode || tripId} vừa ghi nhận sự cố xe (${this.getTripVehicleLabel(assignment)}). Vui lòng phối hợp với điều hành và chờ hướng dẫn thay xe nếu cần.`,
+      sourceType: 'UC48_EMERGENCY_BREAKDOWN_STAFF',
+      actorId: userId,
+      io,
+    });
+
     io?.to('fleet:operations').emit('server:vehicleIssue:emergencyReported', issue);
     io?.emit('server:vehicleIssue:emergencyReported', issue);
     return issue;
   }
 
-  static async createFromDriverReport({ assignment, inspection, userId, payload = {} }) {
+  static async createFromDriverReport({ assignment, inspection, userId, payload = {}, operationIncident = null }) {
     const vehicleId = assignment?.trip?.vehicle?.busId;
     if (!vehicleId) {
       return null;
@@ -302,13 +418,14 @@ export class VehicleIssueService {
     const latitude = Number(payload.latitude);
     const longitude = Number(payload.longitude);
 
-    return VehicleIssue.findOneAndUpdate(
+    const issue = await VehicleIssue.findOneAndUpdate(
       { inspectionId: inspection._id },
       {
         $setOnInsert: {
           vehicleId,
           tripId: assignment.trip._id,
           inspectionId: inspection._id,
+          sourceIncidentId: operationIncident?._id || null,
           reportedBy: userId,
           reportedAt: inspection.reportedAt || new Date(),
         },
@@ -326,9 +443,30 @@ export class VehicleIssueService {
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
+
+    await this.markVehicleUnderMaintenance(vehicleId);
+    issue.maintenanceTaskId = await this.createMaintenanceTask(
+      issue,
+      { userId },
+      'Pre-trip vehicle issue reported. Broken vehicle is waiting for maintenance handling.'
+    );
+    await issue.save();
+
+    await this.notifyTripStaffOfVehicleIssue({
+      assignment,
+      issue,
+      title: 'Tài xế báo lỗi xe trước chuyến',
+      message: `Chuyến ${assignment.trip.scheduleCode || assignment.trip._id} vừa ghi nhận lỗi xe trước khi xuất bến (${this.getTripVehicleLabel(assignment)}). Vui lòng theo dõi hướng dẫn điều hành và xe thay thế nếu được phân phối.`,
+      sourceType: 'UC43_PRE_TRIP_VEHICLE_ISSUE_STAFF',
+      actorId: userId,
+    });
+
+    return issue;
   }
 
   static async getIssues(query = {}) {
+    await this.syncPreTripIssuesFromOperationIncidents();
+
     const page = toPositiveInteger(query.page, PAGINATION.DEFAULT_PAGE);
     const limit = toPositiveInteger(query.limit, PAGINATION.DEFAULT_LIMIT, PAGINATION.MAX_LIMIT);
     const filter = buildFilter(query);
@@ -346,6 +484,7 @@ export class VehicleIssueService {
         .lean(),
       VehicleIssue.countDocuments(filter),
       VehicleIssue.aggregate([
+        { $match: filter },
         {
           $group: {
             _id: null,
@@ -353,6 +492,9 @@ export class VehicleIssueService {
             criticalIssues: { $sum: { $cond: [{ $eq: ['$severity', 'critical'] }, 1, 0] } },
             maintenanceRequired: {
               $sum: { $cond: [{ $eq: ['$status', 'maintenance_required'] }, 1, 0] },
+            },
+            preTripIssues: {
+              $sum: { $cond: [{ $ne: ['$emergencyBreakdown.isEmergency', true] }, 1, 0] },
             },
             emergencyReported: {
               $sum: { $cond: [{ $eq: ['$emergencyBreakdown.incidentStatus', 'REPORTED'] }, 1, 0] },
@@ -382,6 +524,7 @@ export class VehicleIssueService {
         criticalIssues: counts[0]?.criticalIssues || 0,
         vehiclesAffected: affectedVehicles.length,
         maintenanceRequired: counts[0]?.maintenanceRequired || 0,
+        preTripIssues: counts[0]?.preTripIssues || 0,
         emergencyReported: counts[0]?.emergencyReported || 0,
         emergencyConfirmed: counts[0]?.emergencyConfirmed || 0,
         standbyDispatched: counts[0]?.standbyDispatched || 0,
@@ -455,6 +598,14 @@ export class VehicleIssueService {
       return issue.maintenanceTaskId;
     }
 
+    const existingTask = await MaintenanceTask.findOne({
+      vehicleIssueId: issue._id,
+      status: { $nin: ['approved', 'cancelled'] },
+    }).select('_id');
+    if (existingTask) {
+      return existingTask._id;
+    }
+
     const task = await MaintenanceTask.create({
       vehicleIssueId: issue._id,
       vehicleId: issue.vehicleId,
@@ -462,7 +613,7 @@ export class VehicleIssueService {
       title: `Review ${issue.issueType} issue`,
       description: issue.description,
       priority: issue.severity,
-      status: 'draft',
+      status: 'assigned',
       createdBy: actor.userId,
       adminNote,
     });
@@ -474,6 +625,79 @@ export class VehicleIssueService {
     await Promise.all([
       FleetBus.updateOne({ _id: vehicleId }, { $set: { status: 'MAINTENANCE' } }),
       Vehicle.updateOne({ _id: vehicleId }, { $set: { status: 'maintenance' } }),
+    ]);
+  }
+
+  static getAssignmentStaffUserIds(assignment = {}) {
+    return [...new Set([
+      assignment.driver?.userId || assignment.trip?.driver?.userId,
+      assignment.busAssistant?.userId || assignment.assistant?.userId || assignment.trip?.assistant?.userId,
+    ].map((id) => String(id || '').trim()).filter(Boolean))];
+  }
+
+  static async notifyTripStaffOfVehicleIssue({
+    assignment,
+    issue,
+    title,
+    message,
+    sourceType,
+    actorId,
+    io = null,
+  }) {
+    const tripId = assignment?.trip?._id || issue?.tripId;
+    const vehicleId = assignment?.trip?.vehicle?.busId || issue?.vehicleId;
+    const routeId = assignment?.trip?.routeId?._id || assignment?.trip?.routeId || null;
+    const targetUsers = this.getAssignmentStaffUserIds(assignment);
+
+    if (!tripId || !issue?._id) return;
+
+    await Promise.allSettled([
+      createBroadcastNotification({
+        title,
+        message,
+        type: 'maintenance',
+        priority: 'urgent',
+        targetAudience: 'trip_staff',
+        tripId,
+        sourceType,
+        sourceId: issue._id,
+        metadata: {
+          issueId: String(issue._id),
+          tripId: String(tripId),
+          vehicleId: vehicleId ? String(vehicleId) : '',
+        },
+      }, actorId, io),
+      OperationNotification.findOneAndUpdate(
+        {
+          sourceType,
+          sourceId: issue._id,
+        },
+        {
+          $set: {
+            title,
+            message,
+            category: 'EMERGENCY_INSTRUCTION',
+            priority: 'CRITICAL',
+            targetRoles: ['DRIVER', 'BUS_ASSISTANT'],
+            targetUsers,
+            route: routeId,
+            trip: tripId,
+            vehicle: vehicleId,
+            activeFrom: new Date(),
+            expiresAt: null,
+            status: 'ACTIVE',
+            createdBy: actorId,
+            sourceType,
+            sourceId: issue._id,
+            metadata: {
+              notificationKind: sourceType,
+              issueId: issue._id,
+              tripCode: assignment?.trip?.scheduleCode || '',
+            },
+          },
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      ),
     ]);
   }
 
@@ -493,6 +717,12 @@ export class VehicleIssueService {
       },
       actor.userId,
       io
+    );
+
+    issue.maintenanceTaskId = await this.createMaintenanceTask(
+      issue,
+      actor,
+      adminNote || 'Replacement vehicle assigned. Broken vehicle is waiting for maintenance handling.'
     );
 
     return result.reassignmentLog?.newVehicleId || replacementVehicleId;
@@ -700,6 +930,7 @@ export class VehicleIssueService {
         payload,
         io
       );
+      maintenanceTaskId = issue.maintenanceTaskId || maintenanceTaskId;
     }
 
     issue.status = nextStatus;
@@ -724,6 +955,13 @@ export class VehicleIssueService {
     });
 
     await issue.save();
+
+    if (issue.sourceIncidentId) {
+      await OperationIncident.updateOne(
+        { _id: issue.sourceIncidentId, type: 'VEHICLE_ISSUE' },
+        { $set: { status: vehicleIssueStatusToOperationIncidentStatus(nextStatus) } }
+      );
+    }
 
     await logAudit({
       action: 'VEHICLE_ISSUE_REVIEWED',

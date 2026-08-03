@@ -24,6 +24,26 @@ export class MaintenanceApprovalController {
     return res.success(task, 'Maintenance task approved successfully');
   }
 
+  static async startMaintenanceTask(req, res) {
+    const task = await MaintenanceApprovalService.startMaintenanceTask(
+      req.params.id,
+      req.user.userId,
+      req.body,
+      req.app?.io
+    );
+    return res.success(task, 'Maintenance task started successfully');
+  }
+
+  static async completeMaintenanceTask(req, res) {
+    const task = await MaintenanceApprovalService.completeMaintenanceTask(
+      req.params.id,
+      req.user.userId,
+      req.body,
+      req.app?.io
+    );
+    return res.success(task, 'Maintenance task completed and waiting for approval');
+  }
+
   static async rejectMaintenanceTask(req, res) {
     const task = await MaintenanceApprovalService.rejectMaintenanceTask(
       req.params.id,

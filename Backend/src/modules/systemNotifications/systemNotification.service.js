@@ -6,6 +6,7 @@ import User from '../auth/User.js';
 import Trip from '../fleetOperations/Trip.js';
 import TripSchedule from '../admin/TripSchedule.js';
 import Notification from './Notification.js';
+import NotificationReceipt from './NotificationReceipt.js';
 
 const ACTIVE_USER_FILTER = { status: 'ACTIVE', 'accountLock.isLocked': { $ne: true } };
 const IMMEDIATE_SKEW_MS = 30 * 1000;
@@ -186,6 +187,58 @@ const buildSocketPayload = (notification) => ({
   sentAt: notification.deliverySummary?.sentAt || new Date(),
   isUrgent: notification.priority === 'urgent' || notification.type === 'emergency',
 });
+
+const getAudienceForRole = (role) => ({
+  PASSENGER: 'passengers',
+  DRIVER: 'drivers',
+  BUS_ASSISTANT: 'bus_assistants',
+  ADMIN: 'admins',
+}[String(role || '').toUpperCase()] || '');
+
+const buildMyNotificationFilter = (user) => {
+  const userId = user?.userId || user?._id;
+
+  return {
+    status: 'sent',
+    $and: [
+      {
+        $or: [
+          { expiresAt: null },
+          { expiresAt: { $gte: new Date() } },
+        ],
+      },
+      {
+        $or: [
+          { targetAudience: 'all' },
+          { targetAudience: getAudienceForRole(user?.role) },
+          { recipientUserIds: userId },
+        ],
+      },
+    ],
+  };
+};
+
+const decorateReadState = async (items, userId) => {
+  if (!items.length) return items;
+
+  const receipts = await NotificationReceipt.find({
+    userId: toObjectId(userId, 'userId'),
+    notificationId: { $in: items.map((item) => item._id) },
+  }).lean();
+  const readByNotificationId = new Map(
+    receipts.map((receipt) => [normalizeId(receipt.notificationId), receipt.readAt])
+  );
+
+  return items.map((item) => {
+    const readAt = readByNotificationId.get(normalizeId(item._id)) || null;
+    return {
+      ...item,
+      id: normalizeId(item._id),
+      readAt,
+      isRead: Boolean(readAt),
+    };
+  });
+};
 
 export const sendNotificationNow = async (notificationId, io = null) => {
   let notification = await Notification.findById(notificationId);
@@ -374,35 +427,10 @@ export const listNotifications = async (query = {}) => {
 export const listMyNotifications = async (user, query = {}) => {
   const page = Math.max(Number(query.page) || 1, 1);
   const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
-  const role = String(user?.role || '').toUpperCase();
   const userId = user?.userId || user?._id;
-  const audienceByRole = {
-    PASSENGER: 'passengers',
-    DRIVER: 'drivers',
-    BUS_ASSISTANT: 'bus_assistants',
-    ADMIN: 'admins',
-  };
+  const filter = buildMyNotificationFilter(user);
 
-  const filter = {
-    status: 'sent',
-    $and: [
-      {
-        $or: [
-          { expiresAt: null },
-          { expiresAt: { $gte: new Date() } },
-        ],
-      },
-      {
-        $or: [
-          { targetAudience: 'all' },
-          { targetAudience: audienceByRole[role] || '' },
-          { recipientUserIds: userId },
-        ],
-      },
-    ],
-  };
-
-  const [items, total] = await Promise.all([
+  const [rawItems, total] = await Promise.all([
     Notification.find(filter)
       .sort({ 'deliverySummary.sentAt': -1, createdAt: -1 })
       .skip((page - 1) * limit)
@@ -410,6 +438,7 @@ export const listMyNotifications = async (user, query = {}) => {
       .lean(),
     Notification.countDocuments(filter),
   ]);
+  const items = await decorateReadState(rawItems, userId);
 
   return {
     items,
@@ -420,6 +449,69 @@ export const listMyNotifications = async (user, query = {}) => {
       totalPages: Math.ceil(total / limit) || 1,
     },
   };
+};
+
+export const getMyUnreadCount = async (user) => {
+  const userId = toObjectId(user?.userId || user?._id, 'userId');
+  const filter = buildMyNotificationFilter(user);
+  const [total, readReceipts] = await Promise.all([
+    Notification.countDocuments(filter),
+    NotificationReceipt.find({ userId, readAt: { $ne: null } }).select('notificationId').lean(),
+  ]);
+  const readIds = readReceipts.map((receipt) => receipt.notificationId);
+  const readableReadCount = readIds.length
+    ? await Notification.countDocuments({ ...filter, _id: { $in: readIds } })
+    : 0;
+
+  return { unreadCount: Math.max(total - readableReadCount, 0) };
+};
+
+export const markMyNotificationRead = async (user, notificationId) => {
+  const userId = toObjectId(user?.userId || user?._id, 'userId');
+  const id = toObjectId(notificationId, 'notificationId');
+  const notification = await Notification.findOne({
+    ...buildMyNotificationFilter(user),
+    _id: id,
+  }).lean();
+
+  if (!notification) {
+    throw new CustomError('Notification not found', HTTP_STATUS.NOT_FOUND);
+  }
+
+  const receipt = await NotificationReceipt.findOneAndUpdate(
+    { notificationId: id, userId },
+    { $set: { readAt: new Date() } },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  ).lean();
+
+  return {
+    ...notification,
+    id: normalizeId(notification._id),
+    readAt: receipt.readAt,
+    isRead: true,
+  };
+};
+
+export const markAllMyNotificationsRead = async (user) => {
+  const userId = toObjectId(user?.userId || user?._id, 'userId');
+  const notifications = await Notification.find(buildMyNotificationFilter(user)).select('_id').lean();
+  const now = new Date();
+
+  if (!notifications.length) {
+    return { updatedCount: 0 };
+  }
+
+  await NotificationReceipt.bulkWrite(
+    notifications.map((notification) => ({
+      updateOne: {
+        filter: { notificationId: notification._id, userId },
+        update: { $set: { readAt: now } },
+        upsert: true,
+      },
+    }))
+  );
+
+  return { updatedCount: notifications.length };
 };
 
 export const getNotificationById = async (id) => {
@@ -465,6 +557,9 @@ export default {
   sendNotificationNow,
   listNotifications,
   listMyNotifications,
+  getMyUnreadCount,
+  markMyNotificationRead,
+  markAllMyNotificationsRead,
   getNotificationById,
   cancelNotification,
 };
