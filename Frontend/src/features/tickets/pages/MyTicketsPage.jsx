@@ -147,6 +147,22 @@ const getPassDisplayStatus = (pass) => {
   return pass.passStatus || 'ACTIVE';
 };
 
+const isPendingMonthlyPass = (pass) => (
+  pass?.passStatus === 'PENDING' && pass?.paymentStatus === 'PENDING'
+);
+
+const buildCheckoutOrderFromMonthlyPass = (pass) => ({
+  monthlyPassId: pass._id,
+  ticketType: 'MONTHLY_PASS',
+  routeNumber: pass.routeCode === 'ALL' ? 'Tất cả tuyến' : pass.routeCode,
+  departureLocation: 'Toàn mạng BusDN',
+  destinationLocation: `${pass.dailyRideLimit || 6} lượt/ngày`,
+  serviceDate: String(pass.startDate || '').slice(0, 10),
+  expiryDate: String(pass.expiryDate || '').slice(0, 10),
+  dailyRideLimit: pass.dailyRideLimit || 6,
+  price: pass.passPrice,
+});
+
 const MyTicketsPage = () => {
   const navigate = useNavigate();
   const [tickets, setTickets] = useState([]);
@@ -252,6 +268,47 @@ const MyTicketsPage = () => {
       await loadTickets();
     } catch (err) {
       const message = err?.message || 'Khong the huy ve nay.';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setProcessingTicketId('');
+    }
+  };
+
+  const handlePayPendingMonthlyPass = async (event, pass) => {
+    event.stopPropagation();
+    setProcessingTicketId(pass._id);
+    setError('');
+    try {
+      const payment = await ticketService.createPendingMonthlyPassPayment(pass._id);
+      if (payment.status === 'PAID') {
+        toast.success('Thanh toán thành công. Vé tháng đã được kích hoạt.');
+        await loadTickets();
+        return;
+      }
+      navigate('/tickets/checkout', {
+        state: { order: buildCheckoutOrderFromMonthlyPass(pass), payment },
+      });
+    } catch (err) {
+      const message = err?.message || 'Không thể tạo lại mã thanh toán cho vé tháng.';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setProcessingTicketId('');
+    }
+  };
+
+  const handleCancelPendingMonthlyPass = async (event, pass) => {
+    event.stopPropagation();
+    if (!window.confirm('Hủy vé tháng chưa thanh toán này?')) return;
+    setProcessingTicketId(pass._id);
+    setError('');
+    try {
+      await ticketService.cancelMonthlyPass(pass._id);
+      toast.success('Đã hủy vé tháng chưa thanh toán.');
+      await loadTickets();
+    } catch (err) {
+      const message = err?.message || 'Không thể hủy vé tháng này.';
       setError(message);
       toast.error(message);
     } finally {
@@ -604,7 +661,7 @@ const MyTicketsPage = () => {
           <div className="mt-10 border-t border-outline-variant/40 pt-8">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.2em] text-on-tertiary-container">Đi lại không giới hạn</p>
+                
                 <h2 className="mt-2 text-2xl font-black text-primary">Vé tháng của tôi</h2>
               </div>
               <span className="rounded-full bg-primary-fixed px-4 py-2 text-sm font-black text-on-primary-fixed">
@@ -660,6 +717,27 @@ const MyTicketsPage = () => {
                           </p>
                         </div>
                       </div>
+                      {isPendingMonthlyPass(pass) ? (
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          <button
+                            type="button"
+                            onClick={(event) => handlePayPendingMonthlyPass(event, pass)}
+                            disabled={processingTicketId === pass._id}
+                            className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-black text-white disabled:opacity-60"
+                          >
+                            {processingTicketId === pass._id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                            Thanh toán lại
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => handleCancelPendingMonthlyPass(event, pass)}
+                            disabled={processingTicketId === pass._id}
+                            className="inline-flex items-center justify-center gap-2 rounded-full border border-red-200 px-4 py-3 text-sm font-black text-red-600 hover:bg-red-50 disabled:opacity-60"
+                          >
+                            <Trash2 className="h-4 w-4" /> Hủy vé
+                          </button>
+                        </div>
+                      ) : null}
                     </article>
                   );
                 })}

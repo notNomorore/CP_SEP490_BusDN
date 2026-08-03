@@ -58,7 +58,7 @@ function ServiceTile({
       <View style={styles.serviceIcon}>
         <MaterialCommunityIcons color={colors.primary} name={icon} size={21} />
       </View>
-      <Text numberOfLines={2} style={styles.serviceLabel}>{label}</Text>
+      <Text adjustsFontSizeToFit minimumFontScale={0.78} numberOfLines={1} style={styles.serviceLabel}>{label}</Text>
     </Pressable>
   );
 }
@@ -97,7 +97,7 @@ export default function HomeScreen() {
               <Pressable accessibilityLabel="Mở trình đơn" hitSlop={10}>
                 <MaterialCommunityIcons color={colors.primary} name="menu" size={25} />
               </Pressable>
-              <Text style={styles.brandName}>Veridian Transit</Text>
+              <View><Text style={styles.brandName}>BusDN</Text><Text style={styles.brandSub}>Xe buýt Đà Nẵng</Text></View>
             </View>
             <Pressable
               accessibilityLabel="Mở hồ sơ"
@@ -117,6 +117,8 @@ export default function HomeScreen() {
           <View style={styles.hero}>
             <Text style={styles.kicker}>HÀNH TRÌNH TIỆN NGHI</Text>
             <Text style={styles.title}>Hôm nay bạn muốn đi đâu?</Text>
+            <Text style={styles.heroText}>Tra cứu tuyến, theo dõi xe và mua vé nhanh chóng ngay trên BusDN.</Text>
+            <Pressable onPress={() => router.push('/route-search')} style={styles.heroButton}><Text style={styles.heroButtonText}>Khám phá tuyến xe</Text><MaterialCommunityIcons color={colors.primary} name="arrow-right" size={19} /></Pressable>
           </View>
 
           <Text style={[styles.sectionTitle, styles.servicesTitle]}>Dịch vụ BusDN</Text>
@@ -163,7 +165,7 @@ export default function HomeScreen() {
             ))}
           </ScrollView>
 
-          <Text style={[styles.sectionTitle, styles.flashTitle]}>Flash Sales</Text>
+          <Text style={[styles.sectionTitle, styles.flashTitle]}>Ưu đãi nổi bật</Text>
           <Pressable style={styles.mainSale}>
             <MaterialCommunityIcons
               color="rgba(255,255,255,0.08)"
@@ -172,9 +174,9 @@ export default function HomeScreen() {
               style={styles.saleWatermark}
             />
             <View style={styles.saleCopy}>
-              <Text style={styles.saleKicker}>LIMITED TIME ONLY</Text>
-              <Text style={styles.saleTitle}>50% OFF</Text>
-              <Text style={styles.saleDescription}>All sleeper cabins to Central Highlands</Text>
+              <Text style={styles.saleKicker}>ƯU ĐÃI CÓ HẠN</Text>
+              <Text style={styles.saleTitle}>GIẢM 50%</Text>
+              <Text style={styles.saleDescription}>Áp dụng cho các hành trình đủ điều kiện</Text>
             </View>
           </Pressable>
 
@@ -186,30 +188,30 @@ export default function HomeScreen() {
               >
                 <MaterialCommunityIcons color={colors.white} name="bus-clock" size={30} />
                 <View>
-                  <Text style={[styles.smallSaleTitle, styles.workSaleTitle]}>Work Dashboard</Text>
-                  <Text style={[styles.smallSaleText, styles.workSaleText]}>Trips and shift schedule</Text>
+                  <Text style={[styles.smallSaleTitle, styles.workSaleTitle]}>Trang vận hành</Text>
+                  <Text style={[styles.smallSaleText, styles.workSaleText]}>Chuyến và lịch làm việc</Text>
                 </View>
               </Pressable>
             ) : null}
             <Pressable style={[styles.smallSale, styles.firstRide]}>
               <MaterialCommunityIcons color="#34725a" name="tag-outline" size={30} />
               <View>
-                <Text style={styles.smallSaleTitle}>First Ride</Text>
-                <Text style={styles.smallSaleText}>Use code: VERIDIAN1</Text>
+                <Text style={styles.smallSaleTitle}>Chuyến đầu tiên</Text>
+                <Text style={styles.smallSaleText}>Mã: BUSDN1</Text>
               </View>
             </Pressable>
             <Pressable style={[styles.smallSale, styles.groupSale]}>
               <MaterialCommunityIcons color={colors.primary} name="account-group" size={30} />
               <View>
-                <Text style={styles.smallSaleTitle}>Group Special</Text>
-                <Text style={styles.smallSaleText}>Save 15% on 4+ seats</Text>
+                <Text style={styles.smallSaleTitle}>Ưu đãi nhóm</Text>
+                <Text style={styles.smallSaleText}>Giảm 15% từ 4 vé</Text>
               </View>
             </Pressable>
           </View>
         </ScrollView>
 
         <Pressable
-          accessibilityLabel="Contact support"
+          accessibilityLabel="Liên hệ hỗ trợ"
           onPress={() => router.push(priorityPassengerRoute)}
           style={[styles.supportButton, { bottom: 82 + insets.bottom }]}
         >
@@ -225,7 +227,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.surface },
   screen: { flex: 1, backgroundColor: colors.surface },
-  scrollContent: { paddingHorizontal: 20 },
+  scrollContent: { paddingHorizontal: 16 },
   header: {
     height: 64,
     flexDirection: 'row',
@@ -233,7 +235,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  brandName: { color: colors.primary, fontSize: 15, fontWeight: '900', letterSpacing: -0.5 },
+  brandName: { color: colors.primary, fontSize: 16, fontWeight: '900', letterSpacing: -0.5 },
+  brandSub: { marginTop: 1, color: colors.muted, fontSize: 9, fontWeight: '700' },
   avatar: {
     width: 38,
     height: 38,
@@ -247,17 +250,20 @@ const styles = StyleSheet.create({
   },
   avatarImage: { width: '100%', height: '100%' },
   avatarText: { color: colors.primary, fontSize: 16, fontWeight: '900' },
-  hero: { paddingTop: 24, paddingBottom: 24 },
-  kicker: { color: colors.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1.6 },
+  hero: { overflow: 'hidden', borderRadius: 26, backgroundColor: colors.primary, padding: 22, marginTop: 12 },
+  kicker: { color: '#7fe0ae', fontSize: 9, fontWeight: '900', letterSpacing: 1.5 },
   title: {
     maxWidth: 335,
     marginTop: 8,
-    color: colors.primary,
-    fontSize: 31,
-    lineHeight: 35,
+    color: colors.white,
+    fontSize: 28,
+    lineHeight: 33,
     fontWeight: '900',
     letterSpacing: -1.4,
   },
+  heroText: { maxWidth: 315, marginTop: 10, color: '#c9e9dc', fontSize: 12, lineHeight: 18, fontWeight: '600' },
+  heroButton: { alignSelf: 'flex-start', minHeight: 43, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 22, backgroundColor: '#d7f5e6', paddingHorizontal: 16, marginTop: 18 },
+  heroButtonText: { color: colors.primary, fontSize: 12, fontWeight: '900' },
   searchCard: {
     gap: 11,
     padding: 18,
@@ -279,17 +285,17 @@ const styles = StyleSheet.create({
   searchButton: { height: 49, marginTop: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 25, backgroundColor: colors.primaryContainer },
   searchButtonText: { color: colors.white, fontSize: 14, fontWeight: '900' },
   pressed: { opacity: 0.82, transform: [{ scale: 0.99 }] },
-  servicesTitle: { marginTop: 28, marginBottom: 13 },
-  serviceGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  serviceTile: { width: '22.8%', minWidth: 72, flexGrow: 1, minHeight: 82, alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 18, backgroundColor: colors.card, padding: 9 },
-  serviceIcon: { width: 39, height: 39, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: '#d8f6e7' },
-  serviceLabel: { color: colors.primary, fontSize: 10, lineHeight: 13, fontWeight: '900', textAlign: 'center' },
+  servicesTitle: { marginTop: 26, marginBottom: 13 },
+  serviceGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10 },
+  serviceTile: { width: '31.5%', minHeight: 96, alignItems: 'center', justifyContent: 'center', gap: 9, borderRadius: 20, borderWidth: 1, borderColor: '#e8efec', backgroundColor: colors.card, padding: 10 },
+  serviceIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: '#d8f6e7' },
+  serviceLabel: { width: '100%', color: colors.primary, fontSize: 10, lineHeight: 14, fontWeight: '900', textAlign: 'center' },
   sectionHeader: { marginTop: 31, marginBottom: 14, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   sectionTitle: { color: colors.primary, fontSize: 20, fontWeight: '900', letterSpacing: -0.6 },
   viewAll: { color: '#16865b', fontSize: 10, fontWeight: '800' },
   cardsRow: { gap: 14, paddingRight: 20, paddingBottom: 3 },
-  destinationCard: { width: 226, overflow: 'hidden', borderRadius: 22, backgroundColor: colors.card },
-  destinationImage: { width: '100%', height: 139 },
+  destinationCard: { width: 255, overflow: 'hidden', borderRadius: 22, borderWidth: 1, borderColor: '#e5eeea', backgroundColor: colors.card },
+  destinationImage: { width: '100%', height: 150 },
   badge: { position: 'absolute', top: 11, right: 11, overflow: 'hidden', borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.92)', paddingHorizontal: 9, paddingVertical: 5, color: '#173b2e', fontSize: 8, fontWeight: '900', textTransform: 'uppercase' },
   destinationBody: { padding: 14 },
   destinationMeta: { color: colors.accent, fontSize: 8, fontWeight: '900', letterSpacing: 0.6 },

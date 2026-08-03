@@ -1367,11 +1367,12 @@ export class TicketService {
       passenger: user._id,
       passType,
       passStatus: 'ACTIVE',
-      expiryDate: { $gte: new Date() },
+      startDate: { $lte: expiryDate },
+      expiryDate: { $gte: startDate },
     }).lean();
 
     if (activePass && !payload.renew) {
-      throw new CustomError('Báº¡n Ä‘ang cÃ³ má»™t vÃ© thÃ¡ng cÃ¹ng loáº¡i cÃ²n hiá»‡u lá»±c.', HTTP_STATUS.CONFLICT);
+      throw new CustomError('Bạn đang có một vé tháng cùng loại trùng thời hạn sử dụng.', HTTP_STATUS.CONFLICT);
     }
 
     const promotion = await this.applyPromotionToAmount(userId, {
@@ -1396,7 +1397,20 @@ export class TicketService {
     }).lean();
 
     if (duplicatePendingPass && !payload.renew) {
-      throw new CustomError('Ban da co ve thang cung tuyen va thoi han dang cho xu ly.', HTTP_STATUS.CONFLICT);
+      // Reuse a pass left pending by an interrupted PayOS request. This makes
+      // retrying QR creation idempotent instead of reporting a duplicate pass.
+      const pendingPass = { ...duplicatePendingPass };
+      pendingPass.pricing = buildPricingResponse({
+        originalPrice: pendingPass.originalPrice || originalPrice,
+        priorityDiscountAmount: pendingPass.priorityDiscountAmount || 0,
+        promotionDiscountAmount: pendingPass.promotionDiscountAmount || 0,
+        finalPrice: pendingPass.passPrice,
+        appliedDiscount: pendingPass.appliedDiscount || null,
+        promotion,
+        dailyRideLimit,
+      });
+      pendingPass.dailyRideLimit = dailyRideLimit;
+      return pendingPass;
     }
 
     const passCode = buildPassCode();
@@ -1445,6 +1459,38 @@ export class TicketService {
 
     await monthlyPass.save();
 
+    // Concurrent checkout requests (for example React StrictMode in
+    // development) may both pass the pre-insert lookup. Keep the oldest pass
+    // and cancel the duplicate immediately.
+    const canonicalPendingPass = await MonthlyPass.findOne({
+      passenger: user._id,
+      passType,
+      routeCode,
+      passStatus: 'PENDING',
+      startDate,
+      expiryDate,
+      passPrice,
+      promotionCode: promotion.promotionCode || '',
+    }).sort({ createdAt: 1, _id: 1 }).lean();
+
+    if (canonicalPendingPass && String(canonicalPendingPass._id) !== String(monthlyPass._id)) {
+      monthlyPass.passStatus = 'CANCELLED';
+      await monthlyPass.save();
+      return {
+        ...canonicalPendingPass,
+        pricing: buildPricingResponse({
+          originalPrice: canonicalPendingPass.originalPrice || originalPrice,
+          priorityDiscountAmount: canonicalPendingPass.priorityDiscountAmount || 0,
+          promotionDiscountAmount: canonicalPendingPass.promotionDiscountAmount || 0,
+          finalPrice: canonicalPendingPass.passPrice,
+          appliedDiscount: canonicalPendingPass.appliedDiscount || null,
+          promotion,
+          dailyRideLimit,
+        }),
+        dailyRideLimit,
+      };
+    }
+
     const monthlyPassObject = monthlyPass.toObject();
     monthlyPassObject.pricing = buildPricingResponse({
       originalPrice,
@@ -1463,6 +1509,28 @@ export class TicketService {
     await this.reconcilePendingPaymentOrders(userId);
 
     return MonthlyPass.find({ passenger: userId }).sort({ purchasedAt: -1 }).lean();
+  }
+
+  static async cancelMyMonthlyPass(userId, passId) {
+    if (!mongoose.isValidObjectId(passId)) {
+      throw new CustomError('Không tìm thấy vé tháng.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const monthlyPass = await MonthlyPass.findOne({ _id: passId, passenger: userId });
+    if (!monthlyPass) {
+      throw new CustomError('Không tìm thấy vé tháng.', HTTP_STATUS.NOT_FOUND);
+    }
+    if (monthlyPass.passStatus !== 'PENDING' || monthlyPass.paymentStatus !== 'PENDING') {
+      throw new CustomError('Chỉ có thể hủy vé tháng chưa thanh toán.', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    monthlyPass.passStatus = 'CANCELLED';
+    await monthlyPass.save();
+    await PaymentOrder.updateMany(
+      { passenger: userId, monthlyPassId: monthlyPass._id, status: 'PENDING' },
+      { $set: { status: 'CANCELLED', 'payos.rawStatus': 'CANCELLED' } }
+    );
+    return monthlyPass.toObject();
   }
 
   static async listMyTransactions(userId) {
@@ -1520,6 +1588,9 @@ export class TicketService {
   static async createPaymentOrder(userId, payload = {}) {
     if (payload.ticketId) {
       return this.createPaymentForPendingTicket(userId, payload.ticketId);
+    }
+    if (payload.monthlyPassId) {
+      return this.createPaymentForPendingMonthlyPass(userId, payload.monthlyPassId);
     }
 
     const ticketType = String(payload.ticketType || '').trim().toUpperCase();
@@ -1779,6 +1850,92 @@ export class TicketService {
         })
         : '',
       paymentLinkId: paymentOrder.payos.paymentLinkId,
+    };
+  }
+
+  static async createPaymentForPendingMonthlyPass(userId, passId) {
+    if (!mongoose.isValidObjectId(passId)) {
+      throw new CustomError('Không tìm thấy vé tháng.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const monthlyPass = await MonthlyPass.findOne({
+      _id: passId,
+      passenger: userId,
+      paymentStatus: 'PENDING',
+      passStatus: 'PENDING',
+    });
+    if (!monthlyPass) {
+      throw new CustomError('Không tìm thấy vé tháng chưa thanh toán.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    let paymentOrder = await PaymentOrder.findOne({
+      passenger: userId,
+      monthlyPassId: monthlyPass._id,
+      status: { $in: ['PENDING', 'PAID'] },
+    }).sort({ createdAt: -1 });
+
+    if (paymentOrder?.status === 'PAID') {
+      await this.completePaymentOrder(paymentOrder);
+      return {
+        orderCode: paymentOrder.orderCode,
+        status: 'PAID',
+        amount: paymentOrder.amount,
+        ticketType: 'MONTHLY_PASS',
+        checkoutUrl: '',
+        qrCode: '',
+        qrCodeImage: '',
+        message: 'Thanh toán thành công. Vé tháng đã được kích hoạt.',
+      };
+    }
+
+    if (!paymentOrder) {
+      paymentOrder = await PaymentOrder.create({
+        orderCode: this.buildPayOSOrderCode(),
+        passenger: userId,
+        ticketType: 'MONTHLY_PASS',
+        payload: { monthlyPassId: monthlyPass._id },
+        amount: monthlyPass.passPrice,
+        description: `BusDN ${monthlyPass.passCode}`,
+        status: monthlyPass.passPrice > 0 ? 'PENDING' : 'PAID',
+        monthlyPassId: monthlyPass._id,
+      });
+    }
+
+    if (paymentOrder.amount <= 0) {
+      await this.completePaymentOrder(paymentOrder);
+    } else if (!paymentOrder.payos?.qrCode) {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const payosLink = await PayOSService.createPaymentLink({
+        orderCode: paymentOrder.orderCode,
+        amount: paymentOrder.amount,
+        description: paymentOrder.description,
+        returnUrl: `${frontendUrl}/my-tickets`,
+        cancelUrl: `${frontendUrl}/my-tickets`,
+      });
+      paymentOrder.payos = {
+        paymentLinkId: payosLink.paymentLinkId || '',
+        checkoutUrl: payosLink.checkoutUrl || '',
+        qrCode: payosLink.qrCode || '',
+        rawStatus: payosLink.status || 'PENDING',
+        rawResponse: payosLink,
+      };
+      await paymentOrder.save();
+    }
+
+    return {
+      orderCode: paymentOrder.orderCode,
+      status: paymentOrder.status,
+      amount: paymentOrder.amount,
+      ticketType: 'MONTHLY_PASS',
+      checkoutUrl: paymentOrder.payos?.checkoutUrl || '',
+      qrCode: paymentOrder.payos?.qrCode || '',
+      qrCodeImage: paymentOrder.payos?.qrCode
+        ? await QRCode.toDataURL(paymentOrder.payos.qrCode, {
+          errorCorrectionLevel: 'M', margin: 2, width: 320,
+          color: { dark: '#002f1b', light: '#ffffff' },
+        })
+        : '',
+      paymentLinkId: paymentOrder.payos?.paymentLinkId || '',
     };
   }
 

@@ -70,6 +70,16 @@ export const ticketService = {
     const response = await apiClient.post(`/tickets/${ticketId}/payment`);
     return response.data;
   },
+
+  createPendingMonthlyPassPayment: async (passId) => {
+    const response = await apiClient.post(`/tickets/monthly-passes/${passId}/payment`);
+    return response.data;
+  },
+
+  cancelMonthlyPass: async (passId) => {
+    const response = await apiClient.patch(`/tickets/monthly-passes/${passId}/cancel`);
+    return response.data;
+  },
 };
 
 export default ticketService;

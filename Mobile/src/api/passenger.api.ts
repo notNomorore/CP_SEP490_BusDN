@@ -185,10 +185,38 @@ export type TicketRecord = {
   bookingStatus?: string;
   ticketStatus?: string;
   currentStatus?: string;
+  status?: string;
+  passengerType?: string;
+  paymentMethod?: string;
+  purchasedAt?: string;
   digitalTicket?: {
     qrCode?: string;
     qrCodeImage?: string;
   };
+};
+
+export type TicketDetailRecord = TicketRecord & {
+  status?: string;
+  canCancel?: boolean;
+  qrCode?: {
+    payload?: string;
+    data?: string;
+    image?: string;
+    validFrom?: string;
+    validUntil?: string;
+    expiresAt?: string;
+  };
+  passengerInfo?: { fullName?: string; email?: string; phoneNumber?: string };
+  tripInfo?: {
+    routeName?: string;
+    boardingPoint?: string;
+    destinationPoint?: string;
+    estimatedArrivalTime?: string;
+    estimatedDurationMinutes?: number;
+    progressPercent?: number;
+    stops?: Array<{ stopId?: string; name?: string; order?: number; isBoardingPoint?: boolean; isDestination?: boolean }>;
+  };
+  importantNotes?: string[];
 };
 
 export type MonthlyPassRecord = {
@@ -202,6 +230,8 @@ export type MonthlyPassRecord = {
   passStatus?: string;
   startDate?: string;
   expiryDate?: string;
+  paymentMethod?: string;
+  digitalPass?: { qrPayload?: string; qrCodeImage?: string };
 };
 
 export type PurchasableTripSchedule = {
@@ -566,6 +596,21 @@ export const passengerApi = {
   getTickets: async () => {
     const response = await apiClient.get('/tickets/me') as unknown;
     return unwrap<{ tickets: TicketRecord[]; count: number }>(response);
+  },
+
+  getTicket: async (ticketId: string) => {
+    const response = await apiClient.get(`/tickets/${encodeURIComponent(ticketId)}`) as unknown;
+    return unwrap<TicketDetailRecord>(response);
+  },
+
+  createPendingTicketPayment: async (ticketId: string) => {
+    const response = await apiClient.post(`/tickets/${encodeURIComponent(ticketId)}/payment`) as unknown;
+    return unwrap<{ status?: string; checkoutUrl?: string; message?: string }>(response);
+  },
+
+  cancelTicket: async (ticketId: string) => {
+    const response = await apiClient.patch(`/tickets/${encodeURIComponent(ticketId)}/cancel`) as unknown;
+    return unwrap<TicketRecord>(response);
   },
 
   getMonthlyPasses: async () => {

@@ -31,6 +31,16 @@ export class TicketController {
     return res.success({ passes, count: passes.length }, 'Monthly passes retrieved successfully');
   }
 
+  static async createPendingMonthlyPassPayment(req, res) {
+    const payment = await TicketService.createPaymentForPendingMonthlyPass(req.user.userId, req.params.passId);
+    return res.success(payment, 'Payment QR created successfully', 201);
+  }
+
+  static async cancelMyMonthlyPass(req, res) {
+    const monthlyPass = await TicketService.cancelMyMonthlyPass(req.user.userId, req.params.passId);
+    return res.success(monthlyPass, 'Monthly pass cancelled successfully');
+  }
+
   static async listPurchasableSchedules(req, res) {
     const result = await TicketService.listPurchasableTripSchedules(req.query);
     return res.success(result, 'Purchasable trip schedules retrieved successfully');

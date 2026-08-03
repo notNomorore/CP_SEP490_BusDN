@@ -25,6 +25,13 @@ const ticketTypeLabel = (type) => ({
 }[type] || 'Vé một lượt');
 
 const buildPaymentPayload = (order) => {
+  if (order.monthlyPassId) {
+    return {
+      ticketType: 'MONTHLY_PASS',
+      monthlyPassId: order.monthlyPassId,
+    };
+  }
+
   if (order.ticketId || order.sourceTicketId) {
     return {
       ticketType: 'ONE_WAY',
@@ -102,6 +109,8 @@ const TicketCheckoutPage = () => {
     try {
       const nextPayment = paymentPayload.ticketId
         ? await ticketService.createPendingTicketPayment(paymentPayload.ticketId)
+        : paymentPayload.monthlyPassId
+          ? await ticketService.createPendingMonthlyPassPayment(paymentPayload.monthlyPassId)
         : await ticketService.createPayment(paymentPayload);
       setPayment(nextPayment);
 
