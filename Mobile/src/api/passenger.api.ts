@@ -4,11 +4,19 @@ type ApiEnvelope<T> = {
   success?: boolean;
   message?: string;
   data: T;
-  pagination?: unknown;
+  pagination?: PaginationMeta;
+};
+
+export type PaginationMeta = {
+  page?: number;
+  limit?: number;
+  total?: number;
+  totalPages?: number;
 };
 
 export type BusRouteStop = {
   stopId?: string;
+  id?: string;
   name: string;
   order: number;
   estimatedOffsetMinutes?: number;
@@ -39,17 +47,26 @@ export type BusRoute = {
     lastDeparture?: string;
     frequencyMinutes?: number;
   };
+  directions?: {
+    OUTBOUND?: { stops?: BusRouteStop[] };
+    INBOUND?: { stops?: BusRouteStop[] };
+  };
   pathPoints?: RoutePathPoint[];
   status?: string;
 };
 
 export type LiveBus = {
   busId: string;
+  vehicleId?: string;
+  plateNumber?: string;
+  tripId?: string;
+  tripCode?: string;
   routeId?: string;
   routeNumber: string;
   currentLocation?: {
     latitude?: number;
     longitude?: number;
+    heading?: number;
   };
   nextStop?: string;
   estimatedArrivalTime?: string;
@@ -69,9 +86,18 @@ export type LiveBus = {
   }>;
   lastUpdated?: string;
   tripProgress?: {
+    tripId?: string;
+    tripCode?: string;
+    busId?: string;
+    routeId?: string;
     progressPercent?: number;
+    completedStops?: Array<{ stopId?: string; stopName?: string; stopOrder?: number }>;
+    remainingStops?: Array<{ stopId?: string; stopName?: string; stopOrder?: number }>;
+    tripStatus?: string;
     currentStop?: string;
+    currentStopIndex?: number;
     nextStop?: string;
+    totalStops?: number;
     estimatedRemainingTime?: string;
   };
 };
@@ -93,6 +119,16 @@ export type NearbyStopRecord = {
     estimatedDurationMinutes?: number;
     fare?: number;
   };
+};
+
+export type StopEtaSummaryRecord = {
+  stopId?: string;
+  stopName: string;
+  stopOrder?: number;
+  nextBusId?: string | null;
+  etaMinutes?: number | null;
+  estimatedArrivalTime?: string;
+  status?: string;
 };
 
 export type FavoriteRouteRecord = {
@@ -179,8 +215,27 @@ export type NotificationRecord = {
   status?: string;
   createdAt?: string;
   sentAt?: string;
+  readAt?: string | null;
+  isRead?: boolean;
   actionUrl?: string;
+  routeId?: string | null;
+  tripId?: string | null;
+  deliverySummary?: { sentAt?: string };
   metadata?: Record<string, unknown>;
+};
+
+export type NotificationListResult = {
+  items: NotificationRecord[];
+  pagination: PaginationMeta;
+};
+
+export type NotificationSubscriptionRecord = {
+  subscriptionId: string;
+  routeId?: string;
+  routeNumber?: string;
+  stopId?: string;
+  stopName?: string;
+  notificationStatus?: string;
 };
 
 export type TravelHistoryRecord = {
@@ -272,10 +327,25 @@ export type PaymentOrder = {
   status?: string;
   amount?: number;
   ticketType?: string;
+  ticketId?: string;
+  monthlyPassId?: string;
   checkoutUrl?: string;
   qrCode?: string;
   qrCodeImage?: string;
+  paymentLinkId?: string;
+  rawStatus?: string;
   message?: string;
+};
+
+export type PromotionPreview = {
+  promotionId?: string;
+  promotionCode?: string;
+  promotionName?: string;
+  discountType?: string;
+  discountValue?: number;
+  originalAmount?: number;
+  discountAmount?: number;
+  finalAmount?: number;
 };
 
 const unwrap = <T>(response: unknown): T => (response as ApiEnvelope<T>).data;
@@ -322,12 +392,19 @@ export const passengerApi = {
     return unwrap<{
       route: BusRoute;
       buses: LiveBus[];
-      stopEtaSummary?: Array<{
-        stopName: string;
-        estimatedArrivalTime?: string;
-        status?: string;
-      }>;
+      stopEtaSummary?: StopEtaSummaryRecord[];
       routeChange?: unknown;
+      refreshedAt?: string;
+    }>(response);
+  },
+
+  getEstimatedArrivalTimes: async (routeId: string) => {
+    const response = await apiClient.get(`/routes/${encodeURIComponent(routeId)}/eta`) as unknown;
+    return unwrap<{
+      route: BusRoute;
+      buses: LiveBus[];
+      stopEtaSummary: StopEtaSummaryRecord[];
+      tripProgress?: unknown[];
       refreshedAt?: string;
     }>(response);
   },
@@ -377,10 +454,105 @@ export const passengerApi = {
     return unwrap<PaymentOrder>(response);
   },
 
+  applyPromotion: async (payload: {
+    promotionCode: string;
+    ticketType: 'ONE_WAY' | 'MONTHLY_PASS';
+    routeId?: string;
+    amount: number;
+  }) => {
+    const response = await apiClient.post('/tickets/promotions/apply', payload) as unknown;
+    return unwrap<PromotionPreview>(response);
+  },
+
+  getPaymentStatus: async (orderCode: number | string) => {
+    const response = await apiClient.get(`/tickets/payments/${encodeURIComponent(String(orderCode))}`) as unknown;
+    return unwrap<PaymentOrder>(response);
+  },
+
+  getNotificationPage: async (params: { page?: number; limit?: number; type?: string } = {}): Promise<NotificationListResult> => {
+    const response = await apiClient.get('/notifications/me', {
+      params: {
+        limit: 20,
+        ...params,
+      },
+    }) as unknown;
+    const envelope = response as ApiEnvelope<NotificationRecord[] | { items: NotificationRecord[] }>;
+    const data = envelope.data;
+    return {
+      items: Array.isArray(data) ? data : data.items || [],
+      pagination: envelope.pagination || { page: params.page || 1, limit: params.limit || 20, total: 0, totalPages: 1 },
+    };
+  },
+
   getNotifications: async () => {
-    const response = await apiClient.get('/notifications/me', { params: { limit: 50 } }) as unknown;
-    const data = unwrap<NotificationRecord[] | { items: NotificationRecord[] }>(response);
-    return Array.isArray(data) ? data : data.items || [];
+    const result = await passengerApi.getNotificationPage({ limit: 50 });
+    return result.items;
+  },
+
+  getNotificationUnreadCount: async () => {
+    const response = await apiClient.get('/notifications/me/unread-count') as unknown;
+    return unwrap<{ unreadCount: number }>(response);
+  },
+
+  markNotificationRead: async (notificationId: string) => {
+    const response = await apiClient.patch(`/notifications/me/${encodeURIComponent(notificationId)}/read`) as unknown;
+    return unwrap<NotificationRecord>(response);
+  },
+
+  markAllNotificationsRead: async () => {
+    const response = await apiClient.patch('/notifications/me/read-all') as unknown;
+    return unwrap<{ updatedCount: number }>(response);
+  },
+
+  getArrivalNotificationSubscriptions: async () => {
+    const response = await apiClient.get('/profile/notifications/arrival') as unknown;
+    return unwrap<NotificationSubscriptionRecord[]>(response);
+  },
+
+  getDelayNotificationSubscriptions: async () => {
+    const response = await apiClient.get('/profile/notifications/delay') as unknown;
+    return unwrap<NotificationSubscriptionRecord[]>(response);
+  },
+
+  getRouteChangeNotificationSubscriptions: async () => {
+    const response = await apiClient.get('/profile/notifications/route-change') as unknown;
+    return unwrap<NotificationSubscriptionRecord[]>(response);
+  },
+
+  removeArrivalNotificationSubscription: async (subscriptionId: string) => {
+    const response = await apiClient.delete(`/profile/notifications/arrival/${encodeURIComponent(subscriptionId)}`) as unknown;
+    return unwrap<NotificationSubscriptionRecord>(response);
+  },
+
+  removeDelayNotificationSubscription: async (subscriptionId: string) => {
+    const response = await apiClient.delete(`/profile/notifications/delay/${encodeURIComponent(subscriptionId)}`) as unknown;
+    return unwrap<NotificationSubscriptionRecord>(response);
+  },
+
+  removeRouteChangeNotificationSubscription: async (subscriptionId: string) => {
+    const response = await apiClient.delete(`/profile/notifications/route-change/${encodeURIComponent(subscriptionId)}`) as unknown;
+    return unwrap<NotificationSubscriptionRecord>(response);
+  },
+
+  updateNotificationEnabled: async (profile: {
+    fullName: string;
+    email?: string;
+    phone?: string;
+    phoneNumber?: string;
+    gender?: string;
+    dateOfBirth?: string | null;
+    address?: string;
+  }, notificationEnabled: boolean) => {
+    const response = await apiClient.put('/profile/update', {
+      fullName: profile.fullName,
+      email: profile.email,
+      phoneNumber: profile.phoneNumber || profile.phone,
+      gender: profile.gender || 'PREFER_NOT_TO_SAY',
+      dateOfBirth: profile.dateOfBirth || null,
+      address: profile.address || '',
+      notificationEnabled,
+    }) as unknown;
+    return unwrap<unknown>(response);
   },
 
   getTravelHistory: async () => {

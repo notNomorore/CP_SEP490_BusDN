@@ -236,7 +236,7 @@ export default function SearchRoutesScreen() {
   const loadNotificationCount = useCallback(async () => {
     try {
       const notifications = await passengerApi.getNotifications();
-      const unread = notifications.filter((item: NotificationRecord & { isRead?: boolean; readAt?: string }) => (
+      const unread = notifications.filter((item) => (
         item.isRead === false || item.status === 'unread'
       ));
       setNotificationCount(unread.length);

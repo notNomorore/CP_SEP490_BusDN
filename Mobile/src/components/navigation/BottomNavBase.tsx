@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/colors';
 
-export type BottomNavKey = 'home' | 'explore' | 'tickets' | 'history' | 'priority' | 'trips' | 'schedule' | 'chat' | 'support' | 'profile' | 'validate' | 'sell' | 'revenue';
+export type BottomNavKey = 'home' | 'explore' | 'tickets' | 'activity' | 'history' | 'priority' | 'trips' | 'schedule' | 'chat' | 'support' | 'profile' | 'validate' | 'sell' | 'revenue';
 
 export type BottomNavItemConfig = {
   key: BottomNavKey;
@@ -13,6 +13,7 @@ export type BottomNavItemConfig = {
   icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
   href?: Href;
   unavailableTitle?: string;
+  badgeCount?: number;
 };
 
 type BottomNavBaseProps = {
@@ -46,6 +47,11 @@ export function BottomNavBase({ active, items, style }: BottomNavBaseProps) {
               name={item.icon}
               size={21}
             />
+            {item.badgeCount ? (
+              <View style={styles.badge} accessibilityLabel={`${item.badgeCount} unread notifications`}>
+                <Text style={styles.badgeText}>{item.badgeCount > 99 ? '99+' : item.badgeCount}</Text>
+              </View>
+            ) : null}
             <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>{item.label}</Text>
           </Pressable>
         );
@@ -77,6 +83,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     paddingHorizontal: 8,
     paddingVertical: 7,
+    position: 'relative',
   },
   navItemActive: {
     backgroundColor: '#d7f4e6',
@@ -89,6 +96,23 @@ const styles = StyleSheet.create({
   },
   navLabelActive: {
     color: colors.primary,
+    fontWeight: '900',
+  },
+  badge: {
+    position: 'absolute',
+    top: 3,
+    right: 10,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: colors.error,
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    color: colors.white,
+    fontSize: 9,
     fontWeight: '900',
   },
 });
