@@ -12,6 +12,7 @@ import PaymentOrder from './PaymentOrder.js';
 import PayOSService from './PayOSService.js';
 import Promotion from '../promotions/Promotion.js';
 import PromotionUsage from '../promotions/PromotionUsage.js';
+import TripSchedule from '../admin/TripSchedule.js';
 import {
   calculateMonthlyPassPrice,
   calculatePriorityDiscount,
@@ -301,6 +302,54 @@ const deriveStoredPassengerType = (priorityType) => {
   return priorityType ? 'PRIORITY' : 'STANDARD';
 };
 
+const SCHEDULE_STATUSES_ALLOWED_FOR_PURCHASE = ['PLANNED', 'ASSIGNED', 'SCHEDULED', 'BOARDING'];
+const SCHEDULE_STATUSES_BLOCKED_FOR_PURCHASE = ['COMPLETED', 'DEPARTED', 'CANCELLED', 'IN_PROGRESS'];
+
+const getVietnamDateString = (date = new Date()) => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Ho_Chi_Minh',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+}).format(date);
+
+const getVietnamTimeString = (date = new Date()) => new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Ho_Chi_Minh',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+}).format(date);
+
+const toVietnamDayBounds = (dateText) => ({
+  start: new Date(`${dateText}T00:00:00+07:00`),
+  end: new Date(`${dateText}T23:59:59.999+07:00`),
+});
+
+const isScheduleStatusPurchasable = (status) => {
+  const normalized = String(status || '').trim().toUpperCase();
+  if (SCHEDULE_STATUSES_BLOCKED_FOR_PURCHASE.includes(normalized)) return false;
+  return SCHEDULE_STATUSES_ALLOWED_FOR_PURCHASE.includes(normalized);
+};
+
+const formatPurchasableSchedule = (schedule) => ({
+  id: schedule._id?.toString(),
+  scheduleId: schedule._id?.toString(),
+  scheduleCode: schedule.scheduleCode,
+  routeId: schedule.routeId?._id?.toString?.() || schedule.routeId?.toString?.() || '',
+  routeCode: schedule.routeCode,
+  routeName: schedule.routeName,
+  direction: schedule.direction,
+  serviceDate: getVietnamDateString(schedule.serviceDate),
+  departureTime: schedule.departureTime,
+  expectedArrivalTime: schedule.expectedArrivalTime,
+  status: schedule.status,
+  statusLabel: String(schedule.status || '').toUpperCase() === 'BOARDING' ? 'Boarding' : 'Scheduled',
+  vehicle: schedule.vehicle ? {
+    busId: schedule.vehicle.busId?.toString?.() || '',
+    busCode: schedule.vehicle.busCode || '',
+    plateNumber: schedule.vehicle.plateNumber || '',
+  } : null,
+});
+
 const buildPricingResponse = ({
   originalPrice,
   priorityDiscountAmount = 0,
@@ -345,6 +394,94 @@ export class TicketService {
     } catch {
       return null;
     }
+  }
+
+  static async listPurchasableTripSchedules(payload = {}) {
+    const route = await this.findRoute(payload.routeId);
+    if (!route) {
+      throw new CustomError('Tuyen xe da chon khong ton tai', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const serviceDateText = String(payload.serviceDate || '').slice(0, 10);
+    if (!parseServiceDateParts(serviceDateText)) {
+      throw new CustomError('Ngay khoi hanh khong hop le', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const todayText = getVietnamDateString();
+    if (serviceDateText < todayText) {
+      return {
+        schedules: [],
+        count: 0,
+        serverTime: new Date().toISOString(),
+        serverDate: todayText,
+      };
+    }
+
+    const direction = String(payload.direction || 'OUTBOUND').trim().toUpperCase();
+    const { start, end } = toVietnamDayBounds(serviceDateText);
+    const now = new Date();
+    const serverTime = getVietnamTimeString(now);
+    const schedules = await TripSchedule.find({
+      routeId: route._id,
+      direction,
+      serviceDate: { $gte: start, $lte: end },
+      departureTime: { $regex: /^\d{2}:\d{2}$/ },
+      status: { $nin: SCHEDULE_STATUSES_BLOCKED_FOR_PURCHASE },
+    })
+      .sort({ departureTime: 1 })
+      .lean();
+
+    const purchasable = schedules.filter((schedule) => {
+      if (!isScheduleStatusPurchasable(schedule.status)) return false;
+      return serviceDateText > todayText || String(schedule.departureTime || '') >= serverTime;
+    });
+
+    return {
+      schedules: purchasable.map(formatPurchasableSchedule),
+      count: purchasable.length,
+      serverTime: now.toISOString(),
+      serverClock: serverTime,
+      serverDate: todayText,
+    };
+  }
+
+  static async findPurchasableTripSchedule(route, { serviceDate, departureTime, direction }) {
+    const serviceDateText = String(serviceDate || '').slice(0, 10);
+    if (!parseServiceDateParts(serviceDateText)) {
+      throw new CustomError('Ngay khoi hanh khong hop le', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const todayText = getVietnamDateString();
+    const serverTime = getVietnamTimeString();
+    const departureDate = buildVietnamDepartureDate(serviceDateText, departureTime);
+    if (!departureDate) {
+      throw new CustomError('Ngay di hoac gio khoi hanh khong hop le', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    if (serviceDateText < todayText || (serviceDateText === todayText && String(departureTime || '') < serverTime)) {
+      throw new CustomError(
+        'Khong the mua ve cho chuyen xe da khoi hanh. Vui long chon chuyen hop le.',
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    const { start, end } = toVietnamDayBounds(serviceDateText);
+    const schedule = await TripSchedule.findOne({
+      routeId: route._id,
+      direction,
+      serviceDate: { $gte: start, $lte: end },
+      departureTime,
+      status: { $nin: SCHEDULE_STATUSES_BLOCKED_FOR_PURCHASE },
+    }).lean();
+
+    if (!schedule || !isScheduleStatusPurchasable(schedule.status)) {
+      throw new CustomError(
+        'Chuyen xe da chon khong con mo ban ve. Vui long chon chuyen khac.',
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    return { schedule, departureDate, serviceDateText };
   }
 
   static findStop(route, stopName) {
@@ -646,6 +783,13 @@ export class TicketService {
       }
 
       const direction = String(payload.direction || 'OUTBOUND').trim().toUpperCase();
+      if (payload.serviceDate && payload.departureTime) {
+        await this.findPurchasableTripSchedule(route, {
+          serviceDate: payload.serviceDate,
+          departureTime: payload.departureTime,
+          direction,
+        });
+      }
       const directionStops = route.directions?.[direction]?.stops || route.stops || [];
       const directionalRoute = { ...route, stops: directionStops };
       const startStop = this.findStop(directionalRoute, payload.departureLocation);
@@ -655,7 +799,10 @@ export class TicketService {
       }
 
       const originalPrice = this.calculatePrice(directionalRoute, startStop, endStop);
-      const priority = await calculatePriorityDiscount(userId, originalPrice, new Date());
+      const departureDate = payload.serviceDate && payload.departureTime
+        ? buildVietnamDepartureDate(payload.serviceDate, payload.departureTime)
+        : new Date();
+      const priority = await calculatePriorityDiscount(userId, originalPrice, departureDate || new Date());
       const priorityDiscountAmount = Math.max(Number(priority.discountAmount || 0), 0);
       const appliedDiscount = buildAppliedPriorityDiscount({
         discount: priority.discount,
@@ -813,27 +960,22 @@ export class TicketService {
 
     const paymentMethod = String(payload.paymentMethod || 'PAYOS').trim().toUpperCase();
 
-
-    const departureTime = payload.departureTime || route.operatingHours?.firstDeparture || '05:30';
-    const departureDate = buildVietnamDepartureDate(payload.serviceDate, departureTime);
-
-    if (!departureDate) {
-      throw new CustomError('Ngày đi hoặc giờ khởi hành không hợp lệ', HTTP_STATUS.BAD_REQUEST);
+    if (!payload.departureTime) {
+      throw new CustomError('Vui long chon chuyen khoi hanh hop le', HTTP_STATUS.BAD_REQUEST);
     }
 
-    if (departureDate.getTime() <= Date.now()) {
-      throw new CustomError(
-        'Không thể mua vé cho chuyến xe đã khởi hành. Vui lòng chọn thời gian trong tương lai.',
-        HTTP_STATUS.BAD_REQUEST
-      );
-    }
+    const departureTime = String(payload.departureTime).trim();
+    const { departureDate, serviceDateText } = await this.findPurchasableTripSchedule(route, {
+      serviceDate: payload.serviceDate,
+      departureTime,
+      direction,
+    });
 
     const serviceDate = buildStoredServiceDate(payload.serviceDate);
     if (!serviceDate) {
       throw new CustomError('Ngày đi không hợp lệ', HTTP_STATUS.BAD_REQUEST);
     }
-    const serviceDateValue = String(payload.serviceDate || '').slice(0, 10);
-    const tripId = `${route.routeNumber}-${serviceDateValue}-${departureTime}-${direction}`;
+    const tripId = `${route.routeNumber}-${serviceDateText}-${departureTime}-${direction}`;
 
     const originalPrice = this.calculatePrice(directionalRoute, startStop, endStop);
     const priority = await calculatePriorityDiscount(userId, originalPrice, departureDate);

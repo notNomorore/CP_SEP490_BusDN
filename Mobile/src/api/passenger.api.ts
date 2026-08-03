@@ -204,6 +204,26 @@ export type MonthlyPassRecord = {
   expiryDate?: string;
 };
 
+export type PurchasableTripSchedule = {
+  id?: string;
+  scheduleId?: string;
+  scheduleCode?: string;
+  routeId?: string;
+  routeCode?: string;
+  routeName?: string;
+  direction?: 'OUTBOUND' | 'INBOUND' | string;
+  serviceDate?: string;
+  departureTime: string;
+  expectedArrivalTime?: string;
+  status?: string;
+  statusLabel?: string;
+  vehicle?: {
+    busId?: string;
+    busCode?: string;
+    plateNumber?: string;
+  } | null;
+};
+
 export type NotificationRecord = {
   _id?: string;
   id?: string;
@@ -415,6 +435,12 @@ export type PaymentOrder = {
   paymentLinkId?: string;
   rawStatus?: string;
   message?: string;
+  originalPrice?: number;
+  priorityDiscountAmount?: number;
+  promotionDiscountAmount?: number;
+  discountAmount?: number;
+  finalPrice?: number;
+  pricing?: TicketPriceQuote;
 };
 
 export type PromotionPreview = {
@@ -426,6 +452,24 @@ export type PromotionPreview = {
   originalAmount?: number;
   discountAmount?: number;
   finalAmount?: number;
+};
+
+export type TicketPriceQuote = PromotionPreview & {
+  originalPrice?: number;
+  priorityDiscountAmount?: number;
+  promotionDiscountAmount?: number;
+  finalPrice?: number;
+  appliedDiscount?: {
+    type?: string;
+    priorityType?: string;
+    label?: string;
+    discountPercent?: number;
+    discountAmount?: number;
+  } | null;
+  appliedPromotion?: PromotionPreview;
+  dailyRideLimit?: number;
+  startDate?: string;
+  expiryDate?: string;
 };
 
 const unwrap = <T>(response: unknown): T => (response as ApiEnvelope<T>).data;
@@ -527,6 +571,22 @@ export const passengerApi = {
   getMonthlyPasses: async () => {
     const response = await apiClient.get('/tickets/monthly-passes/me') as unknown;
     return unwrap<{ passes: MonthlyPassRecord[]; count: number }>(response);
+  },
+
+  getPurchasableSchedules: async (params: { routeId: string; direction: string; serviceDate: string }) => {
+    const response = await apiClient.get('/tickets/purchasable-schedules', { params }) as unknown;
+    return unwrap<{
+      schedules: PurchasableTripSchedule[];
+      count: number;
+      serverTime?: string;
+      serverClock?: string;
+      serverDate?: string;
+    }>(response);
+  },
+
+  quoteTicket: async (payload: Record<string, unknown>) => {
+    const response = await apiClient.post('/tickets/quote', payload) as unknown;
+    return unwrap<TicketPriceQuote>(response);
   },
 
   createPayment: async (payload: Record<string, unknown>) => {

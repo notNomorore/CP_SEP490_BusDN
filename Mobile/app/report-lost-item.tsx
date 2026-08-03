@@ -8,6 +8,7 @@ import passengerApi, { type LostItemAttachmentAsset, type LostItemCategory, type
 import { AppButton } from '@/components/AppButton';
 import { EmptyState, LoadingState, PassengerLayout } from '@/components/passenger/PassengerLayout';
 import { colors } from '@/constants/colors';
+import { useAuthStore } from '@/store/auth.store';
 import { lostItemCategories } from '@/utils/lostItemDisplay';
 
 type FormErrors = Partial<Record<'itemName' | 'itemCategory' | 'itemDescription' | 'lostAt' | 'lastSeenLocation' | 'contact' | 'attachments', string>>;
@@ -28,6 +29,7 @@ const toDateTimeValue = (date = new Date()) => {
 
 export default function ReportLostItemScreen() {
   const params = useLocalSearchParams<{ relatedTripId?: string; tripCode?: string; routeName?: string }>();
+  const user = useAuthStore((state) => state.user);
   const [itemName, setItemName] = useState('');
   const [itemCategory, setItemCategory] = useState<LostItemCategory>('PERSONAL_BELONGINGS');
   const [itemDescription, setItemDescription] = useState('');
@@ -35,8 +37,8 @@ export default function ReportLostItemScreen() {
   const [routeName, setRouteName] = useState(params.routeName || '');
   const [lostAt, setLostAt] = useState(toDateTimeValue());
   const [lastSeenLocation, setLastSeenLocation] = useState('');
-  const [contactPhone, setContactPhone] = useState('');
-  const [contactEmail, setContactEmail] = useState('');
+  const [contactPhone, setContactPhone] = useState(user?.phone || user?.phoneNumber || '');
+  const [contactEmail, setContactEmail] = useState(user?.email || '');
   const [attachments, setAttachments] = useState<LostItemAttachmentAsset[]>([]);
   const [travelRecords, setTravelRecords] = useState<TravelHistoryRecord[]>([]);
   const [isLoadingTrips, setIsLoadingTrips] = useState(true);
@@ -59,6 +61,15 @@ export default function ReportLostItemScreen() {
     };
     void loadTrips();
   }, []);
+
+  useEffect(() => {
+    if (!contactPhone.trim()) {
+      setContactPhone(user?.phone || user?.phoneNumber || '');
+    }
+    if (!contactEmail.trim()) {
+      setContactEmail(user?.email || '');
+    }
+  }, [contactEmail, contactPhone, user?.email, user?.phone, user?.phoneNumber]);
 
   const tripOptions = useMemo(() => {
     const seen = new Set<string>();

@@ -16,6 +16,11 @@ export const ticketService = {
     return response.data;
   },
 
+  getPurchasableSchedules: async (params) => {
+    const response = await apiClient.get('/tickets/purchasable-schedules', { params });
+    return response.data;
+  },
+
   getMyTickets: async () => {
     const response = await apiClient.get('/tickets/me');
     return response.data;

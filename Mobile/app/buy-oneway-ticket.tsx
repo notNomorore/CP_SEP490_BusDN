@@ -15,7 +15,13 @@ import {
   View,
 } from 'react-native';
 
-import passengerApi, { type BusRoute, type BusRouteStop, type PaymentOrder, type PromotionPreview } from '@/api/passenger.api';
+import passengerApi, {
+  type BusRoute,
+  type BusRouteStop,
+  type PaymentOrder,
+  type PurchasableTripSchedule,
+  type TicketPriceQuote,
+} from '@/api/passenger.api';
 import { AppButton } from '@/components/AppButton';
 import { EmptyState, LoadingState, PassengerLayout, StatusPill } from '@/components/passenger/PassengerLayout';
 import { colors } from '@/constants/colors';
@@ -23,7 +29,6 @@ import useAuthStore from '@/store/auth.store';
 
 type TicketType = 'ONE_WAY' | 'MONTHLY_PASS';
 type Direction = 'OUTBOUND' | 'INBOUND';
-type PassengerType = 'STANDARD' | 'STUDENT' | 'PRIORITY';
 type MonthOption = { value: string; label: string; startDate: string; endDate: string };
 type FormErrors = Partial<Record<
   | 'auth'
@@ -33,38 +38,22 @@ type FormErrors = Partial<Record<
   | 'destinationStop'
   | 'serviceDate'
   | 'departureTime'
-  | 'passengerType'
   | 'promotion'
   | 'price',
   string
 >>;
 
-const passengerTypes: Array<{ id: PassengerType; label: string; note?: string }> = [
-  { id: 'STANDARD', label: 'Phổ thông' },
-  { id: 'STUDENT', label: 'Học sinh / Sinh viên', note: 'Vui lòng mang giấy tờ xác minh khi lên xe.' },
-  { id: 'PRIORITY', label: 'Đối tượng ưu tiên', note: 'Hành khách thuộc đối tượng ưu tiên vui lòng mang giấy tờ xác minh khi lên xe.' },
-];
-
-const monthlyPrices: Record<PassengerType, number> = {
-  STANDARD: 250000,
-  STUDENT: 120000,
-  PRIORITY: 0,
-};
-
-const currency = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 });
+const currency = new Intl.NumberFormat('vi-VN', {
+  style: 'currency',
+  currency: 'VND',
+  maximumFractionDigits: 0,
+});
 
 const getVietnamDate = () => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Ho_Chi_Minh',
   year: 'numeric',
   month: '2-digit',
   day: '2-digit',
-}).format(new Date());
-
-const getVietnamTime = () => new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Asia/Ho_Chi_Minh',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
 }).format(new Date());
 
 const getCurrentMonthStart = () => {
@@ -104,50 +93,43 @@ const buildMonthEnd = (startDate: string) => {
   return formatMonthDate(new Date(start.getFullYear(), start.getMonth() + 1, 0));
 };
 
-const addMinutesToTime = (time: string, minutes: number) => {
-  const [hour, minute] = time.split(':').map(Number);
-  const total = hour * 60 + minute + minutes;
-  const nextHour = Math.floor(total / 60);
-  const nextMinute = total % 60;
-  if (nextHour > 23) return '';
-  return `${String(nextHour).padStart(2, '0')}:${String(nextMinute).padStart(2, '0')}`;
-};
-
-const buildDepartureTimes = (route?: BusRoute | null, serviceDate = getVietnamDate()) => {
-  const first = route?.operatingHours?.firstDeparture || '';
-  const last = route?.operatingHours?.lastDeparture || '';
-  const frequency = Number(route?.operatingHours?.frequencyMinutes || 0);
-  if (!first || !last || !frequency) return [];
-
-  const today = getVietnamDate();
-  const now = getVietnamTime();
-  const times: string[] = [];
-  let cursor = first;
-  for (let index = 0; index < 160 && cursor && cursor <= last; index += 1) {
-    if (serviceDate > today || cursor > now) times.push(cursor);
-    cursor = addMinutesToTime(cursor, frequency);
-  }
-  return times;
-};
-
-const getDirectionStops = (route?: BusRoute | null, direction: Direction = 'OUTBOUND') => (
-  direction === 'INBOUND'
-    ? route?.directions?.INBOUND?.stops || []
-    : route?.directions?.OUTBOUND?.stops || route?.stops || []
-);
-
-const getDirectionOptions = (route?: BusRoute | null) => {
-  const outboundStops = getDirectionStops(route, 'OUTBOUND');
-  const inboundStops = getDirectionStops(route, 'INBOUND');
-  const options: Array<{ id: Direction; label: string; stops: BusRouteStop[] }> = [];
-  if (outboundStops.length >= 2) options.push({ id: 'OUTBOUND', label: 'Chiều đi', stops: outboundStops });
-  if (inboundStops.length >= 2) options.push({ id: 'INBOUND', label: 'Chiều về', stops: inboundStops });
-  return options;
+const getDirectionStops = (route?: BusRoute | null, direction: Direction = 'OUTBOUND') => {
+  const outbound = route?.directions?.OUTBOUND?.stops || route?.stops || [];
+  if (direction === 'OUTBOUND') return outbound;
+  return route?.directions?.INBOUND?.stops || [...outbound].reverse().map((stop, index) => ({ ...stop, order: index + 1 }));
 };
 
 const routeMatches = (route: BusRoute, query: string) => {
   const text = [route.routeNumber, route.name, route.origin, route.destination].join(' ').toLowerCase();
   return text.includes(query.trim().toLowerCase());
+};
+
+const getDirectionOptions = (route?: BusRoute | null): Array<{ id: Direction; label: string; stops: BusRouteStop[] }> => {
+  const outbound = route?.directions?.OUTBOUND?.stops || route?.stops || [];
+  const inbound = route?.directions?.INBOUND?.stops || [...outbound].reverse().map((stop, index) => ({ ...stop, order: index + 1 }));
+  return [
+    { id: 'OUTBOUND', label: 'Chiều đi', stops: outbound },
+    { id: 'INBOUND', label: 'Chiều về', stops: inbound },
+  ].filter((item) => item.stops.length >= 2) as Array<{ id: Direction; label: string; stops: BusRouteStop[] }>;
+};
+
+const calculateOneWayPrice = (
+  route: BusRoute | null,
+  directionStops: BusRouteStop[],
+  fromStop: string,
+  toStop: string,
+) => {
+  const departureStop = directionStops.find((stop) => stop.name === fromStop);
+  const arrivalStop = directionStops.find((stop) => stop.name === toStop);
+  if (!route || !departureStop || !arrivalStop || Number(departureStop.order) >= Number(arrivalStop.order)) {
+    return Number(route?.fare || 0);
+  }
+
+  const routeStopCount = Math.max((route.stops || directionStops).length - 1, 1);
+  const stopSpan = Math.max(Number(arrivalStop.order) - Number(departureStop.order), 1);
+  const proportionalFare = (Number(route.fare || 0) / routeStopCount) * stopSpan;
+  const minimumFare = Number(route.fare || 0) * 0.35;
+  return roundFare(Math.max(proportionalFare, minimumFare));
 };
 
 export default function BuyOneWayTicketScreen() {
@@ -159,22 +141,28 @@ export default function BuyOneWayTicketScreen() {
   const [direction, setDirection] = useState<Direction>('OUTBOUND');
   const [serviceDate, setServiceDate] = useState(getVietnamDate());
   const [departureTime, setDepartureTime] = useState('');
-  const [passengerType, setPassengerType] = useState<PassengerType>('STANDARD');
+  const [departureSchedules, setDepartureSchedules] = useState<PurchasableTripSchedule[]>([]);
   const [monthlyStartDate, setMonthlyStartDate] = useState(getCurrentMonthStart());
   const [startMonthOpen, setStartMonthOpen] = useState(false);
+  const [departureOpen, setDepartureOpen] = useState(false);
   const [promotionCode, setPromotionCode] = useState('');
-  const [appliedPromotion, setAppliedPromotion] = useState<PromotionPreview | null>(null);
+  const [appliedPromotion, setAppliedPromotion] = useState<TicketPriceQuote | null>(null);
+  const [priceQuote, setPriceQuote] = useState<TicketPriceQuote | null>(null);
   const [payment, setPayment] = useState<PaymentOrder | null>(null);
   const pendingOrderRef = useRef<PaymentOrder | null>(null);
   const [routeSelectorOpen, setRouteSelectorOpen] = useState(false);
   const [dateSelectorOpen, setDateSelectorOpen] = useState<null | 'ONE_WAY' | 'MONTHLY_PASS'>(null);
   const [routeQuery, setRouteQuery] = useState('');
   const [loadingRoutes, setLoadingRoutes] = useState(true);
+  const [loadingSchedules, setLoadingSchedules] = useState(false);
+  const [loadingQuote, setLoadingQuote] = useState(false);
   const [applyingPromotion, setApplyingPromotion] = useState(false);
   const [creatingOrder, setCreatingOrder] = useState(false);
   const [checkingPayment, setCheckingPayment] = useState(false);
   const [payosOpening, setPayosOpening] = useState(false);
   const [error, setError] = useState('');
+  const [scheduleError, setScheduleError] = useState('');
+  const [quoteError, setQuoteError] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
 
   useEffect(() => {
@@ -200,10 +188,25 @@ export default function BuyOneWayTicketScreen() {
     };
   }, [params.routeId]);
 
-  const selectedRoute = useMemo(() => routes.find((route) => toRouteId(route) === routeId || route.routeNumber === routeId) || null, [routeId, routes]);
+  const selectedRoute = useMemo(() => routes.find((route) => (
+    toRouteId(route) === routeId || route.routeNumber === routeId
+  )) || null, [routeId, routes]);
+  const stops = useMemo(() => getDirectionStops(selectedRoute, direction), [direction, selectedRoute]);
+  const selectedDepartureSchedule = useMemo(
+    () => departureSchedules.find((schedule) => schedule.departureTime === departureTime),
+    [departureSchedules, departureTime],
+  );
   const directionOptions = useMemo(() => getDirectionOptions(selectedRoute), [selectedRoute]);
-  const selectedDirection = directionOptions.find((item) => item.id === direction) || directionOptions[0] || null;
-  const departureTimes = useMemo(() => buildDepartureTimes(selectedRoute, serviceDate), [selectedRoute, serviceDate]);
+  const selectedDirection = useMemo(
+    () => directionOptions.find((item) => item.id === direction) || directionOptions[0],
+    [direction, directionOptions],
+  );
+  const boardingStop = stops[0]?.name || selectedRoute?.origin || '';
+  const destinationStop = stops[stops.length - 1]?.name || selectedRoute?.destination || '';
+  const filteredRoutes = useMemo(
+    () => routes.filter((route) => routeMatches(route, routeQuery)),
+    [routeQuery, routes],
+  );
   const startMonthOptions = useMemo(() => buildStartMonthOptions(), []);
   const selectedStartMonth = startMonthOptions.find((option) => option.startDate === monthlyStartDate)
     || startMonthOptions[0]
@@ -213,65 +216,207 @@ export default function BuyOneWayTicketScreen() {
       startDate: getCurrentMonthStart(),
       endDate: buildMonthEnd(getCurrentMonthStart()),
     };
-  const selectedPassengerType = passengerTypes.find((item) => item.id === passengerType) || passengerTypes[0];
-  const basePrice = useMemo(() => (
-    ticketType === 'MONTHLY_PASS'
-      ? monthlyPrices[passengerType]
-      : calculateOneWayPrice(selectedRoute, stops, boardingStop, destinationStop)
-  ), [boardingStop, destinationStop, passengerType, selectedRoute, stops, ticketType]);
-  const finalPrice = Math.max(Number(appliedPromotion?.finalAmount ?? basePrice) || 0, 0);
-  const discountAmount = Math.max(Number(appliedPromotion?.discountAmount || 0), 0);
-  const filteredRoutes = useMemo(() => routes.filter((route) => routeMatches(route, routeQuery)), [routeQuery, routes]);
+  const localBasePrice = useMemo(
+    () => (ticketType === 'MONTHLY_PASS' ? 0 : calculateOneWayPrice(selectedRoute, stops, boardingStop, destinationStop)),
+    [boardingStop, destinationStop, selectedRoute, stops, ticketType],
+  );
+  const activeQuote = appliedPromotion || priceQuote;
+  const basePrice = Math.max(Number(activeQuote?.originalPrice ?? activeQuote?.originalAmount ?? localBasePrice) || 0, 0);
+  const finalPrice = Math.max(Number(activeQuote?.finalPrice ?? activeQuote?.finalAmount ?? basePrice) || 0, 0);
+  const discountAmount = Math.max(Number(activeQuote?.discountAmount || 0), 0);
+  const monthlyDailyLimit = Number(activeQuote?.dailyRideLimit || 0);
+  const hasRequiredSelectionsForQuote = ticketType === 'MONTHLY_PASS'
+    ? Boolean(monthlyStartDate)
+    : Boolean(selectedRoute && boardingStop && destinationStop && selectedDepartureSchedule);
+  const priceUnavailable = hasRequiredSelectionsForQuote && (!activeQuote || basePrice <= 0 || Boolean(quoteError));
+  const appliedPromotionCode = appliedPromotion?.appliedPromotion?.promotionCode || appliedPromotion?.promotionCode || '';
 
   useEffect(() => {
     if (!selectedRoute) return;
     const nextDirections = getDirectionOptions(selectedRoute);
     setDirection(nextDirections[0]?.id || 'OUTBOUND');
     setDepartureTime('');
+    setDepartureSchedules([]);
     setAppliedPromotion(null);
+    setPriceQuote(null);
     setPayment(null);
     pendingOrderRef.current = null;
   }, [selectedRoute]);
 
   useEffect(() => {
-    if (departureTime && !departureTimes.includes(departureTime)) setDepartureTime('');
-  }, [departureTime, departureTimes]);
+    if (departureTime && !departureSchedules.some((schedule) => schedule.departureTime === departureTime)) {
+      setDepartureTime('');
+    }
+  }, [departureSchedules, departureTime]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadSchedules = async () => {
+      if (ticketType !== 'ONE_WAY' || !selectedRoute || !serviceDate.trim() || serviceDate < getVietnamDate()) {
+        setDepartureSchedules([]);
+        setDepartureTime('');
+        setScheduleError('');
+        return;
+      }
+
+      setLoadingSchedules(true);
+      setScheduleError('');
+      try {
+        const data = await passengerApi.getPurchasableSchedules({
+          routeId: toRouteId(selectedRoute),
+          direction,
+          serviceDate: serviceDate.trim(),
+        });
+        if (!mounted) return;
+        setDepartureSchedules(data.schedules || []);
+      } catch (err) {
+        if (!mounted) return;
+        setDepartureSchedules([]);
+        setDepartureTime('');
+        setScheduleError((err as { message?: string })?.message || 'Không thể tải lịch chuyến hợp lệ.');
+      } finally {
+        if (mounted) setLoadingSchedules(false);
+      }
+    };
+
+    void loadSchedules();
+    return () => {
+      mounted = false;
+    };
+  }, [direction, selectedRoute, serviceDate, ticketType]);
 
   useEffect(() => {
     setAppliedPromotion(null);
+    setPriceQuote(null);
+    setQuoteError('');
     setErrors((current) => ({ ...current, promotion: undefined, price: undefined }));
     setPayment(null);
-  }, [ticketType, routeId, direction, boardingStop, destinationStop, serviceDate, departureTime, passengerType, monthlyStartDate]);
+  }, [ticketType, routeId, direction, boardingStop, destinationStop, serviceDate, departureTime, monthlyStartDate]);
+
+  const buildCheckoutPayload = useCallback((promotionCodeOverride = appliedPromotionCode) => (
+    ticketType === 'MONTHLY_PASS'
+      ? {
+        ticketType,
+        routeCode: 'ALL',
+        startDate: monthlyStartDate,
+        validityMonths: 1,
+        promotionCode: promotionCodeOverride,
+      }
+      : {
+        ticketType,
+        routeId: toRouteId(selectedRoute),
+        direction,
+        departureLocation: boardingStop,
+        destinationLocation: destinationStop,
+        serviceDate,
+        departureTime,
+        promotionCode: promotionCodeOverride,
+      }
+  ), [
+    appliedPromotionCode,
+    boardingStop,
+    departureTime,
+    destinationStop,
+    direction,
+    monthlyStartDate,
+    selectedRoute,
+    serviceDate,
+    ticketType,
+  ]);
+
+  useEffect(() => {
+    let mounted = true;
+    const hasPromotionWaitingForApply = Boolean(promotionCode.trim()) && !appliedPromotionCode;
+    const canQuote = ticketType === 'MONTHLY_PASS'
+      ? Boolean(monthlyStartDate)
+      : Boolean(selectedRoute && boardingStop && destinationStop && selectedDepartureSchedule);
+
+    if (!canQuote || hasPromotionWaitingForApply) {
+      setPriceQuote(null);
+      setQuoteError('');
+      setLoadingQuote(false);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    const timeout = setTimeout(async () => {
+      setLoadingQuote(true);
+      setQuoteError('');
+      try {
+        const quote = await passengerApi.quoteTicket(buildCheckoutPayload(appliedPromotionCode));
+        if (mounted) setPriceQuote(quote);
+      } catch (err) {
+        if (mounted) {
+          setPriceQuote(null);
+          setQuoteError((err as { message?: string })?.message || 'Không thể tính giá vé.');
+        }
+      } finally {
+        if (mounted) setLoadingQuote(false);
+      }
+    }, 250);
+
+    return () => {
+      mounted = false;
+      clearTimeout(timeout);
+    };
+  }, [
+    appliedPromotionCode,
+    boardingStop,
+    buildCheckoutPayload,
+    departureTime,
+    destinationStop,
+    monthlyStartDate,
+    promotionCode,
+    selectedDepartureSchedule,
+    selectedRoute,
+    ticketType,
+  ]);
 
   const validate = useCallback(() => {
     const nextErrors: FormErrors = {};
     if (!isAuthenticated) nextErrors.auth = 'Vui lòng đăng nhập trước khi mua vé.';
-    if (!selectedRoute) nextErrors.route = 'Vui lòng chọn tuyến.';
     if (ticketType === 'ONE_WAY') {
+      if (!selectedRoute) nextErrors.route = 'Vui lòng chọn tuyến.';
       if (!selectedDirection) nextErrors.direction = 'Vui lòng chọn chiều tuyến.';
       if (serviceDate < getVietnamDate()) nextErrors.serviceDate = 'Không thể chọn ngày trong quá khứ.';
       if (!departureTime) nextErrors.departureTime = 'Vui lòng chọn giờ khởi hành hợp lệ.';
-      if (serviceDate === getVietnamDate() && departureTime && departureTime <= getVietnamTime()) nextErrors.departureTime = 'Giờ khởi hành đã qua.';
+      if (loadingSchedules) {
+        nextErrors.departureTime = 'Đang tải lịch chuyến hợp lệ, vui lòng chờ.';
+      } else if (departureTime && !selectedDepartureSchedule) {
+        nextErrors.departureTime = 'Chuyến đã chọn không còn mở bán. Vui lòng chọn chuyến khác.';
+      }
     }
-    if (!passengerType) nextErrors.passengerType = 'Vui lòng chọn loại hành khách.';
     if (ticketType === 'MONTHLY_PASS') {
       if (!startMonthOptions.some((option) => option.startDate === monthlyStartDate)) {
         nextErrors.serviceDate = 'Start Month không hợp lệ. Vui lòng chọn từ tháng hiện tại đến 5 tháng tới.';
       }
     }
     if (promotionCode.trim() && !appliedPromotion) nextErrors.promotion = 'Vui lòng áp dụng mã khuyến mãi trước khi thanh toán.';
-    if (basePrice < 0) nextErrors.price = 'Không tính được giá vé.';
+    if (loadingQuote) {
+      nextErrors.price = 'Đang tải giá vé, vui lòng chờ.';
+    } else if (quoteError) {
+      nextErrors.price = quoteError;
+    } else if (hasRequiredSelectionsForQuote && (!activeQuote || basePrice <= 0)) {
+      nextErrors.price = 'Không tìm thấy cấu hình giá vé đang hoạt động.';
+    }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   }, [
     appliedPromotion,
+    activeQuote,
     basePrice,
     departureTime,
+    hasRequiredSelectionsForQuote,
     direction,
     isAuthenticated,
+    loadingQuote,
+    loadingSchedules,
     monthlyStartDate,
-    passengerType,
     promotionCode,
+    quoteError,
+    selectedDepartureSchedule,
     selectedRoute,
     serviceDate,
     startMonthOptions,
@@ -302,17 +447,17 @@ export default function BuyOneWayTicketScreen() {
     setApplyingPromotion(true);
     setErrors((current) => ({ ...current, promotion: undefined }));
     try {
-      const promotion = await passengerApi.applyPromotion({
-        promotionCode: code,
-        ticketType,
-        routeId: ticketType === 'ONE_WAY' ? toRouteId(selectedRoute) : undefined,
-        amount: basePrice,
-      });
+      const promotion = await passengerApi.quoteTicket(buildCheckoutPayload(code));
       setAppliedPromotion(promotion);
-      setPromotionCode(promotion.promotionCode || code);
+      setPriceQuote(promotion);
+      setPromotionCode(promotion.appliedPromotion?.promotionCode || promotion.promotionCode || code);
     } catch (err) {
       setAppliedPromotion(null);
-      setErrors((current) => ({ ...current, promotion: (err as { message?: string })?.message || 'Không thể áp dụng mã khuyến mãi.' }));
+      setPriceQuote(null);
+      setErrors((current) => ({
+        ...current,
+        promotion: (err as { message?: string })?.message || 'Không thể áp dụng mã khuyến mãi.',
+      }));
     } finally {
       setApplyingPromotion(false);
     }
@@ -354,31 +499,13 @@ export default function BuyOneWayTicketScreen() {
   }, [checkPayment]);
 
   const submit = async () => {
-    if (creatingOrder || applyingPromotion || checkingPayment || loadingRoutes) return;
+    if (creatingOrder || applyingPromotion || checkingPayment || loadingRoutes || loadingSchedules || loadingQuote) return;
     setError('');
     if (!validate()) return;
 
     setCreatingOrder(true);
     try {
-      const payload = ticketType === 'MONTHLY_PASS'
-        ? {
-          ticketType,
-          passType: passengerType,
-          routeId: routeId || undefined,
-          routeCode: routeId ? undefined : 'ALL',
-          startDate: monthlyStartDate,
-          validityMonths: 1,
-          promotionCode: appliedPromotion?.promotionCode || '',
-        }
-        : {
-          ticketType,
-          routeId: toRouteId(selectedRoute),
-          direction,
-          serviceDate,
-          departureTime,
-          passengerType,
-          promotionCode: appliedPromotion?.promotionCode || '',
-        };
+      const payload = buildCheckoutPayload(appliedPromotionCode);
 
       const nextPayment = await passengerApi.createPayment(payload);
       setPayment(nextPayment);
@@ -403,7 +530,7 @@ export default function BuyOneWayTicketScreen() {
     }
   };
 
-  const payDisabled = loadingRoutes || applyingPromotion || checkingPayment || creatingOrder || payosOpening;
+  const payDisabled = loadingRoutes || loadingSchedules || loadingQuote || applyingPromotion || checkingPayment || creatingOrder || payosOpening || priceUnavailable;
 
   return (
     <PassengerLayout active="tickets" subtitle="Chọn tuyến, chiều và thanh toán PayOS" title="Mua vé xe buýt">
@@ -418,22 +545,37 @@ export default function BuyOneWayTicketScreen() {
             <TabButton active={ticketType === 'MONTHLY_PASS'} label="Vé tháng" onPress={() => switchTicketType('MONTHLY_PASS')} />
           </View>
 
-          <View style={styles.section}>
-            <Text style={styles.label}>Tuyến</Text>
-            <Pressable accessibilityLabel="Chọn tuyến" onPress={() => setRouteSelectorOpen(true)} style={styles.selectorField}>
-              <View style={styles.routeBadge}>
-                <Text style={styles.routeBadgeText}>{selectedRoute?.routeNumber || '--'}</Text>
+          {ticketType === 'ONE_WAY' ? (
+            <View style={styles.section}>
+              <Text style={styles.label}>Tuyến</Text>
+              <Pressable accessibilityLabel="Chọn tuyến" onPress={() => setRouteSelectorOpen(true)} style={styles.selectorField}>
+                <View style={styles.routeBadge}>
+                  <Text style={styles.routeBadgeText}>{selectedRoute?.routeNumber || '--'}</Text>
+                </View>
+                <View style={styles.selectorCopy}>
+                  <Text numberOfLines={1} style={styles.selectorTitle}>{selectedRoute?.name || 'Chọn tuyến'}</Text>
+                  <Text numberOfLines={1} style={styles.selectorMeta}>
+                    {selectedRoute ? `${selectedRoute.origin} → ${selectedRoute.destination}` : 'Tìm theo mã, tên tuyến hoặc điểm đầu/cuối'}
+                  </Text>
+                </View>
+                <MaterialCommunityIcons color={colors.secondary} name="chevron-down" size={22} />
+              </Pressable>
+              {errors.route ? <FieldError message={errors.route} /> : null}
+            </View>
+          ) : (
+            <View style={styles.section}>
+              <Text style={styles.label}>Gói vé tháng</Text>
+              <View style={styles.selectorField}>
+                <View style={styles.routeBadge}>
+                  <Text style={styles.routeBadgeText}>ALL</Text>
+                </View>
+                <View style={styles.selectorCopy}>
+                  <Text numberOfLines={1} style={styles.selectorTitle}>Vé tháng toàn mạng</Text>
+                  <Text numberOfLines={2} style={styles.selectorMeta}>Áp dụng cho tất cả tuyến BusDN theo cấu hình vận hành giá vé.</Text>
+                </View>
               </View>
-              <View style={styles.selectorCopy}>
-                <Text numberOfLines={1} style={styles.selectorTitle}>{selectedRoute?.name || 'Chọn tuyến'}</Text>
-                <Text numberOfLines={1} style={styles.selectorMeta}>
-                  {selectedRoute ? `${selectedRoute.origin} → ${selectedRoute.destination}` : 'Tìm theo mã, tên tuyến hoặc điểm đầu/cuối'}
-                </Text>
-              </View>
-              <MaterialCommunityIcons color={colors.secondary} name="chevron-down" size={22} />
-            </Pressable>
-            {errors.route ? <FieldError message={errors.route} /> : null}
-          </View>
+            </View>
+          )}
 
           {ticketType === 'ONE_WAY' ? (
             <>
@@ -461,17 +603,27 @@ export default function BuyOneWayTicketScreen() {
 
               <View style={styles.section}>
                 <Text style={styles.label}>Giờ khởi hành</Text>
-                {departureTimes.length ? (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeRow}>
-                    {departureTimes.map((time) => (
-                      <Pressable key={time} accessibilityLabel={`Giờ ${time}`} onPress={() => setDepartureTime(time)} style={[styles.timeChip, departureTime === time && styles.timeChipActive]}>
-                        <Text style={[styles.timeText, departureTime === time && styles.timeTextActive]}>{time}</Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
+                {loadingSchedules ? (
+                  <View style={styles.emptyInline}>
+                    <MaterialCommunityIcons color={colors.secondary} name="clock-outline" size={20} />
+                    <Text style={styles.emptyInlineText}>Đang tải chuyến khởi hành hợp lệ...</Text>
+                  </View>
+                ) : departureSchedules.length ? (
+                  <DepartureTimeDropdown
+                    onClose={() => setDepartureOpen(false)}
+                    onOpen={() => setDepartureOpen(true)}
+                    onSelect={(schedule) => {
+                      setDepartureTime(schedule.departureTime);
+                      setDepartureOpen(false);
+                    }}
+                    schedules={departureSchedules}
+                    selected={selectedDepartureSchedule}
+                    visible={departureOpen}
+                  />
                 ) : (
                   <InlineState icon="clock-alert-outline" text="Không có giờ khởi hành hợp lệ trong ngày đã chọn." />
                 )}
+                {scheduleError ? <FieldError message={scheduleError} /> : null}
                 {errors.departureTime ? <FieldError message={errors.departureTime} /> : null}
               </View>
             </>
@@ -493,23 +645,17 @@ export default function BuyOneWayTicketScreen() {
                 <MaterialCommunityIcons color={colors.secondary} name="calendar-range-outline" size={20} />
                 <Text style={styles.emptyInlineText}>Hiệu lực từ {selectedStartMonth.startDate} đến {selectedStartMonth.endDate}</Text>
               </View>
+              <View style={styles.emptyInline}>
+                <MaterialCommunityIcons color={colors.secondary} name="ticket-confirmation-outline" size={20} />
+                <Text style={styles.emptyInlineText}>
+                  {monthlyDailyLimit ? `${monthlyDailyLimit} lượt đi mỗi ngày` : 'Đang tải số lượt đi mỗi ngày...'}
+                </Text>
+              </View>
               {errors.serviceDate ? <FieldError message={errors.serviceDate} /> : null}
             </>
           )}
 
           <View style={styles.section}>
-            <Text style={styles.label}>Loại hành khách</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeRow}>
-              {passengerTypes.map((item) => (
-                <Pressable key={item.id} accessibilityLabel={item.label} onPress={() => setPassengerType(item.id)} style={[styles.passengerChip, passengerType === item.id && styles.passengerChipActive]}>
-                  <Text numberOfLines={1} style={[styles.passengerText, passengerType === item.id && styles.passengerTextActive]}>{item.label}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-            {selectedPassengerType.note ? <Text style={styles.warningText}>{selectedPassengerType.note}</Text> : null}
-          </View>
-
-          <View style={styles.promoCard}>
             <Text style={styles.label}>Mã khuyến mãi</Text>
             <View style={styles.promoRow}>
               <TextInput
@@ -532,10 +678,7 @@ export default function BuyOneWayTicketScreen() {
             {appliedPromotion ? (
               <View style={styles.successBox}>
                 <MaterialCommunityIcons color="#06613f" name="check-circle-outline" size={18} />
-                <Text style={styles.successText}>Đã áp dụng {appliedPromotion.promotionCode}. Giảm {currency.format(discountAmount)}.</Text>
-                <Pressable accessibilityLabel="Bỏ mã khuyến mãi" onPress={() => { setAppliedPromotion(null); setPromotionCode(''); }}>
-                  <MaterialCommunityIcons color={colors.primary} name="close" size={18} />
-                </Pressable>
+                <Text style={styles.successText}>Đã áp dụng {appliedPromotionCode}. Giảm {currency.format(Number(activeQuote?.promotionDiscountAmount || 0))}.</Text>
               </View>
             ) : null}
             {errors.promotion ? <FieldError message={errors.promotion} /> : null}
@@ -543,22 +686,31 @@ export default function BuyOneWayTicketScreen() {
 
           <View style={styles.summary}>
             <View style={styles.summaryTop}>
-              <View style={styles.summaryTitleWrap}>
-                <Text style={styles.summaryTitle}>Tóm tắt</Text>
-                <Text style={styles.summarySub}>{ticketType === 'ONE_WAY' ? 'Vé một lượt' : 'Vé tháng'} · {selectedPassengerType.label}</Text>
+              <View>
+                <Text style={styles.summaryTitle}>Tóm tắt hành trình</Text>
+                <Text style={styles.summarySub}>{ticketType === 'ONE_WAY' ? 'Vé một lượt' : 'Vé tháng'} - Giảm giá tự động theo hồ sơ</Text>
               </View>
               <Text style={styles.totalText}>{currency.format(finalPrice)}</Text>
             </View>
-            <SummaryLine label="Tuyến" value={selectedRoute ? `${selectedRoute.routeNumber} - ${selectedRoute.name}` : 'Chưa chọn'} />
-            <SummaryLine label="Chiều tuyến" value={ticketType === 'ONE_WAY' ? `${stops[0]?.name || '-'} → ${stops[stops.length - 1]?.name || '-'}` : selectedRoute ? selectedRoute.routeNumber : 'Toàn mạng'} />
+            <SummaryLine label="Tuyến" value={ticketType === 'ONE_WAY' ? (selectedRoute ? `${selectedRoute.routeNumber} - ${selectedRoute.name}` : 'Chưa chọn') : 'Tất cả tuyến'} />
+            <SummaryLine label="Chiều tuyến" value={ticketType === 'ONE_WAY' ? `${stops[0]?.name || '-'} → ${stops[stops.length - 1]?.name || '-'}` : 'Vé tháng toàn mạng'} />
             <SummaryLine label="Hành trình" value={ticketType === 'ONE_WAY' ? `${boardingStop || '-'} → ${destinationStop || '-'}` : `${monthlyStartDate} → ${buildMonthEnd(monthlyStartDate)}`} />
             <SummaryLine label="Khởi hành" value={ticketType === 'ONE_WAY' ? `${serviceDate} ${departureTime || '--:--'}` : selectedStartMonth.label} />
+            {ticketType === 'MONTHLY_PASS' ? <SummaryLine label="Lượt/ngày" value={monthlyDailyLimit ? `${monthlyDailyLimit} lượt` : 'Đang tải'} /> : null}
             <View style={styles.priceBox}>
               <SummaryLine label="Giá gốc" value={currency.format(basePrice)} />
-              <SummaryLine label="Khuyến mãi" value={discountAmount ? `-${currency.format(discountAmount)}` : 'Không có'} />
+              <SummaryLine label="Giảm tự động" value={Number(activeQuote?.priorityDiscountAmount || 0) ? `-${currency.format(Number(activeQuote?.priorityDiscountAmount || 0))}` : 'Không có'} />
+              <SummaryLine label="Khuyến mãi" value={Number(activeQuote?.promotionDiscountAmount || 0) ? `-${currency.format(Number(activeQuote?.promotionDiscountAmount || 0))}` : 'Không có'} />
               <SummaryLine label="Tổng thanh toán" value={currency.format(finalPrice)} strong />
             </View>
           </View>
+          {loadingQuote ? (
+            <View style={styles.emptyInline}>
+              <MaterialCommunityIcons color={colors.secondary} name="calculator-variant-outline" size={20} />
+              <Text style={styles.emptyInlineText}>Đang tính giá theo hồ sơ đã xác minh...</Text>
+            </View>
+          ) : null}
+          {quoteError ? <FieldError message={quoteError} /> : null}
 
           {payment?.orderCode ? (
             <View style={styles.paymentBox}>
@@ -575,8 +727,12 @@ export default function BuyOneWayTicketScreen() {
           {errors.auth ? <FieldError message={errors.auth} /> : null}
           {errors.price ? <FieldError message={errors.price} /> : null}
 
-          <View style={styles.footerSpace} />
-          <AppButton disabled={payDisabled} loading={creatingOrder || payosOpening} onPress={submit} title={`${payosOpening ? 'Đang mở PayOS' : 'Tiếp tục thanh toán'} · ${currency.format(finalPrice)}`} />
+          <AppButton
+            disabled={payDisabled}
+            loading={creatingOrder || payosOpening}
+            onPress={submit}
+            title={payosOpening ? 'Đang mở PayOS' : 'Tiếp tục thanh toán'}
+          />
           <AppButton onPress={() => router.push('/my-tickets')} title="Vé của tôi" variant="secondary" />
 
           <RouteSelectorModal
@@ -782,17 +938,61 @@ function StartMonthDropdown({
   );
 }
 
-function StopSelector({
-  label,
+function DepartureTimeDropdown({
+  schedules,
   selected,
-  stops,
+  visible,
+  onOpen,
+  onClose,
   onSelect,
 }: {
-  label: string;
-  selected: string;
-  stops: BusRouteStop[];
-  onSelect: (value: string) => void;
+  schedules: PurchasableTripSchedule[];
+  selected?: PurchasableTripSchedule;
+  visible: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onSelect: (schedule: PurchasableTripSchedule) => void;
 }) {
+  return (
+    <View>
+      <Pressable accessibilityRole="button" onPress={onOpen} style={styles.dropdownButton}>
+        <View style={styles.dropdownCopy}>
+          <Text style={styles.dropdownValue}>
+            {selected ? `${selected.departureTime}${selected.expectedArrivalTime ? ` - ${selected.expectedArrivalTime}` : ''}` : 'Chọn chuyến khởi hành'}
+          </Text>
+          {selected?.scheduleCode ? <Text style={styles.dropdownMeta}>{selected.scheduleCode}</Text> : null}
+        </View>
+        <MaterialCommunityIcons color={colors.secondary} name="chevron-down" size={20} />
+      </Pressable>
+      <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
+        <Pressable style={styles.modalScrim} onPress={onClose}>
+          <View style={styles.monthMenu}>
+            <Text style={styles.monthMenuTitle}>Chọn chuyến khởi hành</Text>
+            {schedules.map((schedule) => {
+              const key = schedule.scheduleId || schedule.id || `${schedule.departureTime}-${schedule.scheduleCode}`;
+              const active = schedule.departureTime === selected?.departureTime;
+              return (
+                <Pressable key={key} onPress={() => onSelect(schedule)} style={[styles.monthOption, active && styles.monthOptionActive]}>
+                  <View style={styles.dropdownCopy}>
+                    <Text style={[styles.monthOptionText, active && styles.monthOptionTextActive]}>
+                      {schedule.departureTime}{schedule.expectedArrivalTime ? ` - ${schedule.expectedArrivalTime}` : ''}
+                    </Text>
+                    <Text style={[styles.dropdownMeta, active && styles.dropdownMetaActive]}>
+                      {[schedule.scheduleCode, schedule.statusLabel || schedule.status].filter(Boolean).join(' - ')}
+                    </Text>
+                  </View>
+                  {active ? <MaterialCommunityIcons color={colors.white} name="check" size={18} /> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
+
+function DateField({ label, value, onPress }: { label: string; value: string; onPress: () => void }) {
   return (
     <View style={styles.section}>
       <Text style={styles.label}>{label}</Text>
@@ -847,11 +1047,11 @@ function DateSelectorModal({
   );
 }
 
-function SummaryLine({ label, value }: { label: string; value: string }) {
+function SummaryLine({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return (
     <View style={styles.summaryLine}>
       <Text style={styles.summaryLabel}>{label}</Text>
-      <Text numberOfLines={2} style={styles.summaryValue}>{value}</Text>
+      <Text numberOfLines={2} style={[styles.summaryValue, strong && styles.summaryValueStrong]}>{value}</Text>
     </View>
   );
 }
@@ -898,7 +1098,12 @@ const styles = StyleSheet.create({
   choiceTitleActive: { color: colors.white },
   choiceText: { color: colors.secondary, fontSize: 11, fontWeight: '700' },
   choiceTextActive: { color: colors.white },
-  passengerChip: { minHeight: 44, justifyContent: 'center', borderRadius: 16, backgroundColor: colors.card, paddingHorizontal: 12 },
+  directionGrid: { gap: 8 },
+  directionChip: { minHeight: 58, justifyContent: 'center', gap: 3, borderRadius: 16, backgroundColor: colors.card, padding: 12 },
+  directionChipActive: { backgroundColor: colors.primaryContainer },
+  directionTitle: { color: colors.primary, fontSize: 13, fontWeight: '900' },
+  directionPath: { color: colors.secondary, fontSize: 11, fontWeight: '700' },
+  directionTextActive: { color: colors.white },
   stopWrap: { gap: 8 },
   stopChip: { minHeight: 44, justifyContent: 'center', borderRadius: 16, backgroundColor: colors.card, paddingHorizontal: 12 },
   stopChipActive: { backgroundColor: '#d8f6e7' },
@@ -906,7 +1111,12 @@ const styles = StyleSheet.create({
   stopTextActive: { color: colors.primary },
   input: { minHeight: 52, borderRadius: 16, backgroundColor: colors.card, paddingHorizontal: 14, color: colors.text, fontSize: 14, fontWeight: '800' },
   dropdownButton: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderRadius: 16, backgroundColor: colors.card, paddingHorizontal: 14 },
+  dropdownCopy: { flex: 1, minWidth: 0 },
   dropdownValue: { color: colors.text, fontSize: 14, fontWeight: '900' },
+  dropdownMeta: { marginTop: 3, color: colors.secondary, fontSize: 10, fontWeight: '800' },
+  dropdownMetaActive: { color: colors.white },
+  dateField: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderRadius: 16, backgroundColor: colors.card, paddingHorizontal: 14 },
+  dateValue: { flex: 1, color: colors.text, fontSize: 14, fontWeight: '900' },
   modalScrim: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.24)', padding: 22 },
   monthMenu: { gap: 8, borderRadius: 20, backgroundColor: colors.card, padding: 16 },
   monthMenuTitle: { marginBottom: 4, color: colors.primary, fontSize: 15, fontWeight: '900' },
@@ -914,16 +1124,6 @@ const styles = StyleSheet.create({
   monthOptionActive: { backgroundColor: colors.primaryContainer },
   monthOptionText: { color: colors.primary, fontSize: 13, fontWeight: '900' },
   monthOptionTextActive: { color: colors.white },
-  timeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  timeChip: { minWidth: 72, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: colors.card, paddingHorizontal: 10 },
-  timeChipActive: { backgroundColor: colors.primaryContainer },
-  timeText: { color: colors.secondary, fontSize: 13, fontWeight: '900' },
-  timeTextActive: { color: colors.white },
-  passengerChip: { maxWidth: 170, minHeight: 40, justifyContent: 'center', borderRadius: 14, backgroundColor: colors.card, paddingHorizontal: 12 },
-  passengerChipActive: { backgroundColor: colors.primaryContainer },
-  passengerText: { color: colors.secondary, fontSize: 12, fontWeight: '900' },
-  passengerTextActive: { color: colors.white },
-  promoCard: { gap: 9, borderRadius: 18, backgroundColor: colors.card, padding: 14 },
   promoRow: { flexDirection: 'row', gap: 8 },
   promoInput: { minHeight: 48, flex: 1, borderRadius: 14, backgroundColor: colors.surfaceLow, paddingHorizontal: 13, color: colors.text, fontSize: 14, fontWeight: '900' },
   applyButton: { minWidth: 88, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: colors.primaryContainer, paddingHorizontal: 10 },
@@ -931,8 +1131,7 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.55 },
   successBox: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 13, backgroundColor: '#d8f6e7', padding: 10 },
   successText: { flex: 1, color: '#06613f', fontSize: 12, fontWeight: '800' },
-  warningText: { color: '#6f5200', fontSize: 12, lineHeight: 18, fontWeight: '800' },
-  emptyInline: { minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 13, backgroundColor: colors.card, padding: 12 },
+  emptyInline: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 14, backgroundColor: colors.card, padding: 12 },
   emptyInlineText: { flex: 1, color: colors.secondary, fontSize: 12, fontWeight: '800' },
   summary: { gap: 9, borderRadius: 18, backgroundColor: colors.card, padding: 14 },
   summaryTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
@@ -943,6 +1142,8 @@ const styles = StyleSheet.create({
   summaryLine: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
   summaryLabel: { flex: 0.34, color: colors.secondary, fontSize: 12, fontWeight: '800' },
   summaryValue: { flex: 0.66, color: colors.primary, fontSize: 12, fontWeight: '900', textAlign: 'right' },
+  summaryValueStrong: { fontSize: 14, color: colors.primaryContainer },
+  priceBox: { gap: 8, borderRadius: 16, backgroundColor: colors.surfaceLow, padding: 12 },
   paymentBox: { gap: 12, borderRadius: 18, backgroundColor: '#fff4cc', padding: 14 },
   paymentHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   paymentTitle: { color: colors.primary, fontSize: 15, fontWeight: '900' },

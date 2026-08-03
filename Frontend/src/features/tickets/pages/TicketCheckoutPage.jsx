@@ -36,7 +36,6 @@ const buildPaymentPayload = (order) => {
     return {
       ticketType: 'MONTHLY_PASS',
       routeId: order.route?.id || order.route?._id,
-      passType: order.passengerType,
       startDate: order.serviceDate,
       validityMonths: 1,
       promotionCode: order.promotionCode || '',
@@ -51,7 +50,6 @@ const buildPaymentPayload = (order) => {
     destinationLocation: order.destinationLocation,
     serviceDate: order.serviceDate,
     departureTime: order.departureTime,
-    passengerType: order.passengerType,
     promotionCode: order.promotionCode || '',
   };
 };
@@ -181,7 +179,7 @@ const TicketCheckoutPage = () => {
               </div>
               <Info label={order.ticketType === 'MONTHLY_PASS' ? 'Ngày bắt đầu' : 'Ngày khởi hành'} value={order.serviceDate} icon={<CalendarDays className="h-4 w-4" />} />
               <Info label={order.ticketType === 'MONTHLY_PASS' ? 'Ngày hết hạn' : 'Giờ xuất bến'} value={order.ticketType === 'MONTHLY_PASS' ? order.expiryDate : order.departureTime} />
-              <Info label="Đối tượng" value={order.passengerTypeLabel} />
+              {order.ticketType === 'MONTHLY_PASS' ? <Info label="Lượt đi/ngày" value={order.dailyRideLimit ? `${order.dailyRideLimit} lượt` : 'Theo cấu hình hệ thống'} /> : null}
               <Info label="Giá vé" value={formatCurrency(order.price)} icon={<CreditCard className="h-4 w-4" />} />
             </div>
           </section>

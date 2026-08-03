@@ -299,6 +299,7 @@ export const UpdateFoundItemCaseDTO = {
 
 export const FoundItemCaseResponseDTO = {
   format: (incident) => ({
+    sourceType: 'FOUND_ITEM',
     id: incident._id,
     incidentCode: incident.incidentCode,
     status: incident.status,
@@ -349,6 +350,84 @@ export const FoundItemCaseResponseDTO = {
     createdAt: incident.createdAt,
     updatedAt: incident.updatedAt,
   }),
+};
+
+const mapPassengerLostItemStatus = (supportCase) => {
+  if (supportCase.status === 'RESOLVED' || supportCase.lostItem?.recoveryStatus === 'RETURNED') return 'RESOLVED';
+  if (supportCase.status === 'CLOSED' || supportCase.status === 'REJECTED') return 'CANCELLED';
+  if (['UNDER_REVIEW', 'IN_PROGRESS', 'RESPONDED', 'WAITING_FOR_PASSENGER'].includes(supportCase.status)) {
+    return 'ACKNOWLEDGED';
+  }
+  return 'OPEN';
+};
+
+export const PassengerLostItemCaseResponseDTO = {
+  format: (supportCase) => {
+    const latestVisibleResponse = [...(supportCase.responses || [])]
+      .reverse()
+      .find((response) => response.visibleToPassenger !== false);
+
+    return {
+      sourceType: 'PASSENGER_LOST_ITEM',
+      id: supportCase._id,
+      incidentCode: supportCase.referenceNumber,
+      referenceNumber: supportCase.referenceNumber,
+      status: mapPassengerLostItemStatus(supportCase),
+      caseStatus: supportCase.status,
+      severity: supportCase.priority || 'NORMAL',
+      recoveryStatus: supportCase.lostItem?.recoveryStatus || 'REPORTED',
+      itemName: supportCase.lostItem?.itemName || supportCase.title || '',
+      itemDescription: supportCase.lostItem?.itemDescription || supportCase.description,
+      foundLocation: supportCase.lostItem?.lastSeenLocation || '',
+      lastSeenLocation: supportCase.lostItem?.lastSeenLocation || '',
+      handedTo: '',
+      adminNote: latestVisibleResponse?.message || '',
+      reporterRole: 'PASSENGER',
+      reporter: supportCase.passenger
+        ? {
+          id: supportCase.passenger._id || supportCase.passenger,
+          fullName: supportCase.passenger.fullName,
+          email: supportCase.passenger.email,
+          phone: supportCase.passenger.phone || supportCase.passenger.phoneNumber,
+          role: supportCase.passenger.role || 'PASSENGER',
+        }
+        : null,
+      route: supportCase.routeName
+        ? {
+          id: supportCase.routeId,
+          routeNumber: supportCase.routeName,
+          name: supportCase.routeName,
+        }
+        : null,
+      vehicle: supportCase.busPlate
+        ? {
+          plateNumber: supportCase.busPlate,
+        }
+        : null,
+      trip: supportCase.tripCode || supportCase.relatedTripId
+        ? {
+          id: supportCase.relatedTripId || supportCase.tripId,
+          scheduleCode: supportCase.tripCode || supportCase.relatedTripId,
+          routeName: supportCase.routeName,
+        }
+        : null,
+      evidenceFiles: (supportCase.attachments || []).map((file) => ({
+        originalName: file.originalName,
+        filename: file.fileName,
+        url: file.url || file.path,
+        mimeType: file.mimeType,
+        size: file.size,
+        uploadedAt: file.uploadedAt,
+      })),
+      reportedAt: supportCase.createdAt,
+      acknowledgedAt: ['UNDER_REVIEW', 'IN_PROGRESS', 'RESPONDED', 'WAITING_FOR_PASSENGER'].includes(supportCase.status)
+        ? supportCase.updatedAt
+        : null,
+      resolvedAt: supportCase.resolvedAt,
+      createdAt: supportCase.createdAt,
+      updatedAt: supportCase.updatedAt,
+    };
+  },
 };
 
 export {

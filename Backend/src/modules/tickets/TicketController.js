@@ -31,6 +31,11 @@ export class TicketController {
     return res.success({ passes, count: passes.length }, 'Monthly passes retrieved successfully');
   }
 
+  static async listPurchasableSchedules(req, res) {
+    const result = await TicketService.listPurchasableTripSchedules(req.query);
+    return res.success(result, 'Purchasable trip schedules retrieved successfully');
+  }
+
   static async validateQRCode(req, res) {
     const result = await TicketService.validateQRCode(req.user.userId, req.body);
     return res.success(result, result.message || 'Ticket validated successfully');

@@ -23,6 +23,7 @@ router.post('/one-way', authorizeRole('PASSENGER'), asyncHandler(TicketControlle
 router.get('/me', authorizeRole('PASSENGER'), asyncHandler(TicketController.listMyTickets));
 router.post('/monthly-pass', authorizeRole('PASSENGER'), asyncHandler(TicketController.purchaseMonthlyPass));
 router.get('/monthly-passes/me', authorizeRole('PASSENGER'), asyncHandler(TicketController.listMyMonthlyPasses));
+router.get('/purchasable-schedules', authorizeRole('PASSENGER'), asyncHandler(TicketController.listPurchasableSchedules));
 router.post('/quote', authorizeRole('PASSENGER'), asyncHandler(TicketController.quotePurchase));
 router.post('/promotions/apply', authorizeRole('PASSENGER'), asyncHandler(TicketController.previewPromotion));
 router.post('/payments', authorizeRole('PASSENGER'), asyncHandler(TicketController.createPayment));
