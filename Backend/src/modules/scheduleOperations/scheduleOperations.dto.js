@@ -262,15 +262,30 @@ export const ShiftAssignmentResponseDTO = {
   },
 };
 
+const formatWorkDateKey = (value) => {
+  if (!value) return null;
+
+  const text = String(value);
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(text);
+  if (match) return match[1];
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString().slice(0, 10);
+};
+
 export const StaffShiftScheduleResponseDTO = {
   format: (assignment) => {
     const shift = assignment.shift || assignment.shiftId || {};
     const route = shift.routeId || {};
+    const workDateKey = formatWorkDateKey(assignment.workDate || shift.workDate);
 
     return {
       id: assignment._id,
+      ...(assignment.source ? { source: assignment.source } : {}),
       assignmentStatus: assignment.status || 'ASSIGNED',
-      workDate: assignment.workDate || shift.workDate,
+      workDate: workDateKey,
+      workDateKey,
       shiftCode: shift.shiftCode || '',
       shiftName: shift.shiftName || 'Ca làm việc',
       shiftType: shift.shiftType || 'CUSTOM',

@@ -1,6 +1,7 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   MapContainer,
   Marker,
@@ -20,6 +21,10 @@ import {
   ClipboardCheck,
   Clock3,
   ListChecks,
+  X,
+  Save,
+  Pencil,
+  LogOut,
   MapPin,
   MessageCircle,
   PlayCircle,
@@ -30,6 +35,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import useAuthStore from '../../auth/stores/authStore.js';
+import useLanguage from '../../../shared/hooks/useLanguage.js';
 import { OperationChatPage } from '../../operationChat';
 import scheduleOperationsService from '../services/scheduleOperationsService.js';
 
@@ -67,12 +73,12 @@ const ISSUE_CATEGORIES = [
 ];
 
 const INCIDENT_TYPES = [
-  { value: 'TRAFFIC_CONGESTION', label: 'UC46 - Báo kẹt xe' },
-  { value: 'ACCIDENT', label: 'UC47 - Báo tai nạn' },
-  { value: 'VEHICLE_BREAKDOWN', label: 'UC48 - Báo xe hỏng' },
-  { value: 'PASSENGER_VIOLATION', label: 'UC50 - Báo hành khách vi phạm' },
-  { value: 'PASSENGER_CONFLICT', label: 'UC51 - Báo xung đột hành khách' },
-  { value: 'FOUND_ITEM', label: 'UC52 - Báo đồ tìm thấy' },
+  { value: 'TRAFFIC_CONGESTION', label: 'Traffic congestion report' },
+  { value: 'ACCIDENT', label: 'Accident report' },
+  { value: 'VEHICLE_BREAKDOWN', label: 'Vehicle breakdown report' },
+  { value: 'PASSENGER_VIOLATION', label: 'Báo hành khách vi phạm' },
+  { value: 'PASSENGER_CONFLICT', label: 'Báo xung đột hành khách' },
+  { value: 'FOUND_ITEM', label: 'Báo đồ tìm thấy' },
 ];
 
 const DRIVER_INCIDENT_TYPES = INCIDENT_TYPES.filter((type) => [
@@ -88,9 +94,9 @@ const BUS_ASSISTANT_INCIDENT_TYPES = INCIDENT_TYPES.filter((type) => [
 ].includes(type.value));
 
 const INCIDENT_TYPE_DESCRIPTIONS = {
-  TRAFFIC_CONGESTION: 'Báo ùn tắc, chậm tuyến hoặc đường bị chặn.',
-  ACCIDENT: 'Báo tai nạn, va chạm hoặc tình huống cần hỗ trợ khẩn.',
-  VEHICLE_BREAKDOWN: 'Báo xe hỏng trong chuyến, cần hỗ trợ kỹ thuật hoặc xe thay thế.',
+  TRAFFIC_CONGESTION: 'Report congestion, route delays, or blocked roads.',
+  ACCIDENT: 'Report accidents, collisions, or urgent support situations.',
+  VEHICLE_BREAKDOWN: 'Report an in-trip vehicle breakdown that needs technical support or a replacement vehicle.',
   PASSENGER_VIOLATION: 'Báo hành khách vi phạm nội quy xe buýt để điều hành xử lý.',
   PASSENGER_CONFLICT: 'Báo xung đột giữa hành khách để điều hành nắm tình hình.',
   FOUND_ITEM: 'Báo đồ vật tìm thấy trên xe để xử lý thất lạc.',
@@ -143,13 +149,6 @@ const INCIDENT_SEVERITIES = [
   { value: 'HIGH', label: 'Cao' },
   { value: 'CRITICAL', label: 'Khẩn cấp' },
 ];
-
-const NOTIFICATION_CATEGORY_LABELS = {
-  ROUTE_UPDATE: 'Cập nhật tuyến',
-  SCHEDULE_CHANGE: 'Đổi lịch vận hành',
-  EMERGENCY_INSTRUCTION: 'Chỉ đạo khẩn',
-  GENERAL: 'Thông báo chung',
-};
 
 const NOTIFICATION_PRIORITY_META = {
   LOW: 'bg-slate-100 text-slate-700',
@@ -275,6 +274,24 @@ const addInputDays = (value, days) => {
   const date = new Date(`${value}T00:00:00`);
   date.setDate(date.getDate() + days);
   return getDateInputValue(date);
+};
+
+const isWorkShiftSchedule = (shift = {}) => {
+  const source = String(shift.source || '').toUpperCase();
+  const code = String(shift.shiftCode || '').toUpperCase();
+  return source !== 'TRIP_SCHEDULE' && !code.startsWith('TRIP-');
+};
+
+const getShiftWorkDateKey = (shift = {}) => {
+  const explicitKey = String(shift.workDateKey || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(explicitKey)) return explicitKey;
+
+  const value = String(shift.workDate || '').trim();
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(value);
+  if (match) return match[1];
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 'unknown' : getDateInputValue(parsed);
 };
 
 const getWeekRange = (anchor = new Date()) => {
@@ -496,7 +513,7 @@ const DriverLocationMap = ({ assignment }) => {
         <div>
           <p className="text-sm font-black text-slate-950">Vị trí tài xế khi bắt đầu chuyến</p>
           <p className="mt-1 text-xs text-slate-500">
-            GPS được đồng bộ tự động khi bấm UC44 - Bắt đầu chuyến.
+            GPS được đồng bộ tự động khi bấm Bắt đầu chuyến.
           </p>
         </div>
         <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
@@ -709,7 +726,7 @@ const VehicleOperationsPanel = ({
           <div>
             <div className="flex items-center gap-2">
               <ClipboardCheck className="h-5 w-5 text-emerald-800" />
-              <h4 className="font-black text-slate-950">UC41 - Bắt đầu kiểm tra xe</h4>
+              <h4 className="font-black text-slate-950">Bắt đầu kiểm tra xe</h4>
             </div>
             <p className="mt-1 text-sm text-slate-600">
               Tài xế bắt đầu biên bản kiểm tra trước chuyến. Sau khi bắt đầu, hệ thống mới mở checklist để xác nhận xe sẵn sàng hoặc báo lỗi.
@@ -741,7 +758,7 @@ const VehicleOperationsPanel = ({
             className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Wrench className="h-4 w-4" />
-            UC41 - Bắt đầu kiểm tra
+            Bắt đầu kiểm tra
           </button>
         </div>
       </div>
@@ -814,7 +831,7 @@ const VehicleOperationsPanel = ({
           className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <CheckCircle2 className="h-4 w-4" />
-          UC42 - Xác nhận xe sẵn sàng
+          Xác nhận xe sẵn sàng
         </button>
       </div>
 
@@ -860,7 +877,7 @@ const VehicleOperationsPanel = ({
             className="mt-3 inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-3 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <AlertTriangle className="h-4 w-4" />
-            UC43 - Báo lỗi xe
+            Báo lỗi xe
           </button>
         </div>
       )}
@@ -908,7 +925,7 @@ const TripLifecyclePanel = ({
             <h4 className="font-black text-slate-950">Vận hành chuyến</h4>
           </div>
           <p className="mt-1 text-sm text-slate-600">
-            UC44 bắt đầu chuyến sau khi tài xế đã xác nhận phương tiện sẵn sàng.
+            Bắt đầu chuyến sau khi tài xế đã xác nhận phương tiện sẵn sàng.
           </p>
         </div>
         <StatusBadge status={assignment.tripStatus} />
@@ -936,7 +953,7 @@ const TripLifecyclePanel = ({
           className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 py-3 text-sm font-bold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <PlayCircle className="h-4 w-4" />
-          UC44 - Bắt đầu chuyến
+          Bắt đầu chuyến
         </button>
           <button
             type="button"
@@ -945,7 +962,7 @@ const TripLifecyclePanel = ({
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
             <CheckCircle2 className="h-4 w-4" />
-            UC45 - Hoàn thành chuyến
+            Hoàn thành chuyến
           </button>
           <button
             type="button"
@@ -1017,12 +1034,12 @@ const IncidentReportingPanel = ({
   }, [allowedIncidentTypes, selectedIncidentType]);
   const activeIncidentType = selectedIncidentType || form.type;
   const incidentTitle = {
-    TRAFFIC_CONGESTION: 'UC46 - Báo kẹt xe',
-    ACCIDENT: 'UC47 - Báo tai nạn',
-    VEHICLE_BREAKDOWN: 'UC48 - Báo xe hỏng',
-    PASSENGER_VIOLATION: 'UC50 - Báo hành khách vi phạm',
-    PASSENGER_CONFLICT: 'UC51 - Báo xung đột hành khách',
-    FOUND_ITEM: 'UC52 - Báo đồ tìm thấy',
+    TRAFFIC_CONGESTION: 'Traffic congestion report',
+    ACCIDENT: 'Accident report',
+    VEHICLE_BREAKDOWN: 'Vehicle breakdown report',
+    PASSENGER_VIOLATION: 'Báo hành khách vi phạm',
+    PASSENGER_CONFLICT: 'Báo xung đột hành khách',
+    FOUND_ITEM: 'Báo đồ tìm thấy',
   }[activeIncidentType] || 'Báo sự cố trong chuyến';
   const canSubmit = canReportIncident
     && canUseIncidentForm
@@ -1765,9 +1782,8 @@ const ShiftScheduleCard = ({ shift }) => {
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-black text-white">
-              {shift.shiftCode}
+              {shift.shiftType || 'Ca làm việc'}
             </span>
-            <span className="text-sm font-semibold text-slate-500">{shift.tripCode}</span>
           </div>
           <h3 className="mt-3 text-lg font-black text-slate-950">
             Ca {formatShortDate(shift.scheduledStart)} - {shift.actorRole === 'DRIVER' ? 'Tài xế' : 'Phụ xe'}
@@ -1847,9 +1863,6 @@ const OperationNotificationsPanel = ({ notifications = [] }) => (
               <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${NOTIFICATION_PRIORITY_META[notification.priority] || NOTIFICATION_PRIORITY_META.NORMAL}`}>
                 {notification.priority || 'NORMAL'}
               </span>
-              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">
-                {NOTIFICATION_CATEGORY_LABELS[notification.category] || notification.category}
-              </span>
             </div>
             <h3 className="mt-3 text-base font-black text-slate-950">{notification.title}</h3>
             <p className="mt-2 text-sm leading-6 text-slate-700">{notification.message}</p>
@@ -1875,7 +1888,9 @@ const EmptyState = ({ message }) => (
 );
 
 const ScheduleOperationsPage = () => {
-  const { user } = useAuthStore();
+  const navigate = useNavigate();
+  const { user, logout, updateProfile, isLoading: isAuthLoading } = useAuthStore();
+  const { language, toggleLanguage } = useLanguage();
   const [activeTab, setActiveTab] = useState('trips');
   const [filters, setFilters] = useState(getInitialFilters);
   const [assignedTrips, setAssignedTrips] = useState([]);
@@ -1885,6 +1900,10 @@ const ScheduleOperationsPage = () => {
   const [processingAssignmentId, setProcessingAssignmentId] = useState('');
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [profileForm, setProfileForm] = useState({ fullName: '', avatar: '' });
+  const [profileMessage, setProfileMessage] = useState('');
+  const [profileError, setProfileError] = useState('');
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -2004,13 +2023,49 @@ const ScheduleOperationsPage = () => {
     'Đã gửi báo cáo sự cố vận hành.'
   );
 
+  useEffect(() => {
+    if (isProfileOpen) {
+      setProfileForm({
+        fullName: user?.fullName || '',
+        avatar: user?.avatar || '',
+      });
+      setProfileMessage('');
+      setProfileError('');
+    }
+  }, [isProfileOpen, user]);
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/auth/login', { replace: true });
+  };
+
+  const handleProfileSubmit = async (event) => {
+    event.preventDefault();
+    setProfileMessage('');
+    setProfileError('');
+
+    try {
+      await updateProfile({
+        fullName: profileForm.fullName.trim(),
+        avatar: profileForm.avatar.trim(),
+      });
+      setProfileMessage('\u0110\u00e3 c\u1eadp nh\u1eadt h\u1ed3 s\u01a1.');
+    } catch {
+      setProfileError('Kh\u00f4ng th\u1ec3 c\u1eadp nh\u1eadt h\u1ed3 s\u01a1.');
+    }
+  };
+
+  const workShiftSchedule = useMemo(() => (
+    shiftSchedule.filter(isWorkShiftSchedule)
+  ), [shiftSchedule]);
+
   const scheduleByDate = useMemo(() => (
-    shiftSchedule.reduce((groups, shift) => {
-      const key = getDateInputValue(new Date(shift.workDate));
+    workShiftSchedule.reduce((groups, shift) => {
+      const key = getShiftWorkDateKey(shift);
       groups[key] = [...(groups[key] || []), shift];
       return groups;
     }, {})
-  ), [shiftSchedule]);
+  ), [workShiftSchedule]);
   const weekDays = useMemo(() => (
     Array.from({ length: 7 }, (_, index) => addInputDays(filters.from, index))
   ), [filters.from]);
@@ -2021,6 +2076,8 @@ const ScheduleOperationsPage = () => {
   };
 
   const actorLabel = user?.role === 'DRIVER' ? 'Tài xế' : 'Phụ xe';
+  const displayName = user?.fullName || user?.email || actorLabel;
+  const initial = displayName.charAt(0).toUpperCase();
   const canOperateVehicle = user?.role === 'DRIVER';
 
   return (
@@ -2042,16 +2099,46 @@ const ScheduleOperationsPage = () => {
           </button>
 
           <div className="flex items-center gap-3">
-            <span className="rounded border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800">VN</span>
-            <div className="flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50/70 px-2 py-1.5 shadow-sm">
-              <span className="grid h-9 w-9 place-items-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800">
-                {(user?.fullName || 'D').charAt(0).toUpperCase()}
-              </span>
+            <button
+              type="button"
+              onClick={toggleLanguage}
+              className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded border border-emerald-100 bg-emerald-50 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100"
+              aria-label="Change language"
+              title="Change language"
+            >
+              {language === 'en' ? 'VN' : 'EN'}
+            </button>
+            <div className="flex items-center gap-2 rounded border border-emerald-100 bg-white px-2 py-1.5 shadow-sm">
+              {user?.avatar ? (
+                <img src={user.avatar} alt={displayName} className="h-9 w-9 rounded-full object-cover" />
+              ) : (
+                <span className="grid h-9 w-9 place-items-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800">
+                  {initial}
+                </span>
+              )}
               <div className="hidden min-w-0 sm:block">
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-900/55">Đã đăng nhập</p>
-                <p className="max-w-[180px] truncate text-sm font-semibold text-emerald-950">{user?.fullName || 'Tài xế'}</p>
-                <p className="text-xs font-semibold text-emerald-400">{actorLabel}</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Đã đăng nhập</p>
+                <p className="max-w-[180px] truncate text-sm font-semibold text-emerald-950">{displayName}</p>
+                <p className="text-xs font-semibold text-emerald-500">{actorLabel}</p>
               </div>
+              <button
+                type="button"
+                onClick={() => setIsProfileOpen(true)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded border border-slate-200 text-slate-700 transition hover:bg-slate-100"
+                title="Sửa hồ sơ"
+                aria-label="Sửa hồ sơ"
+              >
+                <Pencil size={15} />
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="inline-flex h-9 w-9 items-center justify-center rounded border border-slate-200 text-slate-700 transition hover:bg-slate-100"
+                title="Đăng xuất"
+                aria-label="Đăng xuất"
+              >
+                <LogOut size={16} />
+              </button>
             </div>
           </div>
         </div>
@@ -2213,7 +2300,7 @@ const ScheduleOperationsPage = () => {
             <section className="mt-6 rounded-[32px] bg-[#effaf5] p-5 text-[#061c13] shadow-[0_24px_60px_rgba(0,26,15,0.08)] lg:p-8">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">UC40 - Lịch ca làm việc</p>
+                  <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">Lịch ca làm việc</p>
                   <h2 className="mt-1 text-xl font-black">Lịch làm việc theo tuần</h2>
                   <p className="mt-1 text-sm font-semibold text-emerald-950/60">Chỉ hiển thị các ca admin đã phân công cho bạn.</p>
                 </div>
@@ -2241,8 +2328,7 @@ const ScheduleOperationsPage = () => {
                                 <p className="text-lg font-black">{shift.startTime} - {shift.endTime}</p>
                                 <StatusBadge status={shift.assignmentStatus} />
                               </div>
-                              <p className="mt-3 text-sm font-black">{shift.shiftName}</p>
-                              <p className={`mt-1 text-xs font-semibold ${today ? 'text-emerald-300' : 'text-emerald-700'}`}>{shift.shiftCode}</p>
+                              <p className="mt-3 text-sm font-black">{shift.shiftName || 'Ca làm việc'}</p>
                               {shift.route?.routeName ? <p className={`mt-3 text-xs font-semibold ${today ? 'text-white/80' : 'text-emerald-800'}`}>{shift.route.routeCode} · {shift.route.routeName}</p> : null}
                               {shift.description ? <p className={`mt-4 line-clamp-3 text-xs leading-5 ${today ? 'text-white/78' : 'text-emerald-950/62'}`}>{shift.description}</p> : null}
                             </article>
@@ -2260,10 +2346,87 @@ const ScheduleOperationsPage = () => {
           </section>
         </section>
       </main>
+
+      {isProfileOpen ? (
+        <div className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/70 px-4">
+          <section className="w-full max-w-md rounded border border-slate-200 bg-white text-slate-950 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <span className="grid h-10 w-10 place-items-center rounded bg-emerald-400 text-slate-950">
+                  <UserRound size={20} />
+                </span>
+                <div>
+                  <h2 className="text-base font-semibold">Hồ sơ</h2>
+                  <p className="text-xs text-slate-500">{displayName} - {actorLabel}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsProfileOpen(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded border border-slate-200 hover:bg-slate-100"
+                aria-label="Đóng hồ sơ"
+              >
+                <X size={17} />
+              </button>
+            </div>
+            <form onSubmit={handleProfileSubmit} className="space-y-4 p-4">
+              <label className="block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Họ tên</span>
+                <input
+                  value={profileForm.fullName}
+                  onChange={(event) => setProfileForm((current) => ({ ...current, fullName: event.target.value }))}
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none ring-emerald-300 focus:ring-2"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Email</span>
+                <input
+                  value={user?.email || ''}
+                  readOnly
+                  className="w-full rounded border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-700"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Vai trò</span>
+                <input
+                  value={actorLabel}
+                  readOnly
+                  className="w-full rounded border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-700"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Avatar URL</span>
+                <input
+                  value={profileForm.avatar}
+                  onChange={(event) => setProfileForm((current) => ({ ...current, avatar: event.target.value }))}
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none ring-emerald-300 focus:ring-2"
+                />
+              </label>
+              {profileMessage ? <p className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{profileMessage}</p> : null}
+              {profileError ? <p className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{profileError}</p> : null}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsProfileOpen(false)}
+                  className="rounded border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isAuthLoading || !profileForm.fullName.trim()}
+                  className="inline-flex items-center gap-2 rounded bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-60"
+                >
+                  <Save size={16} />
+                  {isAuthLoading ? 'Đang lưu...' : 'Lưu hồ sơ'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 };
 
 export default ScheduleOperationsPage;
-
-

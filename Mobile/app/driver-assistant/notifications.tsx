@@ -97,11 +97,6 @@ export default function DriverNotificationsScreen() {
                   <View style={[styles.priorityRail, { backgroundColor: tone }]} />
                   <View style={styles.notificationBody}>
                     <View style={styles.notificationHeader}>
-                      <View style={styles.categoryPill}>
-                        <Text style={[styles.categoryText, { color: tone }]}>
-                          {(notification.category || 'Operation').toUpperCase()}
-                        </Text>
-                      </View>
                       {!notification.isRead ? <View style={styles.unreadDot} /> : null}
                     </View>
                     <Text style={styles.notificationTitle}>{notification.title || 'Thông báo vận hành'}</Text>
@@ -119,7 +114,7 @@ export default function DriverNotificationsScreen() {
           </View>
         )}
       </Screen>
-      <RoleBottomNav active="home" role={user?.role} />
+      <RoleBottomNav active="notifications" role={user?.role} />
     </View>
   );
 }
@@ -142,8 +137,6 @@ const styles = StyleSheet.create({
   priorityRail: { width: 5 },
   notificationBody: { flex: 1, gap: 8, padding: 15 },
   notificationHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  categoryPill: { alignSelf: 'flex-start', borderRadius: 14, backgroundColor: colors.surfaceHigh, paddingHorizontal: 9, paddingVertical: 4 },
-  categoryText: { fontSize: 10, fontWeight: '900' },
   unreadDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },
   notificationTitle: { color: colors.text, fontSize: 16, fontWeight: '900' },
   notificationMessage: { color: colors.muted, fontSize: 13, lineHeight: 19, fontWeight: '600' },

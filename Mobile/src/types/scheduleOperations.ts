@@ -129,6 +129,7 @@ export type AssignedTrip = {
 
 export type ShiftSchedule = {
   id: string;
+  source?: string;
   assignmentStatus?: string;
   workDate?: string;
   shiftCode?: string;

@@ -6,6 +6,7 @@ const busAssistantItems: BottomNavItemConfig[] = [
   { key: 'sell', label: 'Bán vé', icon: 'ticket-confirmation-outline', href: '/driver-assistant/walkin-ticket' },
   { key: 'validate', label: 'Quét vé', icon: 'qrcode-scan', href: '/driver-assistant/validate-ticket' },
   { key: 'trips', label: 'Chuyến', icon: 'bus-clock', href: '/driver-assistant/assigned-trips' },
+  { key: 'notifications', label: 'Thông báo', icon: 'bell-ring-outline', href: '/driver-assistant/notifications' },
   { key: 'profile', label: 'Cá nhân', icon: 'account-outline', href: '/profile' },
 ];
 

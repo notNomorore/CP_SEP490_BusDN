@@ -22,10 +22,14 @@ const getLanguage = () => {
 };
 
 const setGlobalLanguage = (nextLanguage) => {
+  if (currentLanguage === nextLanguage) return;
   currentLanguage = nextLanguage;
 
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
+    window.dispatchEvent(new CustomEvent('app-language-change', {
+      detail: { language: nextLanguage },
+    }));
   }
 
   listeners.forEach((listener) => listener(nextLanguage));
@@ -55,7 +59,7 @@ const useLanguage = () => {
   return {
     language,
     setLanguage: setGlobalLanguage,
-    toggleLanguage: () => setGlobalLanguage(language === 'en' ? 'vi' : 'en'),
+    toggleLanguage: () => setGlobalLanguage(getLanguage() === 'en' ? 'vi' : 'en'),
   };
 };
 

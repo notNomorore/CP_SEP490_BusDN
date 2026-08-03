@@ -192,7 +192,7 @@ export default function DriverBusAssistantHomeScreen() {
                 <Text style={styles.dateText}>{formatDate(new Date().toISOString())}</Text>
               </View>
             </View>
-            <Pressable accessibilityLabel="Mở thông báo" onPress={() => router.push(route('/driver-assistant/notifications'))} style={styles.notificationButton}>
+            <Pressable accessibilityLabel="Mở thông báo" onPress={() => router.push(notificationsRoute)} style={styles.notificationButton}>
               {isLoading ? <ActivityIndicator color={colors.primary} size="small" /> : <MaterialCommunityIcons color={colors.accent} name="bell-outline" size={22} />}
             </Pressable>
           </View>
@@ -315,6 +315,7 @@ export default function DriverBusAssistantHomeScreen() {
               <>
                 <ActionTile title="Chuyến được phân công" subtitle="Kiểm tra tuyến và bắt đầu công việc" icon="bus-clock" href={assignedTripsRoute} primary />
                 <ActionTile title={upcomingShift?.shiftName || 'Lịch ca làm'} subtitle="Xem giờ làm và nhiệm vụ" icon="calendar-month-outline" href={shiftScheduleRoute} />
+                <ActionTile title="Thông báo vận hành" subtitle="Xem chỉ đạo và cập nhật từ điều hành" icon="bell-ring-outline" href={notificationsRoute} />
                 <ActionTile title="Trò chuyện vận hành" subtitle="Trao đổi với điều hành và đồng đội" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
               </>
             ) : (
@@ -324,6 +325,7 @@ export default function DriverBusAssistantHomeScreen() {
                 <ActionTile title="Doanh thu ca" subtitle={`${revenue?.totalRevenue ? new Intl.NumberFormat('vi-VN').format(revenue.totalRevenue) : 0} đồng hôm nay`} icon="cash-register" href={route('/driver-assistant/shift-revenue')} />
                 <ActionTile title="Chuyến" subtitle="Xem các chuyến được phân công" icon="bus-clock" href={assignedTripsRoute} />
                 <ActionTile title={upcomingShift?.shiftName || 'Lịch ca làm'} subtitle="Xem giờ làm và nhiệm vụ" icon="calendar-month-outline" href={shiftScheduleRoute} />
+                <ActionTile title="Thông báo vận hành" subtitle="Xem chỉ đạo và cập nhật từ điều hành" icon="bell-ring-outline" href={notificationsRoute} />
                 <ActionTile title="Trò chuyện vận hành" subtitle="Trao đổi với điều hành và đồng đội" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
               </>
             )}

@@ -15,6 +15,19 @@ import { getErrorMessage } from '@/utils/validation';
 
 const assignedStatuses = new Set(['ASSIGNED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED']);
 
+const getShiftDateKey = (shift: ShiftSchedule) => {
+  return formatDateKey(shift.workDate);
+};
+
+const isWorkShiftSchedule = (shift: ShiftSchedule) => {
+  const source = String(shift.source || '').toUpperCase();
+  const code = String(shift.shiftCode || '').toUpperCase();
+  const id = String(shift.id || '').toUpperCase();
+  return source !== 'TRIP_SCHEDULE'
+    && !code.startsWith('TRIP-')
+    && !id.startsWith('TRIP-SCHEDULE-');
+};
+
 const getShiftDurationHours = (shift: ShiftSchedule) => {
   if (!/^\d{2}:\d{2}$/.test(String(shift.startTime || '')) || !/^\d{2}:\d{2}$/.test(String(shift.endTime || ''))) {
     return 0;
@@ -26,20 +39,6 @@ const getShiftDurationHours = (shift: ShiftSchedule) => {
   if (end < start) end += 24 * 60;
   return Math.max((end - start) / 60, 0);
 };
-
-function DetailPill({ icon, label, value }: { icon: React.ComponentProps<typeof MaterialCommunityIcons>['name']; label: string; value?: string | null }) {
-  return (
-    <View style={styles.detailPill}>
-      <View style={styles.detailIcon}>
-        <MaterialCommunityIcons color={colors.primary} name={icon} size={21} />
-      </View>
-      <View style={styles.detailTextBlock}>
-        <Text style={styles.detailLabel}>{label}</Text>
-        <Text numberOfLines={1} style={styles.detailValue}>{value || 'N/A'}</Text>
-      </View>
-    </View>
-  );
-}
 
 export default function ShiftScheduleScreen() {
   const user = useAuthStore((state) => state.user);
@@ -66,7 +65,7 @@ export default function ShiftScheduleScreen() {
     try {
       const payload = await scheduleOperationsApi.getShiftSchedule(requestedRange);
       if (requestId !== requestIdRef.current) return;
-      setShifts(payload.shifts || []);
+      setShifts((payload.shifts || []).filter(isWorkShiftSchedule));
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
       const message = getErrorMessage(error, 'Không thể tải lịch ca làm việc.');
@@ -106,33 +105,35 @@ export default function ShiftScheduleScreen() {
     Array.from({ length: 7 }, (_, index) => toDateInput(addDays(range.from, index)))
   ), [range.from]);
 
-  const todayShift = useMemo(() => (
-    shifts.find((shift) => formatDateKey(shift.workDate) === getTodayRange().from) || null
-  ), [shifts]);
+  const workShifts = useMemo(() => shifts.filter(isWorkShiftSchedule), [shifts]);
 
-  const shiftsByDate = useMemo(() => shifts.reduce<Record<string, ShiftSchedule[]>>((result, shift) => {
-    const key = formatDateKey(shift.workDate);
+  const todayShift = useMemo(() => (
+    workShifts.find((shift) => getShiftDateKey(shift) === getTodayRange().from) || null
+  ), [workShifts]);
+
+  const shiftsByDate = useMemo(() => workShifts.reduce<Record<string, ShiftSchedule[]>>((result, shift) => {
+    const key = getShiftDateKey(shift);
     result[key] = [...(result[key] || []), shift];
     return result;
-  }, {}), [shifts]);
+  }, {}), [workShifts]);
 
   const ungroupedShifts = useMemo(() => (
-    shifts.filter((shift) => !weekDays.includes(formatDateKey(shift.workDate)))
-  ), [shifts, weekDays]);
+    workShifts.filter((shift) => !weekDays.includes(getShiftDateKey(shift)))
+  ), [workShifts, weekDays]);
 
   const weeklyStats = useMemo(() => ({
-    totalHours: shifts.reduce((total, shift) => total + getShiftDurationHours(shift), 0),
-    shiftCount: shifts.length,
-    assignedCount: shifts.filter((shift) => assignedStatuses.has(String(shift.assignmentStatus || ''))).length,
-    completedCount: shifts.filter((shift) => shift.assignmentStatus === 'COMPLETED').length,
-  }), [shifts]);
+    totalHours: workShifts.reduce((total, shift) => total + getShiftDurationHours(shift), 0),
+    shiftCount: workShifts.length,
+    assignedCount: workShifts.filter((shift) => assignedStatuses.has(String(shift.assignmentStatus || ''))).length,
+    completedCount: workShifts.filter((shift) => shift.assignmentStatus === 'COMPLETED').length,
+  }), [workShifts]);
 
   const nextShift = useMemo(() => (
-    [...shifts].sort((left, right) => (
+    [...workShifts].sort((left, right) => (
       String(left.workDate || '').localeCompare(String(right.workDate || ''))
       || String(left.startTime || '').localeCompare(String(right.startTime || ''))
     ))[0] || null
-  ), [shifts]);
+  ), [workShifts]);
 
   const changeWeek = (offset: number) => {
     setRange(getWeekRange(addDays(range.from, offset * 7)));
@@ -194,7 +195,7 @@ export default function ShiftScheduleScreen() {
               {formatDate(nextShift.workDate)} · {nextShift.startTime || 'N/A'} - {nextShift.endTime || 'N/A'}
             </Text>
             <Text numberOfLines={1} style={styles.nextShiftRoute}>
-              {nextShift.shiftName || 'Shift'} · {nextShift.route?.routeCode || nextShift.route?.routeName || 'No route'}
+              {nextShift.shiftName || 'Ca làm'}
             </Text>
           </View>
         </View>
@@ -212,7 +213,7 @@ export default function ShiftScheduleScreen() {
             <Text style={styles.retryText}>Thử lại</Text>
           </Pressable>
         </View>
-      ) : shifts.length === 0 ? (
+      ) : workShifts.length === 0 ? (
         <Text style={styles.emptyText}>Tuần này chưa có lịch ca được phân công.</Text>
       ) : (
         <>
@@ -247,10 +248,6 @@ export default function ShiftScheduleScreen() {
                     <Text style={styles.statusValue}>{getShiftStatus(todayShift)}</Text>
                   </View>
                 </View>
-                <View style={styles.detailGrid}>
-                  <DetailPill icon="bus" label="Xe được phân công" value="Theo chuyến được phân công" />
-                  <DetailPill icon="routes" label="Tuyến được phân công" value={todayShift.route?.routeCode || todayShift.route?.routeName} />
-                </View>
               </View>
             ) : (
               <Text style={styles.emptyText}>Hôm nay chưa có ca làm được phân công.</Text>
@@ -272,7 +269,6 @@ export default function ShiftScheduleScreen() {
                           <Text style={styles.shiftRowTime}>{shift.startTime || 'N/A'} - {shift.endTime || 'N/A'}</Text>
                           <Text style={styles.shiftRowName}>{shift.shiftName || 'Ca làm'}</Text>
                         </View>
-                        <Text style={styles.routeChip}>{shift.route?.routeCode || 'Tuyến'}</Text>
                       </View>
                     )) : (
                       <View style={styles.dayOffRow}>
@@ -295,7 +291,6 @@ export default function ShiftScheduleScreen() {
                         <Text style={styles.shiftRowTime}>{formatDate(shift.workDate)} · {shift.startTime || 'N/A'} - {shift.endTime || 'N/A'}</Text>
                         <Text style={styles.shiftRowName}>{shift.shiftName || 'Ca làm'}</Text>
                       </View>
-                      <Text style={styles.routeChip}>{shift.route?.routeCode || 'Tuyến'}</Text>
                     </View>
                   ))}
                 </View>
@@ -356,12 +351,6 @@ const styles = StyleSheet.create({
   statusBlock: { alignItems: 'flex-end' },
   statusLabel: { color: colors.muted, fontSize: 10, fontWeight: '900' },
   statusValue: { marginTop: 4, color: colors.primary, fontSize: 15, fontWeight: '900' },
-  detailGrid: { marginTop: 18, flexDirection: 'row', gap: 12 },
-  detailPill: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  detailIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: colors.surfaceLow },
-  detailTextBlock: { flex: 1 },
-  detailLabel: { color: colors.muted, fontSize: 10, fontWeight: '900' },
-  detailValue: { marginTop: 2, color: colors.text, fontSize: 13, fontWeight: '900' },
   timelineSection: { paddingBottom: 96 },
   timelineGroup: { flexDirection: 'row', gap: 12, marginBottom: 16 },
   timelineDot: { width: 14, height: 14, marginTop: 4, borderRadius: 7, borderWidth: 3, borderColor: colors.outline, backgroundColor: colors.surface },

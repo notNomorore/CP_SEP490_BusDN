@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import useLanguage from '../hooks/useLanguage.js';
 import { translateAdminPhrase } from '../i18n/adminI18n.js';
 import { translateBusAssistantPhrase } from '../../features/busAssistant/busAssistantPhraseTranslations.js';
+import { translateScheduleOperationsPhrase } from '../../features/scheduleOperations/scheduleOperationsPhraseTranslations.js';
 
 const originalText = new WeakMap();
 const appliedText = new WeakMap();
@@ -22,9 +23,12 @@ const translateTextNode = (node, language, refreshOriginal = false) => {
   if (refreshOriginal && current !== appliedText.get(node)) originalText.set(node, current);
   if (!originalText.has(node)) originalText.set(node, current);
   const source = originalText.get(node);
+  const adminTranslated = translateAdminPhrase(source, language);
   const translated = window.location.pathname.startsWith('/bus-assistant')
-    ? translateBusAssistantPhrase(translateAdminPhrase(source, language), language)
-    : translateAdminPhrase(source, language);
+    ? translateBusAssistantPhrase(source, language, adminTranslated)
+    : window.location.pathname.startsWith('/operations')
+      ? translateScheduleOperationsPhrase(source, language, adminTranslated)
+      : adminTranslated;
   appliedText.set(node, translated);
   if (current !== translated) node.nodeValue = translated;
 };
@@ -42,9 +46,12 @@ const translateElementAttributes = (element, language, refreshOriginal = false) 
     if (!(attribute in stored) || (refreshOriginal && current !== translatedMarker)) {
       stored[attribute] = current;
     }
+    const adminTranslated = translateAdminPhrase(stored[attribute], language);
     const translated = window.location.pathname.startsWith('/bus-assistant')
-      ? translateBusAssistantPhrase(translateAdminPhrase(stored[attribute], language), language)
-      : translateAdminPhrase(stored[attribute], language);
+      ? translateBusAssistantPhrase(stored[attribute], language, adminTranslated)
+      : window.location.pathname.startsWith('/operations')
+        ? translateScheduleOperationsPhrase(stored[attribute], language, adminTranslated)
+        : adminTranslated;
     stored[`${attribute}Translated`] = translated;
     if (current !== translated) element.setAttribute(attribute, translated);
     changed = true;
@@ -77,8 +84,25 @@ const I18nBoundary = ({ children }) => {
   const { language } = useLanguage();
 
   useEffect(() => {
+    let animationFrameId = null;
+    const translateAfterRender = (nextLanguage) => {
+      if (animationFrameId) window.cancelAnimationFrame(animationFrameId);
+      animationFrameId = window.requestAnimationFrame(() => {
+        document.documentElement.lang = nextLanguage;
+        translateTree(document.body, nextLanguage);
+      });
+    };
+
     document.documentElement.lang = language;
     translateTree(document.body, language);
+
+    const handleLanguageChange = (event) => {
+      const nextLanguage = event.detail?.language;
+      if (nextLanguage === 'vi' || nextLanguage === 'en') {
+        translateAfterRender(nextLanguage);
+      }
+    };
+    window.addEventListener('app-language-change', handleLanguageChange);
 
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
@@ -101,7 +125,11 @@ const I18nBoundary = ({ children }) => {
       childList: true,
       subtree: true,
     });
-    return () => observer.disconnect();
+    return () => {
+      if (animationFrameId) window.cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('app-language-change', handleLanguageChange);
+      observer.disconnect();
+    };
   }, [language]);
 
   return children;

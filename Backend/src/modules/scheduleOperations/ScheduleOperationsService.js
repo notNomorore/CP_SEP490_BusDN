@@ -85,6 +85,29 @@ const parseDate = (value, fallback) => {
   return Number.isNaN(parsed.getTime()) ? fallback : parsed;
 };
 
+const parseDateOnlyAsUtc = (value, fallback) => {
+  if (!value) return fallback;
+
+  const text = String(value).trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!match) return parseDate(value, fallback);
+
+  const [, year, month, day] = match;
+  return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+};
+
+const startOfUtcDay = (date = new Date()) => {
+  const value = new Date(date);
+  value.setUTCHours(0, 0, 0, 0);
+  return value;
+};
+
+const endOfUtcDay = (date = new Date()) => {
+  const value = new Date(date);
+  value.setUTCHours(23, 59, 59, 999);
+  return value;
+};
+
 const normalizeScheduleStatus = (status) => {
   if (status === 'COMPLETED') return 'COMPLETED';
   if (status === 'CANCELLED') return 'CANCELLED';
@@ -422,8 +445,8 @@ export class ScheduleOperationsService {
   }
 
   static async listShiftSchedule(userId, role, query = {}) {
-    const from = startOfDay(parseDate(query.from, new Date()));
-    const to = endOfDay(parseDate(query.to, addDays(from, 6)));
+    const from = startOfUtcDay(parseDateOnlyAsUtc(query.from, new Date()));
+    const to = endOfUtcDay(parseDateOnlyAsUtc(query.to, addDays(from, 6)));
     const isDriver = role === 'DRIVER';
     const isAssistant = role === 'BUS_ASSISTANT' || role === 'CONDUCTOR';
 
@@ -433,28 +456,18 @@ export class ScheduleOperationsService {
 
     const AssignmentModel = isDriver ? DriverShiftAssignment : AssistantShiftAssignment;
     const staffField = isDriver ? 'driverId' : 'assistantId';
-    const [assignments, tripSchedules] = await Promise.all([
-      AssignmentModel.find({
-        [staffField]: userId,
-        workDate: { $gte: from, $lte: to },
-        status: { $ne: 'CANCELLED' },
+    const assignments = await AssignmentModel.find({
+      [staffField]: userId,
+      workDate: { $gte: from, $lte: to },
+      status: { $ne: 'CANCELLED' },
+    })
+      .populate({
+        path: 'shiftId',
+        match: { status: { $in: ['ACTIVE', 'APPROVED', 'DRAFT', 'PUBLISHED', 'IN_PROGRESS', 'COMPLETED'] } },
+        populate: { path: 'routeId', select: 'routeCode routeName' },
       })
-        .populate({
-          path: 'shiftId',
-          match: { status: { $in: ['ACTIVE', 'APPROVED', 'DRAFT', 'PUBLISHED', 'IN_PROGRESS', 'COMPLETED'] } },
-          populate: { path: 'routeId', select: 'routeCode routeName' },
-        })
-        .sort({ workDate: 1, createdAt: 1 })
-        .lean(),
-      TripSchedule.find({
-        ...this.buildActorScheduleQuery(userId, role),
-        serviceDate: { $gte: from, $lte: to },
-        status: { $ne: 'CANCELLED' },
-      })
-        .populate('routeId', 'routeCode routeName')
-        .sort({ serviceDate: 1, departureTime: 1 })
-        .lean(),
-    ]);
+      .sort({ workDate: 1, createdAt: 1 })
+      .lean();
 
     const manualShiftSchedules = assignments
       .filter((assignment) => assignment.shiftId)
@@ -463,11 +476,7 @@ export class ScheduleOperationsService {
         shift: assignment.shiftId,
       }));
 
-    const generatedTripShifts = tripSchedules
-      .filter((schedule) => isScheduleAssignedToActor(schedule, userId, role))
-      .map((schedule) => buildShiftScheduleFromTripSchedule(schedule, role));
-
-    return [...manualShiftSchedules, ...generatedTripShifts].sort((left, right) => {
+    return manualShiftSchedules.sort((left, right) => {
       const leftStart = buildTimeOnServiceDate(left.workDate || left.shift?.workDate, left.shift?.startTime);
       const rightStart = buildTimeOnServiceDate(right.workDate || right.shift?.workDate, right.shift?.startTime);
       return (leftStart?.getTime() || 0) - (rightStart?.getTime() || 0);

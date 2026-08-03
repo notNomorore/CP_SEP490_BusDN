@@ -5,6 +5,7 @@ const driverItems: BottomNavItemConfig[] = [
   { key: 'home', label: 'Home', icon: 'home', href: '/driver-assistant' },
   { key: 'trips', label: 'Trips', icon: 'bus', href: '/driver-assistant/assigned-trips' },
   { key: 'schedule', label: 'Schedule', icon: 'calendar-month-outline', href: '/driver-assistant/shift-schedule' },
+  { key: 'notifications', label: 'Thông báo', icon: 'bell-ring-outline', href: '/driver-assistant/notifications' },
   { key: 'chat', label: 'Chat', icon: 'chat-outline', href: '/driver-assistant/group-chat' },
   { key: 'profile', label: 'Profile', icon: 'account-outline', href: '/profile' },
 ];
