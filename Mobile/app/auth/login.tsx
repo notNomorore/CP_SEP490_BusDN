@@ -1,9 +1,7 @@
 import { FontAwesome, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -16,57 +14,30 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useLogin } from '@/auth/hooks/useLogin';
 import { colors } from '@/constants/colors';
-import { useAuthStore } from '@/store/auth.store';
-import { getRoleHomeRoute } from '@/utils/roleNavigation';
 
 const BRAND_GREEN = '#003120';
 const SOFT_MINT = '#ecf6f2';
 
 export default function LoginScreen() {
-  const [identifier, setIdentifier] = useState('');
-  const [password, setPassword] = useState('');
+  const {
+    identifier,
+    setIdentifier,
+    password,
+    setPassword,
+    canSubmit,
+    error,
+    loading,
+    login,
+    openRegister,
+    showForgotPasswordUnavailable,
+    showGoogleLoginUnavailable,
+  } = useLogin();
   const [showPassword, setShowPassword] = useState(false);
   const [focusedField, setFocusedField] = useState<'identifier' | 'password' | null>(null);
   const { height } = useWindowDimensions();
   const compact = height < 760;
-
-  const login = useAuthStore((state) => state.login);
-  const clearError = useAuthStore((state) => state.clearError);
-  const isLoading = useAuthStore((state) => state.isLoading);
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const user = useAuthStore((state) => state.user);
-  const error = useAuthStore((state) => state.error);
-  const canSubmit = Boolean(identifier.trim() && password);
-
-  useEffect(() => () => clearError(), [clearError]);
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      router.replace(getRoleHomeRoute(user?.role));
-    }
-  }, [isAuthenticated, user?.role]);
-
-  const handleLogin = async () => {
-    clearError();
-    try {
-      await login(identifier.trim(), password);
-      const loggedInUser = useAuthStore.getState().user;
-      router.replace(getRoleHomeRoute(loggedInUser?.role));
-    } catch {
-      // The auth store owns the visible API error message.
-    }
-  };
-
-  const handleForgotPassword = () => {
-    // TODO: Navigate here when a mobile forgot-password route is added.
-    Alert.alert('Forgot Password', 'Password recovery is not available in the mobile app yet.');
-  };
-
-  const handleGoogleLogin = () => {
-    // TODO: Connect the Google auth provider when the mobile auth service exposes it.
-    Alert.alert('Google Sign-In', 'Google sign-in is not available in the mobile app yet.');
-  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -148,7 +119,7 @@ export default function LoginScreen() {
                   <Pressable
                     accessibilityRole="button"
                     hitSlop={8}
-                    onPress={handleForgotPassword}
+                    onPress={showForgotPasswordUnavailable}
                   >
                     <Text style={styles.forgotLink}>Forgot Password?</Text>
                   </Pressable>
@@ -172,7 +143,7 @@ export default function LoginScreen() {
                     onChangeText={setPassword}
                     onFocus={() => setFocusedField('password')}
                     onSubmitEditing={() => {
-                      if (canSubmit && !isLoading) void handleLogin();
+                      if (canSubmit && !loading) void login();
                     }}
                     placeholder="Password"
                     placeholderTextColor="#89918d"
@@ -199,16 +170,16 @@ export default function LoginScreen() {
 
               <Pressable
                 accessibilityRole="button"
-                accessibilityState={{ busy: isLoading, disabled: !canSubmit || isLoading }}
-                disabled={!canSubmit || isLoading}
-                onPress={handleLogin}
+                accessibilityState={{ busy: loading, disabled: !canSubmit || loading }}
+                disabled={!canSubmit || loading}
+                onPress={login}
                 style={({ pressed }) => [
                   styles.signInButton,
-                  (!canSubmit || isLoading) ? styles.buttonDisabled : null,
+                  (!canSubmit || loading) ? styles.buttonDisabled : null,
                   pressed ? styles.buttonPressed : null,
                 ]}
               >
-                {isLoading ? (
+                {loading ? (
                   <ActivityIndicator color={colors.white} />
                 ) : (
                   <>
@@ -226,7 +197,7 @@ export default function LoginScreen() {
 
               <Pressable
                 accessibilityRole="button"
-                onPress={handleGoogleLogin}
+                onPress={showGoogleLoginUnavailable}
                 style={({ pressed }) => [
                   styles.googleButton,
                   pressed ? styles.buttonPressed : null,
@@ -242,7 +213,7 @@ export default function LoginScreen() {
               <Pressable
                 accessibilityRole="link"
                 hitSlop={8}
-                onPress={() => router.push('/auth/register')}
+                onPress={openRegister}
               >
                 <Text style={styles.registerLink}>Register Now</Text>
               </Pressable>

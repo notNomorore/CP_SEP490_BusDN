@@ -5,7 +5,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -16,6 +15,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import profileApi from '@/api/profile.api';
+import { useLogout } from '@/auth/hooks/useLogout';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
@@ -102,11 +102,10 @@ export default function ProfileScreen() {
   const storedUser = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isHydrated = useAuthStore((state) => state.isHydrated);
-  const logout = useAuthStore((state) => state.logout);
+  const { logout, loading: isLoggingOut } = useLogout();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const displayUser = profile || storedUser || fallbackUser;
   const daysLeft = getDaysLeft(profile?.monthlyPass?.expireDate || displayUser.monthlyPassExpireDate);
@@ -143,34 +142,6 @@ export default function ProfileScreen() {
 
   const unavailable = (title: string) => {
     Alert.alert(title, `${title} is not available in the mobile app yet.`);
-  };
-
-  const performLogout = async () => {
-    setIsLoggingOut(true);
-    try {
-      await logout();
-      router.replace('/auth/login');
-    } finally {
-      setIsLoggingOut(false);
-    }
-  };
-
-  const handleLogout = () => {
-    if (Platform.OS === 'web') {
-      if (window.confirm('Are you sure you want to sign out?')) {
-        void performLogout();
-      }
-      return;
-    }
-
-    Alert.alert('Logout Account', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Logout',
-        style: 'destructive',
-        onPress: () => void performLogout(),
-      },
-    ]);
   };
 
   return (
@@ -281,7 +252,7 @@ export default function ProfileScreen() {
           <Pressable
             accessibilityRole="button"
             disabled={isLoggingOut}
-            onPress={handleLogout}
+            onPress={logout}
             style={({ pressed }) => [styles.logoutButton, pressed && styles.pressed]}
           >
             {isLoggingOut ? (
