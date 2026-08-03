@@ -1,4 +1,4 @@
-import apiClient, { AUTH_TOKEN_KEY, AUTH_USER_KEY } from '@/api/client';
+import apiClient, { AUTH_TOKEN_KEY, AUTH_USER_KEY, setApiAuthToken } from '@/api/client';
 import authStorage from '@/api/authStorage';
 import type {
   AuthUser,
@@ -11,6 +11,7 @@ import type {
 
 const persistSession = async (token?: string, user?: AuthUser) => {
   if (token) {
+    setApiAuthToken(token);
     await authStorage.setItem(AUTH_TOKEN_KEY, token);
   }
 
@@ -65,6 +66,7 @@ export const authApi = {
       // JWT sessions are stateless. Local token removal must still complete
       // when the API is unreachable or the token has already expired.
     } finally {
+      setApiAuthToken(null);
       await authStorage.deleteItem(AUTH_TOKEN_KEY);
       await authStorage.deleteItem(AUTH_USER_KEY);
     }
@@ -75,6 +77,8 @@ export const authApi = {
       authStorage.getItem(AUTH_TOKEN_KEY),
       authStorage.getItem(AUTH_USER_KEY),
     ]);
+
+    setApiAuthToken(token);
 
     let user: AuthUser | null = null;
     if (storedUser) {

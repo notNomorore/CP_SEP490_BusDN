@@ -11,8 +11,8 @@ import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
 import type { ShiftRevenue } from '@/types/busAssistant';
 import type { AssignedTrip, ShiftSchedule } from '@/types/scheduleOperations';
-import { isDriverAssistantRole } from '@/utils/roleNavigation';
-import { formatDate, formatTime, getTodayRange, getTripStatus, isTripCompleted, isTripToday, toDateInput } from '@/utils/scheduleOperations';
+import { isDriverAssistantRole, normalizeRole } from '@/utils/roleNavigation';
+import { formatDate, formatTime, getTodayRange, getTripStatus, getTripVehicleLabel, isTripCompleted, isTripToday, toDateInput } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
 const assignedTripsRoute = '/driver-assistant/assigned-trips' as Href;
@@ -77,29 +77,51 @@ export default function DriverBusAssistantHomeScreen() {
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isHydrated = useAuthStore((state) => state.isHydrated);
+  const logout = useAuthStore((state) => state.logout);
   const [trips, setTrips] = useState<AssignedTrip[]>([]);
   const [shifts, setShifts] = useState<ShiftSchedule[]>([]);
   const [revenue, setRevenue] = useState<ShiftRevenue | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [processingId, setProcessingId] = useState('');
+  const normalizedRole = normalizeRole(user?.role);
+  const isDriver = normalizedRole === 'DRIVER';
+  const isBusAssistant = ['BUS_ASSISTANT', 'BUS ASSISTANT', 'CONDUCTOR'].includes(normalizedRole);
 
   const loadDashboard = useCallback(async () => {
+    if (!isHydrated || !isAuthenticated) {
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     try {
       const [tripsPayload, shiftsPayload, revenuePayload] = await Promise.all([
         scheduleOperationsApi.getAssignedTrips(getTodayRange()),
         scheduleOperationsApi.getShiftSchedule(getTodayRange()),
-        busAssistantApi.getShiftRevenue({ date: toDateInput() }).catch(() => null),
+        isBusAssistant
+          ? busAssistantApi.getShiftRevenue({ date: toDateInput() }).catch(() => null)
+          : Promise.resolve(null),
       ]);
       setTrips(tripsPayload.trips || []);
       setShifts(shiftsPayload.shifts || []);
       setRevenue(revenuePayload);
     } catch (error) {
-      Alert.alert('Unable to load dashboard', getErrorMessage(error, 'Unable to load schedule and assignment data.'));
+      const message = getErrorMessage(error, 'Unable to load schedule and assignment data.');
+      const statusCode = (error as { statusCode?: number; response?: { status?: number } })?.statusCode
+        || (error as { response?: { status?: number } })?.response?.status;
+      const isAuthError = statusCode === 401 || message.toLowerCase().includes('no token provided');
+
+      if (isAuthError) {
+        await logout();
+        router.replace('/auth/login');
+        return;
+      }
+
+      Alert.alert('Unable to load dashboard', message);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isAuthenticated, isBusAssistant, isHydrated, logout]);
 
   useEffect(() => {
     if (isHydrated && !isAuthenticated) {
@@ -121,7 +143,6 @@ export default function DriverBusAssistantHomeScreen() {
   const completedCount = useMemo(() => trips.filter(isTripCompleted).length, [trips]);
   const nextTrip = todaysTrips.find((trip) => !isTripCompleted(trip)) || todaysTrips[0] || null;
   const upcomingShift = shifts[0] || null;
-  const isDriver = user?.role === 'DRIVER';
   const displayName = user?.fullName || (isDriver ? 'Driver' : 'Bus Assistant');
 
   const openInspection = (trip: AssignedTrip) => {
@@ -184,7 +205,7 @@ export default function DriverBusAssistantHomeScreen() {
             <View style={styles.statsRow}>
               <StatPill label="Trips" value={todaysTrips.length} />
               <StatPill label="Done" value={completedCount} />
-              <StatPill label="Sales" value={revenue?.totalTicketsSold || 0} />
+              <StatPill label={isDriver ? 'Shifts' : 'Sales'} value={isDriver ? shifts.length : revenue?.totalTicketsSold || 0} />
             </View>
           </View>
 
@@ -207,7 +228,7 @@ export default function DriverBusAssistantHomeScreen() {
                 <View style={styles.nextContent}>
                   <Text style={styles.routeBadge}>{nextTrip.route?.routeNumber || nextTrip.tripCode || 'Trip'}</Text>
                   <Text style={styles.nextTitle}>{nextTrip.route?.origin || 'Origin'} - {nextTrip.route?.destination || 'Destination'}</Text>
-                  <Text style={styles.nextMeta}>{formatTime(nextTrip.scheduledStart)} - {nextTrip.vehicle?.code || nextTrip.vehicle?.plateNumber || 'No bus'} - {getTripStatus(nextTrip)}</Text>
+                  <Text style={styles.nextMeta}>{formatTime(nextTrip.scheduledStart)} - {getTripVehicleLabel(nextTrip)} - {getTripStatus(nextTrip)}</Text>
                 </View>
                 {isDriver && canAcceptTrip(nextTrip) ? (
                   <Pressable
@@ -277,20 +298,31 @@ export default function DriverBusAssistantHomeScreen() {
             <Text style={styles.sectionTitle}>Core actions</Text>
           </View>
           <View style={styles.actionGrid}>
-            <ActionTile title="Validate ticket" subtitle="Check QR or ticket code" icon="qrcode-scan" href={route('/driver-assistant/validate-ticket')} primary />
-            <ActionTile title="Sell ticket" subtitle="Create onboard cash/QR ticket" icon="ticket-confirmation-outline" href={route('/driver-assistant/walkin-ticket')} />
-            <ActionTile title="Shift revenue" subtitle={`${revenue?.totalRevenue ? new Intl.NumberFormat('vi-VN').format(revenue.totalRevenue) : 0} VND today`} icon="cash-register" href={route('/driver-assistant/shift-revenue')} />
-            <ActionTile title="Submit summary" subtitle="Close shift cashbox" icon="clipboard-check-outline" href={route('/driver-assistant/revenue-summary')} />
+            {isDriver ? (
+              <>
+                <ActionTile title="Assigned trips" subtitle="Review routes and start work" icon="bus-clock" href={assignedTripsRoute} primary />
+                <ActionTile title={upcomingShift?.shiftName || 'Shift schedule'} subtitle="View work hours and assignments" icon="calendar-month-outline" href={shiftScheduleRoute} />
+                <ActionTile title="Operation chat" subtitle="Message dispatch and crew" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
+              </>
+            ) : (
+              <>
+                <ActionTile title="Validate ticket" subtitle="Check QR or ticket code" icon="qrcode-scan" href={route('/driver-assistant/validate-ticket')} primary />
+                <ActionTile title="Sell ticket" subtitle="Create onboard cash/QR ticket" icon="ticket-confirmation-outline" href={route('/driver-assistant/walkin-ticket')} />
+                <ActionTile title="Shift revenue" subtitle={`${revenue?.totalRevenue ? new Intl.NumberFormat('vi-VN').format(revenue.totalRevenue) : 0} VND today`} icon="cash-register" href={route('/driver-assistant/shift-revenue')} />
+                <ActionTile title="Submit summary" subtitle="Close shift cashbox" icon="clipboard-check-outline" href={route('/driver-assistant/revenue-summary')} />
+              </>
+            )}
           </View>
 
-          <View style={styles.operationsSection}>
-            <Text style={styles.sectionTitle}>Operations</Text>
-            <View style={styles.actionGrid}>
-              <ActionTile title={upcomingShift?.shiftName || 'Shift schedule'} subtitle="View work hours and assignments" icon="calendar-month-outline" href={route('/driver-assistant/shift-schedule')} />
-              <ActionTile title="Operation chat" subtitle="Message dispatch and crew" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
-              <ActionTile title="Incident report" subtitle="Open a trip to report issues" icon="alert-circle-outline" href={route('/driver-assistant/assigned-trips')} />
+          {isBusAssistant ? (
+            <View style={styles.operationsSection}>
+              <Text style={styles.sectionTitle}>Operations</Text>
+              <View style={styles.actionGrid}>
+                <ActionTile title={upcomingShift?.shiftName || 'Shift schedule'} subtitle="View work hours and assignments" icon="calendar-month-outline" href={shiftScheduleRoute} />
+                <ActionTile title="Operation chat" subtitle="Message dispatch and crew" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
+              </View>
             </View>
-          </View>
+          ) : null}
         </ScrollView>
         <RoleBottomNav active="home" role={user?.role} />
       </View>

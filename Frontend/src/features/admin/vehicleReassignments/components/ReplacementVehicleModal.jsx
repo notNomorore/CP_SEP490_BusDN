@@ -73,7 +73,7 @@ const ReplacementVehicleModal = ({
       return;
     }
     if (!note.trim()) {
-      toast.error('Emergency replacement note is required');
+      toast.error('Please enter the replacement note or reason');
       return;
     }
 

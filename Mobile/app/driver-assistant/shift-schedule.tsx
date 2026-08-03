@@ -1,4 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -42,6 +43,9 @@ function DetailPill({ icon, label, value }: { icon: React.ComponentProps<typeof 
 
 export default function ShiftScheduleScreen() {
   const user = useAuthStore((state) => state.user);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const isHydrated = useAuthStore((state) => state.isHydrated);
+  const logout = useAuthStore((state) => state.logout);
   const [range, setRange] = useState(() => getWeekRange());
   const [shifts, setShifts] = useState<ShiftSchedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -49,6 +53,11 @@ export default function ShiftScheduleScreen() {
   const requestIdRef = useRef(0);
 
   const loadSchedule = useCallback(async () => {
+    if (!isHydrated || !isAuthenticated) {
+      setIsLoading(false);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     const requestedRange = { ...range };
@@ -61,6 +70,17 @@ export default function ShiftScheduleScreen() {
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
       const message = getErrorMessage(error, 'Unable to load shift schedule.');
+      const statusCode = (error as { statusCode?: number; response?: { status?: number } })?.statusCode
+        || (error as { response?: { status?: number } })?.response?.status;
+      const isAuthError = statusCode === 401 || message.toLowerCase().includes('no token provided');
+
+      if (isAuthError) {
+        setError('');
+        await logout();
+        router.replace('/auth/login');
+        return;
+      }
+
       setError(message);
       Alert.alert('Unable to load shift schedule', message);
     } finally {
@@ -68,11 +88,19 @@ export default function ShiftScheduleScreen() {
         setIsLoading(false);
       }
     }
-  }, [range]);
+  }, [isAuthenticated, isHydrated, logout, range]);
 
   useEffect(() => {
+    if (!isHydrated) return;
+
+    if (!isAuthenticated) {
+      setIsLoading(false);
+      router.replace('/auth/login');
+      return;
+    }
+
     void loadSchedule();
-  }, [loadSchedule]);
+  }, [isAuthenticated, isHydrated, loadSchedule]);
 
   const weekDays = useMemo(() => (
     Array.from({ length: 7 }, (_, index) => toDateInput(addDays(range.from, index)))

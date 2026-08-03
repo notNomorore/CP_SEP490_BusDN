@@ -29,6 +29,7 @@ const formatDateTime = (value) => {
 };
 
 const labelize = (value) => String(value || 'N/A').replaceAll('_', ' ');
+const canReviewMaintenance = (task) => task?.status === 'completed';
 
 const getVehicleLabel = (task) => (
   task?.vehicle?.plateNumber
@@ -50,8 +51,13 @@ const ApprovalModal = ({ task, isSaving, onClose, onSubmit }) => {
   if (!task) return null;
 
   const blockingIssues = task.returnToServiceCheck?.blockingCriticalIssues || [];
+  const reviewReady = canReviewMaintenance(task);
 
   const submit = () => {
+    if (!reviewReady) {
+      toast.error('Maintenance must be completed before approval');
+      return;
+    }
     if (!safetyCheckPassed) {
       toast.error('Safety check must pass before approval');
       return;
@@ -180,11 +186,73 @@ const RejectModal = ({ task, isSaving, onClose, onSubmit }) => {
   );
 };
 
-const DetailDrawer = ({ task, onClose, onApprove, onReject }) => {
+const CompleteMaintenanceModal = ({ task, isSaving, onClose, onSubmit }) => {
+  const [completionNote, setCompletionNote] = useState('');
+
+  useEffect(() => {
+    setCompletionNote('');
+  }, [task]);
+
+  if (!task) return null;
+
+  const submit = () => {
+    onSubmit({ completionNote: completionNote.trim() });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 px-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-outline">Complete maintenance</p>
+            <h3 className="mt-2 text-xl font-headline font-black text-primary">{getVehicleLabel(task)}</h3>
+          </div>
+          <button type="button" title="Close" onClick={onClose} className="rounded-full p-2 hover:bg-surface-container">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <label className="mt-5 block space-y-2">
+          <span className="text-sm font-semibold text-on-surface">Repair result</span>
+          <textarea
+            value={completionNote}
+            onChange={(event) => setCompletionNote(event.target.value)}
+            className={`${fieldClassName} min-h-[140px] resize-none`}
+            placeholder="Describe what was repaired, parts replaced, and final technical result."
+          />
+        </label>
+
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
+          Completing maintenance does not release the vehicle yet. Admin still needs to approve safety before the vehicle becomes active again.
+        </div>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" onClick={onClose} className="rounded-full border px-5 py-2.5 text-sm font-bold">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={isSaving}
+            className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+          >
+            {isSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ClipboardCheck className="h-4 w-4" />}
+            Mark completed
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const DetailDrawer = ({ task, onClose, onStart, onComplete, onApprove, onReject, isSaving }) => {
   if (!task) return null;
 
   const issue = task.issue;
   const blockingIssues = task.returnToServiceCheck?.blockingCriticalIssues || [];
+  const reviewReady = canReviewMaintenance(task);
+  const canStart = ['draft', 'assigned', 'pending_rework'].includes(task.status);
+  const canComplete = ['assigned', 'in_progress', 'pending_rework'].includes(task.status);
 
   return (
     <div className="fixed inset-0 z-[70] flex justify-end bg-black/35">
@@ -223,18 +291,47 @@ const DetailDrawer = ({ task, onClose, onApprove, onReject }) => {
         <div className="mt-6 flex flex-wrap gap-2">
           <button
             type="button"
+            onClick={() => onStart(task)}
+            disabled={!canStart || isSaving}
+            className="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-bold text-primary disabled:opacity-50"
+          >
+            <Wrench className="h-4 w-4" />
+            Start repair
+          </button>
+          <button
+            type="button"
+            onClick={() => onComplete(task)}
+            disabled={!canComplete || isSaving}
+            className="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-bold text-primary disabled:opacity-50"
+          >
+            <ClipboardCheck className="h-4 w-4" />
+            Complete repair
+          </button>
+          <button
+            type="button"
             onClick={() => onApprove(task)}
-            disabled={blockingIssues.length > 0}
+            disabled={!reviewReady || blockingIssues.length > 0 || isSaving}
             className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
           >
             <CheckCircle2 className="h-4 w-4" />
             Approve
           </button>
-          <button type="button" onClick={() => onReject(task)} className="inline-flex items-center gap-2 rounded-full border border-error/40 px-4 py-2 text-sm font-bold text-error">
+          <button
+            type="button"
+            onClick={() => onReject(task)}
+            disabled={!reviewReady || isSaving}
+            className="inline-flex items-center gap-2 rounded-full border border-error/40 px-4 py-2 text-sm font-bold text-error disabled:opacity-50"
+          >
             <XCircle className="h-4 w-4" />
             Reject
           </button>
         </div>
+
+        {!reviewReady ? (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+            Xe đang nằm trong luồng bảo trì. Chỉ duyệt xuất xe sau khi nhiệm vụ được cập nhật trạng thái hoàn tất.
+          </div>
+        ) : null}
 
         <section className="mt-6 grid gap-3 sm:grid-cols-2">
           {[
@@ -243,7 +340,7 @@ const DetailDrawer = ({ task, onClose, onApprove, onReject }) => {
             ['Task status', labelize(task.status)],
             ['Approval status', labelize(task.approvalStatus)],
             ['Priority', labelize(task.priority)],
-            ['Completed at', formatDateTime(task.updatedAt)],
+            ['Updated at', formatDateTime(task.updatedAt)],
           ].map(([label, value]) => (
             <div key={label} className="rounded-xl border border-outline-variant/30 p-4">
               <dt className="text-xs font-bold uppercase tracking-[0.12em] text-outline">{label}</dt>
@@ -307,6 +404,7 @@ const MaintenanceApprovalPage = () => {
   const [selectedTask, setSelectedTask] = useState(null);
   const [approveTask, setApproveTask] = useState(null);
   const [rejectTask, setRejectTask] = useState(null);
+  const [completeTask, setCompleteTask] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
   const loadTasks = useCallback(async () => {
@@ -346,6 +444,37 @@ const MaintenanceApprovalPage = () => {
     }
   };
 
+  const startRepair = async (task) => {
+    setIsSaving(true);
+    try {
+      const response = await maintenanceApprovalService.startTask(task._id, {
+        note: 'Repair work started by admin.',
+      });
+      toast.success('Maintenance repair started');
+      setSelectedTask(response.data || task);
+      await loadTasks();
+    } catch (error) {
+      toast.error(error.message || 'Unable to start maintenance repair');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const submitComplete = async (payload) => {
+    setIsSaving(true);
+    try {
+      const response = await maintenanceApprovalService.completeTask(completeTask._id, payload);
+      toast.success('Maintenance completed. Waiting for approval.');
+      setCompleteTask(null);
+      setSelectedTask(response.data || null);
+      await loadTasks();
+    } catch (error) {
+      toast.error(error.message || 'Unable to complete maintenance');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const submitReject = async (payload) => {
     setIsSaving(true);
     try {
@@ -364,7 +493,7 @@ const MaintenanceApprovalPage = () => {
   return (
     <AdminPromotionShell
       title="Maintenance Approval"
-      subtitle="Review completed maintenance before vehicles return to passenger service."
+      subtitle="Track broken vehicles in maintenance and approve them only after service completion."
       action={(
         <button type="button" onClick={loadTasks} className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-bold text-white">
           <RefreshCcw className="h-4 w-4" />
@@ -374,7 +503,7 @@ const MaintenanceApprovalPage = () => {
     >
       <section className="grid gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-outline-variant/35 bg-white p-4 shadow-sm">
-          <p className="text-xs font-bold uppercase tracking-[0.12em] text-outline">Pending approval</p>
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-outline">Open maintenance</p>
           <p className="mt-3 text-3xl font-headline font-black text-primary">{counts.pending}</p>
         </div>
         <div className="rounded-2xl border border-error/35 bg-white p-4 shadow-sm">
@@ -383,7 +512,7 @@ const MaintenanceApprovalPage = () => {
         </div>
         <div className="rounded-2xl border border-outline-variant/35 bg-white p-4 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-[0.12em] text-outline">Vehicle release rule</p>
-          <p className="mt-3 text-sm font-semibold text-on-surface-variant">Approved tasks restore vehicle availability only after safety clearance.</p>
+          <p className="mt-3 text-sm font-semibold text-on-surface-variant">Broken vehicles stay unavailable until maintenance is completed and approved.</p>
         </div>
       </section>
 
@@ -392,7 +521,7 @@ const MaintenanceApprovalPage = () => {
           <table className="min-w-[1000px] divide-y divide-outline-variant/30 text-left text-sm">
             <thead className="bg-surface-container-low text-xs uppercase tracking-[0.12em] text-outline">
               <tr>
-                {['Task', 'Vehicle', 'Issue', 'Priority', 'Completed', 'Safety', 'Action'].map((heading) => (
+                {['Task', 'Vehicle', 'Issue', 'Priority', 'Status', 'Safety', 'Action'].map((heading) => (
                   <th key={heading} className="px-4 py-4">{heading}</th>
                 ))}
               </tr>
@@ -411,7 +540,10 @@ const MaintenanceApprovalPage = () => {
                     <td className="px-4 py-4">{getVehicleLabel(task)}</td>
                     <td className="px-4 py-4">{task.issue ? `${labelize(task.issue.issueType)} (${labelize(task.issue.status)})` : 'N/A'}</td>
                     <td className="px-4 py-4">{labelize(task.priority)}</td>
-                    <td className="px-4 py-4">{formatDateTime(task.updatedAt)}</td>
+                    <td className="px-4 py-4">
+                      <p className="font-bold text-primary">{labelize(task.status)}</p>
+                      <p className="mt-1 text-xs text-on-surface-variant">{formatDateTime(task.updatedAt)}</p>
+                    </td>
                     <td className="px-4 py-4">
                       {blockingIssues.length ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 py-1 text-xs font-bold text-on-error-container">
@@ -433,7 +565,7 @@ const MaintenanceApprovalPage = () => {
                   </tr>
                 );
               }) : (
-                <tr><td colSpan="7" className="px-5 py-12 text-center text-on-surface-variant">No completed maintenance tasks are waiting for approval.</td></tr>
+                <tr><td colSpan="7" className="px-5 py-12 text-center text-on-surface-variant">No maintenance tasks are waiting for handling or approval.</td></tr>
               )}
             </tbody>
           </table>
@@ -450,8 +582,17 @@ const MaintenanceApprovalPage = () => {
       <DetailDrawer
         task={selectedTask}
         onClose={() => setSelectedTask(null)}
+        onStart={startRepair}
+        onComplete={setCompleteTask}
         onApprove={setApproveTask}
         onReject={setRejectTask}
+        isSaving={isSaving}
+      />
+      <CompleteMaintenanceModal
+        task={completeTask}
+        isSaving={isSaving}
+        onClose={() => setCompleteTask(null)}
+        onSubmit={submitComplete}
       />
       <ApprovalModal
         task={approveTask}

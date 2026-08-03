@@ -65,6 +65,20 @@ const formatVehicle = (vehicle = {}) => ({
   capacity: vehicle.capacity || 0,
 });
 
+const formatVehicleReplacement = (trip = {}) => {
+  const history = Array.isArray(trip.emergencyHistory) ? trip.emergencyHistory : [];
+  const latest = history.length ? history[history.length - 1] : null;
+
+  if (!latest?.previousVehicle?.busId) return null;
+
+  return {
+    reason: latest.reason || '',
+    changedAt: latest.changedAt || null,
+    previousVehicle: formatVehicle(latest.previousVehicle),
+    currentVehicle: formatVehicle(trip.vehicle),
+  };
+};
+
 const addMinutes = (value, minutes) => {
   if (!value) return null;
   const date = new Date(value);
@@ -124,7 +138,8 @@ const formatTripStatus = (tripStatus, shiftStatus, inspectionStatus) => {
   if (tripStatus === 'IN_PROGRESS') return 'IN_PROGRESS';
   if (tripStatus === 'COMPLETED') return 'COMPLETED';
   if (tripStatus === 'CANCELLED') return 'CANCELLED';
-  if (shiftStatus === 'CONFIRMED' || inspectionStatus === 'READY') return 'READY';
+  if (inspectionStatus === 'READY') return 'READY';
+  if (shiftStatus === 'CONFIRMED' && !['IN_PROGRESS', 'ISSUE_REPORTED'].includes(inspectionStatus)) return 'READY';
   return 'SCHEDULED';
 };
 
@@ -210,6 +225,7 @@ export const ShiftAssignmentResponseDTO = {
     actorRole: resolvedActorRole,
     route: formatRoute(trip),
     vehicle: formatVehicle(trip.vehicle),
+    vehicleReplacement: formatVehicleReplacement(trip),
     driver: formatStaff(assignment.driver),
     busAssistant: formatStaff(assignment.busAssistant),
     scheduledStart,

@@ -32,6 +32,24 @@ export class ScheduleOperationsController {
     }
   }
 
+  static async getAssignedTripDetail(req, res, next) {
+    try {
+      const assignment = await ScheduleOperationsService.getActorAssignment(
+        req.user.userId,
+        req.user.role,
+        req.params.assignmentId
+      );
+
+      return res.success(
+        ShiftAssignmentResponseDTO.format(assignment, req.user.userId, req.user.role),
+        'Assigned trip detail retrieved successfully'
+      );
+    } catch (error) {
+      logger.error('Get assigned trip detail error:', error);
+      next(error);
+    }
+  }
+
   static async listShiftSchedule(req, res, next) {
     try {
       const assignments = await ScheduleOperationsService.listShiftSchedule(
