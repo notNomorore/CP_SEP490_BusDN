@@ -140,6 +140,30 @@ const findAssistantShift = async ({ assistantId, shiftId, tripId, date }) => {
       const shift = await Shift.findOne({ shiftCode: scheduleAssignment.shiftCode }).lean();
       return { shiftId: shift?._id || null, assignment: scheduleAssignment, shift };
     }
+
+    // Các màn vận hành hiện lấy phân công trực tiếp từ TripSchedule. Vì vậy
+    // việc bán/kiểm tra vé phải công nhận cùng nguồn phân công này, thay vì
+    // chỉ dựa vào các bản ghi ShiftAssignment kiểu cũ.
+    const tripSchedule = await TripSchedule.findOne({
+      _id: tripId,
+      'assistant.userId': assistantId,
+      status: { $ne: 'CANCELLED' },
+    }).lean();
+
+    if (tripSchedule) {
+      const { start, end } = todayRange(tripSchedule.serviceDate || date);
+      const assistantShift = await AssistantShiftAssignment.findOne({
+        assistantId,
+        workDate: { $gte: start, $lte: end },
+        status: { $in: ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'] },
+      }).populate('shiftId').sort({ updatedAt: -1 }).lean();
+
+      return {
+        shiftId: assistantShift?.shiftId?._id || assistantShift?.shiftId || null,
+        assignment: assistantShift || tripSchedule,
+        shift: assistantShift?.shiftId || null,
+      };
+    }
   }
 
   const { start, end } = todayRange(date);
@@ -252,10 +276,22 @@ export class BusAssistantService {
   static async validateETicket(payload, actor, req) {
     const trip = await assertActiveTrip(payload.tripId);
     const route = await findRoute(trip.routeId);
-    const shiftContext = await assertAssignedShift({
+    let shiftContext = await findAssistantShift({
       assistantId: actor.userId,
       tripId: payload.tripId,
+      date: trip.serviceDate,
     });
+
+    // TripSchedule là nguồn phân công chính của màn vận hành. Một chuyến có
+    // đúng assistant.userId phải được phép kiểm tra vé kể cả khi dữ liệu ca cũ
+    // chưa được đồng bộ sang AssistantShiftAssignment/ShiftAssignment.
+    if (!shiftContext && isSameId(trip.assistant?.userId, actor.userId)) {
+      shiftContext = { shiftId: null, assignment: trip, shift: null };
+    }
+
+    if (!shiftContext) {
+      throw new CustomError('Trip is not assigned to this bus assistant', HTTP_STATUS.FORBIDDEN);
+    }
 
     const ticket = await Ticket.findOne({
       $or: [
@@ -339,10 +375,19 @@ export class BusAssistantService {
       throw new CustomError('Trip does not belong to this route', HTTP_STATUS.BAD_REQUEST);
     }
 
-    const shiftContext = await assertAssignedShift({
+    let shiftContext = await findAssistantShift({
       assistantId: actor.userId,
       tripId: payload.tripId,
+      date: trip.serviceDate,
     });
+
+    if (!shiftContext && isSameId(trip.assistant?.userId, actor.userId)) {
+      shiftContext = { shiftId: null, assignment: trip, shift: null };
+    }
+
+    if (!shiftContext) {
+      throw new CustomError('Trip is not assigned to this bus assistant', HTTP_STATUS.FORBIDDEN);
+    }
     const fare = calculateFare(route, payload.passengerType, payload.amount, passengerQuantity);
     const cashReceived = number(payload.cashReceived);
     if (payload.paymentMethod === 'CASH' && cashReceived < fare.totalAmount) {

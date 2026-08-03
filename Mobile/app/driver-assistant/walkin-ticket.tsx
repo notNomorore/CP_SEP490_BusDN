@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import busAssistantApi from '@/api/busAssistant.api';
 import scheduleOperationsApi from '@/api/scheduleOperations.api';
@@ -9,24 +9,24 @@ import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
-import type { WalkInTicketResult } from '@/types/busAssistant';
+import type { WalkInTicketHistory, WalkInTicketResult } from '@/types/busAssistant';
 import type { AssignedTrip } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
-import { formatTime, getTodayRange, isTripCompleted } from '@/utils/scheduleOperations';
+import { formatTime, getAssignedTripsRange, getTripStatus, toDateInput } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
 const passengerTypes = ['ADULT', 'STUDENT', 'CHILD', 'SENIOR'];
-const paymentMethods = ['CASH', 'QR', 'E_WALLET'];
-const ticketTypes = ['SINGLE_RIDE', 'DAY_PASS', 'TRANSFER'];
+const paymentMethods = ['CASH', 'BANK_TRANSFER'];
 const money = (value: number | string) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
 const objectId = (value?: string | null) => String(value || '');
+const optionLabels: Record<string, string> = { ADULT: 'Người lớn', STUDENT: 'Học sinh / sinh viên', CHILD: 'Trẻ em', SENIOR: 'Người cao tuổi', CASH: 'Tiền mặt', BANK_TRANSFER: 'Chuyển khoản QR' };
 
 function OptionRow({ values, active, onChange }: { values: string[]; active: string; onChange: (value: string) => void }) {
   return (
     <View style={styles.optionRow}>
       {values.map((value) => (
         <Pressable key={value} onPress={() => onChange(value)} style={[styles.optionChip, active === value && styles.optionChipActive]}>
-          <Text style={[styles.optionText, active === value && styles.optionTextActive]}>{value.replace('_', ' ')}</Text>
+          <Text style={[styles.optionText, active === value && styles.optionTextActive]}>{optionLabels[value] || value}</Text>
         </Pressable>
       ))}
     </View>
@@ -41,23 +41,48 @@ export default function WalkInTicketScreen() {
   const [toStopId, setToStopId] = useState('');
   const [passengerType, setPassengerType] = useState('ADULT');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
-  const [ticketType, setTicketType] = useState('SINGLE_RIDE');
   const [quantity, setQuantity] = useState('1');
-  const [amount, setAmount] = useState('7000');
+  const [cashReceived, setCashReceived] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<WalkInTicketResult | null>(null);
+  const [historyDate, setHistoryDate] = useState(toDateInput());
+  const [history, setHistory] = useState<WalkInTicketHistory>({ date: toDateInput(), count: 0, totalRevenue: 0, tickets: [] });
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [resumingId, setResumingId] = useState('');
 
   const selectedTrip = useMemo(
     () => trips.find((trip) => trip.id === selectedTripId) || trips[0] || null,
     [selectedTripId, trips],
   );
   const stops = selectedTrip?.route?.stops || [];
-  const total = Number(amount) || 0;
+  const unitFare = useMemo(() => {
+    const fares = selectedTrip?.route?.fareConfig;
+    if (passengerType === 'STUDENT') return Number(fares?.studentFare) || Number(fares?.baseFare) || Number(selectedTrip?.route?.fare) || 0;
+    if (passengerType === 'CHILD') return Number(fares?.childFare) || Number(fares?.baseFare) || Number(selectedTrip?.route?.fare) || 0;
+    if (passengerType === 'SENIOR') return Number(fares?.seniorFare) || Number(fares?.baseFare) || Number(selectedTrip?.route?.fare) || 0;
+    return Number(fares?.baseFare) || Number(selectedTrip?.route?.fare) || 0;
+  }, [passengerType, selectedTrip]);
+  const total = unitFare * Math.max(Number.parseInt(quantity, 10) || 1, 1);
+  const received = Number(cashReceived) || 0;
+  const changeAmount = Math.max(received - total, 0);
+  const cashInsufficient = paymentMethod === 'CASH' && received < total;
+
+  const loadHistory = useCallback(async (date = historyDate) => {
+    setIsLoadingHistory(true);
+    try {
+      setHistory(await busAssistantApi.getWalkInTicketHistory({ date }));
+    } catch (error) {
+      Alert.alert('Không thể tải lịch sử', getErrorMessage(error, 'Không thể tải lịch sử bán vé.'));
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, [historyDate]);
 
   const loadTrips = useCallback(async () => {
     try {
-      const payload = await scheduleOperationsApi.getAssignedTrips(getTodayRange());
-      const usableTrips = (payload.trips || []).filter((trip) => !isTripCompleted(trip));
+      // Dùng cùng phạm vi với màn Chuyến để hai màn luôn nhận cùng danh sách.
+      const payload = await scheduleOperationsApi.getAssignedTrips(getAssignedTripsRange());
+      const usableTrips = (payload.trips || []).filter((trip) => !['COMPLETED', 'CANCELLED'].includes(getTripStatus(trip)));
       setTrips(usableTrips);
       const first = usableTrips[0];
       setSelectedTripId((current) => current || first?.id || '');
@@ -65,13 +90,17 @@ export default function WalkInTicketScreen() {
       setFromStopId((current) => current || objectId(firstStops[0]?.stationId || firstStops[0]?.id));
       setToStopId((current) => current || objectId(firstStops[firstStops.length - 1]?.stationId || firstStops[firstStops.length - 1]?.id));
     } catch (error) {
-      Alert.alert('Unable to load trips', getErrorMessage(error, 'Unable to load assigned trips.'));
+      Alert.alert('Không thể tải chuyến', getErrorMessage(error, 'Không thể tải các chuyến được phân công.'));
     }
   }, []);
 
   useEffect(() => {
     void loadTrips();
   }, [loadTrips]);
+
+  useEffect(() => {
+    void loadHistory(historyDate);
+  }, [historyDate, loadHistory]);
 
   useEffect(() => {
     if (!selectedTrip) return;
@@ -82,7 +111,7 @@ export default function WalkInTicketScreen() {
 
   const createTicket = async () => {
     if (!selectedTrip?.route?.id || !selectedTrip.tripId || !fromStopId || !toStopId) {
-      Alert.alert('Missing trip data', 'The selected trip needs route, trip, and stop IDs before selling a ticket.');
+      Alert.alert('Thiếu thông tin chuyến', 'Chuyến đã chọn cần đầy đủ tuyến, chuyến và điểm dừng trước khi bán vé.');
       return;
     }
 
@@ -95,17 +124,48 @@ export default function WalkInTicketScreen() {
         toStopId,
         passengerType,
         passengerQuantity: Math.max(Number.parseInt(quantity, 10) || 1, 1),
-        ticketType,
+        ticketType: 'SINGLE_RIDE',
         paymentMethod,
         amount: total,
+        cashReceived: paymentMethod === 'CASH' ? received : undefined,
+        changeAmount: paymentMethod === 'CASH' ? changeAmount : undefined,
       });
       setResult(data);
-      setQuantity('1');
-      Alert.alert('Ticket created', data.message || 'Walk-in ticket created successfully.');
+      await loadHistory(historyDate);
+      Alert.alert(paymentMethod === 'CASH' ? 'Đã thu tiền và tạo vé' : 'Đã tạo mã thanh toán', paymentMethod === 'CASH' ? 'Hành khách có thể lên xe.' : 'Hãy đưa mã QR cho hành khách quét.');
     } catch (error) {
-      Alert.alert('Unable to create ticket', getErrorMessage(error, 'Unable to create walk-in ticket.'));
+      Alert.alert('Không thể tạo vé', getErrorMessage(error, 'Không thể tạo vé trực tiếp.'));
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const confirmPayment = async () => {
+    const ticketId = result?.ticketData?._id;
+    if (!ticketId) return;
+    setIsSubmitting(true);
+    try {
+      const data = await busAssistantApi.confirmWalkInPayment(ticketId);
+      setResult((current) => current ? { ...current, ...data, requiresPaymentConfirmation: false, paymentCompleted: true, confirmed: true } : data);
+      await loadHistory(historyDate);
+      Alert.alert('Đã thanh toán', 'Đã xác nhận chuyển khoản. Hành khách có thể lên xe.');
+    } catch (error) {
+      Alert.alert('Chưa nhận được thanh toán', getErrorMessage(error, 'Giao dịch chuyển khoản chưa hoàn tất.'));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const resumePayment = async (ticketId: string) => {
+    setResumingId(ticketId);
+    try {
+      const data = await busAssistantApi.resumeWalkInPayment(ticketId);
+      setResult(data);
+      if (data.paymentCompleted) await loadHistory(historyDate);
+    } catch (error) {
+      Alert.alert('Không thể thanh toán lại', getErrorMessage(error, 'Mã thanh toán không còn khả dụng.'));
+    } finally {
+      setResumingId('');
     }
   };
 
@@ -113,53 +173,58 @@ export default function WalkInTicketScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+          <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View>
-            <Text style={styles.kicker}>ONBOARD SALES</Text>
-            <Text style={styles.title}>Walk-in Ticket</Text>
+            <Text style={styles.kicker}>BÁN VÉ TẠI XE</Text>
+            <Text style={styles.title}>Vé trực tiếp</Text>
           </View>
         </View>
 
         <View style={styles.totalCard}>
-          <Text style={styles.totalLabel}>Collect from passenger</Text>
+          <Text style={styles.totalLabel}>Tổng tiền vé</Text>
           <Text style={styles.totalValue}>{money(total)}</Text>
-          <Text style={styles.totalMeta}>{quantity || 1} passenger(s) - {paymentMethod.replace('_', ' ')}</Text>
+          <Text style={styles.totalMeta}>{quantity || 1} hành khách · {paymentMethod === 'CASH' ? 'Tiền mặt' : 'Chuyển khoản QR'}</Text>
         </View>
 
         <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Trip</Text>
+          <View style={styles.panelHeadingRow}>
+            <Text style={styles.panelTitle}>Chuyến được phân công</Text>
+            <Pressable accessibilityLabel="Tải lại chuyến" onPress={() => void loadTrips()} style={styles.reloadTripsButton}>
+              <MaterialCommunityIcons color={colors.primary} name="refresh" size={19} />
+            </Pressable>
+          </View>
           <View style={styles.optionColumn}>
             {trips.length ? trips.map((trip) => (
               <Pressable key={trip.id} onPress={() => setSelectedTripId(trip.id)} style={[styles.tripChip, selectedTrip?.id === trip.id && styles.tripChipActive]}>
-                <Text style={[styles.tripTitle, selectedTrip?.id === trip.id && styles.tripTextActive]}>{trip.route?.routeNumber || trip.tripCode || 'Trip'}</Text>
-                <Text style={[styles.tripMeta, selectedTrip?.id === trip.id && styles.tripTextActive]}>{formatTime(trip.scheduledStart)} - {trip.vehicle?.code || trip.vehicle?.plateNumber || 'No bus'}</Text>
+                <Text style={[styles.tripTitle, selectedTrip?.id === trip.id && styles.tripTextActive]}>{trip.route?.routeNumber || trip.tripCode || 'Chuyến'}</Text>
+                <Text style={[styles.tripMeta, selectedTrip?.id === trip.id && styles.tripTextActive]}>{formatTime(trip.scheduledStart)} - {trip.vehicle?.code || trip.vehicle?.plateNumber || 'Chưa có xe'}</Text>
               </Pressable>
-            )) : <Text style={styles.emptyText}>No active assigned trip.</Text>}
+            )) : <Text style={styles.emptyText}>Không có chuyến đang hoạt động được phân công.</Text>}
           </View>
         </View>
 
         <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Stops</Text>
-          <Text style={styles.fieldLabel}>From</Text>
+          <Text style={styles.panelTitle}>Điểm dừng</Text>
+          <Text style={styles.fieldLabel}>Điểm lên</Text>
           <View style={styles.optionRow}>
             {stops.slice(0, 6).map((stop) => {
               const id = objectId(stop.stationId || stop.id);
               return (
                 <Pressable key={`from-${id || stop.stopName}`} onPress={() => setFromStopId(id)} style={[styles.stopChip, fromStopId === id && styles.optionChipActive]}>
-                  <Text numberOfLines={1} style={[styles.optionText, fromStopId === id && styles.optionTextActive]}>{stop.stopName || 'Stop'}</Text>
+                  <Text numberOfLines={1} style={[styles.optionText, fromStopId === id && styles.optionTextActive]}>{stop.stopName || 'Điểm dừng'}</Text>
                 </Pressable>
               );
             })}
           </View>
-          <Text style={styles.fieldLabel}>To</Text>
+          <Text style={styles.fieldLabel}>Điểm xuống</Text>
           <View style={styles.optionRow}>
             {stops.slice(-6).map((stop) => {
               const id = objectId(stop.stationId || stop.id);
               return (
                 <Pressable key={`to-${id || stop.stopName}`} onPress={() => setToStopId(id)} style={[styles.stopChip, toStopId === id && styles.optionChipActive]}>
-                  <Text numberOfLines={1} style={[styles.optionText, toStopId === id && styles.optionTextActive]}>{stop.stopName || 'Stop'}</Text>
+                  <Text numberOfLines={1} style={[styles.optionText, toStopId === id && styles.optionTextActive]}>{stop.stopName || 'Điểm dừng'}</Text>
                 </Pressable>
               );
             })}
@@ -167,33 +232,84 @@ export default function WalkInTicketScreen() {
         </View>
 
         <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Ticket details</Text>
-          <Text style={styles.fieldLabel}>Passenger type</Text>
+          <Text style={styles.panelTitle}>Thông tin vé</Text>
+          <Text style={styles.fieldLabel}>Đối tượng hành khách</Text>
           <OptionRow values={passengerTypes} active={passengerType} onChange={setPassengerType} />
-          <Text style={styles.fieldLabel}>Ticket type</Text>
-          <OptionRow values={ticketTypes} active={ticketType} onChange={setTicketType} />
-          <Text style={styles.fieldLabel}>Payment</Text>
+          <Text style={styles.fieldLabel}>Phương thức thanh toán</Text>
           <OptionRow values={paymentMethods} active={paymentMethod} onChange={setPaymentMethod} />
           <View style={styles.inputRow}>
             <View style={styles.inputGroup}>
-              <Text style={styles.fieldLabel}>Quantity</Text>
-              <TextInput keyboardType="number-pad" onChangeText={setQuantity} style={styles.input} value={quantity} />
+              <Text style={styles.fieldLabel}>Số lượng</Text>
+              <TextInput keyboardType="number-pad" maxLength={2} onChangeText={setQuantity} style={styles.input} value={quantity} />
             </View>
             <View style={styles.inputGroup}>
-              <Text style={styles.fieldLabel}>Amount</Text>
-              <TextInput keyboardType="number-pad" onChangeText={setAmount} style={styles.input} value={amount} />
+              <Text style={styles.fieldLabel}>Tổng tiền</Text>
+              <View style={styles.readonlyInput}><Text style={styles.readonlyValue}>{money(total)}</Text></View>
             </View>
           </View>
-          <AppButton title="Create ticket" loading={isSubmitting} onPress={createTicket} />
+          {paymentMethod === 'CASH' ? (
+            <View style={styles.cashPanel}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>Khách đưa</Text>
+                <TextInput keyboardType="number-pad" onChangeText={setCashReceived} placeholder="0" placeholderTextColor={colors.muted} style={styles.input} value={cashReceived} />
+              </View>
+              <View style={styles.changeBlock}>
+                <Text style={styles.fieldLabel}>Tiền thối lại</Text>
+                <Text style={[styles.changeValue, cashInsufficient && cashReceived !== '' && styles.changeError]}>{money(changeAmount)}</Text>
+                {cashInsufficient && cashReceived !== '' ? <Text style={styles.insufficientText}>Số tiền khách đưa chưa đủ.</Text> : null}
+              </View>
+            </View>
+          ) : null}
+          <AppButton
+            disabled={!selectedTrip || !fromStopId || !toStopId || cashInsufficient}
+            title={paymentMethod === 'CASH' ? 'Thu tiền và tạo vé' : 'Tạo mã QR thanh toán'}
+            loading={isSubmitting}
+            onPress={createTicket}
+          />
         </View>
 
         {result ? (
-          <View style={[styles.panel, styles.bottomSpace]}>
-            <Text style={styles.panelTitle}>Last ticket</Text>
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>{result.qrCodeImage ? 'Mã QR cho hành khách' : 'Vé vừa tạo'}</Text>
+            {result.qrCodeImage ? <Image resizeMode="contain" source={{ uri: result.qrCodeImage }} style={styles.qrImage} /> : <MaterialCommunityIcons color={colors.accent} name="check-circle-outline" size={54} style={styles.successIcon} />}
+            {result.qrCodeImage ? <Text style={styles.qrHint}>Đưa mã này cho hành khách quét bằng điện thoại.</Text> : null}
             <Text style={styles.resultCode}>{result.ticketData?.ticketCode}</Text>
-            <Text style={styles.resultMeta}>{result.transactionData?.transactionCode} - {money(result.totalAmount || 0)}</Text>
+            <Text style={styles.resultAmount}>{money(result.totalAmount || 0)}</Text>
+            <View style={[styles.statusPill, result.requiresPaymentConfirmation ? styles.statusPending : styles.statusPaid]}>
+              <Text style={styles.statusText}>{result.requiresPaymentConfirmation ? 'Chờ thanh toán' : 'Đã thanh toán'}</Text>
+            </View>
+            {result.checkoutUrl ? <Pressable onPress={() => void Linking.openURL(result.checkoutUrl!)}><Text style={styles.payOsLink}>Mở trang thanh toán PayOS</Text></Pressable> : null}
+            {result.requiresPaymentConfirmation ? <AppButton title="Xác nhận đã nhận chuyển khoản" loading={isSubmitting} onPress={confirmPayment} /> : null}
+            <AppButton title="Tạo vé mới" variant="secondary" onPress={() => { setResult(null); setCashReceived(''); }} />
           </View>
-        ) : <View style={styles.bottomSpace} />}
+        ) : null}
+
+        <View style={[styles.panel, styles.bottomSpace]}>
+          <View style={styles.historyHeader}>
+            <View style={styles.historyTitleRow}>
+              <MaterialCommunityIcons color={colors.accent} name="calendar-clock" size={22} />
+              <View><Text style={styles.panelTitle}>Lịch sử bán vé</Text><Text style={styles.historyHint}>Xem lại vé đã bán theo ngày</Text></View>
+            </View>
+            <Pressable onPress={() => void loadHistory()} style={styles.refreshButton}>
+              {isLoadingHistory ? <ActivityIndicator color={colors.primary} size="small" /> : <MaterialCommunityIcons color={colors.primary} name="refresh" size={21} />}
+            </Pressable>
+          </View>
+          <TextInput onChangeText={setHistoryDate} placeholder="YYYY-MM-DD" style={styles.dateInput} value={historyDate} />
+          {isLoadingHistory ? <ActivityIndicator color={colors.primary} /> : history.tickets.length ? history.tickets.map((ticket) => (
+            <View key={ticket._id} style={styles.historyItem}>
+              <View style={styles.historyItemTop}>
+                <Text style={styles.historyCode}>{ticket.ticketCode || 'Vé'}</Text>
+                <Text style={styles.historyAmount}>{money(ticket.totalAmount || 0)}</Text>
+              </View>
+              <Text style={styles.historyMeta}>{ticket.issuedAt ? new Date(ticket.issuedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--'} · {ticket.routeCode || ticket.routeName || 'Chưa có tuyến'} · {ticket.passengerCount || 1} khách</Text>
+              <View style={styles.historyFooter}>
+                <Text style={styles.historyPayment}>{ticket.paymentMethod === 'CASH' ? 'Tiền mặt' : 'Chuyển khoản QR'}</Text>
+                <Text style={ticket.status === 'COMPLETED' ? styles.paidText : styles.pendingText}>{ticket.status === 'COMPLETED' ? 'Đã thanh toán' : 'Chờ thanh toán'}</Text>
+              </View>
+              {ticket.canResumePayment ? <AppButton title={resumingId === ticket._id ? 'Đang mở...' : 'Thanh toán lại'} disabled={Boolean(resumingId)} onPress={() => void resumePayment(ticket._id)} /> : null}
+            </View>
+          )) : <Text style={styles.emptyText}>Chưa có vé nào được bán trong ngày này.</Text>}
+        </View>
       </Screen>
       <RoleBottomNav active="sell" role={user?.role} />
     </View>
@@ -211,6 +327,8 @@ const styles = StyleSheet.create({
   totalMeta: { color: '#d7f4e6', fontSize: 13, fontWeight: '800' },
   panel: { gap: 12, borderRadius: 22, backgroundColor: colors.card, padding: 16, marginBottom: 14 },
   panelTitle: { color: colors.text, fontSize: 17, fontWeight: '900' },
+  panelHeadingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  reloadTripsButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 13, backgroundColor: colors.surfaceLow },
   optionColumn: { gap: 10 },
   tripChip: { borderRadius: 18, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, padding: 14 },
   tripChipActive: { borderColor: colors.primary, backgroundColor: colors.primary },
@@ -227,8 +345,38 @@ const styles = StyleSheet.create({
   inputRow: { flexDirection: 'row', gap: 12 },
   inputGroup: { flex: 1, gap: 8 },
   input: { minHeight: 52, borderRadius: 14, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, color: colors.text, paddingHorizontal: 14, fontSize: 16, fontWeight: '800' },
+  readonlyInput: { minHeight: 52, justifyContent: 'center', borderRadius: 14, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, paddingHorizontal: 14 },
+  readonlyValue: { color: colors.primary, fontSize: 16, fontWeight: '900' },
+  cashPanel: { flexDirection: 'row', gap: 12, borderWidth: 1, borderColor: '#ccebdc', borderRadius: 18, backgroundColor: '#effaf5', padding: 14 },
+  changeBlock: { flex: 1, justifyContent: 'center' },
+  changeValue: { marginTop: 5, color: colors.primary, fontSize: 22, fontWeight: '900' },
+  changeError: { color: colors.error },
+  insufficientText: { marginTop: 2, color: colors.error, fontSize: 10, fontWeight: '700' },
   resultCode: { color: colors.primary, fontSize: 20, fontWeight: '900' },
   resultMeta: { color: colors.muted, fontSize: 13, fontWeight: '800' },
+  resultAmount: { color: colors.primary, fontSize: 28, fontWeight: '900' },
+  qrImage: { width: '100%', aspectRatio: 1, alignSelf: 'center', borderRadius: 18, backgroundColor: colors.white },
+  qrHint: { textAlign: 'center', color: colors.muted, fontSize: 12, fontWeight: '700' },
+  successIcon: { alignSelf: 'center' },
+  statusPill: { alignSelf: 'flex-start', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 },
+  statusPending: { backgroundColor: '#fff0c2' },
+  statusPaid: { backgroundColor: '#d5f1e3' },
+  statusText: { color: colors.primary, fontSize: 11, fontWeight: '900' },
+  payOsLink: { textAlign: 'center', color: colors.accent, fontSize: 13, fontWeight: '900', textDecorationLine: 'underline' },
+  historyHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  historyTitleRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  historyHint: { marginTop: 2, color: colors.muted, fontSize: 11, fontWeight: '600' },
+  refreshButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: colors.surfaceLow },
+  dateInput: { minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, color: colors.text, paddingHorizontal: 14, fontSize: 14, fontWeight: '800' },
+  historyItem: { gap: 7, borderWidth: 1, borderColor: '#e0ebe6', borderRadius: 17, backgroundColor: '#fbfdfc', padding: 13 },
+  historyItemTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  historyCode: { flex: 1, color: colors.primary, fontSize: 13, fontWeight: '900' },
+  historyAmount: { color: colors.primary, fontSize: 14, fontWeight: '900' },
+  historyMeta: { color: colors.muted, fontSize: 11, lineHeight: 16, fontWeight: '700' },
+  historyFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  historyPayment: { color: colors.secondary, fontSize: 11, fontWeight: '800' },
+  paidText: { color: colors.accent, fontSize: 11, fontWeight: '900' },
+  pendingText: { color: '#a46300', fontSize: 11, fontWeight: '900' },
   emptyText: { color: colors.muted, fontSize: 13, fontWeight: '700' },
   bottomSpace: { marginBottom: 96 },
 });

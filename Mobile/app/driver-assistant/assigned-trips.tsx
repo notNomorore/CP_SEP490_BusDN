@@ -49,12 +49,12 @@ type BusAssistantIncidentForm = {
 };
 
 const filters: Array<{ key: FilterKey; label: string }> = [
-  { key: 'ALL', label: 'All' },
-  { key: 'TODAY', label: 'Today' },
-  { key: 'HISTORY', label: 'History' },
-  { key: 'UPCOMING', label: 'Upcoming' },
-  { key: 'COMPLETED', label: 'Completed' },
-  { key: 'DELAYED', label: 'Delayed' },
+  { key: 'ALL', label: 'Tất cả' },
+  { key: 'TODAY', label: 'Hôm nay' },
+  { key: 'HISTORY', label: 'Lịch sử' },
+  { key: 'UPCOMING', label: 'Sắp tới' },
+  { key: 'COMPLETED', label: 'Hoàn thành' },
+  { key: 'DELAYED', label: 'Bị trễ' },
 ];
 
 const matchesFilter = (trip: AssignedTrip, filter: FilterKey) => {
@@ -133,17 +133,17 @@ const actorCopy: Record<ActorKind, {
     prepareAction: 'Inspect Vehicle',
   },
   BUS_ASSISTANT: {
-    kicker: 'BUS ASSISTANT OPERATIONS',
-    title: 'Assistant Trips',
-    searchPlaceholder: 'Search route, trip ID, bus number',
-    countSuffix: 'assistant trips',
-    empty: 'No assistant trips match this filter.',
-    roleLabel: 'Bus Assistant',
-    acceptSuccessTitle: 'Trip accepted',
-    acceptSuccessMessage: 'The assigned assistant trip has been accepted.',
-    rejectReasonTitle: 'Reject assistant trip',
-    rejectReasonHint: 'Enter the reason so dispatch can assign another bus assistant.',
-    rejectPlaceholder: 'Rejection reason',
+    kicker: 'VẬN HÀNH PHỤ XE',
+    title: 'Chuyến được phân công',
+    searchPlaceholder: 'Tìm tuyến, mã chuyến hoặc biển số xe',
+    countSuffix: 'chuyến của phụ xe',
+    empty: 'Không có chuyến nào phù hợp với bộ lọc.',
+    roleLabel: 'Phụ xe',
+    acceptSuccessTitle: 'Đã nhận chuyến',
+    acceptSuccessMessage: 'Bạn đã nhận chuyến được phân công.',
+    rejectReasonTitle: 'Từ chối chuyến',
+    rejectReasonHint: 'Nhập lý do để điều hành phân công phụ xe khác.',
+    rejectPlaceholder: 'Lý do từ chối',
     startAction: '',
     prepareAction: '',
   },
@@ -158,47 +158,47 @@ const busAssistantIncidentOptions: Array<{
   {
     type: 'PASSENGER_VIOLATION',
     code: 'UC50',
-    title: 'Passenger Violation',
-    hint: 'Ticket, safety, or bus rule violation.',
+    title: 'Vi phạm của hành khách',
+    hint: 'Vi phạm về vé, an toàn hoặc nội quy xe.',
   },
   {
     type: 'PASSENGER_CONFLICT',
     code: 'UC51',
-    title: 'Passenger Conflict',
-    hint: 'Argument, dispute, or unsafe passenger conflict.',
+    title: 'Xung đột hành khách',
+    hint: 'Tranh cãi, tranh chấp hoặc xung đột thiếu an toàn.',
   },
   {
     type: 'FOUND_ITEM',
     code: 'UC52',
-    title: 'Found Item',
-    hint: 'Item found on the bus after the trip.',
+    title: 'Đồ thất lạc',
+    hint: 'Đồ vật được tìm thấy trên xe sau chuyến đi.',
   },
 ];
 
 const severityOptions: Array<{ value: IncidentSeverity; label: string }> = [
-  { value: 'LOW', label: 'Low' },
-  { value: 'MEDIUM', label: 'Medium' },
-  { value: 'HIGH', label: 'High' },
-  { value: 'CRITICAL', label: 'Critical' },
+  { value: 'LOW', label: 'Thấp' },
+  { value: 'MEDIUM', label: 'Trung bình' },
+  { value: 'HIGH', label: 'Cao' },
+  { value: 'CRITICAL', label: 'Khẩn cấp' },
 ];
 
 const violationCategories = [
-  { value: 'NO_TICKET', label: 'No ticket' },
-  { value: 'WRONG_TICKET', label: 'Wrong ticket' },
-  { value: 'SMOKING', label: 'Smoking' },
-  { value: 'LITTERING', label: 'Littering' },
-  { value: 'UNSAFE_BEHAVIOR', label: 'Unsafe behavior' },
-  { value: 'DISTURBANCE', label: 'Disturbance' },
-  { value: 'OTHER', label: 'Other' },
+  { value: 'NO_TICKET', label: 'Không có vé' },
+  { value: 'WRONG_TICKET', label: 'Sai vé' },
+  { value: 'SMOKING', label: 'Hút thuốc' },
+  { value: 'LITTERING', label: 'Xả rác' },
+  { value: 'UNSAFE_BEHAVIOR', label: 'Hành vi không an toàn' },
+  { value: 'DISTURBANCE', label: 'Gây rối' },
+  { value: 'OTHER', label: 'Khác' },
 ];
 
 const conflictCategories = [
-  { value: 'ARGUMENT', label: 'Argument' },
-  { value: 'FARE_DISPUTE', label: 'Fare dispute' },
-  { value: 'SEAT_DISPUTE', label: 'Seat dispute' },
-  { value: 'HARASSMENT', label: 'Harassment' },
-  { value: 'SAFETY_RISK', label: 'Safety risk' },
-  { value: 'OTHER', label: 'Other' },
+  { value: 'ARGUMENT', label: 'Tranh cãi' },
+  { value: 'FARE_DISPUTE', label: 'Tranh chấp giá vé' },
+  { value: 'SEAT_DISPUTE', label: 'Tranh chấp chỗ ngồi' },
+  { value: 'HARASSMENT', label: 'Quấy rối' },
+  { value: 'SAFETY_RISK', label: 'Nguy cơ an toàn' },
+  { value: 'OTHER', label: 'Khác' },
 ];
 
 const getDefaultIncidentForm = (tripStatus?: string): BusAssistantIncidentForm => ({
@@ -274,7 +274,7 @@ function BusAssistantIncidentPanel({
     if (isAccepted && tripStatus === 'SCHEDULED') {
       return (
         <View style={styles.assistantNotice}>
-          <Text style={styles.assistantNoticeText}>Accepted. Incident reporting opens when the trip is running.</Text>
+          <Text style={styles.assistantNoticeText}>Đã nhận chuyến. Bạn có thể báo cáo sự cố khi chuyến bắt đầu.</Text>
         </View>
       );
     }
@@ -287,22 +287,22 @@ function BusAssistantIncidentPanel({
 
   const validate = () => {
     if (form.description.trim().length < 10) {
-      Alert.alert('Missing description', 'Please describe the situation with at least 10 characters.');
+      Alert.alert('Thiếu mô tả', 'Vui lòng mô tả tình huống bằng ít nhất 10 ký tự.');
       return false;
     }
 
     if (form.type === 'PASSENGER_VIOLATION' && form.actionTaken.trim().length < 3) {
-      Alert.alert('Missing action', 'Please enter the action taken.');
+      Alert.alert('Thiếu cách xử lý', 'Vui lòng nhập cách bạn đã xử lý.');
       return false;
     }
 
     if (form.type === 'PASSENGER_CONFLICT' && form.actionTaken.trim().length < 3) {
-      Alert.alert('Missing action', 'Please enter the action taken.');
+      Alert.alert('Thiếu cách xử lý', 'Vui lòng nhập cách bạn đã xử lý.');
       return false;
     }
 
     if (form.type === 'FOUND_ITEM' && (form.itemName.trim().length < 2 || form.foundLocation.trim().length < 3)) {
-      Alert.alert('Missing item details', 'Please enter the item name and where it was found.');
+      Alert.alert('Thiếu thông tin đồ vật', 'Vui lòng nhập tên đồ vật và nơi tìm thấy.');
       return false;
     }
 
@@ -322,8 +322,8 @@ function BusAssistantIncidentPanel({
         <View style={styles.incidentTitleRow}>
           <MaterialCommunityIcons color={colors.error} name="alert-circle-outline" size={20} />
           <View style={styles.incidentTitleWrap}>
-            <Text style={styles.incidentTitle}>Incident Report</Text>
-            <Text style={styles.incidentHint}>UC50/UC51 while running. UC52 after completion.</Text>
+            <Text style={styles.incidentTitle}>Báo cáo sự cố</Text>
+            <Text style={styles.incidentHint}>UC50/UC51 khi đang chạy; UC52 sau khi hoàn thành.</Text>
           </View>
         </View>
         <Pressable
@@ -332,7 +332,7 @@ function BusAssistantIncidentPanel({
           onPress={() => setIsOpen((current) => !current)}
           style={[styles.reportToggle, isProcessing && styles.disabledChip]}
         >
-          <Text style={styles.reportToggleText}>{isOpen ? 'Close' : 'Report'}</Text>
+          <Text style={styles.reportToggleText}>{isOpen ? 'Đóng' : 'Báo cáo'}</Text>
         </Pressable>
       </View>
 
@@ -356,7 +356,7 @@ function BusAssistantIncidentPanel({
 
           {form.type !== 'FOUND_ITEM' ? (
             <View style={styles.fieldBlock}>
-              <FieldLabel>Severity</FieldLabel>
+              <FieldLabel>Mức độ</FieldLabel>
               <View style={styles.choiceRow}>
                 {severityOptions.map((severity) => (
                   <ChoiceChip
@@ -374,7 +374,7 @@ function BusAssistantIncidentPanel({
           {form.type === 'PASSENGER_VIOLATION' ? (
             <>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Violation Type</FieldLabel>
+                <FieldLabel>Loại vi phạm</FieldLabel>
                 <View style={styles.choiceRow}>
                   {violationCategories.map((category) => (
                     <ChoiceChip
@@ -388,7 +388,7 @@ function BusAssistantIncidentPanel({
                 </View>
               </View>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Passenger Description</FieldLabel>
+                <FieldLabel>Mô tả hành khách</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('passengerDescription', value)}
                   placeholder="Example: blue shirt near rear door"
@@ -403,7 +403,7 @@ function BusAssistantIncidentPanel({
           {form.type === 'PASSENGER_CONFLICT' ? (
             <>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Conflict Type</FieldLabel>
+                <FieldLabel>Loại xung đột</FieldLabel>
                 <View style={styles.choiceRow}>
                   {conflictCategories.map((category) => (
                     <ChoiceChip
@@ -417,7 +417,7 @@ function BusAssistantIncidentPanel({
                 </View>
               </View>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Parties Involved</FieldLabel>
+                <FieldLabel>Các bên liên quan</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('partiesInvolved', value)}
                   placeholder="Example: two passengers in middle seats"
@@ -432,7 +432,7 @@ function BusAssistantIncidentPanel({
           {form.type === 'FOUND_ITEM' ? (
             <>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Item Name</FieldLabel>
+                <FieldLabel>Tên đồ vật</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('itemName', value)}
                   placeholder="Example: black wallet"
@@ -442,7 +442,7 @@ function BusAssistantIncidentPanel({
                 />
               </View>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Found Location</FieldLabel>
+                <FieldLabel>Nơi tìm thấy</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('foundLocation', value)}
                   placeholder="Example: seat 12"
@@ -452,7 +452,7 @@ function BusAssistantIncidentPanel({
                 />
               </View>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Handed To</FieldLabel>
+                <FieldLabel>Đã bàn giao cho</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('handedTo', value)}
                   placeholder="Example: dispatch desk"
@@ -466,7 +466,7 @@ function BusAssistantIncidentPanel({
 
           {form.type !== 'FOUND_ITEM' ? (
             <View style={styles.fieldBlock}>
-              <FieldLabel>Action Taken</FieldLabel>
+              <FieldLabel>Cách đã xử lý</FieldLabel>
               <TextInput
                 onChangeText={(value) => updateForm('actionTaken', value)}
                 placeholder="Example: reminded passenger of bus rules"
@@ -478,7 +478,7 @@ function BusAssistantIncidentPanel({
           ) : null}
 
           <View style={styles.fieldBlock}>
-            <FieldLabel>Description</FieldLabel>
+            <FieldLabel>Mô tả</FieldLabel>
             <TextInput
               multiline
               onChangeText={(value) => updateForm('description', value)}
@@ -501,7 +501,7 @@ function BusAssistantIncidentPanel({
             ) : (
               <>
                 <MaterialCommunityIcons color={colors.white} name="send-outline" size={18} />
-                <Text style={styles.reportSubmitText}>Send Incident Report</Text>
+                <Text style={styles.reportSubmitText}>Gửi báo cáo sự cố</Text>
               </>
             )}
           </Pressable>
@@ -538,7 +538,7 @@ export default function AssignedTripsScreen() {
       const payload = await scheduleOperationsApi.getAssignedTrips(getAssignedTripsRange());
       setTrips(payload.trips || []);
     } catch (error) {
-      const message = getErrorMessage(error, 'Unable to load assigned trips.');
+      const message = getErrorMessage(error, 'Không thể tải các chuyến được phân công.');
       const statusCode = (error as { statusCode?: number; response?: { status?: number } })?.statusCode
         || (error as { response?: { status?: number } })?.response?.status;
       const isAuthError = statusCode === 401 || message.toLowerCase().includes('no token provided');
@@ -549,7 +549,7 @@ export default function AssignedTripsScreen() {
         return;
       }
 
-      Alert.alert('Unable to load assigned trips', message);
+      Alert.alert('Không thể tải chuyến', message);
     } finally {
       setIsLoading(false);
     }
@@ -634,7 +634,7 @@ export default function AssignedTripsScreen() {
       Alert.alert(copy.acceptSuccessTitle, copy.acceptSuccessMessage);
       await loadTrips();
     } catch (error) {
-      Alert.alert('Không thể tiếp nhận chuyến', getErrorMessage(error, 'Unable to accept assigned trip.'));
+      Alert.alert('Không thể tiếp nhận chuyến', getErrorMessage(error, 'Không thể tiếp nhận chuyến được phân công.'));
     } finally {
       setProcessingId('');
     }
@@ -657,7 +657,7 @@ export default function AssignedTripsScreen() {
       Alert.alert('Đã từ chối chuyến', 'Lý do từ chối đã được gửi về điều hành.');
       await loadTrips();
     } catch (error) {
-      Alert.alert('Không thể từ chối chuyến', getErrorMessage(error, 'Unable to reject assigned trip.'));
+      Alert.alert('Không thể từ chối chuyến', getErrorMessage(error, 'Không thể từ chối chuyến được phân công.'));
     } finally {
       setProcessingId('');
     }
@@ -668,7 +668,7 @@ export default function AssignedTripsScreen() {
     try {
       const locationText = form.type === 'FOUND_ITEM'
         ? form.foundLocation.trim()
-        : trip.route?.name || trip.route?.origin || trip.tripCode || 'Assigned trip';
+        : trip.route?.name || trip.route?.origin || trip.tripCode || 'Chuyến được phân công';
 
       await scheduleOperationsApi.reportOperationIncident(trip.id, {
         ...form,
@@ -676,10 +676,10 @@ export default function AssignedTripsScreen() {
         locationText,
       });
 
-      Alert.alert('Incident reported', 'The incident report has been sent to dispatch.');
+      Alert.alert('Đã báo cáo sự cố', 'Báo cáo sự cố đã được gửi đến bộ phận điều hành.');
       await loadTrips();
     } catch (error) {
-      Alert.alert('Unable to report incident', getErrorMessage(error, 'Unable to report incident.'));
+      Alert.alert('Không thể báo cáo sự cố', getErrorMessage(error, 'Không thể gửi báo cáo sự cố.'));
     } finally {
       setProcessingId('');
     }
@@ -689,7 +689,7 @@ export default function AssignedTripsScreen() {
     <View style={styles.screenShell}>
       <Screen>
       <View style={styles.header}>
-        <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+        <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
           <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
         </Pressable>
         <View>
@@ -701,7 +701,7 @@ export default function AssignedTripsScreen() {
       <View style={styles.searchBox}>
         <MaterialCommunityIcons color={colors.muted} name="magnify" size={22} />
         <TextInput
-          accessibilityLabel="Search assigned trips"
+          accessibilityLabel="Tìm chuyến được phân công"
           onChangeText={setSearch}
           placeholder={copy.searchPlaceholder}
           placeholderTextColor={colors.muted}
@@ -726,14 +726,14 @@ export default function AssignedTripsScreen() {
       </View>
       {!isLoading ? (
         <Text style={styles.resultText}>
-          Showing {filteredTrips.length} of {actorTrips.length} {copy.countSuffix}
+          Hiển thị {filteredTrips.length}/{actorTrips.length} {copy.countSuffix}
         </Text>
       ) : null}
 
       {isLoading ? (
         <View style={styles.loading}>
           <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Loading assigned trips...</Text>
+          <Text style={styles.loadingText}>Đang tải các chuyến được phân công...</Text>
         </View>
       ) : (
         <View style={styles.tripList}>
@@ -751,7 +751,7 @@ export default function AssignedTripsScreen() {
                 <View style={styles.tripCardHeader}>
                   <View>
                     <Text style={styles.tripCode}>{trip.tripCode || trip.id}</Text>
-                    <Text style={styles.routeName}>{trip.route?.name || 'Unnamed route'}</Text>
+                    <Text style={styles.routeName}>{trip.route?.name || 'Tuyến chưa có tên'}</Text>
                   </View>
                   <View style={styles.statusBadge}>
                     <Text style={styles.statusBadgeText}>{status}</Text>
@@ -759,17 +759,17 @@ export default function AssignedTripsScreen() {
                 </View>
 
                 <View style={styles.infoGrid}>
-                  <InfoLine label="Route ID" value={trip.route?.routeNumber || trip.route?.id} />
-                  <InfoLine label="Direction" value={trip.route?.direction} />
-                  <InfoLine label="Service Date" value={formatDate(trip.scheduledStart)} />
-                  <InfoLine label="Departure" value={formatTime(trip.scheduledStart)} />
-                  <InfoLine label="Arrival" value={formatTime(trip.scheduledEnd)} />
-                  {trip.actualStartAt ? <InfoLine label="Started" value={formatTime(trip.actualStartAt)} /> : null}
-                  {trip.actualEndAt ? <InfoLine label="Ended" value={formatTime(trip.actualEndAt)} /> : null}
-                  <InfoLine label="Bus Number" value={getTripVehicleLabel(trip)} />
-                  <InfoLine label="Driver" value={trip.driver?.fullName} />
-                  <InfoLine label="Bus Assistant" value={trip.busAssistant?.fullName} />
-                  <InfoLine label="Your Role" value={copy.roleLabel} />
+                  <InfoLine label="Mã tuyến" value={trip.route?.routeNumber || trip.route?.id} />
+                  <InfoLine label="Chiều chạy" value={trip.route?.direction} />
+                  <InfoLine label="Ngày chạy" value={formatDate(trip.scheduledStart)} />
+                  <InfoLine label="Giờ khởi hành" value={formatTime(trip.scheduledStart)} />
+                  <InfoLine label="Giờ đến" value={formatTime(trip.scheduledEnd)} />
+                  {trip.actualStartAt ? <InfoLine label="Đã bắt đầu" value={formatTime(trip.actualStartAt)} /> : null}
+                  {trip.actualEndAt ? <InfoLine label="Đã kết thúc" value={formatTime(trip.actualEndAt)} /> : null}
+                  <InfoLine label="Xe buýt" value={getTripVehicleLabel(trip)} />
+                  <InfoLine label="Tài xế" value={trip.driver?.fullName} />
+                  <InfoLine label="Phụ xe" value={trip.busAssistant?.fullName} />
+                  <InfoLine label="Vai trò của bạn" value={copy.roleLabel} />
                 </View>
 
                 {hasVehicleReplacement(trip) ? (

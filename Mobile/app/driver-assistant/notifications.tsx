@@ -32,7 +32,7 @@ export default function DriverNotificationsScreen() {
       const payload = await scheduleOperationsApi.getOperationNotifications(getWeekRange());
       setNotifications(payload.notifications || []);
     } catch (error) {
-      Alert.alert('Unable to load notifications', getErrorMessage(error, 'Unable to load operation notifications.'));
+      Alert.alert('Không thể tải thông báo', getErrorMessage(error, 'Không thể tải thông báo vận hành.'));
     } finally {
       refresh ? setIsRefreshing(false) : setIsLoading(false);
     }
@@ -51,15 +51,15 @@ export default function DriverNotificationsScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+          <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View style={styles.headerText}>
-            <Text style={styles.kicker}>SCHEDULE & ASSIGNMENT</Text>
-            <Text style={styles.title}>Driver Notifications</Text>
+            <Text style={styles.kicker}>LỊCH VÀ PHÂN CÔNG</Text>
+            <Text style={styles.title}>Thông báo vận hành</Text>
           </View>
           <Pressable
-            accessibilityLabel="Refresh notifications"
+            accessibilityLabel="Làm mới thông báo"
             disabled={isRefreshing}
             hitSlop={8}
             onPress={() => void loadNotifications(true)}
@@ -75,7 +75,7 @@ export default function DriverNotificationsScreen() {
 
         <View style={styles.summaryCard}>
           <View>
-            <Text style={styles.summaryLabel}>Unread alerts</Text>
+            <Text style={styles.summaryLabel}>Thông báo chưa đọc</Text>
             <Text style={styles.summaryValue}>{unreadCount}</Text>
           </View>
           <MaterialCommunityIcons color="rgba(43,164,113,0.14)" name="bell-badge-outline" size={64} />
@@ -84,12 +84,12 @@ export default function DriverNotificationsScreen() {
         {isLoading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.primary} />
-            <Text style={styles.loadingText}>Loading operation notifications...</Text>
+            <Text style={styles.loadingText}>Đang tải thông báo vận hành...</Text>
           </View>
         ) : (
           <View style={styles.notificationList}>
             {notifications.length === 0 ? (
-              <Text style={styles.emptyText}>No operation notifications in this period.</Text>
+              <Text style={styles.emptyText}>Không có thông báo vận hành trong khoảng thời gian này.</Text>
             ) : notifications.map((notification) => {
               const tone = priorityColor(notification.priority);
               return (
@@ -104,8 +104,8 @@ export default function DriverNotificationsScreen() {
                       </View>
                       {!notification.isRead ? <View style={styles.unreadDot} /> : null}
                     </View>
-                    <Text style={styles.notificationTitle}>{notification.title || 'Operation notification'}</Text>
-                    <Text style={styles.notificationMessage}>{notification.message || 'No message provided.'}</Text>
+                    <Text style={styles.notificationTitle}>{notification.title || 'Thông báo vận hành'}</Text>
+                    <Text style={styles.notificationMessage}>{notification.message || 'Không có nội dung.'}</Text>
                     <View style={styles.metaRow}>
                       <MaterialCommunityIcons color={colors.muted} name="clock-outline" size={15} />
                       <Text style={styles.metaText}>

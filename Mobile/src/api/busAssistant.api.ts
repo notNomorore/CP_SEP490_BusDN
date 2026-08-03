@@ -7,6 +7,7 @@ import type {
   ValidateTicketPayload,
   ValidationHistoryPayload,
   WalkInTicketPayload,
+  WalkInTicketHistory,
   WalkInTicketResult,
 } from '@/types/busAssistant';
 
@@ -32,6 +33,21 @@ export const busAssistantApi = {
 
   createWalkInTicket: async (payload: WalkInTicketPayload): Promise<WalkInTicketResult> => {
     const response = await apiClient.post('/bus-assistant/walkin-tickets', payload) as unknown as ApiEnvelope<WalkInTicketResult>;
+    return response.data;
+  },
+
+  confirmWalkInPayment: async (ticketId: string): Promise<WalkInTicketResult> => {
+    const response = await apiClient.patch(`/bus-assistant/walkin-tickets/${ticketId}/confirm-payment`) as unknown as ApiEnvelope<WalkInTicketResult>;
+    return response.data;
+  },
+
+  getWalkInTicketHistory: async (params: { date?: string } = {}): Promise<WalkInTicketHistory> => {
+    const response = await apiClient.get('/bus-assistant/walkin-tickets/history', { params: cleanParams(params) }) as unknown as ApiEnvelope<WalkInTicketHistory>;
+    return response.data;
+  },
+
+  resumeWalkInPayment: async (ticketId: string): Promise<WalkInTicketResult> => {
+    const response = await apiClient.get(`/bus-assistant/walkin-tickets/${ticketId}/resume-payment`) as unknown as ApiEnvelope<WalkInTicketResult>;
     return response.data;
   },
 

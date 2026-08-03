@@ -26,15 +26,6 @@ type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 const route = (pathname: string) => pathname as Href;
 
-function StatPill({ label, value }: { label: string; value: string | number }) {
-  return (
-    <View style={styles.statPill}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
 function ActionTile({
   title,
   subtitle,
@@ -57,8 +48,16 @@ function ActionTile({
       <View style={[styles.actionIcon, primary && styles.actionIconPrimary]}>
         <MaterialCommunityIcons color={primary ? colors.white : colors.primary} name={icon} size={26} />
       </View>
-      <Text style={[styles.actionTitle, primary && styles.actionTitlePrimary]}>{title}</Text>
-      <Text style={[styles.actionSubtitle, primary && styles.actionSubtitlePrimary]}>{subtitle}</Text>
+      <View style={styles.actionTextBlock}>
+        <Text style={[styles.actionTitle, primary && styles.actionTitlePrimary]}>{title}</Text>
+        <Text numberOfLines={2} style={[styles.actionSubtitle, primary && styles.actionSubtitlePrimary]}>{subtitle}</Text>
+      </View>
+      <MaterialCommunityIcons
+        color={primary ? 'rgba(255,255,255,0.8)' : colors.outline}
+        name="chevron-right"
+        size={20}
+        style={styles.actionArrow}
+      />
     </Pressable>
   );
 }
@@ -106,7 +105,7 @@ export default function DriverBusAssistantHomeScreen() {
       setShifts(shiftsPayload.shifts || []);
       setRevenue(revenuePayload);
     } catch (error) {
-      const message = getErrorMessage(error, 'Unable to load schedule and assignment data.');
+      const message = getErrorMessage(error, 'Không thể tải lịch làm việc và chuyến được phân công.');
       const statusCode = (error as { statusCode?: number; response?: { status?: number } })?.statusCode
         || (error as { response?: { status?: number } })?.response?.status;
       const isAuthError = statusCode === 401 || message.toLowerCase().includes('no token provided');
@@ -117,7 +116,7 @@ export default function DriverBusAssistantHomeScreen() {
         return;
       }
 
-      Alert.alert('Unable to load dashboard', message);
+      Alert.alert('Không thể tải trang chủ', message);
     } finally {
       setIsLoading(false);
     }
@@ -140,10 +139,9 @@ export default function DriverBusAssistantHomeScreen() {
   }, [isAuthenticated, isHydrated, loadDashboard, user?.role]);
 
   const todaysTrips = useMemo(() => trips.filter(isTripToday), [trips]);
-  const completedCount = useMemo(() => trips.filter(isTripCompleted).length, [trips]);
   const nextTrip = todaysTrips.find((trip) => !isTripCompleted(trip)) || todaysTrips[0] || null;
   const upcomingShift = shifts[0] || null;
-  const displayName = user?.fullName || (isDriver ? 'Driver' : 'Bus Assistant');
+  const displayName = user?.fullName || (isDriver ? 'Tài xế' : 'Phụ xe');
 
   const openInspection = (trip: AssignedTrip) => {
     router.push({
@@ -168,9 +166,9 @@ export default function DriverBusAssistantHomeScreen() {
         openInspection(updated);
         return;
       }
-      Alert.alert('Trip accepted', 'The assigned trip has been accepted.');
+      Alert.alert('Đã nhận chuyến', 'Bạn đã nhận chuyến được phân công.');
     } catch (error) {
-      Alert.alert('Unable to accept trip', getErrorMessage(error, 'Unable to accept this assigned trip.'));
+      Alert.alert('Không thể nhận chuyến', getErrorMessage(error, 'Không thể nhận chuyến được phân công này.'));
     } finally {
       setProcessingId('');
     }
@@ -190,30 +188,33 @@ export default function DriverBusAssistantHomeScreen() {
                 {user?.avatar ? <Image source={{ uri: user.avatar }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>{displayName.slice(0, 1).toUpperCase()}</Text>}
               </View>
               <View>
-                <Text style={styles.brand}>BusDN Crew</Text>
+                <Text style={styles.brand}>Đội ngũ BusDN</Text>
                 <Text style={styles.dateText}>{formatDate(new Date().toISOString())}</Text>
               </View>
             </View>
-            <Pressable accessibilityLabel="Open notifications" onPress={() => router.push(route('/driver-assistant/notifications'))} style={styles.notificationButton}>
+            <Pressable accessibilityLabel="Mở thông báo" onPress={() => router.push(route('/driver-assistant/notifications'))} style={styles.notificationButton}>
               {isLoading ? <ActivityIndicator color={colors.primary} size="small" /> : <MaterialCommunityIcons color={colors.accent} name="bell-outline" size={22} />}
             </Pressable>
           </View>
 
           <View style={styles.heroCard}>
-            <Text style={styles.heroKicker}>TODAY'S WORK</Text>
-            <Text style={styles.heroTitle}>Hi, {displayName}</Text>
-            <View style={styles.statsRow}>
-              <StatPill label="Trips" value={todaysTrips.length} />
-              <StatPill label="Done" value={completedCount} />
-              <StatPill label={isDriver ? 'Shifts' : 'Sales'} value={isDriver ? shifts.length : revenue?.totalTicketsSold || 0} />
+            <View style={styles.greetingRow}>
+              <View style={styles.greetingText}>
+                <Text style={styles.heroKicker}>TỔNG QUAN HÔM NAY</Text>
+                <Text numberOfLines={1} style={styles.heroTitle}>Xin chào, {displayName}</Text>
+                <Text style={styles.heroSubtitle}>Chúc bạn có một ca làm việc thuận lợi.</Text>
+              </View>
+              <View style={styles.greetingIcon}>
+                <MaterialCommunityIcons color={colors.accent} name="hand-wave-outline" size={26} />
+              </View>
             </View>
           </View>
 
           <View style={styles.nextCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Next assignment</Text>
+              <Text style={styles.sectionTitle}>Chuyến tiếp theo</Text>
               <Pressable onPress={() => router.push(route('/driver-assistant/assigned-trips'))}>
-                <Text style={styles.linkText}>All trips</Text>
+                <Text style={styles.linkText}>Tất cả chuyến</Text>
               </Pressable>
             </View>
             {nextTrip ? (
@@ -226,8 +227,8 @@ export default function DriverBusAssistantHomeScreen() {
                   <MaterialCommunityIcons color={colors.primary} name="bus-clock" size={25} />
                 </View>
                 <View style={styles.nextContent}>
-                  <Text style={styles.routeBadge}>{nextTrip.route?.routeNumber || nextTrip.tripCode || 'Trip'}</Text>
-                  <Text style={styles.nextTitle}>{nextTrip.route?.origin || 'Origin'} - {nextTrip.route?.destination || 'Destination'}</Text>
+                  <Text style={styles.routeBadge}>{nextTrip.route?.routeNumber || nextTrip.tripCode || 'Chuyến'}</Text>
+                  <Text style={styles.nextTitle}>{nextTrip.route?.origin || 'Điểm đầu'} - {nextTrip.route?.destination || 'Điểm cuối'}</Text>
                   <Text style={styles.nextMeta}>{formatTime(nextTrip.scheduledStart)} - {getTripVehicleLabel(nextTrip)} - {getTripStatus(nextTrip)}</Text>
                 </View>
                 {isDriver && canAcceptTrip(nextTrip) ? (
@@ -247,7 +248,7 @@ export default function DriverBusAssistantHomeScreen() {
                     {processingId === nextTrip.id ? (
                       <ActivityIndicator color={colors.white} size="small" />
                     ) : (
-                      <Text style={styles.startButtonText}>ACCEPT</Text>
+                      <Text style={styles.startButtonText}>NHẬN CHUYẾN</Text>
                     )}
                   </Pressable>
                 ) : isDriver && getAcceptanceStatus(nextTrip) === 'ACCEPTED' && !isTripCompleted(nextTrip) ? (
@@ -264,7 +265,7 @@ export default function DriverBusAssistantHomeScreen() {
                     style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}
                   >
                     <Text style={styles.startButtonText}>
-                      {nextTrip.inspection?.status === 'READY' ? 'START' : 'INSPECT'}
+                      {nextTrip.inspection?.status === 'READY' ? 'BẮT ĐẦU' : 'KIỂM TRA'}
                     </Text>
                   </Pressable>
                 ) : canAcceptTrip(nextTrip) ? (
@@ -284,45 +285,49 @@ export default function DriverBusAssistantHomeScreen() {
                     {processingId === nextTrip.id ? (
                       <ActivityIndicator color={colors.white} size="small" />
                     ) : (
-                      <Text style={styles.startButtonText}>ACCEPT</Text>
+                      <Text style={styles.startButtonText}>NHẬN CHUYẾN</Text>
                     )}
                   </Pressable>
                 ) : (
                   <MaterialCommunityIcons color={colors.muted} name="chevron-right" size={24} />
                 )}
               </Pressable>
-            ) : <Text style={styles.emptyText}>No next assignment for today.</Text>}
-          </View>
-
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Core actions</Text>
-          </View>
-          <View style={styles.actionGrid}>
-            {isDriver ? (
-              <>
-                <ActionTile title="Assigned trips" subtitle="Review routes and start work" icon="bus-clock" href={assignedTripsRoute} primary />
-                <ActionTile title={upcomingShift?.shiftName || 'Shift schedule'} subtitle="View work hours and assignments" icon="calendar-month-outline" href={shiftScheduleRoute} />
-                <ActionTile title="Operation chat" subtitle="Message dispatch and crew" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
-              </>
             ) : (
-              <>
-                <ActionTile title="Validate ticket" subtitle="Check QR or ticket code" icon="qrcode-scan" href={route('/driver-assistant/validate-ticket')} primary />
-                <ActionTile title="Sell ticket" subtitle="Create onboard cash/QR ticket" icon="ticket-confirmation-outline" href={route('/driver-assistant/walkin-ticket')} />
-                <ActionTile title="Shift revenue" subtitle={`${revenue?.totalRevenue ? new Intl.NumberFormat('vi-VN').format(revenue.totalRevenue) : 0} VND today`} icon="cash-register" href={route('/driver-assistant/shift-revenue')} />
-                <ActionTile title="Submit summary" subtitle="Close shift cashbox" icon="clipboard-check-outline" href={route('/driver-assistant/revenue-summary')} />
-              </>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => router.push(assignedTripsRoute)}
+                style={({ pressed }) => [styles.emptyTripButton, pressed && styles.pressed]}
+              >
+                <View style={styles.emptyTripIcon}>
+                  <MaterialCommunityIcons color={colors.primary} name="bus-clock" size={24} />
+                </View>
+                <View style={styles.emptyTripContent}>
+                  <Text style={styles.emptyTripTitle}>Xem các chuyến được phân công</Text>
+                  <Text style={styles.emptyTripSubtitle}>Hôm nay chưa có chuyến tiếp theo</Text>
+                </View>
+                <MaterialCommunityIcons color={colors.muted} name="chevron-right" size={23} />
+              </Pressable>
             )}
           </View>
 
-          {isBusAssistant ? (
-            <View style={styles.operationsSection}>
-              <Text style={styles.sectionTitle}>Operations</Text>
-              <View style={styles.actionGrid}>
-                <ActionTile title={upcomingShift?.shiftName || 'Shift schedule'} subtitle="View work hours and assignments" icon="calendar-month-outline" href={shiftScheduleRoute} />
-                <ActionTile title="Operation chat" subtitle="Message dispatch and crew" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
-              </View>
-            </View>
-          ) : null}
+          <View style={styles.actionGrid}>
+            {isDriver ? (
+              <>
+                <ActionTile title="Chuyến được phân công" subtitle="Kiểm tra tuyến và bắt đầu công việc" icon="bus-clock" href={assignedTripsRoute} primary />
+                <ActionTile title={upcomingShift?.shiftName || 'Lịch ca làm'} subtitle="Xem giờ làm và nhiệm vụ" icon="calendar-month-outline" href={shiftScheduleRoute} />
+                <ActionTile title="Trò chuyện vận hành" subtitle="Trao đổi với điều hành và đồng đội" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
+              </>
+            ) : (
+              <>
+                <ActionTile title="Kiểm tra vé" subtitle="Quét QR hoặc nhập mã vé" icon="qrcode-scan" href={route('/driver-assistant/validate-ticket')} primary />
+                <ActionTile title="Bán vé" subtitle="Tạo vé tiền mặt hoặc chuyển khoản" icon="ticket-confirmation-outline" href={route('/driver-assistant/walkin-ticket')} />
+                <ActionTile title="Doanh thu ca" subtitle={`${revenue?.totalRevenue ? new Intl.NumberFormat('vi-VN').format(revenue.totalRevenue) : 0} đồng hôm nay`} icon="cash-register" href={route('/driver-assistant/shift-revenue')} />
+                <ActionTile title="Chuyến" subtitle="Xem các chuyến được phân công" icon="bus-clock" href={assignedTripsRoute} />
+                <ActionTile title={upcomingShift?.shiftName || 'Lịch ca làm'} subtitle="Xem giờ làm và nhiệm vụ" icon="calendar-month-outline" href={shiftScheduleRoute} />
+                <ActionTile title="Trò chuyện vận hành" subtitle="Trao đổi với điều hành và đồng đội" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
+              </>
+            )}
+          </View>
         </ScrollView>
         <RoleBottomNav active="home" role={user?.role} />
       </View>
@@ -331,28 +336,28 @@ export default function DriverBusAssistantHomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#f7f8fb' },
-  screen: { flex: 1, backgroundColor: '#f7f8fb' },
-  scrollContent: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 16, paddingTop: 10 },
-  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  safeArea: { flex: 1, backgroundColor: '#f5f8f6' },
+  screen: { flex: 1, backgroundColor: '#f5f8f6' },
+  scrollContent: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 16, paddingTop: 8 },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   profileRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  avatar: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 20, borderWidth: 2, borderColor: 'rgba(43,164,113,0.25)', backgroundColor: colors.surfaceHigh },
+  avatar: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 22, borderWidth: 2, borderColor: '#bde6d2', backgroundColor: '#e8f7ef' },
   avatarImage: { width: '100%', height: '100%' },
   avatarText: { color: colors.primary, fontSize: 16, fontWeight: '900' },
-  brand: { color: colors.accent, fontSize: 18, fontWeight: '900' },
-  dateText: { color: colors.muted, fontSize: 12, fontWeight: '700' },
-  notificationButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 21, backgroundColor: colors.card },
-  heroCard: { gap: 14, borderRadius: 26, backgroundColor: colors.primary, padding: 20, marginBottom: 14 },
-  heroKicker: { color: '#aff4d1', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
-  heroTitle: { color: colors.white, fontSize: 28, lineHeight: 34, fontWeight: '900' },
-  statsRow: { flexDirection: 'row', gap: 9 },
-  statPill: { flex: 1, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.12)', padding: 12 },
-  statValue: { color: colors.white, fontSize: 21, fontWeight: '900' },
-  statLabel: { marginTop: 2, color: '#d4f2e5', fontSize: 11, fontWeight: '800' },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  sectionTitle: { color: colors.text, fontSize: 17, fontWeight: '900' },
+  brand: { color: colors.primary, fontSize: 17, fontWeight: '900' },
+  dateText: { marginTop: 1, color: colors.muted, fontSize: 11, fontWeight: '700' },
+  notificationButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, borderWidth: 1, borderColor: '#e2ebe6', backgroundColor: colors.card },
+  heroCard: { gap: 16, marginBottom: 18 },
+  greetingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 2 },
+  greetingText: { minWidth: 0, flex: 1 },
+  greetingIcon: { width: 50, height: 50, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: '#e1f6eb' },
+  heroKicker: { color: colors.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1.1 },
+  heroTitle: { marginTop: 4, color: colors.primary, fontSize: 25, lineHeight: 31, fontWeight: '900' },
+  heroSubtitle: { marginTop: 3, color: colors.muted, fontSize: 12, fontWeight: '600' },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, paddingHorizontal: 2 },
+  sectionTitle: { color: colors.text, fontSize: 18, fontWeight: '900' },
   linkText: { color: colors.accent, fontSize: 13, fontWeight: '900' },
-  nextCard: { borderRadius: 22, backgroundColor: colors.card, padding: 16, marginBottom: 18 },
+  nextCard: { borderWidth: 1, borderColor: '#cde8da', borderRadius: 20, backgroundColor: '#fafffc', padding: 16, marginBottom: 22 },
   nextRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   nextIcon: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 24, backgroundColor: '#d4f2e5' },
   nextContent: { flex: 1, minWidth: 0 },
@@ -362,16 +367,22 @@ const styles = StyleSheet.create({
   startButton: { minWidth: 72, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: colors.accent, paddingHorizontal: 14 },
   disabledButton: { opacity: 0.55 },
   startButtonText: { color: colors.white, fontSize: 12, fontWeight: '900' },
-  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 18 },
-  actionTile: { width: '48%', minHeight: 156, justifyContent: 'space-between', borderRadius: 22, borderWidth: 1, borderColor: '#e1e2e5', backgroundColor: colors.card, padding: 16 },
-  actionTilePrimary: { borderColor: colors.accent, backgroundColor: colors.accent },
-  actionIcon: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: '#d4f2e5' },
+  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
+  actionTile: { position: 'relative', width: '48.6%', minHeight: 140, borderRadius: 19, borderWidth: 1, borderColor: '#dfe7e3', backgroundColor: colors.card, padding: 13 },
+  actionTilePrimary: { borderColor: colors.accent, backgroundColor: '#35b97b' },
+  actionIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 13, backgroundColor: '#d9f4e7' },
   actionIconPrimary: { backgroundColor: 'rgba(255,255,255,0.18)' },
-  actionTitle: { color: colors.text, fontSize: 18, lineHeight: 22, fontWeight: '900' },
+  actionTextBlock: { flex: 1, justifyContent: 'flex-end', paddingTop: 10, paddingRight: 8 },
+  actionTitle: { color: colors.text, fontSize: 15, lineHeight: 19, fontWeight: '900' },
   actionTitlePrimary: { color: colors.white },
-  actionSubtitle: { color: colors.muted, fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  actionSubtitle: { marginTop: 3, color: colors.muted, fontSize: 10, lineHeight: 14, fontWeight: '700' },
   actionSubtitlePrimary: { color: '#d6f8e5' },
-  operationsSection: { gap: 12 },
-  emptyText: { borderRadius: 16, backgroundColor: colors.surfaceLow, padding: 14, color: colors.muted, fontSize: 13, fontWeight: '700' },
+  actionArrow: { position: 'absolute', right: 12, top: 23 },
+  emptyText: { borderRadius: 15, backgroundColor: '#edf6f2', paddingHorizontal: 14, paddingVertical: 13, color: colors.muted, fontSize: 13, fontWeight: '700' },
+  emptyTripButton: { minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 17, backgroundColor: '#edf6f2', paddingHorizontal: 13, paddingVertical: 12 },
+  emptyTripIcon: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: '#d5f1e3' },
+  emptyTripContent: { minWidth: 0, flex: 1 },
+  emptyTripTitle: { color: colors.primary, fontSize: 14, fontWeight: '900' },
+  emptyTripSubtitle: { marginTop: 3, color: colors.muted, fontSize: 11, lineHeight: 15, fontWeight: '700' },
   pressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
 });

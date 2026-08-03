@@ -36,7 +36,7 @@ export default function ShiftRevenueScreen() {
       const data = await busAssistantApi.getShiftRevenue({ date: toDateInput() });
       setRevenue(data);
     } catch (error) {
-      Alert.alert('Unable to load revenue', getErrorMessage(error, 'Unable to load shift revenue.'));
+      Alert.alert('Không thể tải doanh thu', getErrorMessage(error, 'Không thể tải doanh thu ca.'));
     } finally {
       setIsLoading(false);
     }
@@ -50,14 +50,14 @@ export default function ShiftRevenueScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+          <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View style={styles.headerText}>
-            <Text style={styles.kicker}>SHIFT CASHBOX</Text>
-            <Text style={styles.title}>Shift Revenue</Text>
+            <Text style={styles.kicker}>DOANH THU CA</Text>
+            <Text style={styles.title}>Doanh thu ca</Text>
           </View>
-          <Pressable accessibilityLabel="Refresh" hitSlop={10} onPress={() => void loadRevenue()}>
+          <Pressable accessibilityLabel="Tải lại" hitSlop={10} onPress={() => void loadRevenue()}>
             <MaterialCommunityIcons color={colors.primary} name="refresh" size={24} />
           </Pressable>
         </View>
@@ -65,51 +65,51 @@ export default function ShiftRevenueScreen() {
         {isLoading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.primary} />
-            <Text style={styles.emptyText}>Loading shift revenue...</Text>
+            <Text style={styles.emptyText}>Đang tải doanh thu ca...</Text>
           </View>
         ) : (
           <>
             <View style={styles.heroCard}>
-              <Text style={styles.heroLabel}>{revenue?.shiftInfo?.shiftName || revenue?.shiftInfo?.shiftCode || 'Current shift'}</Text>
+              <Text style={styles.heroLabel}>{revenue?.shiftInfo?.shiftName || revenue?.shiftInfo?.shiftCode || 'Ca hiện tại'}</Text>
               <Text style={styles.heroValue}>{money(revenue?.totalRevenue)}</Text>
-              <Text style={styles.heroMeta}>{revenue?.totalTicketsSold || 0} walk-in tickets - {revenue?.validatedETickets || 0} validated e-tickets</Text>
+              <Text style={styles.heroMeta}>{revenue?.totalTicketsSold || 0} vé trực tiếp - {revenue?.validatedETickets || 0} vé điện tử đã kiểm tra</Text>
             </View>
 
             <View style={styles.metricGrid}>
-              <Metric label="Cash" value={money(revenue?.cashCollected)} accent />
-              <Metric label="E-payment" value={money(revenue?.ePaymentAmount)} />
-              <Metric label="Discount" value={money(revenue?.discountAmount)} />
-              <Metric label="Tickets" value={revenue?.totalTicketsSold || 0} />
+              <Metric label="Tiền mặt" value={money(revenue?.cashCollected)} accent />
+              <Metric label="Thanh toán điện tử" value={money(revenue?.ePaymentAmount)} />
+              <Metric label="Giảm giá" value={money(revenue?.discountAmount)} />
+              <Metric label="Số vé" value={revenue?.totalTicketsSold || 0} />
             </View>
 
             <View style={styles.panel}>
-              <Text style={styles.panelTitle}>By ticket type</Text>
+              <Text style={styles.panelTitle}>Theo loại vé</Text>
               {(revenue?.revenueBreakdown || []).length ? revenue?.revenueBreakdown?.map((item) => (
                 <View key={item.ticketType} style={styles.row}>
                   <View>
                     <Text style={styles.rowTitle}>{item.ticketType}</Text>
-                    <Text style={styles.rowMeta}>{item.tickets} ticket(s)</Text>
+                    <Text style={styles.rowMeta}>{item.tickets} vé</Text>
                   </View>
                   <Text style={styles.rowAmount}>{money(item.revenue)}</Text>
                 </View>
-              )) : <Text style={styles.emptyText}>No ticket sales yet.</Text>}
+              )) : <Text style={styles.emptyText}>Chưa có vé nào được bán.</Text>}
             </View>
 
             <View style={styles.panel}>
-              <Text style={styles.panelTitle}>Payment methods</Text>
+              <Text style={styles.panelTitle}>Phương thức thanh toán</Text>
               {(revenue?.paymentMethodBreakdown || []).length ? revenue?.paymentMethodBreakdown?.map((item) => (
                 <View key={item.paymentMethod} style={styles.row}>
                   <View>
                     <Text style={styles.rowTitle}>{item.paymentMethod.replace('_', ' ')}</Text>
-                    <Text style={styles.rowMeta}>{item.transactions} transaction(s)</Text>
+                    <Text style={styles.rowMeta}>{item.transactions} giao dịch</Text>
                   </View>
                   <Text style={styles.rowAmount}>{money(item.amount)}</Text>
                 </View>
-              )) : <Text style={styles.emptyText}>No payment records yet.</Text>}
+              )) : <Text style={styles.emptyText}>Chưa có giao dịch thanh toán.</Text>}
             </View>
 
             <View style={styles.panel}>
-              <Text style={styles.panelTitle}>Recent transactions</Text>
+              <Text style={styles.panelTitle}>Giao dịch gần đây</Text>
               {(revenue?.recentTransactions || []).length ? revenue?.recentTransactions?.map((item) => (
                 <View key={item._id} style={styles.row}>
                   <View style={styles.rowText}>
@@ -118,11 +118,11 @@ export default function ShiftRevenueScreen() {
                   </View>
                   <Text style={styles.rowAmount}>{money(item.amount)}</Text>
                 </View>
-              )) : <Text style={styles.emptyText}>No recent transactions.</Text>}
+              )) : <Text style={styles.emptyText}>Chưa có giao dịch gần đây.</Text>}
             </View>
 
             <View style={styles.bottomSpace}>
-              <AppButton title="Submit end-of-shift summary" onPress={() => router.push('/driver-assistant/revenue-summary')} />
+              <AppButton title="Chốt doanh thu cuối ca" onPress={() => router.push('/driver-assistant/revenue-summary')} />
             </View>
           </>
         )}

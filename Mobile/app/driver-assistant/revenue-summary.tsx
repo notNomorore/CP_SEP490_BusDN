@@ -35,7 +35,7 @@ export default function RevenueSummaryScreen() {
       setRevenue(data);
       setActualAmount(String(Math.round(Number(data.totalRevenue) || 0)));
     } catch (error) {
-      Alert.alert('Unable to load revenue', getErrorMessage(error, 'Unable to load shift revenue.'));
+      Alert.alert('Không thể tải doanh thu', getErrorMessage(error, 'Không thể tải doanh thu ca.'));
     } finally {
       setIsLoading(false);
     }
@@ -47,7 +47,7 @@ export default function RevenueSummaryScreen() {
 
   const submitSummary = async () => {
     if (!shiftId) {
-      Alert.alert('Missing shift', 'No active assigned shift was found for this summary.');
+      Alert.alert('Thiếu thông tin ca', 'Không tìm thấy ca đang hoạt động để chốt doanh thu.');
       return;
     }
 
@@ -59,9 +59,9 @@ export default function RevenueSummaryScreen() {
         note,
         attachmentUrls: [],
       });
-      Alert.alert('Summary submitted', result.message || `Status: ${result.reconciliationStatus || 'submitted'}`);
+      Alert.alert('Đã nộp báo cáo', result.message || `Trạng thái: ${result.reconciliationStatus || 'đã nộp'}`);
     } catch (error) {
-      Alert.alert('Unable to submit summary', getErrorMessage(error, 'Unable to submit revenue summary.'));
+      Alert.alert('Không thể nộp báo cáo', getErrorMessage(error, 'Không thể nộp báo cáo doanh thu.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -71,69 +71,69 @@ export default function RevenueSummaryScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant/shift-revenue')}>
+          <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant/shift-revenue')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View>
-            <Text style={styles.kicker}>END OF SHIFT</Text>
-            <Text style={styles.title}>Revenue Summary</Text>
+            <Text style={styles.kicker}>KẾT THÚC CA</Text>
+            <Text style={styles.title}>Chốt doanh thu</Text>
           </View>
         </View>
 
         {isLoading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.primary} />
-            <Text style={styles.emptyText}>Loading summary...</Text>
+            <Text style={styles.emptyText}>Đang tải báo cáo...</Text>
           </View>
         ) : (
           <>
             <View style={styles.heroCard}>
-              <Text style={styles.heroLabel}>{revenue?.shiftInfo?.shiftName || revenue?.shiftInfo?.shiftCode || 'Current shift'}</Text>
+              <Text style={styles.heroLabel}>{revenue?.shiftInfo?.shiftName || revenue?.shiftInfo?.shiftCode || 'Ca hiện tại'}</Text>
               <Text style={styles.heroValue}>{money(systemAmount)}</Text>
-              <Text style={styles.heroMeta}>System amount</Text>
+              <Text style={styles.heroMeta}>Số tiền hệ thống</Text>
             </View>
 
             <View style={styles.metricGrid}>
               <View style={styles.metric}>
-                <Text style={styles.metricLabel}>Cash</Text>
+                <Text style={styles.metricLabel}>Tiền mặt</Text>
                 <Text style={styles.metricValue}>{money(revenue?.cashCollected)}</Text>
               </View>
               <View style={styles.metric}>
-                <Text style={styles.metricLabel}>E-payment</Text>
+                <Text style={styles.metricLabel}>Thanh toán điện tử</Text>
                 <Text style={styles.metricValue}>{money(revenue?.ePaymentAmount)}</Text>
               </View>
               <View style={styles.metric}>
-                <Text style={styles.metricLabel}>Tickets</Text>
+                <Text style={styles.metricLabel}>Số vé</Text>
                 <Text style={styles.metricValue}>{revenue?.totalTicketsSold || 0}</Text>
               </View>
               <View style={styles.metric}>
-                <Text style={styles.metricLabel}>Difference</Text>
+                <Text style={styles.metricLabel}>Chênh lệch</Text>
                 <Text style={[styles.metricValue, difference === 0 ? styles.match : styles.discrepancy]}>{money(difference)}</Text>
               </View>
             </View>
 
             <View style={styles.panel}>
-              <Text style={styles.panelTitle}>Submit collected amount</Text>
-              <Text style={styles.fieldLabel}>Actual cash collected</Text>
+              <Text style={styles.panelTitle}>Nộp số tiền thực thu</Text>
+              <Text style={styles.fieldLabel}>Tiền mặt thực thu</Text>
               <TextInput keyboardType="number-pad" onChangeText={setActualAmount} style={styles.input} value={actualAmount} />
-              <Text style={styles.fieldLabel}>Note</Text>
+              <Text style={styles.fieldLabel}>Ghi chú</Text>
               <TextInput
                 multiline
                 onChangeText={setNote}
-                placeholder="Optional note for finance/admin"
+                placeholder="Ghi chú cho bộ phận tài chính hoặc quản trị viên"
                 placeholderTextColor={colors.muted}
                 style={[styles.input, styles.noteInput]}
                 textAlignVertical="top"
                 value={note}
               />
-              <AppButton title="Submit summary" loading={isSubmitting} onPress={submitSummary} />
+              <AppButton title="Nộp báo cáo" loading={isSubmitting} onPress={submitSummary} />
             </View>
 
             <View style={[styles.panel, styles.bottomSpace]}>
-              <Text style={styles.panelTitle}>Checklist</Text>
-              <Text style={styles.checkItem}>Cash counted and matches the amount above.</Text>
-              <Text style={styles.checkItem}>QR/e-wallet payments reviewed in shift revenue.</Text>
-              <Text style={styles.checkItem}>Any difference is explained in the note.</Text>
+              <Text style={styles.panelTitle}>Kiểm tra trước khi nộp</Text>
+              <Text style={styles.checkItem}>Đã kiểm đếm tiền mặt và khớp với số tiền bên trên.</Text>
+              <Text style={styles.checkItem}>Đã kiểm tra các khoản QR/ví điện tử trong doanh thu ca.</Text>
+              <Text style={styles.checkItem}>Mọi chênh lệch đã được giải thích trong ghi chú.</Text>
             </View>
           </>
         )}

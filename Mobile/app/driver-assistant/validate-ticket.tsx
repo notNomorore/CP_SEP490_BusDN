@@ -70,9 +70,9 @@ const addDateDays = (dateKey: string, days: number) => {
 function TripChip({ trip, active, onPress }: { trip: AssignedTrip; active: boolean; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={[styles.tripChip, active && styles.tripChipActive]}>
-      <Text style={[styles.tripChipCode, active && styles.tripChipTextActive]}>{trip.route?.routeNumber || trip.tripCode || 'Trip'}</Text>
+      <Text style={[styles.tripChipCode, active && styles.tripChipTextActive]}>{trip.route?.routeNumber || trip.tripCode || 'Chuyến'}</Text>
       <Text numberOfLines={1} style={[styles.tripChipMeta, active && styles.tripChipTextActive]}>
-        {formatTime(trip.scheduledStart)} - {trip.vehicle?.code || trip.vehicle?.plateNumber || 'No bus'}
+        {formatTime(trip.scheduledStart)} - {trip.vehicle?.code || trip.vehicle?.plateNumber || 'Chưa có xe'}
       </Text>
     </Pressable>
   );
@@ -117,7 +117,7 @@ export default function ValidateTicketScreen() {
       setTrips(usableTrips);
       setSelectedTripId((current) => current || usableTrips[0]?.id || '');
     } catch (error) {
-      Alert.alert('Unable to load trips', getErrorMessage(error, 'Unable to load assigned trips.'));
+      Alert.alert('Không thể tải chuyến', getErrorMessage(error, 'Không thể tải các chuyến được phân công.'));
     } finally {
       setIsLoadingTrips(false);
     }
@@ -146,7 +146,7 @@ export default function ValidateTicketScreen() {
   const validateTicketCode = useCallback(async (rawCode: string) => {
     const code = rawCode.trim();
     if (!code) {
-      Alert.alert('Ticket code required', 'Enter or paste the QR/ticket code before validating.');
+      Alert.alert('Cần nhập mã vé', 'Hãy nhập hoặc dán mã QR/mã vé trước khi kiểm tra.');
       return;
     }
     setIsSubmitting(true);
@@ -169,9 +169,9 @@ export default function ValidateTicketScreen() {
         }
       }
       setQrCode('');
-      setCameraMessage('QR code detected and validated.');
+      setCameraMessage('Đã nhận diện và kiểm tra mã QR.');
     } catch (error) {
-      setError(getErrorMessage(error, 'Unable to validate ticket.'));
+      setError(getErrorMessage(error, 'Không thể kiểm tra vé.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -184,7 +184,7 @@ export default function ValidateTicketScreen() {
   const startCamera = async () => {
     const permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
     if (!permission.granted) {
-      Alert.alert('Camera permission needed', 'Allow camera access to scan ticket QR codes.');
+      Alert.alert('Cần quyền truy cập camera', 'Hãy cho phép sử dụng camera để quét mã QR vé.');
       return;
     }
 
@@ -213,24 +213,24 @@ export default function ValidateTicketScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+          <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View>
-            <Text style={styles.kicker}>BOARDING</Text>
-            <Text style={styles.title}>Validate Ticket</Text>
+            <Text style={styles.kicker}>KIỂM TRA LÊN XE</Text>
+            <Text style={styles.title}>Kiểm tra vé</Text>
           </View>
         </View>
 
         <View style={styles.panel}>
           <View style={styles.panelHeader}>
-            <Text style={styles.panelTitle}>Active trip</Text>
+            <Text style={styles.panelTitle}>Chuyến đang hoạt động</Text>
             {isLoadingTrips ? <ActivityIndicator color={colors.primary} /> : null}
           </View>
           <View style={styles.tripList}>
             {trips.length ? trips.map((trip) => (
               <TripChip key={trip.id} trip={trip} active={selectedTrip?.id === trip.id} onPress={() => setSelectedTripId(trip.id)} />
-            )) : <Text style={styles.emptyText}>No assigned trip for today. You can still scan a ticket like the web validator.</Text>}
+            )) : <Text style={styles.emptyText}>Hôm nay chưa có chuyến được phân công. Bạn vẫn có thể quét mã vé.</Text>}
           </View>
         </View>
 
@@ -251,28 +251,28 @@ export default function ValidateTicketScreen() {
               </View>
               <Pressable accessibilityRole="button" onPress={() => setCameraActive(false)} style={styles.closeCameraButton}>
                 <MaterialCommunityIcons color={colors.white} name="close" size={18} />
-                <Text style={styles.closeCameraText}>Close</Text>
+                <Text style={styles.closeCameraText}>Đóng</Text>
               </Pressable>
             </View>
           ) : (
             <Pressable accessibilityRole="button" onPress={startCamera} style={styles.scanPrompt}>
               <MaterialCommunityIcons color={colors.accent} name="qrcode-scan" size={54} />
-              <Text style={styles.scannerTitle}>Open camera scanner</Text>
-              <Text style={styles.scannerSubtitle}>Scan passenger QR ticket</Text>
+              <Text style={styles.scannerTitle}>Mở camera quét mã</Text>
+              <Text style={styles.scannerSubtitle}>Quét mã QR vé của hành khách</Text>
             </Pressable>
           )}
-          <Text style={styles.manualTitle}>QR / ticket code</Text>
+          <Text style={styles.manualTitle}>Mã QR / mã vé</Text>
           <TextInput
             autoCapitalize="characters"
             onChangeText={setQrCode}
-            placeholder="Paste or enter ticket code"
+            placeholder="Dán hoặc nhập mã vé"
             placeholderTextColor={colors.muted}
             style={styles.input}
             value={qrCode}
           />
           <View style={styles.buttonRow}>
-            <AppButton title="Scan QR" disabled={cameraActive} onPress={startCamera} variant="secondary" style={styles.rowButton} />
-            <AppButton title="Validate" loading={isSubmitting} onPress={validateTicket} style={styles.rowButton} />
+            <AppButton title="Quét QR" disabled={cameraActive} onPress={startCamera} variant="secondary" style={styles.rowButton} />
+            <AppButton title="Kiểm tra" loading={isSubmitting} onPress={validateTicket} style={styles.rowButton} />
           </View>
           {cameraMessage ? (
             <View style={styles.successBox}>
@@ -288,25 +288,25 @@ export default function ValidateTicketScreen() {
 
         {result ? (
           <View style={styles.panel}>
-            <Text style={styles.panelTitle}>Validation result</Text>
+            <Text style={styles.panelTitle}>Kết quả kiểm tra</Text>
             <View style={isValidResult(result) ? styles.statusSuccess : styles.statusError}>
               <Text style={isValidResult(result) ? styles.statusSuccessText : styles.statusErrorText}>
                 {result.message || validationStatus}
               </Text>
             </View>
             <View style={styles.detailGrid}>
-              <Detail label="Status" value={validationStatus} />
-              <Detail label="Ticket" value={displayTicket.ticketCode || displayTicket.passCode || displayTicket._id} />
-              <Detail label="Passenger" value={displayPassenger.fullName || result.passengerName} />
-              <Detail label="Route" value={displayRoute.name || displayRoute.routeCode || displayTicket.routeCode} />
-              <Detail label="From" value={displayTicket.departureLocation || displayTicket.fromStop} />
-              <Detail label="To" value={displayTicket.destinationLocation || displayTicket.toStop} />
-              <Detail label="Ticket type" value={displayTicket.ticketType || result.ticketType} />
-              <Detail label="Fare" value={displayTicket.amount || displayTicket.ticketPrice ? money(displayTicket.amount || displayTicket.ticketPrice) : 'N/A'} />
-              <Detail label="Valid from" value={formatDateTime(displayTicket.validFrom || result.validFrom)} />
-              <Detail label="Valid until" value={formatDateTime(displayTicket.validUntil || result.validUntil)} />
-              <Detail label="Scanned at" value={formatDateTime(displayTicket.usedAt || result.usedAt)} />
-              <Detail label="Trip" value={displayTicket.tripId || result.tripId} />
+              <Detail label="Trạng thái" value={validationStatus} />
+              <Detail label="Vé" value={displayTicket.ticketCode || displayTicket.passCode || displayTicket._id} />
+              <Detail label="Hành khách" value={displayPassenger.fullName || result.passengerName} />
+              <Detail label="Tuyến" value={displayRoute.name || displayRoute.routeCode || displayTicket.routeCode} />
+              <Detail label="Điểm đi" value={displayTicket.departureLocation || displayTicket.fromStop} />
+              <Detail label="Điểm đến" value={displayTicket.destinationLocation || displayTicket.toStop} />
+              <Detail label="Loại vé" value={displayTicket.ticketType || result.ticketType} />
+              <Detail label="Giá vé" value={displayTicket.amount || displayTicket.ticketPrice ? money(displayTicket.amount || displayTicket.ticketPrice) : 'Không có'} />
+              <Detail label="Hiệu lực từ" value={formatDateTime(displayTicket.validFrom || result.validFrom)} />
+              <Detail label="Hiệu lực đến" value={formatDateTime(displayTicket.validUntil || result.validUntil)} />
+              <Detail label="Thời điểm quét" value={formatDateTime(displayTicket.usedAt || result.usedAt)} />
+              <Detail label="Chuyến" value={displayTicket.tripId || result.tripId} />
             </View>
           </View>
         ) : null}
@@ -314,8 +314,8 @@ export default function ValidateTicketScreen() {
         <View style={[styles.panel, styles.bottomSpace]}>
           <View style={styles.historyHeader}>
             <View>
-              <Text style={styles.panelTitle}>Successful validations</Text>
-              <Text style={styles.historySubtitle}>{history.length} ticket(s) on selected date</Text>
+              <Text style={styles.panelTitle}>Lịch sử kiểm tra thành công</Text>
+              <Text style={styles.historySubtitle}>{history.length} vé trong ngày đã chọn</Text>
             </View>
             {isLoadingHistory ? <ActivityIndicator color={colors.primary} /> : null}
           </View>
@@ -335,22 +335,22 @@ export default function ValidateTicketScreen() {
               <MaterialCommunityIcons color={colors.primary} name="chevron-right" size={22} />
             </Pressable>
             <Pressable accessibilityRole="button" onPress={() => setHistoryDate(toDateInput())} style={styles.todayButton}>
-              <Text style={styles.todayText}>Today</Text>
+              <Text style={styles.todayText}>Hôm nay</Text>
             </Pressable>
           </View>
           {history.length ? history.map((item, index) => (
             <View key={`${item.savedAt}-${getDisplayTicket(item).ticketCode || index}`} style={styles.transactionRow}>
               <View>
-                <Text style={styles.transactionCode}>{getDisplayTicket(item).ticketCode || getDisplayTicket(item).passCode || getDisplayTicket(item)._id || 'Ticket'}</Text>
+                <Text style={styles.transactionCode}>{getDisplayTicket(item).ticketCode || getDisplayTicket(item).passCode || getDisplayTicket(item)._id || 'Vé'}</Text>
                 <Text style={styles.transactionMeta}>
-                  {formatDateTime(item.savedAt)} - {getDisplayPassenger(item).fullName || item.passengerName || 'Passenger'} - {getValidationStatus(item)}
+                  {formatDateTime(item.savedAt)} - {getDisplayPassenger(item).fullName || item.passengerName || 'Hành khách'} - {getValidationStatus(item)}
                 </Text>
                 <Text style={styles.transactionMeta}>
-                  {getDisplayRoute(item).name || getDisplayRoute(item).routeCode || getDisplayTicket(item).routeCode || 'Route N/A'}
+                  {getDisplayRoute(item).name || getDisplayRoute(item).routeCode || getDisplayTicket(item).routeCode || 'Chưa có tuyến'}
                 </Text>
               </View>
             </View>
-          )) : <Text style={styles.emptyText}>No successful validations saved for this date.</Text>}
+          )) : <Text style={styles.emptyText}>Ngày này chưa có lượt kiểm tra thành công.</Text>}
         </View>
       </Screen>
       <RoleBottomNav active="validate" role={user?.role} />

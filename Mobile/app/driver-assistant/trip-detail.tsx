@@ -309,7 +309,7 @@ function RouteOverview({ trip }: { trip: AssignedTrip }) {
       }
       await Linking.openURL(url);
     } catch {
-      Alert.alert('Map unavailable', 'Unable to open Google Maps from this device.');
+      Alert.alert('Không thể mở bản đồ', 'Thiết bị này không thể mở Google Maps.');
     }
   };
 
@@ -353,7 +353,7 @@ function RouteOverview({ trip }: { trip: AssignedTrip }) {
         {stops.length === 0 ? (
           <Text style={styles.emptyText}>
             {driverLocation
-              ? 'No route stops were returned by backend for this trip. Showing synced driver GPS only.'
+              ? 'Hệ thống chưa trả về danh sách trạm của chuyến này. Hiện chỉ hiển thị vị trí GPS đã đồng bộ của tài xế.'
               : 'No route stops were returned by backend for this trip.'}
           </Text>
         ) : (
@@ -391,7 +391,7 @@ export default function TripDetailScreen() {
       const updatedTrip = await scheduleOperationsApi.getAssignedTripDetail(assignmentId);
       setFreshTrip(updatedTrip);
     } catch (error) {
-      const message = getErrorMessage(error, 'Unable to refresh trip detail.');
+      const message = getErrorMessage(error, 'Không thể làm mới chi tiết chuyến.');
       const statusCode = (error as { statusCode?: number; response?: { status?: number } })?.statusCode
         || (error as { response?: { status?: number } })?.response?.status;
       const isAuthError = statusCode === 401 || message.toLowerCase().includes('no token provided');
@@ -492,7 +492,7 @@ export default function TripDetailScreen() {
           </View>
         ) : null}
         <View style={styles.detailsGrid}>
-          <DetailRow label="Bus Number" value={getTripVehicleLabel(trip)} />
+          <DetailRow label="Xe buýt" value={getTripVehicleLabel(trip)} />
           <DetailRow label="Passenger Capacity" value={trip.vehicle?.capacity || 'N/A'} />
           <DetailRow label="Current Occupancy" value="N/A" />
           <DetailRow label="Driver Name" value={trip.driver?.fullName} />

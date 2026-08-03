@@ -69,7 +69,7 @@ export default function ShiftScheduleScreen() {
       setShifts(payload.shifts || []);
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
-      const message = getErrorMessage(error, 'Unable to load shift schedule.');
+      const message = getErrorMessage(error, 'Không thể tải lịch ca làm việc.');
       const statusCode = (error as { statusCode?: number; response?: { status?: number } })?.statusCode
         || (error as { response?: { status?: number } })?.response?.status;
       const isAuthError = statusCode === 401 || message.toLowerCase().includes('no token provided');
@@ -82,7 +82,7 @@ export default function ShiftScheduleScreen() {
       }
 
       setError(message);
-      Alert.alert('Unable to load shift schedule', message);
+      Alert.alert('Không thể tải lịch ca', message);
     } finally {
       if (requestId === requestIdRef.current) {
         setIsLoading(false);
@@ -142,12 +142,12 @@ export default function ShiftScheduleScreen() {
     <View style={styles.screenShell}>
       <Screen>
       <View style={styles.header}>
-        <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+        <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
           <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
         </Pressable>
         <View>
-          <Text style={styles.kicker}>SCHEDULE & ASSIGNMENT</Text>
-          <Text style={styles.title}>My Shift Schedule</Text>
+          <Text style={styles.kicker}>LỊCH VÀ PHÂN CÔNG</Text>
+          <Text style={styles.title}>Lịch ca của tôi</Text>
         </View>
       </View>
 
@@ -157,7 +157,7 @@ export default function ShiftScheduleScreen() {
         </Pressable>
         <Pressable accessibilityRole="button" onPress={() => setRange(getWeekRange())} style={styles.weekCenter}>
           <Text style={styles.weekLabel}>{formatDate(range.from)} - {formatDate(range.to)}</Text>
-          <Text style={styles.weekHint}>Tap for current week</Text>
+          <Text style={styles.weekHint}>Nhấn để về tuần hiện tại</Text>
         </Pressable>
         <Pressable accessibilityRole="button" onPress={() => changeWeek(1)} style={styles.weekButton}>
           <MaterialCommunityIcons color={colors.primary} name="chevron-right" size={23} />
@@ -166,19 +166,19 @@ export default function ShiftScheduleScreen() {
 
       <View style={styles.statsGrid}>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Total Hours</Text>
+          <Text style={styles.statLabel}>Tổng số giờ</Text>
           <Text style={styles.statValue}>{weeklyStats.totalHours.toFixed(1)}</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Shifts</Text>
+          <Text style={styles.statLabel}>Ca làm</Text>
           <Text style={styles.statValue}>{weeklyStats.shiftCount}</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Assigned</Text>
+          <Text style={styles.statLabel}>Đã phân công</Text>
           <Text style={styles.statValueAccent}>{weeklyStats.assignedCount}</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Completed</Text>
+          <Text style={styles.statLabel}>Đã hoàn thành</Text>
           <Text style={styles.statValue}>{weeklyStats.completedCount}</Text>
         </View>
       </View>
@@ -189,7 +189,7 @@ export default function ShiftScheduleScreen() {
             <MaterialCommunityIcons color={colors.white} name="calendar-clock" size={22} />
           </View>
           <View style={styles.nextShiftText}>
-            <Text style={styles.nextShiftLabel}>Next assigned shift</Text>
+            <Text style={styles.nextShiftLabel}>Ca được phân công tiếp theo</Text>
             <Text numberOfLines={1} style={styles.nextShiftTitle}>
               {formatDate(nextShift.workDate)} · {nextShift.startTime || 'N/A'} - {nextShift.endTime || 'N/A'}
             </Text>
@@ -203,17 +203,17 @@ export default function ShiftScheduleScreen() {
       {isLoading ? (
         <View style={styles.loading}>
           <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Loading shift schedule...</Text>
+          <Text style={styles.loadingText}>Đang tải lịch ca...</Text>
         </View>
       ) : error ? (
         <View>
           <Text style={styles.emptyText}>{error}</Text>
           <Pressable accessibilityRole="button" onPress={() => void loadSchedule()} style={styles.retryButton}>
-            <Text style={styles.retryText}>Retry</Text>
+            <Text style={styles.retryText}>Thử lại</Text>
           </Pressable>
         </View>
       ) : shifts.length === 0 ? (
-        <Text style={styles.emptyText}>No shift schedule assigned for this week.</Text>
+        <Text style={styles.emptyText}>Tuần này chưa có lịch ca được phân công.</Text>
       ) : (
         <>
           <View style={styles.calendarRow}>
@@ -231,34 +231,34 @@ export default function ShiftScheduleScreen() {
           </View>
 
           <View style={styles.todaySection}>
-            <Text style={styles.sectionTitle}>Today's Shift</Text>
+            <Text style={styles.sectionTitle}>Ca làm hôm nay</Text>
             {todayShift ? (
               <View style={styles.todayCard}>
                 <View style={styles.todayHeader}>
                   <View>
                     <View style={styles.shiftBadge}>
                       <MaterialCommunityIcons color={colors.primary} name="white-balance-sunny" size={18} />
-                      <Text style={styles.shiftBadgeText}>{todayShift.shiftName || 'Shift'}</Text>
+                      <Text style={styles.shiftBadgeText}>{todayShift.shiftName || 'Ca làm'}</Text>
                     </View>
                     <Text style={styles.shiftTime}>{todayShift.startTime || 'N/A'} - {todayShift.endTime || 'N/A'}</Text>
                   </View>
                   <View style={styles.statusBlock}>
-                    <Text style={styles.statusLabel}>Status</Text>
+                    <Text style={styles.statusLabel}>Trạng thái</Text>
                     <Text style={styles.statusValue}>{getShiftStatus(todayShift)}</Text>
                   </View>
                 </View>
                 <View style={styles.detailGrid}>
-                  <DetailPill icon="bus" label="Assigned Bus" value="From assigned trip" />
-                  <DetailPill icon="routes" label="Assigned Route" value={todayShift.route?.routeCode || todayShift.route?.routeName} />
+                  <DetailPill icon="bus" label="Xe được phân công" value="Theo chuyến được phân công" />
+                  <DetailPill icon="routes" label="Tuyến được phân công" value={todayShift.route?.routeCode || todayShift.route?.routeName} />
                 </View>
               </View>
             ) : (
-              <Text style={styles.emptyText}>No shift assigned today.</Text>
+              <Text style={styles.emptyText}>Hôm nay chưa có ca làm được phân công.</Text>
             )}
           </View>
 
           <View style={styles.timelineSection}>
-            <Text style={styles.sectionTitle}>Weekly Schedule</Text>
+            <Text style={styles.sectionTitle}>Lịch làm việc trong tuần</Text>
             {weekDays.map((day) => {
               const dayShifts = shiftsByDate[day] || [];
               return (
@@ -270,13 +270,13 @@ export default function ShiftScheduleScreen() {
                       <View key={shift.id} style={styles.shiftRow}>
                         <View>
                           <Text style={styles.shiftRowTime}>{shift.startTime || 'N/A'} - {shift.endTime || 'N/A'}</Text>
-                          <Text style={styles.shiftRowName}>{shift.shiftName || 'Shift'}</Text>
+                          <Text style={styles.shiftRowName}>{shift.shiftName || 'Ca làm'}</Text>
                         </View>
-                        <Text style={styles.routeChip}>{shift.route?.routeCode || 'Route'}</Text>
+                        <Text style={styles.routeChip}>{shift.route?.routeCode || 'Tuyến'}</Text>
                       </View>
                     )) : (
                       <View style={styles.dayOffRow}>
-                        <Text style={styles.dayOffText}>Day Off</Text>
+                        <Text style={styles.dayOffText}>Nghỉ</Text>
                         <MaterialCommunityIcons color={colors.error} name="calendar-remove-outline" size={20} />
                       </View>
                     )}
@@ -288,14 +288,14 @@ export default function ShiftScheduleScreen() {
               <View style={styles.timelineGroup}>
                 <View style={styles.timelineDot} />
                 <View style={styles.timelineContent}>
-                  <Text style={styles.timelineDate}>Other assigned shifts</Text>
+                  <Text style={styles.timelineDate}>Các ca được phân công khác</Text>
                   {ungroupedShifts.map((shift) => (
                     <View key={shift.id} style={styles.shiftRow}>
                       <View>
                         <Text style={styles.shiftRowTime}>{formatDate(shift.workDate)} · {shift.startTime || 'N/A'} - {shift.endTime || 'N/A'}</Text>
-                        <Text style={styles.shiftRowName}>{shift.shiftName || 'Shift'}</Text>
+                        <Text style={styles.shiftRowName}>{shift.shiftName || 'Ca làm'}</Text>
                       </View>
-                      <Text style={styles.routeChip}>{shift.route?.routeCode || 'Route'}</Text>
+                      <Text style={styles.routeChip}>{shift.route?.routeCode || 'Tuyến'}</Text>
                     </View>
                   ))}
                 </View>

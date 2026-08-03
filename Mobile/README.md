@@ -28,14 +28,7 @@ Registration does not log the user in immediately. The backend creates an unveri
 
 ## API Configuration
 
-Create a local `.env` file from `.env.example`:
-
-```bash
-EXPO_PUBLIC_API_URL=https://cp-sep490-busdn.onrender.com/api
-EXPO_PUBLIC_SOCKET_URL=https://cp-sep490-busdn.onrender.com
-```
-
-The Render API URL is the default fallback in `src/constants/config.ts`, so the app does not need localhost or a LAN IP for normal Expo Go testing.
+Configure Mobile to use the deployed Render backend.
 
 Requirements for testing on a phone:
 
@@ -47,7 +40,7 @@ Example:
 
 ```bash
 EXPO_PUBLIC_API_URL=https://cp-sep490-busdn.onrender.com/api
-EXPO_PUBLIC_SOCKET_URL=https://cp-sep490-busdn.onrender.com
+EXPO_PUBLIC_SOCKET_URL=https://cp-sep490-busdn.onrender.com/
 ```
 
 ## Run
