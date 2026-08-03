@@ -397,6 +397,9 @@ export class BusAssistantService {
 
     const ticketCode = createCode('WI');
     const isBankTransfer = payload.paymentMethod === 'BANK_TRANSFER';
+    // Validate PayOS before creating pending ticket/transaction records. This also
+    // prevents crypto.createHmac from receiving an undefined checksum key.
+    if (isBankTransfer) PayOSService.assertConfigured();
     const ticket = await WalkInTicket.create({
       ticketCode,
       busAssistantId: actor.userId,

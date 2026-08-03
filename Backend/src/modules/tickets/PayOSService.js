@@ -10,12 +10,24 @@ const buildSignatureSource = (data) => Object.keys(data)
 
 export class PayOSService {
   static assertConfigured() {
-    if (!config.payos.clientId || !config.payos.apiKey || !config.payos.checksumKey) {
-      throw new CustomError('PayOS is not configured', HTTP_STATUS.INTERNAL_SERVER_ERROR);
+    const missingVariables = [
+      ['PAYOS_CLIENT_ID', config.payos.clientId],
+      ['PAYOS_API_KEY', config.payos.apiKey],
+      ['PAYOS_CHECKSUM_KEY', config.payos.checksumKey],
+    ]
+      .filter(([, value]) => !value)
+      .map(([name]) => name);
+
+    if (missingVariables.length) {
+      throw new CustomError(
+        `Chưa cấu hình thanh toán PayOS: thiếu ${missingVariables.join(', ')}`,
+        HTTP_STATUS.SERVICE_UNAVAILABLE
+      );
     }
   }
 
   static sign(data) {
+    this.assertConfigured();
     return crypto
       .createHmac('sha256', config.payos.checksumKey)
       .update(buildSignatureSource(data))
