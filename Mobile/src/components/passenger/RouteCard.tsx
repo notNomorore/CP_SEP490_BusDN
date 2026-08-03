@@ -18,13 +18,13 @@ export function RouteCard({ route, compact = false }: { route: BusRoute; compact
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
       <View style={styles.topLine}>
-        <StatusPill label={route.routeNumber || 'Route'} tone="success" />
+        <StatusPill label={route.routeNumber || 'Tuyến'} tone="success" />
         <Text style={styles.fare}>{currency.format(Number(route.fare || 0))}</Text>
       </View>
       <Text numberOfLines={2} style={styles.name}>{route.name || `${route.origin} - ${route.destination}`}</Text>
       <View style={styles.row}>
         <MaterialCommunityIcons color={colors.secondary} name="map-marker-outline" size={16} />
-        <Text numberOfLines={1} style={styles.meta}>{route.origin || 'Origin'} to {route.destination || 'Destination'}</Text>
+        <Text numberOfLines={1} style={styles.meta}>{route.origin || 'Điểm đầu'} đến {route.destination || 'Điểm cuối'}</Text>
       </View>
       {!compact ? (
         <View style={styles.metrics}>

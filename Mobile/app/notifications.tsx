@@ -46,13 +46,13 @@ const typeConfig = {
   },
   delay: {
     label: 'Delay alert',
-    title: 'Trip delayed',
+    title: 'Chuyến bị trễ',
     icon: 'clock-alert-outline',
     tone: 'danger',
   },
   routeChange: {
-    label: 'Route change',
-    title: 'Route updated',
+    label: 'Thay đổi tuyến',
+    title: 'Tuyến đã cập nhật',
     icon: 'routes',
     tone: 'info',
   },
@@ -251,7 +251,7 @@ export default function NotificationsScreen() {
       setItems((current) => current.map((candidate) => (
         idOf(candidate) === notificationId ? { ...candidate, isRead: false, readAt: null } : candidate
       )));
-      Alert.alert('Could not mark as read', getErrorMessage(err, 'Please try again.'));
+      Alert.alert('Không thể đánh dấu đã đọc', getErrorMessage(err, 'Vui lòng thử lại.'));
     }
   };
 
@@ -263,7 +263,7 @@ export default function NotificationsScreen() {
       await passengerApi.markAllNotificationsRead();
     } catch (err) {
       setItems(previous);
-      Alert.alert('Could not mark all as read', getErrorMessage(err, 'Please try again.'));
+      Alert.alert('Không thể đánh dấu tất cả đã đọc', getErrorMessage(err, 'Vui lòng thử lại.'));
     }
   };
 
@@ -306,7 +306,7 @@ export default function NotificationsScreen() {
     try {
       await loadNotifications(nextPage, 'append');
     } catch (err) {
-      Alert.alert('Could not load more', getErrorMessage(err, 'Please try again.'));
+      Alert.alert('Không thể tải thêm', getErrorMessage(err, 'Vui lòng thử lại.'));
     } finally {
       setLoadingMore(false);
     }
@@ -314,7 +314,7 @@ export default function NotificationsScreen() {
 
   const toggleGlobal = async (enabled: boolean) => {
     if (!user) {
-      Alert.alert('Login required', 'Please sign in with a passenger account to manage notifications.');
+      Alert.alert('Yêu cầu đăng nhập', 'Vui lòng đăng nhập bằng tài khoản hành khách để quản lý thông báo.');
       return;
     }
 
@@ -326,7 +326,7 @@ export default function NotificationsScreen() {
       setPermission(nextPermission);
 
       if (enabled && nextPermission === 'denied') {
-        Alert.alert('Notifications blocked', 'Enable notification permission in your browser or device settings, then try again.');
+        Alert.alert('Thông báo bị chặn', 'Hãy bật quyền thông báo trong cài đặt thiết bị rồi thử lại.');
         return;
       }
 
@@ -334,7 +334,7 @@ export default function NotificationsScreen() {
       await refreshUser();
     } catch (err) {
       setPermission(previousPermission);
-      Alert.alert('Could not save settings', getErrorMessage(err, 'Please try again.'));
+      Alert.alert('Không thể lưu cài đặt', getErrorMessage(err, 'Vui lòng thử lại.'));
     } finally {
       setSavingGlobal(false);
     }
@@ -359,7 +359,7 @@ export default function NotificationsScreen() {
       }
       await loadSubscriptions();
     } catch (err) {
-      Alert.alert('Could not update alert type', getErrorMessage(err, 'Please try again.'));
+      Alert.alert('Không thể cập nhật loại thông báo', getErrorMessage(err, 'Vui lòng thử lại.'));
     } finally {
       setSavingType('');
     }
@@ -369,7 +369,7 @@ export default function NotificationsScreen() {
     if (permission === 'granted') return 'Device permission granted.';
     if (permission === 'prompt') return 'Permission not decided. BusDN asks only after you turn notifications on.';
     if (permission === 'denied') return 'Permission is blocked in browser or device settings.';
-    return 'Push permission is unsupported in this mobile build; account preferences are still saved to Backend.';
+    return 'Phiên bản Mobile này chưa hỗ trợ quyền thông báo đẩy; tùy chọn tài khoản vẫn được lưu trên hệ thống.';
   };
 
   return (
@@ -377,22 +377,22 @@ export default function NotificationsScreen() {
       active="activity"
       refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.primary} onRefresh={() => void loadAll('refresh')} />}
       rightAction={(
-        <Pressable accessibilityLabel="Open notification settings" hitSlop={10} onPress={() => setSettingsOpen(true)}>
+        <Pressable accessibilityLabel="Mở cài đặt thông báo" hitSlop={10} onPress={() => setSettingsOpen(true)}>
           <MaterialCommunityIcons color={colors.primary} name="cog-outline" size={24} />
         </Pressable>
       )}
-      subtitle={`${unreadCount} unread updates`}
-      title="Notifications"
+      subtitle={`${unreadCount} thông báo chưa đọc`}
+      title="Thông báo"
       unreadCount={unreadCount}
     >
       <View style={styles.summary}>
         <View>
-          <Text style={styles.summaryLabel}>Notification Center</Text>
+          <Text style={styles.summaryLabel}>Trung tâm thông báo</Text>
           <Text style={styles.summaryTitle}>{unreadCount ? `${unreadCount} unread` : 'All caught up'}</Text>
         </View>
         <Pressable accessibilityRole="button" disabled={!unreadCount} onPress={markAllRead} style={[styles.markAllButton, !unreadCount && styles.disabledButton]}>
           <MaterialCommunityIcons color={unreadCount ? colors.white : colors.muted} name="check-all" size={18} />
-          <Text style={[styles.markAllText, !unreadCount && styles.disabledText]}>Read all</Text>
+          <Text style={[styles.markAllText, !unreadCount && styles.disabledText]}>Đọc tất cả</Text>
         </Pressable>
       </View>
 
@@ -407,14 +407,14 @@ export default function NotificationsScreen() {
       {!realtimeHealthy ? (
         <View style={styles.inlineWarning}>
           <MaterialCommunityIcons color="#6f5200" name="wifi-alert" size={18} />
-          <Text style={styles.inlineWarningText}>Realtime refresh is unavailable. Pull down to retry.</Text>
+          <Text style={styles.inlineWarningText}>Không thể cập nhật theo thời gian thực. Kéo xuống để thử lại.</Text>
         </View>
       ) : null}
 
-      {loading ? <LoadingState label="Loading notifications" /> : null}
-      {!loading && error ? <EmptyState icon="alert-circle-outline" title="Could not load notifications" detail={error} /> : null}
+      {loading ? <LoadingState label="Đang tải thông báo" /> : null}
+      {!loading && error ? <EmptyState icon="alert-circle-outline" title="Không thể tải thông báo" detail={error} /> : null}
       {!loading && !error && !filteredItems.length ? (
-        <EmptyState title="No notifications" detail={filter === 'all' ? 'New BusDN updates will appear here.' : 'No updates match this filter.'} />
+        <EmptyState title="Chưa có thông báo" detail={filter === 'all' ? 'Các cập nhật mới từ BusDN sẽ xuất hiện tại đây.' : 'Không có cập nhật phù hợp với bộ lọc.'} />
       ) : null}
 
       {!loading && !error && filteredItems.map((item) => (
@@ -429,7 +429,7 @@ export default function NotificationsScreen() {
       {!loading && !error && Number(pagination.page || 1) < Number(pagination.totalPages || 1) ? (
         <Pressable disabled={loadingMore} onPress={loadMore} style={styles.loadMore}>
           {loadingMore ? <ActivityIndicator color={colors.primary} /> : <MaterialCommunityIcons color={colors.primary} name="dots-horizontal-circle-outline" size={18} />}
-          <Text style={styles.loadMoreText}>Load more</Text>
+          <Text style={styles.loadMoreText}>Tải thêm</Text>
         </Pressable>
       ) : null}
 
@@ -437,8 +437,8 @@ export default function NotificationsScreen() {
         <View style={styles.modalShade}>
           <View style={styles.settingsPanel}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Notification settings</Text>
-              <Pressable accessibilityLabel="Close settings" hitSlop={10} onPress={() => setSettingsOpen(false)}>
+              <Text style={styles.modalTitle}>Cài đặt thông báo</Text>
+              <Pressable accessibilityLabel="Đóng cài đặt" hitSlop={10} onPress={() => setSettingsOpen(false)}>
                 <MaterialCommunityIcons color={colors.primary} name="close" size={24} />
               </Pressable>
             </View>
@@ -447,7 +447,7 @@ export default function NotificationsScreen() {
               detail={renderPermissionText()}
               disabled={savingGlobal}
               icon="bell-ring-outline"
-              label="Allow notifications"
+              label="Cho phép thông báo"
               loading={savingGlobal}
               onValueChange={toggleGlobal}
               value={Boolean(user?.notificationEnabled)}
@@ -456,7 +456,7 @@ export default function NotificationsScreen() {
               detail={`${arrivalSubs.length} stop alert${arrivalSubs.length === 1 ? '' : 's'} enabled`}
               disabled={savingType !== ''}
               icon="bus-clock"
-              label="Bus approaching"
+              label="Xe sắp đến"
               loading={savingType === 'arrival'}
               onValueChange={() => void disableSubscriptions('arrival')}
               value={arrivalSubs.length > 0}
@@ -465,7 +465,7 @@ export default function NotificationsScreen() {
               detail={`${delaySubs.length} route delay alert${delaySubs.length === 1 ? '' : 's'} enabled`}
               disabled={savingType !== ''}
               icon="clock-alert-outline"
-              label="Trip delayed"
+              label="Chuyến bị trễ"
               loading={savingType === 'delay'}
               onValueChange={() => void disableSubscriptions('delay')}
               value={delaySubs.length > 0}
@@ -474,7 +474,7 @@ export default function NotificationsScreen() {
               detail={`${routeChangeSubs.length} route change alert${routeChangeSubs.length === 1 ? '' : 's'} enabled`}
               disabled={savingType !== ''}
               icon="routes"
-              label="Route changes"
+              label="Thay đổi tuyến"
               loading={savingType === 'routeChange'}
               onValueChange={() => void disableSubscriptions('routeChange')}
               value={routeChangeSubs.length > 0}
@@ -482,7 +482,7 @@ export default function NotificationsScreen() {
 
             <Pressable onPress={() => { setSettingsOpen(false); router.push('/route-search'); }} style={styles.manageRoutesButton}>
               <MaterialCommunityIcons color={colors.primary} name="compass-outline" size={18} />
-              <Text style={styles.manageRoutesText}>Manage route and stop alerts</Text>
+              <Text style={styles.manageRoutesText}>Quản lý thông báo tuyến và điểm dừng</Text>
             </Pressable>
           </View>
         </View>
@@ -526,7 +526,7 @@ function NotificationCard({ item, onOpen, onMarkRead }: { item: NotificationReco
         </View>
       </View>
       {!isRead ? (
-        <Pressable accessibilityLabel="Mark notification as read" hitSlop={8} onPress={onMarkRead} style={styles.readButton}>
+        <Pressable accessibilityLabel="Đánh dấu thông báo đã đọc" hitSlop={8} onPress={onMarkRead} style={styles.readButton}>
           <MaterialCommunityIcons color={colors.primary} name="check" size={18} />
         </Pressable>
       ) : null}

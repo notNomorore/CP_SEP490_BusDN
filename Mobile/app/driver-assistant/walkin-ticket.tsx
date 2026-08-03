@@ -300,6 +300,7 @@ export default function WalkInTicketScreen() {
                 <Text style={styles.successTitle}>Đã thu tiền và tạo vé thành công.</Text>
                 <View style={styles.cashResultRow}>
                   <View style={styles.cashResultItem}><Text style={styles.cashResultLabel}>Khách đưa</Text><Text style={styles.cashResultValue}>{money(result.cashReceived ?? received)}</Text></View>
+                  <View style={styles.cashResultDivider} />
                   <View style={styles.cashResultItem}><Text style={styles.cashResultLabel}>Tiền thối lại</Text><Text style={styles.cashResultValue}>{money(result.changeAmount ?? changeAmount)}</Text></View>
                 </View>
               </View>
@@ -416,10 +417,11 @@ const styles = StyleSheet.create({
   resultHeading: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   successBox: { alignItems: 'center', gap: 8, borderRadius: 17, backgroundColor: '#e8f9f1', padding: 16 },
   successTitle: { color: colors.primary, fontSize: 14, fontWeight: '900', textAlign: 'center' },
-  cashResultRow: { width: '100%', flexDirection: 'row', gap: 16, marginTop: 2 },
-  cashResultItem: { flex: 1 },
-  cashResultLabel: { color: colors.secondary, fontSize: 11, fontWeight: '700' },
-  cashResultValue: { marginTop: 4, color: colors.primary, fontSize: 14, fontWeight: '900' },
+  cashResultRow: { width: '100%', minHeight: 48, flexDirection: 'row', alignItems: 'stretch', marginTop: 4 },
+  cashResultItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  cashResultDivider: { width: StyleSheet.hairlineWidth, backgroundColor: '#bcdccc' },
+  cashResultLabel: { color: colors.secondary, fontSize: 11, fontWeight: '700', textAlign: 'center' },
+  cashResultValue: { marginTop: 4, color: colors.primary, fontSize: 14, fontWeight: '900', textAlign: 'center' },
   ticketIdentity: { alignItems: 'center', gap: 4 },
   ticketCodeLabel: { color: colors.muted, fontSize: 11, fontWeight: '700' },
   ticketCodeValue: { color: colors.primary, fontWeight: '900' },

@@ -30,6 +30,7 @@ export function BottomNavBase({ active, items, style }: BottomNavBaseProps) {
     <View style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 10) }, style]}>
       {items.map((item) => {
         const isActive = item.key === active;
+        const isPrimaryScan = item.key === 'validate';
         return (
           <Pressable
             accessibilityRole="button"
@@ -39,17 +40,19 @@ export function BottomNavBase({ active, items, style }: BottomNavBaseProps) {
                 router.replace(item.href);
                 return;
               }
-              Alert.alert(item.unavailableTitle || item.label, `${item.label} is not available in the mobile app yet.`);
+              Alert.alert(item.unavailableTitle || item.label, `${item.label} hiện chưa có trên ứng dụng Mobile.`);
             }}
-            style={[styles.navItem, isCompact && styles.navItemCompact, isActive && styles.navItemActive]}
+            style={[styles.navItem, isCompact && styles.navItemCompact, isActive && !isPrimaryScan && styles.navItemActive]}
           >
-            <MaterialCommunityIcons
-              color={isActive ? colors.primary : colors.muted}
-              name={item.icon}
-              size={isCompact ? 20 : 21}
-            />
+            <View style={isPrimaryScan ? [styles.primaryScanIcon, isActive && styles.primaryScanIconActive] : undefined}>
+              <MaterialCommunityIcons
+                color={isPrimaryScan ? colors.white : isActive ? colors.primary : colors.muted}
+                name={item.icon}
+                size={isPrimaryScan ? 23 : isCompact ? 20 : 21}
+              />
+            </View>
             {item.badgeCount ? (
-              <View style={styles.badge} accessibilityLabel={`${item.badgeCount} unread notifications`}>
+              <View style={styles.badge} accessibilityLabel={`${item.badgeCount} thông báo chưa đọc`}>
                 <Text style={styles.badgeText}>{item.badgeCount > 99 ? '99+' : item.badgeCount}</Text>
               </View>
             ) : null}
@@ -92,6 +95,17 @@ const styles = StyleSheet.create({
   },
   navItemActive: {
     backgroundColor: '#d7f4e6',
+  },
+  primaryScanIcon: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 21,
+    backgroundColor: '#39bd7d',
+  },
+  primaryScanIconActive: {
+    backgroundColor: colors.primary,
   },
   navLabel: {
     marginTop: 2,

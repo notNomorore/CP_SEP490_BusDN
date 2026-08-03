@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import busAssistantApi from '@/api/busAssistant.api';
@@ -13,6 +13,7 @@ import { toDateInput } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
 const money = (value?: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
+const TRANSACTIONS_PER_PAGE = 5;
 
 function Metric({ label, value, icon, tone }: { label: string; value: string | number; icon: keyof typeof MaterialCommunityIcons.glyphMap; tone: 'green' | 'blue' | 'amber' }) {
   return (
@@ -27,12 +28,20 @@ export default function ShiftRevenueScreen() {
   const user = useAuthStore((state) => state.user);
   const [revenue, setRevenue] = useState<ShiftRevenue | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [transactionPage, setTransactionPage] = useState(1);
+  const recentTransactions = revenue?.recentTransactions || [];
+  const transactionPageCount = Math.max(1, Math.ceil(recentTransactions.length / TRANSACTIONS_PER_PAGE));
+  const visibleTransactions = useMemo(() => {
+    const start = (transactionPage - 1) * TRANSACTIONS_PER_PAGE;
+    return recentTransactions.slice(start, start + TRANSACTIONS_PER_PAGE);
+  }, [recentTransactions, transactionPage]);
 
   const loadRevenue = useCallback(async () => {
     setIsLoading(true);
     try {
       const data = await busAssistantApi.getShiftRevenue({ date: toDateInput() });
       setRevenue(data);
+      setTransactionPage(1);
     } catch (error) {
       Alert.alert('Không thể tải doanh thu', getErrorMessage(error, 'Không thể tải doanh thu ca.'));
     } finally {
@@ -67,29 +76,11 @@ export default function ShiftRevenueScreen() {
           </View>
         ) : (
           <>
-            <View style={styles.summaryHeader}>
-              <View style={styles.summaryIcon}><MaterialCommunityIcons color={colors.white} name="chart-line" size={22} /></View>
-              <View style={styles.summaryText}><Text style={styles.summaryTitle}>Tổng quan doanh thu</Text><Text style={styles.summaryHint}>Theo dõi vé và giao dịch trong ca hiện tại</Text></View>
-              <Pressable accessibilityLabel="Tải lại doanh thu" onPress={() => void loadRevenue()} style={styles.summaryRefresh}><MaterialCommunityIcons color={colors.primary} name="refresh" size={20} /></Pressable>
-            </View>
-
             <View style={styles.metricGrid}>
               <Metric label="VÉ ĐÃ BÁN" value={revenue?.totalTicketsSold || 0} icon="ticket-confirmation-outline" tone="green" />
               <Metric label="TỔNG DOANH THU" value={money(revenue?.totalRevenue)} icon="trending-up" tone="green" />
               <Metric label="TIỀN MẶT" value={money(revenue?.cashCollected)} icon="cash" tone="amber" />
               <Metric label="THANH TOÁN ĐIỆN TỬ" value={money(revenue?.ePaymentAmount)} icon="credit-card-outline" tone="blue" />
-            </View>
-
-            <View style={styles.panel}>
-              <View style={styles.panelHeading}><MaterialCommunityIcons color={colors.accent} name="receipt-text-outline" size={20} /><Text style={styles.panelTitle}>Chi tiết doanh thu</Text></View>
-              <View style={styles.tableHeader}><Text style={styles.tableMain}>LOẠI</Text><Text style={styles.tableCenter}>VÉ</Text><Text style={styles.tableRight}>DOANH THU</Text></View>
-              {(revenue?.revenueBreakdown || []).length ? revenue?.revenueBreakdown?.map((item) => (
-                <View key={item.ticketType} style={styles.row}>
-                  <Text style={styles.tableMainValue}>{item.ticketType === 'WALK_IN' ? 'Vé trực tiếp' : item.ticketType}</Text>
-                  <Text style={styles.tableCenterValue}>{item.tickets}</Text>
-                  <Text style={styles.rowAmount}>{money(item.revenue)}</Text>
-                </View>
-              )) : <Text style={styles.emptyText}>Chưa có vé nào được bán.</Text>}
             </View>
 
             <View style={styles.panel}>
@@ -106,7 +97,7 @@ export default function ShiftRevenueScreen() {
 
             <View style={[styles.panel, styles.lastPanel]}>
               <View style={styles.panelHeading}><MaterialCommunityIcons color={colors.accent} name="receipt-text-outline" size={20} /><Text style={styles.panelTitle}>Giao dịch gần đây</Text></View>
-              {(revenue?.recentTransactions || []).length ? revenue?.recentTransactions?.map((item) => (
+              {recentTransactions.length ? visibleTransactions.map((item) => (
                 <View key={item._id} style={styles.row}>
                   <View style={styles.rowText}>
                     <Text numberOfLines={1} style={styles.rowTitle}>{item.transactionCode || item._id}</Text>
@@ -115,6 +106,19 @@ export default function ShiftRevenueScreen() {
                   <View style={styles.transactionRight}><Text style={styles.rowAmount}>{money(item.amount)}</Text><Text style={[styles.transactionStatus, item.status === 'COMPLETED' ? styles.completedStatus : styles.pendingStatus]}>{item.status === 'COMPLETED' ? 'Hoàn tất' : 'Chờ xử lý'}</Text></View>
                 </View>
               )) : <Text style={styles.emptyText}>Chưa có giao dịch gần đây.</Text>}
+              {recentTransactions.length > TRANSACTIONS_PER_PAGE ? (
+                <View style={styles.pagination}>
+                  <Pressable disabled={transactionPage === 1} onPress={() => setTransactionPage((page) => Math.max(1, page - 1))} style={[styles.pageButton, transactionPage === 1 && styles.pageButtonDisabled]}>
+                    <MaterialCommunityIcons color={transactionPage === 1 ? colors.outline : colors.primary} name="chevron-left" size={20} />
+                    <Text style={[styles.pageButtonText, transactionPage === 1 && styles.pageButtonTextDisabled]}>Trước</Text>
+                  </Pressable>
+                  <View style={styles.pageIndicator}><Text style={styles.pageIndicatorText}>{transactionPage} / {transactionPageCount}</Text></View>
+                  <Pressable disabled={transactionPage === transactionPageCount} onPress={() => setTransactionPage((page) => Math.min(transactionPageCount, page + 1))} style={[styles.pageButton, transactionPage === transactionPageCount && styles.pageButtonDisabled]}>
+                    <Text style={[styles.pageButtonText, transactionPage === transactionPageCount && styles.pageButtonTextDisabled]}>Tiếp</Text>
+                    <MaterialCommunityIcons color={transactionPage === transactionPageCount ? colors.outline : colors.primary} name="chevron-right" size={20} />
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
 
           </>
@@ -132,12 +136,6 @@ const styles = StyleSheet.create({
   kicker: { color: colors.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
   title: { color: colors.primary, fontSize: 25, fontWeight: '900' },
   loading: { minHeight: 260, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  summaryHeader: { flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 20, borderWidth: 1, borderColor: '#ccebdc', backgroundColor: '#f1fcf7', padding: 14, marginBottom: 14 },
-  summaryIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: colors.accent },
-  summaryText: { flex: 1 },
-  summaryTitle: { color: colors.primary, fontSize: 16, fontWeight: '900' },
-  summaryHint: { marginTop: 2, color: colors.muted, fontSize: 10, fontWeight: '600' },
-  summaryRefresh: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: colors.white },
   metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
   metric: { width: '48%', gap: 9, borderRadius: 18, borderWidth: 1, backgroundColor: colors.card, padding: 13 },
   metric_green: { borderColor: '#c9eadb' },
@@ -168,6 +166,13 @@ const styles = StyleSheet.create({
   transactionStatus: { overflow: 'hidden', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3, fontSize: 9, fontWeight: '900' },
   completedStatus: { color: '#087351', backgroundColor: '#d5f5e7' },
   pendingStatus: { color: '#965d00', backgroundColor: '#fff0c2' },
+  pagination: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.outline, padding: 12 },
+  pageButton: { minWidth: 84, minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3, borderRadius: 12, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.white, paddingHorizontal: 10 },
+  pageButtonDisabled: { backgroundColor: colors.surfaceLow, opacity: .65 },
+  pageButtonText: { color: colors.primary, fontSize: 12, fontWeight: '900' },
+  pageButtonTextDisabled: { color: colors.muted },
+  pageIndicator: { minWidth: 58, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: 11, backgroundColor: '#e6f7ef' },
+  pageIndicatorText: { color: colors.primary, fontSize: 12, fontWeight: '900' },
   emptyText: { color: colors.muted, fontSize: 13, fontWeight: '700', padding: 16 },
   lastPanel: { marginBottom: 96 },
 });

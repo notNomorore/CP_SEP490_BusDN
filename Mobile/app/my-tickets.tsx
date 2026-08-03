@@ -8,6 +8,7 @@ import { EmptyState, LoadingState, PassengerLayout, StatusPill } from '@/compone
 import { colors } from '@/constants/colors';
 
 const currency = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' });
+const statusLabel = (value?: string) => ({ PAID: 'Đã thanh toán', PENDING: 'Chờ xử lý', COMPLETED: 'Hoàn tất', ACTIVE: 'Đang hiệu lực', EXPIRED: 'Hết hạn', CANCELLED: 'Đã hủy' }[String(value || '').toUpperCase()] || value || 'Chờ xử lý');
 
 export default function MyTicketsScreen() {
   const [tickets, setTickets] = useState<TicketRecord[]>([]);
@@ -26,7 +27,7 @@ export default function MyTicketsScreen() {
       setTickets(ticketData.tickets || []);
       setPasses(passData.passes || []);
     } catch (err) {
-      setError((err as { message?: string })?.message || 'Could not load tickets.');
+      setError((err as { message?: string })?.message || 'Không thể tải danh sách vé.');
     } finally {
       setLoading(false);
     }
@@ -39,10 +40,10 @@ export default function MyTicketsScreen() {
   return (
     <PassengerLayout
       active="tickets"
-      subtitle="One-way tickets and monthly passes"
-      title="My Tickets"
+      subtitle="Vé một lượt và vé tháng của bạn"
+      title="Vé của tôi"
       rightAction={(
-        <Pressable accessibilityLabel="Travel history" onPress={() => router.push('/travel-history')} style={styles.iconButton}>
+        <Pressable accessibilityLabel="Lịch sử hành trình" onPress={() => router.push('/travel-history')} style={styles.iconButton}>
           <MaterialCommunityIcons color={colors.primary} name="history" size={20} />
         </Pressable>
       )}
@@ -50,41 +51,41 @@ export default function MyTicketsScreen() {
       <View style={styles.actions}>
         <Pressable onPress={() => router.push('/buy-oneway-ticket')} style={styles.buyButton}>
           <MaterialCommunityIcons color={colors.white} name="ticket-outline" size={19} />
-          <Text style={styles.buyText}>Buy one-way</Text>
+          <Text style={styles.buyText}>Mua vé lượt</Text>
         </Pressable>
         <Pressable onPress={() => router.push('/buy-monthly-pass')} style={styles.passButton}>
           <MaterialCommunityIcons color={colors.primary} name="calendar-month-outline" size={19} />
-          <Text style={styles.passText}>Monthly pass</Text>
+          <Text style={styles.passText}>Mua vé tháng</Text>
         </Pressable>
       </View>
 
-      {loading ? <LoadingState label="Loading tickets" /> : null}
-      {!loading && error ? <EmptyState icon="alert-circle-outline" title="Could not load tickets" detail={error} /> : null}
-      {!loading && !error && !tickets.length && !passes.length ? <EmptyState icon="ticket-confirmation-outline" title="No tickets yet" detail="Buy a ticket to start travelling with BusDN." /> : null}
+      {loading ? <LoadingState label="Đang tải vé" /> : null}
+      {!loading && error ? <EmptyState icon="alert-circle-outline" title="Không thể tải vé" detail={error} /> : null}
+      {!loading && !error && !tickets.length && !passes.length ? <EmptyState icon="ticket-confirmation-outline" title="Bạn chưa có vé" detail="Hãy mua vé để bắt đầu hành trình cùng BusDN." /> : null}
 
-      {!loading && !error && tickets.length ? <Text style={styles.sectionTitle}>One-way tickets</Text> : null}
+      {!loading && !error && tickets.length ? <Text style={styles.sectionTitle}>Vé một lượt</Text> : null}
       {!loading && !error && tickets.map((ticket) => (
         <View key={String(ticket.id || ticket._id || ticket.ticketCode)} style={styles.ticketCard}>
           <View style={styles.ticketTop}>
-            <Text style={styles.code}>{ticket.ticketCode || 'Ticket'}</Text>
-            <StatusPill label={ticket.currentStatus || ticket.ticketStatus || ticket.paymentStatus || 'PENDING'} tone={ticket.paymentStatus === 'PAID' ? 'success' : 'warning'} />
+            <Text style={styles.code}>{ticket.ticketCode || 'Vé'}</Text>
+            <StatusPill label={statusLabel(ticket.currentStatus || ticket.ticketStatus || ticket.paymentStatus)} tone={ticket.paymentStatus === 'PAID' ? 'success' : 'warning'} />
           </View>
-          <Text style={styles.path}>{ticket.departureLocation || 'Origin'} to {ticket.destinationLocation || 'Destination'}</Text>
-          <Text style={styles.meta}>{ticket.routeCode || ticket.routeNumber || 'Route'} - {ticket.departureTime || 'Time'} - {currency.format(Number(ticket.ticketPrice || 0))}</Text>
-          <Text style={styles.meta}>Payment: {ticket.paymentStatus || 'PENDING'} - Booking: {ticket.bookingStatus || 'PENDING'}</Text>
+          <Text style={styles.path}>{ticket.departureLocation || 'Điểm đi'} đến {ticket.destinationLocation || 'Điểm đến'}</Text>
+          <Text style={styles.meta}>{ticket.routeCode || ticket.routeNumber || 'Tuyến'} - {ticket.departureTime || 'Chưa có giờ'} - {currency.format(Number(ticket.ticketPrice || 0))}</Text>
+          <Text style={styles.meta}>Thanh toán: {statusLabel(ticket.paymentStatus)} - Đặt vé: {statusLabel(ticket.bookingStatus)}</Text>
         </View>
       ))}
 
-      {!loading && !error && passes.length ? <Text style={styles.sectionTitle}>Monthly passes</Text> : null}
+      {!loading && !error && passes.length ? <Text style={styles.sectionTitle}>Vé tháng</Text> : null}
       {!loading && !error && passes.map((pass) => (
         <View key={String(pass.id || pass._id || pass.passCode)} style={styles.ticketCard}>
           <View style={styles.ticketTop}>
-            <Text style={styles.code}>{pass.passCode || 'Monthly pass'}</Text>
-            <StatusPill label={pass.passStatus || pass.paymentStatus || 'PENDING'} tone={pass.paymentStatus === 'PAID' ? 'success' : 'warning'} />
+            <Text style={styles.code}>{pass.passCode || 'Vé tháng'}</Text>
+            <StatusPill label={statusLabel(pass.passStatus || pass.paymentStatus)} tone={pass.paymentStatus === 'PAID' ? 'success' : 'warning'} />
           </View>
-          <Text style={styles.path}>{pass.passType || 'STANDARD'} - {pass.routeCode || 'ALL ROUTES'}</Text>
-          <Text style={styles.meta}>{new Date(pass.startDate || Date.now()).toLocaleDateString()} to {new Date(pass.expiryDate || Date.now()).toLocaleDateString()}</Text>
-          <Text style={styles.meta}>{currency.format(Number(pass.passPrice || 0))} - Payment: {pass.paymentStatus || 'PENDING'}</Text>
+          <Text style={styles.path}>{pass.passType || 'Tiêu chuẩn'} - {pass.routeCode || 'Tất cả tuyến'}</Text>
+          <Text style={styles.meta}>{new Date(pass.startDate || Date.now()).toLocaleDateString('vi-VN')} đến {new Date(pass.expiryDate || Date.now()).toLocaleDateString('vi-VN')}</Text>
+          <Text style={styles.meta}>{currency.format(Number(pass.passPrice || 0))} - Thanh toán: {statusLabel(pass.paymentStatus)}</Text>
         </View>
       ))}
     </PassengerLayout>

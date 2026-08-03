@@ -1,13 +1,12 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, type Href } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import {
   Image,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,17 +19,17 @@ import { isDriverAssistantRole } from '@/utils/roleNavigation';
 const destinations = [
   {
     title: 'Hà Nội - Sa Pa',
-    detail: '4.8 rating',
-    price: 'From $24.00',
-    badge: 'Popular',
+    detail: 'Đánh giá 4.8',
+    price: 'Từ 24 USD',
+    badge: 'Phổ biến',
     image:
       'https://lh3.googleusercontent.com/aida-public/AB6AXuBw2QLHKlIhgiQuJsKrfxH0bKnsKD3wUy8AsHHoQWP53W4cXESgJGrBrhXdMKNGYPedg6A6BFVrsEsz6M6vEvwpo6ydAUyayYkohp8SMJyO5wciNIvn6kS98CSXF0pBDmj9EoN9POhCnHx5cT3HAAjRIrxAdoyMKO0tfcPN9mTpYedq70fJ6erX87qooQQxszQveP-lvCW6dTmceYeHkf_ORXasEbGTVUaU1jpHpUMzrAcvmogKloRBb9HK0AJaQv6_4mG0bMAq5do',
   },
   {
     title: 'Đà Nẵng - Hội An',
-    detail: '12 trips/day',
-    price: 'From $12.00',
-    badge: 'Trending',
+    detail: '12 chuyến/ngày',
+    price: 'Từ 12 USD',
+    badge: 'Nổi bật',
     image:
       'https://lh3.googleusercontent.com/aida-public/AB6AXuBTclYWEMmSc9NLTgUwDv9on7AFX-SSpA5gPI1ogZN-TD9umRy6yxhLhY05HSnXwdnhNvtc5WOT_HWHnMvrQMl2CevyJtJwtUnTAWXtWdT3b0nQwKCki3s72wp73yTo9qn2sRdNen8AIa2e9n8CBbLOyU2DCghI_mQ2qJrCuGChKthcFGUc7k2ZJ5R6-NwZczM_XHtBDmCcV9s9rm2D0OrHdW-p-xAe3p1CQ7ZhiFTcC8JsrDLcPXA_mFT0glXrCoHpVvKmhNtQwoE',
   },
@@ -38,29 +37,8 @@ const destinations = [
 
 const priorityPassengerRoute = '/priority-passenger' as Href;
 const driverAssistantRoute = '/driver-assistant' as Href;
-const routeSearchRoute = '/route-search' as Href;
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
-
-function SearchField({
-  label,
-  icon,
-  children,
-}: {
-  label: string;
-  icon: IconName;
-  children: React.ReactNode;
-}) {
-  return (
-    <View style={styles.searchField}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <View style={styles.fieldContent}>
-        <MaterialCommunityIcons color="#237356" name={icon} size={18} />
-        {children}
-      </View>
-    </View>
-  );
-}
 
 function ServiceTile({
   icon,
@@ -90,8 +68,6 @@ export default function HomeScreen() {
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isHydrated = useAuthStore((state) => state.isHydrated);
-  const [departure, setDeparture] = useState('Hà Nội');
-  const [destination, setDestination] = useState('');
 
   useEffect(() => {
     if (isHydrated && !isAuthenticated) {
@@ -103,16 +79,6 @@ export default function HomeScreen() {
       router.replace(driverAssistantRoute);
     }
   }, [isHydrated, isAuthenticated, user?.role]);
-
-  const searchRoutes = () => {
-    router.push({
-      pathname: routeSearchRoute,
-      params: {
-        from: departure.trim(),
-        to: destination.trim(),
-      },
-    } as unknown as Href);
-  };
 
   if (isHydrated && isAuthenticated && isDriverAssistantRole(user?.role)) {
     return null;
@@ -128,13 +94,13 @@ export default function HomeScreen() {
         >
           <View style={styles.header}>
             <View style={styles.brand}>
-              <Pressable accessibilityLabel="Open menu" hitSlop={10}>
+              <Pressable accessibilityLabel="Mở trình đơn" hitSlop={10}>
                 <MaterialCommunityIcons color={colors.primary} name="menu" size={25} />
               </Pressable>
               <Text style={styles.brandName}>Veridian Transit</Text>
             </View>
             <Pressable
-              accessibilityLabel="Open profile"
+              accessibilityLabel="Mở hồ sơ"
               onPress={() => router.push('/profile')}
               style={styles.avatar}
             >
@@ -149,74 +115,27 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.hero}>
-            <Text style={styles.kicker}>PREMIUM TRAVEL</Text>
-            <Text style={styles.title}>Where shall we lead you today?</Text>
+            <Text style={styles.kicker}>HÀNH TRÌNH TIỆN NGHI</Text>
+            <Text style={styles.title}>Hôm nay bạn muốn đi đâu?</Text>
           </View>
 
-          <View style={styles.searchCard}>
-            <SearchField icon="map-marker-outline" label="DEPARTURE">
-              <TextInput
-                accessibilityLabel="Departure"
-                onChangeText={setDeparture}
-                style={styles.fieldInput}
-                value={departure}
-              />
-            </SearchField>
-            <SearchField icon="map-outline" label="DESTINATION">
-              <TextInput
-                accessibilityLabel="Destination"
-                onChangeText={setDestination}
-                placeholder="Where to?"
-                placeholderTextColor="#65766f"
-                style={styles.fieldInput}
-                value={destination}
-              />
-            </SearchField>
-
-            <View style={styles.compactFields}>
-              <View style={styles.compactField}>
-                <Text style={styles.fieldLabel}>DATE</Text>
-                <View style={styles.fieldContent}>
-                  <MaterialCommunityIcons color="#237356" name="calendar-blank-outline" size={17} />
-                  <Text style={styles.compactValue}>Oct 24</Text>
-                </View>
-              </View>
-              <View style={styles.compactField}>
-                <Text style={styles.fieldLabel}>PASSENGERS</Text>
-                <View style={styles.fieldContent}>
-                  <MaterialCommunityIcons color="#237356" name="account-outline" size={17} />
-                  <Text style={styles.compactValue}>1 Adult</Text>
-                </View>
-              </View>
-            </View>
-
-            <Pressable
-              accessibilityRole="button"
-              onPress={searchRoutes}
-              style={({ pressed }) => [styles.searchButton, pressed && styles.pressed]}
-            >
-              <Text style={styles.searchButtonText}>Search Routes</Text>
-              <MaterialCommunityIcons color={colors.white} name="arrow-right" size={21} />
-            </Pressable>
-          </View>
-
-          <Text style={[styles.sectionTitle, styles.servicesTitle]}>BusDN Services</Text>
+          <Text style={[styles.sectionTitle, styles.servicesTitle]}>Dịch vụ BusDN</Text>
           <View style={styles.serviceGrid}>
-            <ServiceTile icon="compass-outline" label="Explore" onPress={() => router.push('/search-routes')} />
-            <ServiceTile icon="crosshairs-gps" label="Live Track" onPress={() => router.push('/live-tracking')} />
-            <ServiceTile icon="ticket-outline" label="Buy Ticket" onPress={() => router.push('/buy-oneway-ticket')} />
+            <ServiceTile icon="compass-outline" label="Khám phá" onPress={() => router.push('/search-routes')} />
+            <ServiceTile icon="crosshairs-gps" label="Theo dõi xe" onPress={() => router.push('/live-tracking')} />
+            <ServiceTile icon="ticket-outline" label="Mua vé" onPress={() => router.push('/buy-oneway-ticket')} />
             <ServiceTile icon="package-variant-closed" label="Đồ thất lạc" onPress={() => router.push('/my-lost-items' as Href)} />
-            <ServiceTile icon="ticket-confirmation-outline" label="My Tickets" onPress={() => router.push('/my-tickets')} />
-            <ServiceTile icon="bell-ring-outline" label="Alerts" onPress={() => router.push('/notifications')} />
-            <ServiceTile icon="directions" label="Plan Trip" onPress={() => router.push('/plan-trip')} />
-            <ServiceTile icon="history" label="History" onPress={() => router.push('/travel-history')} />
+            <ServiceTile icon="ticket-confirmation-outline" label="Vé của tôi" onPress={() => router.push('/my-tickets')} />
+            <ServiceTile icon="bell-ring-outline" label="Thông báo" onPress={() => router.push('/notifications')} />
+            <ServiceTile icon="directions" label="Lập hành trình" onPress={() => router.push('/plan-trip')} />
+            <ServiceTile icon="history" label="Lịch sử" onPress={() => router.push('/travel-history')} />
             <ServiceTile icon="message-text-outline" label="Góp ý" onPress={() => router.push('/my-feedback' as Href)} />
           </View>
 
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Trending Now</Text>
+            <Text style={styles.sectionTitle}>Đang nổi bật</Text>
             <Pressable onPress={() => router.push('/search-routes')}>
-              <Text style={styles.viewAll}>View all ↗</Text>
+              <Text style={styles.viewAll}>Xem tất cả ↗</Text>
             </Pressable>
           </View>
 
@@ -228,7 +147,7 @@ export default function HomeScreen() {
             {destinations.map((item) => (
               <Pressable
                 key={item.title}
-                onPress={() => setDestination(item.title.split(' - ')[1])}
+                onPress={() => router.push({ pathname: '/route-search', params: { to: item.title.split(' - ')[1] } })}
                 style={styles.destinationCard}
               >
                 <View>

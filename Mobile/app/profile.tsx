@@ -36,7 +36,7 @@ function formatMemberSince(value?: string) {
   if (!value) return 'Jan 2024';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Jan 2024';
-  return new Intl.DateTimeFormat('en', { month: 'short', year: 'numeric' }).format(date);
+  return new Intl.DateTimeFormat('vi-VN', { month: 'short', year: 'numeric' }).format(date);
 }
 
 function getDaysLeft(expireDate?: string) {
@@ -141,18 +141,18 @@ export default function ProfileScreen() {
   }, [isAuthenticated, isHydrated]);
 
   const unavailable = (title: string) => {
-    Alert.alert(title, `${title} is not available in the mobile app yet.`);
+    Alert.alert(title, `${title} hiện chưa có trên ứng dụng Mobile.`);
   };
 
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <View style={styles.screen}>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Go back" hitSlop={8} onPress={() => router.back()} style={styles.headerButton}>
+          <Pressable accessibilityLabel="Quay lại" hitSlop={8} onPress={() => router.back()} style={styles.headerButton}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={24} />
           </Pressable>
-          <Text style={styles.headerTitle}>My Profile</Text>
-          <Pressable accessibilityLabel="More profile options" hitSlop={8} onPress={() => unavailable('Profile options')} style={styles.headerButton}>
+          <Text style={styles.headerTitle}>Hồ sơ của tôi</Text>
+          <Pressable accessibilityLabel="Tùy chọn hồ sơ" hitSlop={8} onPress={() => unavailable('Tùy chọn hồ sơ')} style={styles.headerButton}>
             <MaterialCommunityIcons color={colors.primary} name="dots-vertical" size={24} />
           </Pressable>
         </View>
@@ -171,13 +171,13 @@ export default function ProfileScreen() {
                   <Text style={styles.avatarInitials}>{initials}</Text>
                 )}
               </View>
-              <Pressable accessibilityLabel="Edit profile photo" onPress={() => unavailable('Profile photo')} style={styles.cameraButton}>
+              <Pressable accessibilityLabel="Đổi ảnh đại diện" onPress={() => unavailable('Ảnh đại diện')} style={styles.cameraButton}>
                 <MaterialCommunityIcons color={colors.white} name="camera" size={18} />
               </Pressable>
             </View>
             <Text style={styles.name}>{displayUser.fullName}</Text>
-            <Text style={styles.contact}>{displayUser.email || 'Email not provided'}</Text>
-            <Text style={styles.phone}>{displayUser.phoneNumber || displayUser.phone || 'Phone not provided'}</Text>
+            <Text style={styles.contact}>{displayUser.email || 'Chưa cung cấp email'}</Text>
+            <Text style={styles.phone}>{displayUser.phoneNumber || displayUser.phone || 'Chưa cung cấp số điện thoại'}</Text>
           </View>
 
           {isLoading && !profile ? (
@@ -189,28 +189,28 @@ export default function ProfileScreen() {
               <View style={styles.verifiedBadge}>
                 <MaterialCommunityIcons color="#17503a" name="check-decagram" size={15} />
                 <Text style={styles.verifiedText}>
-                  {displayUser.isVerified === false ? 'ACCOUNT' : 'VERIFIED ACCOUNT'}
+                  {displayUser.isVerified === false ? 'TÀI KHOẢN' : 'TÀI KHOẢN ĐÃ XÁC THỰC'}
                 </Text>
               </View>
-              <Text style={styles.memberText}>Member since {formatMemberSince(displayUser.createdAt)}</Text>
+              <Text style={styles.memberText}>Thành viên từ {formatMemberSince(displayUser.createdAt)}</Text>
             </View>
             <View style={styles.passengerBlock}>
-              <Text style={styles.passengerLabel}>PASSENGER ID</Text>
+              <Text style={styles.passengerLabel}>MÃ HÀNH KHÁCH</Text>
               <Text style={styles.passengerValue}>{passengerId(displayUser.id)}</Text>
             </View>
           </View>
 
-          <Text style={styles.sectionTitle}>Travel Summary</Text>
+          <Text style={styles.sectionTitle}>Tổng quan hành trình</Text>
           <View style={styles.passCard}>
             <View>
-              <Text style={styles.passKicker}>MONTHLY PASS</Text>
-              <Text style={styles.passTitle}>{passActive ? 'Active Status' : 'Inactive Status'}</Text>
+              <Text style={styles.passKicker}>VÉ THÁNG</Text>
+              <Text style={styles.passTitle}>{passActive ? 'Đang hiệu lực' : 'Chưa kích hoạt'}</Text>
             </View>
             <View style={styles.progressRow}>
               <View style={styles.progressTrack}>
                 <View style={[styles.progressFill, { width: `${passProgress * 100}%` }]} />
               </View>
-              <Text style={styles.daysText}>{daysLeft} Days Left</Text>
+              <Text style={styles.daysText}>Còn {daysLeft} ngày</Text>
             </View>
             <View style={styles.passGlow} />
           </View>
@@ -220,33 +220,33 @@ export default function ProfileScreen() {
               <MaterialCommunityIcons color={colors.accent} name="bus" size={23} />
               <View>
                 <Text style={styles.statValue}>{totalTrips}</Text>
-                <Text style={styles.statLabel}>Total Trips</Text>
+                <Text style={styles.statLabel}>Tổng chuyến</Text>
               </View>
             </View>
             <View style={styles.statCard}>
               <MaterialCommunityIcons color={colors.secondary} name="ticket-confirmation-outline" size={23} />
               <View>
                 <Text style={styles.statValue}>{String(activeTickets).padStart(2, '0')}</Text>
-                <Text style={styles.statLabel}>Active Tickets</Text>
+                <Text style={styles.statLabel}>Vé hiệu lực</Text>
               </View>
             </View>
           </View>
 
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <Text style={styles.sectionTitle}>Truy cập nhanh</Text>
           <View style={styles.actionGrid}>
-            <ActionCard icon="ticket-confirmation-outline" label="My Tickets" onPress={() => router.push('/my-tickets')} />
-            <ActionCard icon="history" label="Travel History" onPress={() => router.push('/travel-history')} />
+            <ActionCard icon="ticket-confirmation-outline" label="Vé của tôi" onPress={() => router.push('/my-tickets')} />
+            <ActionCard icon="history" label="Lịch sử hành trình" onPress={() => router.push('/travel-history')} />
             <ActionCard icon="heart-outline" label="Yêu thích" onPress={() => router.push('/favorites' as Href)} />
-            <ActionCard icon="bell-ring-outline" label="Alerts" onPress={() => router.push('/notifications')} />
+            <ActionCard icon="bell-ring-outline" label="Thông báo" onPress={() => router.push('/notifications')} />
             <ActionCard icon="message-text-outline" label="Góp ý" onPress={() => router.push('/my-feedback' as Href)} />
             <ActionCard icon="package-variant-closed" label="Đồ thất lạc" onPress={() => router.push('/my-lost-items' as Href)} />
-            <ActionCard icon="lock-outline" label="Security" onPress={() => router.push('/change-password')} />
+            <ActionCard icon="lock-outline" label="Bảo mật" onPress={() => router.push('/change-password')} />
           </View>
 
           <View style={styles.settingsCard}>
-            <SettingRow icon="shield-check-outline" label="Privacy Policy" onPress={() => unavailable('Privacy Policy')} />
-            <SettingRow icon="file-document-outline" label="Terms of Service" onPress={() => unavailable('Terms of Service')} />
-            <SettingRow icon="help-box-outline" label="Help Center" onPress={() => unavailable('Help Center')} />
+            <SettingRow icon="shield-check-outline" label="Chính sách riêng tư" onPress={() => unavailable('Chính sách riêng tư')} />
+            <SettingRow icon="file-document-outline" label="Điều khoản dịch vụ" onPress={() => unavailable('Điều khoản dịch vụ')} />
+            <SettingRow icon="help-box-outline" label="Trung tâm trợ giúp" onPress={() => unavailable('Trung tâm trợ giúp')} />
           </View>
 
           <Pressable
@@ -260,14 +260,14 @@ export default function ProfileScreen() {
             ) : (
               <>
                 <MaterialCommunityIcons color={colors.error} name="logout" size={21} />
-                <Text style={styles.logoutText}>Logout Account</Text>
+                <Text style={styles.logoutText}>Đăng xuất</Text>
               </>
             )}
           </Pressable>
 
           <View style={styles.footer}>
             <Text style={styles.footerBrand}>BUSDN MOBILE</Text>
-            <Text style={styles.footerVersion}>VERSION 4.2.0-STABLE</Text>
+            <Text style={styles.footerVersion}>PHIÊN BẢN 4.2.0 ỔN ĐỊNH</Text>
           </View>
         </ScrollView>
 

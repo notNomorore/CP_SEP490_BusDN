@@ -21,7 +21,7 @@ export default function TravelHistoryScreen() {
         setRecords(data.records || []);
         setSummary(data.summary);
       } catch (err) {
-        setError((err as { message?: string })?.message || 'Could not load travel history.');
+        setError((err as { message?: string })?.message || 'Không thể tải lịch sử hành trình.');
       } finally {
         setLoading(false);
       }
@@ -30,26 +30,26 @@ export default function TravelHistoryScreen() {
   }, []);
 
   return (
-    <PassengerLayout active="tickets" subtitle="Completed trips from your profile" title="Travel History">
+    <PassengerLayout active="tickets" subtitle="Các chuyến đã hoàn thành của bạn" title="Lịch sử hành trình">
       {summary ? (
         <View style={styles.summary}>
-          <Metric label="Trips" value={String(summary.totalTrips || records.length)} />
-          <Metric label="Spent" value={currency.format(Number(summary.totalFare || 0))} />
-          <Metric label="Minutes" value={String(summary.totalDurationMinutes || 0)} />
+          <Metric label="Chuyến" value={String(summary.totalTrips || records.length)} />
+          <Metric label="Đã chi" value={currency.format(Number(summary.totalFare || 0))} />
+          <Metric label="Phút" value={String(summary.totalDurationMinutes || 0)} />
         </View>
       ) : null}
-      {loading ? <LoadingState label="Loading travel history" /> : null}
-      {!loading && error ? <EmptyState icon="alert-circle-outline" title="Could not load history" detail={error} /> : null}
-      {!loading && !error && !records.length ? <EmptyState title="No trips yet" detail="Validated trips will appear here." /> : null}
+      {loading ? <LoadingState label="Đang tải lịch sử hành trình" /> : null}
+      {!loading && error ? <EmptyState icon="alert-circle-outline" title="Không thể tải lịch sử" detail={error} /> : null}
+      {!loading && !error && !records.length ? <EmptyState title="Chưa có chuyến đi" detail="Các chuyến đã xác nhận sẽ xuất hiện tại đây." /> : null}
       {!loading && !error && records.map((record) => (
         <View key={record.id} style={styles.card}>
           <View style={styles.row}>
-            <Text style={styles.route}>{record.routeNumber || record.routeName || 'Route'}</Text>
-            <StatusPill label={record.travelStatus || 'COMPLETED'} tone="success" />
+            <Text style={styles.route}>{record.routeNumber || record.routeName || 'Tuyến'}</Text>
+            <StatusPill label={record.travelStatus === 'COMPLETED' ? 'Hoàn tất' : record.travelStatus || 'Hoàn tất'} tone="success" />
           </View>
-          <Text style={styles.path}>{record.boardingStop || 'Origin'} to {record.destinationStop || 'Destination'}</Text>
-          <Text style={styles.meta}>{new Date(record.boardingTime || record.travelDate || Date.now()).toLocaleString()} - {record.travelDurationMinutes || 0} min</Text>
-          <Text style={styles.meta}>{record.ticketId || record.ticketType || 'Ticket'} - {currency.format(Number(record.fareAmount || 0))}</Text>
+          <Text style={styles.path}>{record.boardingStop || 'Điểm lên'} đến {record.destinationStop || 'Điểm xuống'}</Text>
+          <Text style={styles.meta}>{new Date(record.boardingTime || record.travelDate || Date.now()).toLocaleString('vi-VN')} - {record.travelDurationMinutes || 0} phút</Text>
+          <Text style={styles.meta}>{record.ticketId || record.ticketType || 'Vé'} - {currency.format(Number(record.fareAmount || 0))}</Text>
           <Pressable
             onPress={() => router.push({
               pathname: '/submit-feedback',

@@ -24,7 +24,7 @@ export function PassengerLayout({ active, title, subtitle, rightAction, refreshC
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <View style={styles.screen}>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Go back" hitSlop={10} onPress={() => router.canGoBack() ? router.back() : router.replace('/home')}>
+          <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => router.canGoBack() ? router.back() : router.replace('/home')}>
             <MaterialCommunityIcons color={colors.primary} name="chevron-left" size={28} />
           </Pressable>
           <View style={styles.headerCopy}>
@@ -47,7 +47,7 @@ export function PassengerLayout({ active, title, subtitle, rightAction, refreshC
   );
 }
 
-export function LoadingState({ label = 'Loading' }: { label?: string }) {
+export function LoadingState({ label = 'Đang tải' }: { label?: string }) {
   return (
     <View style={styles.stateBox}>
       <ActivityIndicator color={colors.primary} />
