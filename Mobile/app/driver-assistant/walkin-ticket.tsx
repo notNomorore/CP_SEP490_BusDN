@@ -21,14 +21,46 @@ const money = (value: number | string) => new Intl.NumberFormat('vi-VN', { style
 const objectId = (value?: string | null) => String(value || '');
 const optionLabels: Record<string, string> = { ADULT: 'Người lớn', STUDENT: 'Học sinh / sinh viên', CHILD: 'Trẻ em', SENIOR: 'Người cao tuổi', CASH: 'Tiền mặt', BANK_TRANSFER: 'Chuyển khoản QR' };
 
-function OptionRow({ values, active, onChange }: { values: string[]; active: string; onChange: (value: string) => void }) {
+function DropdownSelect({
+  label,
+  value,
+  options,
+  onChange,
+  placeholder = 'Chọn thông tin',
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedLabel = options.find((option) => option.value === value)?.label;
+
   return (
-    <View style={styles.optionRow}>
-      {values.map((value) => (
-        <Pressable key={value} onPress={() => onChange(value)} style={[styles.optionChip, active === value && styles.optionChipActive]}>
-          <Text style={[styles.optionText, active === value && styles.optionTextActive]}>{optionLabels[value] || value}</Text>
-        </Pressable>
-      ))}
+    <View style={styles.dropdownGroup}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <Pressable onPress={() => setOpen((current) => !current)} style={[styles.dropdownButton, open && styles.dropdownButtonOpen]}>
+        <Text numberOfLines={1} style={[styles.dropdownValue, !selectedLabel && styles.dropdownPlaceholder]}>{selectedLabel || placeholder}</Text>
+        <MaterialCommunityIcons color={colors.muted} name={open ? 'chevron-up' : 'chevron-down'} size={22} />
+      </Pressable>
+      {open ? (
+        <View style={styles.dropdownMenu}>
+          {options.map((option, index) => {
+            const active = option.value === value;
+            return (
+              <Pressable
+                key={`${option.value}-${index}`}
+                onPress={() => { onChange(option.value); setOpen(false); }}
+                style={[styles.dropdownOption, index < options.length - 1 && styles.dropdownOptionBorder, active && styles.dropdownOptionActive]}
+              >
+                <Text style={[styles.dropdownOptionText, active && styles.dropdownOptionTextActive]}>{option.label}</Text>
+                {active ? <MaterialCommunityIcons color={colors.accent} name="check" size={19} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -49,12 +81,18 @@ export default function WalkInTicketScreen() {
   const [history, setHistory] = useState<WalkInTicketHistory>({ date: toDateInput(), count: 0, totalRevenue: 0, tickets: [] });
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [resumingId, setResumingId] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
 
   const selectedTrip = useMemo(
     () => trips.find((trip) => trip.id === selectedTripId) || trips[0] || null,
     [selectedTripId, trips],
   );
   const stops = selectedTrip?.route?.stops || [];
+  const stopOptions = stops.map((stop) => ({ value: objectId(stop.stationId || stop.id), label: stop.stopName || 'Điểm dừng' }));
+  const changeQuantity = (delta: number) => {
+    const next = Math.min(20, Math.max(1, (Number.parseInt(quantity, 10) || 1) + delta));
+    setQuantity(String(next));
+  };
   const unitFare = useMemo(() => {
     const fares = selectedTrip?.route?.fareConfig;
     if (passengerType === 'STUDENT') return Number(fares?.studentFare) || Number(fares?.baseFare) || Number(selectedTrip?.route?.fare) || 0;
@@ -182,12 +220,6 @@ export default function WalkInTicketScreen() {
           </View>
         </View>
 
-        <View style={styles.totalCard}>
-          <Text style={styles.totalLabel}>Tổng tiền vé</Text>
-          <Text style={styles.totalValue}>{money(total)}</Text>
-          <Text style={styles.totalMeta}>{quantity || 1} hành khách · {paymentMethod === 'CASH' ? 'Tiền mặt' : 'Chuyển khoản QR'}</Text>
-        </View>
-
         <View style={styles.panel}>
           <View style={styles.panelHeadingRow}>
             <Text style={styles.panelTitle}>Chuyến được phân công</Text>
@@ -206,41 +238,32 @@ export default function WalkInTicketScreen() {
         </View>
 
         <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Điểm dừng</Text>
-          <Text style={styles.fieldLabel}>Điểm lên</Text>
-          <View style={styles.optionRow}>
-            {stops.slice(0, 6).map((stop) => {
-              const id = objectId(stop.stationId || stop.id);
-              return (
-                <Pressable key={`from-${id || stop.stopName}`} onPress={() => setFromStopId(id)} style={[styles.stopChip, fromStopId === id && styles.optionChipActive]}>
-                  <Text numberOfLines={1} style={[styles.optionText, fromStopId === id && styles.optionTextActive]}>{stop.stopName || 'Điểm dừng'}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Text style={styles.fieldLabel}>Điểm xuống</Text>
-          <View style={styles.optionRow}>
-            {stops.slice(-6).map((stop) => {
-              const id = objectId(stop.stationId || stop.id);
-              return (
-                <Pressable key={`to-${id || stop.stopName}`} onPress={() => setToStopId(id)} style={[styles.stopChip, toStopId === id && styles.optionChipActive]}>
-                  <Text numberOfLines={1} style={[styles.optionText, toStopId === id && styles.optionTextActive]}>{stop.stopName || 'Điểm dừng'}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <View style={styles.panelHeadingRow}><View style={styles.sectionIcon}><MaterialCommunityIcons color={colors.accent} name="map-marker-path" size={21} /></View><View style={styles.sectionToggleText}><Text style={styles.panelTitle}>Điểm dừng</Text><Text style={styles.sectionHint}>Chọn điểm lên và điểm xuống</Text></View></View>
+          <DropdownSelect label="ĐIỂM LÊN" value={fromStopId} options={stopOptions} onChange={setFromStopId} placeholder="Chọn điểm lên" />
+          <DropdownSelect label="ĐIỂM XUỐNG" value={toStopId} options={stopOptions} onChange={setToStopId} placeholder="Chọn điểm xuống" />
         </View>
 
         <View style={styles.panel}>
           <Text style={styles.panelTitle}>Thông tin vé</Text>
-          <Text style={styles.fieldLabel}>Đối tượng hành khách</Text>
-          <OptionRow values={passengerTypes} active={passengerType} onChange={setPassengerType} />
-          <Text style={styles.fieldLabel}>Phương thức thanh toán</Text>
-          <OptionRow values={paymentMethods} active={paymentMethod} onChange={setPaymentMethod} />
+          <DropdownSelect label="ĐỐI TƯỢNG HÀNH KHÁCH" value={passengerType} options={passengerTypes.map((value) => ({ value, label: optionLabels[value] }))} onChange={setPassengerType} />
+          <View style={styles.paymentGroup}>
+            <Text style={styles.fieldLabel}>PHƯƠNG THỨC THANH TOÁN</Text>
+            <View style={styles.paymentRow}>
+              {paymentMethods.map((value) => {
+                const active = paymentMethod === value;
+                return (
+                  <Pressable key={value} onPress={() => setPaymentMethod(value)} style={[styles.paymentButton, active && styles.paymentButtonActive]}>
+                    <MaterialCommunityIcons color={active ? colors.white : colors.primary} name={value === 'CASH' ? 'cash' : 'qrcode'} size={21} />
+                    <Text style={[styles.paymentButtonText, active && styles.paymentButtonTextActive]}>{optionLabels[value]}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
           <View style={styles.inputRow}>
             <View style={styles.inputGroup}>
-              <Text style={styles.fieldLabel}>Số lượng</Text>
-              <TextInput keyboardType="number-pad" maxLength={2} onChangeText={setQuantity} style={styles.input} value={quantity} />
+              <Text style={styles.fieldLabel}>SỐ LƯỢNG VÉ</Text>
+              <View style={styles.stepper}><Pressable onPress={() => changeQuantity(-1)} style={styles.stepperButton}><MaterialCommunityIcons color={colors.primary} name="minus" size={20} /></Pressable><Text style={styles.stepperValue}>{quantity}</Text><Pressable onPress={() => changeQuantity(1)} style={styles.stepperButton}><MaterialCommunityIcons color={colors.primary} name="plus" size={20} /></Pressable></View>
             </View>
             <View style={styles.inputGroup}>
               <Text style={styles.fieldLabel}>Tổng tiền</Text>
@@ -269,12 +292,19 @@ export default function WalkInTicketScreen() {
         </View>
 
         {result ? (
-          <View style={styles.panel}>
-            <Text style={styles.panelTitle}>{result.qrCodeImage ? 'Mã QR cho hành khách' : 'Vé vừa tạo'}</Text>
-            {result.qrCodeImage ? <Image resizeMode="contain" source={{ uri: result.qrCodeImage }} style={styles.qrImage} /> : <MaterialCommunityIcons color={colors.accent} name="check-circle-outline" size={54} style={styles.successIcon} />}
-            {result.qrCodeImage ? <Text style={styles.qrHint}>Đưa mã này cho hành khách quét bằng điện thoại.</Text> : null}
-            <Text style={styles.resultCode}>{result.ticketData?.ticketCode}</Text>
-            <Text style={styles.resultAmount}>{money(result.totalAmount || 0)}</Text>
+          <View style={[styles.panel, styles.resultPanel]}>
+            <View style={styles.resultHeading}><MaterialCommunityIcons color={colors.accent} name="receipt-text-outline" size={21} /><Text style={styles.panelTitle}>Thông tin vé</Text></View>
+            {result.qrCodeImage ? <><Image resizeMode="contain" source={{ uri: result.qrCodeImage }} style={styles.qrImage} /><Text style={styles.qrHint}>Đưa mã này cho hành khách quét bằng điện thoại.</Text></> : (
+              <View style={styles.successBox}>
+                <MaterialCommunityIcons color={colors.primary} name="check-circle-outline" size={34} />
+                <Text style={styles.successTitle}>Đã thu tiền và tạo vé thành công.</Text>
+                <View style={styles.cashResultRow}>
+                  <View style={styles.cashResultItem}><Text style={styles.cashResultLabel}>Khách đưa</Text><Text style={styles.cashResultValue}>{money(result.cashReceived ?? received)}</Text></View>
+                  <View style={styles.cashResultItem}><Text style={styles.cashResultLabel}>Tiền thối lại</Text><Text style={styles.cashResultValue}>{money(result.changeAmount ?? changeAmount)}</Text></View>
+                </View>
+              </View>
+            )}
+            <View style={styles.ticketIdentity}><Text style={styles.ticketCodeLabel}>Mã vé: <Text style={styles.ticketCodeValue}>{result.ticketData?.ticketCode}</Text></Text><Text style={styles.resultAmount}>{money(result.totalAmount || 0)}</Text></View>
             <View style={[styles.statusPill, result.requiresPaymentConfirmation ? styles.statusPending : styles.statusPaid]}>
               <Text style={styles.statusText}>{result.requiresPaymentConfirmation ? 'Chờ thanh toán' : 'Đã thanh toán'}</Text>
             </View>
@@ -285,16 +315,17 @@ export default function WalkInTicketScreen() {
         ) : null}
 
         <View style={[styles.panel, styles.bottomSpace]}>
-          <View style={styles.historyHeader}>
+          <Pressable onPress={() => setShowHistory((value) => !value)} style={styles.historyHeader}>
             <View style={styles.historyTitleRow}>
               <MaterialCommunityIcons color={colors.accent} name="calendar-clock" size={22} />
               <View><Text style={styles.panelTitle}>Lịch sử bán vé</Text><Text style={styles.historyHint}>Xem lại vé đã bán theo ngày</Text></View>
             </View>
-            <Pressable onPress={() => void loadHistory()} style={styles.refreshButton}>
+            <View style={styles.historyActions}><View style={styles.historyCount}><Text style={styles.historyCountText}>{history.tickets.length}</Text></View><MaterialCommunityIcons color={colors.muted} name={showHistory ? 'chevron-up' : 'chevron-down'} size={24} /></View>
+          </Pressable>
+          {showHistory ? <>
+            <View style={styles.historyFilter}><TextInput onChangeText={setHistoryDate} placeholder="YYYY-MM-DD" style={styles.dateInput} value={historyDate} /><Pressable onPress={() => void loadHistory()} style={styles.refreshButton}>
               {isLoadingHistory ? <ActivityIndicator color={colors.primary} size="small" /> : <MaterialCommunityIcons color={colors.primary} name="refresh" size={21} />}
-            </Pressable>
-          </View>
-          <TextInput onChangeText={setHistoryDate} placeholder="YYYY-MM-DD" style={styles.dateInput} value={historyDate} />
+            </Pressable></View>
           {isLoadingHistory ? <ActivityIndicator color={colors.primary} /> : history.tickets.length ? history.tickets.map((ticket) => (
             <View key={ticket._id} style={styles.historyItem}>
               <View style={styles.historyItemTop}>
@@ -308,7 +339,7 @@ export default function WalkInTicketScreen() {
               </View>
               {ticket.canResumePayment ? <AppButton title={resumingId === ticket._id ? 'Đang mở...' : 'Thanh toán lại'} disabled={Boolean(resumingId)} onPress={() => void resumePayment(ticket._id)} /> : null}
             </View>
-          )) : <Text style={styles.emptyText}>Chưa có vé nào được bán trong ngày này.</Text>}
+          )) : <Text style={styles.emptyText}>Chưa có vé nào được bán trong ngày này.</Text>}</> : null}
         </View>
       </Screen>
       <RoleBottomNav active="sell" role={user?.role} />
@@ -321,14 +352,23 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 },
   kicker: { color: colors.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
   title: { color: colors.primary, fontSize: 25, fontWeight: '900' },
-  totalCard: { gap: 4, borderRadius: 26, backgroundColor: colors.primary, padding: 20, marginBottom: 14 },
-  totalLabel: { color: '#b9efd3', fontSize: 12, fontWeight: '900' },
-  totalValue: { color: colors.white, fontSize: 34, fontWeight: '900' },
-  totalMeta: { color: '#d7f4e6', fontSize: 13, fontWeight: '800' },
-  panel: { gap: 12, borderRadius: 22, backgroundColor: colors.card, padding: 16, marginBottom: 14 },
+  panel: { gap: 14, borderRadius: 22, backgroundColor: colors.card, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#e8efec' },
   panelTitle: { color: colors.text, fontSize: 17, fontWeight: '900' },
   panelHeadingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   reloadTripsButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 13, backgroundColor: colors.surfaceLow },
+  sectionToggle: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  sectionIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 13, backgroundColor: '#e4f8ef' },
+  sectionToggleText: { flex: 1 },
+  sectionHint: { marginTop: 2, color: colors.muted, fontSize: 11, fontWeight: '600' },
+  routeSummary: { flexDirection: 'row', gap: 12, borderRadius: 17, backgroundColor: colors.surfaceLow, padding: 14 },
+  routeTimeline: { width: 12, alignItems: 'center', paddingVertical: 5 },
+  routeDot: { width: 9, height: 9, borderRadius: 5, borderWidth: 2, borderColor: colors.accent, backgroundColor: colors.white },
+  routeDotEnd: { backgroundColor: colors.accent },
+  routeLine: { width: 2, flex: 1, minHeight: 30, backgroundColor: '#adddca' },
+  routeNames: { flex: 1, gap: 16 },
+  routeCaption: { color: colors.muted, fontSize: 9, fontWeight: '900', letterSpacing: .7 },
+  routeName: { marginTop: 3, color: colors.primary, fontSize: 13, lineHeight: 18, fontWeight: '900' },
+  stopPicker: { gap: 10, borderTopWidth: 1, borderTopColor: '#e8efec', paddingTop: 13 },
   optionColumn: { gap: 10 },
   tripChip: { borderRadius: 18, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, padding: 14 },
   tripChipActive: { borderColor: colors.primary, backgroundColor: colors.primary },
@@ -336,6 +376,23 @@ const styles = StyleSheet.create({
   tripMeta: { marginTop: 3, color: colors.muted, fontSize: 12, fontWeight: '700' },
   tripTextActive: { color: colors.white },
   fieldLabel: { color: colors.secondary, fontSize: 12, fontWeight: '900' },
+  dropdownGroup: { gap: 7 },
+  dropdownButton: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 15, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, paddingHorizontal: 14 },
+  dropdownButtonOpen: { borderColor: colors.accent, backgroundColor: '#f7fffb' },
+  dropdownValue: { flex: 1, color: colors.primary, fontSize: 14, fontWeight: '800' },
+  dropdownPlaceholder: { color: colors.muted, fontWeight: '600' },
+  dropdownMenu: { overflow: 'hidden', borderRadius: 15, borderWidth: 1, borderColor: '#d9e8e1', backgroundColor: colors.white },
+  dropdownOption: { minHeight: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 14, paddingVertical: 10 },
+  dropdownOptionBorder: { borderBottomWidth: 1, borderBottomColor: '#edf2f0' },
+  dropdownOptionActive: { backgroundColor: '#e9f8f1' },
+  dropdownOptionText: { flex: 1, color: colors.text, fontSize: 13, lineHeight: 18, fontWeight: '700' },
+  dropdownOptionTextActive: { color: colors.primary, fontWeight: '900' },
+  paymentGroup: { gap: 8 },
+  paymentRow: { flexDirection: 'row', gap: 10 },
+  paymentButton: { flex: 1, minHeight: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 15, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, paddingHorizontal: 10 },
+  paymentButtonActive: { borderColor: colors.primary, backgroundColor: colors.primary },
+  paymentButtonText: { color: colors.primary, fontSize: 12, fontWeight: '900' },
+  paymentButtonTextActive: { color: colors.white },
   optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   optionChip: { minHeight: 38, justifyContent: 'center', borderRadius: 19, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, paddingHorizontal: 12 },
   stopChip: { maxWidth: '48%', minHeight: 38, justifyContent: 'center', borderRadius: 19, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, paddingHorizontal: 12 },
@@ -345,6 +402,9 @@ const styles = StyleSheet.create({
   inputRow: { flexDirection: 'row', gap: 12 },
   inputGroup: { flex: 1, gap: 8 },
   input: { minHeight: 52, borderRadius: 14, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, color: colors.text, paddingHorizontal: 14, fontSize: 16, fontWeight: '800' },
+  stepper: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 14, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, paddingHorizontal: 6 },
+  stepperButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: colors.white },
+  stepperValue: { color: colors.primary, fontSize: 18, fontWeight: '900' },
   readonlyInput: { minHeight: 52, justifyContent: 'center', borderRadius: 14, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, paddingHorizontal: 14 },
   readonlyValue: { color: colors.primary, fontSize: 16, fontWeight: '900' },
   cashPanel: { flexDirection: 'row', gap: 12, borderWidth: 1, borderColor: '#ccebdc', borderRadius: 18, backgroundColor: '#effaf5', padding: 14 },
@@ -352,22 +412,34 @@ const styles = StyleSheet.create({
   changeValue: { marginTop: 5, color: colors.primary, fontSize: 22, fontWeight: '900' },
   changeError: { color: colors.error },
   insufficientText: { marginTop: 2, color: colors.error, fontSize: 10, fontWeight: '700' },
-  resultCode: { color: colors.primary, fontSize: 20, fontWeight: '900' },
-  resultMeta: { color: colors.muted, fontSize: 13, fontWeight: '800' },
-  resultAmount: { color: colors.primary, fontSize: 28, fontWeight: '900' },
+  resultPanel: { borderColor: '#bfead6' },
+  resultHeading: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  successBox: { alignItems: 'center', gap: 8, borderRadius: 17, backgroundColor: '#e8f9f1', padding: 16 },
+  successTitle: { color: colors.primary, fontSize: 14, fontWeight: '900', textAlign: 'center' },
+  cashResultRow: { width: '100%', flexDirection: 'row', gap: 16, marginTop: 2 },
+  cashResultItem: { flex: 1 },
+  cashResultLabel: { color: colors.secondary, fontSize: 11, fontWeight: '700' },
+  cashResultValue: { marginTop: 4, color: colors.primary, fontSize: 14, fontWeight: '900' },
+  ticketIdentity: { alignItems: 'center', gap: 4 },
+  ticketCodeLabel: { color: colors.muted, fontSize: 11, fontWeight: '700' },
+  ticketCodeValue: { color: colors.primary, fontWeight: '900' },
+  resultAmount: { color: colors.primary, fontSize: 27, fontWeight: '900' },
   qrImage: { width: '100%', aspectRatio: 1, alignSelf: 'center', borderRadius: 18, backgroundColor: colors.white },
   qrHint: { textAlign: 'center', color: colors.muted, fontSize: 12, fontWeight: '700' },
-  successIcon: { alignSelf: 'center' },
-  statusPill: { alignSelf: 'flex-start', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 },
+  statusPill: { alignSelf: 'center', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5 },
   statusPending: { backgroundColor: '#fff0c2' },
   statusPaid: { backgroundColor: '#d5f1e3' },
   statusText: { color: colors.primary, fontSize: 11, fontWeight: '900' },
   payOsLink: { textAlign: 'center', color: colors.accent, fontSize: 13, fontWeight: '900', textDecorationLine: 'underline' },
   historyHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  historyActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  historyCount: { minWidth: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: '#e4f8ef' },
+  historyCountText: { color: colors.primary, fontSize: 11, fontWeight: '900' },
+  historyFilter: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   historyTitleRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   historyHint: { marginTop: 2, color: colors.muted, fontSize: 11, fontWeight: '600' },
   refreshButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: colors.surfaceLow },
-  dateInput: { minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, color: colors.text, paddingHorizontal: 14, fontSize: 14, fontWeight: '800' },
+  dateInput: { flex: 1, minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, color: colors.text, paddingHorizontal: 14, fontSize: 14, fontWeight: '800' },
   historyItem: { gap: 7, borderWidth: 1, borderColor: '#e0ebe6', borderRadius: 17, backgroundColor: '#fbfdfc', padding: 13 },
   historyItemTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   historyCode: { flex: 1, color: colors.primary, fontSize: 13, fontWeight: '900' },

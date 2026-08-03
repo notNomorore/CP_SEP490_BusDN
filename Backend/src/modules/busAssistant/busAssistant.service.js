@@ -173,7 +173,23 @@ const findAssistantShift = async ({ assistantId, shiftId, tripId, date }) => {
     status: { $in: ['ASSIGNED', 'IN_PROGRESS'] },
   }).populate('shiftId').sort({ updatedAt: -1 }).lean();
 
-  if (!assignment) return null;
+  if (!assignment) {
+    // TripSchedule is the current source of truth for bus-assistant assignments.
+    // Revenue requests only provide a date, so accept a direct trip assignment
+    // for that service date even when no legacy shift record exists.
+    const directTripAssignment = await TripSchedule.findOne({
+      'assistant.userId': assistantId,
+      serviceDate: { $gte: start, $lte: end },
+      status: { $ne: 'CANCELLED' },
+    }).sort({ departureTime: 1 }).lean();
+
+    if (!directTripAssignment) return null;
+    return {
+      shiftId: null,
+      assignment: directTripAssignment,
+      shift: null,
+    };
+  }
   return { shiftId: assignment.shiftId?._id || assignment.shiftId, assignment, shift: assignment.shiftId };
 };
 
@@ -218,11 +234,13 @@ const buildRevenue = async ({ assistantId, shiftId, routeId, date, limit = 10 })
   const transactions = await Transaction.find(transactionFilter({ assistantId, shiftId, routeId, date }))
     .sort({ completedAt: -1 })
     .lean();
+  const boardingDateFilter = date ? todayRange(date) : null;
   const boardingCount = await BoardingRecord.countDocuments({
     busAssistantId: assistantId,
     validationStatus: 'VALIDATED',
     ...(shiftId ? { shiftId } : {}),
     ...(routeId ? { routeId } : {}),
+    ...(boardingDateFilter ? { boardedAt: { $gte: boardingDateFilter.start, $lte: boardingDateFilter.end } } : {}),
   });
 
   const breakdown = new Map();
@@ -588,14 +606,18 @@ export class BusAssistantService {
   }
 
   static async getShiftRevenue(query, actor, req) {
-    const shiftContext = await assertAssignedShift({
+    // Revenue belongs to the authenticated assistant and can be safely queried
+    // by date. Do not reject the request when legacy shift records are missing:
+    // current assignments are stored on TripSchedule and completed transactions
+    // remain valid even after the assigned trip/shift has ended.
+    const shiftContext = await findAssistantShift({
       assistantId: actor.userId,
       shiftId: query.shiftId,
       date: query.date,
     });
     const revenue = await buildRevenue({
       assistantId: actor.userId,
-      shiftId: shiftContext.shiftId,
+      shiftId: query.shiftId || shiftContext?.shiftId || null,
       routeId: query.routeId,
       date: query.date,
     });
@@ -606,16 +628,16 @@ export class BusAssistantService {
       action: 'VIEW_SHIFT_REVENUE',
       module: 'BUS_ASSISTANT',
       description: 'Bus assistant viewed shift revenue.',
-      metadata: { shiftId: shiftContext.shiftId, routeId: query.routeId || null, date: query.date || null },
+      metadata: { shiftId: query.shiftId || shiftContext?.shiftId || null, routeId: query.routeId || null, date: query.date || null },
     });
 
     return {
       shiftInfo: {
-        _id: shiftContext.shiftId,
-        shiftCode: shiftContext.shift?.shiftCode || shiftContext.assignment?.shiftCode || '',
-        shiftName: shiftContext.shift?.shiftName || '',
-        status: shiftContext.shift?.status || shiftContext.assignment?.status || shiftContext.assignment?.shiftStatus || '',
-        workDate: shiftContext.shift?.workDate || shiftContext.assignment?.workDate || null,
+        _id: query.shiftId || shiftContext?.shiftId || null,
+        shiftCode: shiftContext?.shift?.shiftCode || shiftContext?.assignment?.shiftCode || '',
+        shiftName: shiftContext?.shift?.shiftName || '',
+        status: shiftContext?.shift?.status || shiftContext?.assignment?.status || shiftContext?.assignment?.shiftStatus || '',
+        workDate: shiftContext?.shift?.workDate || shiftContext?.assignment?.workDate || query.date || null,
       },
       ...revenue,
     };

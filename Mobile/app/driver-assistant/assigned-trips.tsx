@@ -698,37 +698,40 @@ export default function AssignedTripsScreen() {
         </View>
       </View>
 
-      <View style={styles.searchBox}>
-        <MaterialCommunityIcons color={colors.muted} name="magnify" size={22} />
-        <TextInput
-          accessibilityLabel="Tìm chuyến được phân công"
-          onChangeText={setSearch}
-          placeholder={copy.searchPlaceholder}
-          placeholderTextColor={colors.muted}
-          style={styles.searchInput}
-          value={search}
-        />
-      </View>
+      <View style={styles.toolsCard}>
+        <View style={styles.searchBox}>
+          <MaterialCommunityIcons color={colors.muted} name="magnify" size={21} />
+          <TextInput
+            accessibilityLabel="Tìm chuyến được phân công"
+            onChangeText={setSearch}
+            placeholder={copy.searchPlaceholder}
+            placeholderTextColor={colors.muted}
+            style={styles.searchInput}
+            value={search}
+          />
+          {search ? <Pressable hitSlop={8} onPress={() => setSearch('')}><MaterialCommunityIcons color={colors.muted} name="close-circle" size={19} /></Pressable> : null}
+        </View>
 
-      <View style={styles.filterRow}>
-        {filters.map((filter) => (
-          <Pressable
-            key={filter.key}
-            accessibilityRole="button"
-            onPress={() => setActiveFilter(filter.key)}
-            style={[styles.filterChip, activeFilter === filter.key && styles.filterChipActive]}
-          >
-            <Text style={[styles.filterText, activeFilter === filter.key && styles.filterTextActive]}>
-              {filter.label}
-            </Text>
-          </Pressable>
-        ))}
+        <View style={styles.filterRow}>
+          {filters.map((filter) => (
+            <Pressable
+              key={filter.key}
+              accessibilityRole="button"
+              onPress={() => setActiveFilter(filter.key)}
+              style={[styles.filterChip, activeFilter === filter.key && styles.filterChipActive]}
+            >
+              <Text numberOfLines={1} style={[styles.filterText, activeFilter === filter.key && styles.filterTextActive]}>{filter.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {!isLoading ? (
+          <View style={styles.resultBar}>
+            <View style={styles.resultIcon}><MaterialCommunityIcons color={colors.accent} name="bus-clock" size={18} /></View>
+            <Text style={styles.resultText}><Text style={styles.resultStrong}>{filteredTrips.length}</Text> chuyến phù hợp</Text>
+            <Text style={styles.resultTotal}>Tổng {actorTrips.length}</Text>
+          </View>
+        ) : null}
       </View>
-      {!isLoading ? (
-        <Text style={styles.resultText}>
-          Hiển thị {filteredTrips.length}/{actorTrips.length} {copy.countSuffix}
-        </Text>
-      ) : null}
 
       {isLoading ? (
         <View style={styles.loading}>
@@ -875,17 +878,22 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 },
   kicker: { color: colors.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
   title: { color: colors.primary, fontSize: 25, fontWeight: '900' },
-  searchBox: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 18, backgroundColor: colors.card, paddingHorizontal: 14 },
+  toolsCard: { gap: 12, borderRadius: 22, borderWidth: 1, borderColor: '#e4ede9', backgroundColor: colors.card, padding: 12 },
+  searchBox: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 15, backgroundColor: colors.surfaceLow, paddingHorizontal: 13 },
   searchInput: { flex: 1, color: colors.text, fontSize: 14, fontWeight: '700' },
-  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
-  filterChip: { minHeight: 40, justifyContent: 'center', borderRadius: 20, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.card, paddingHorizontal: 14 },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  filterChip: { width: '31.8%', minHeight: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 13, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.white, paddingHorizontal: 6 },
   filterChipActive: { borderColor: colors.primary, backgroundColor: colors.primary },
   filterText: { color: colors.primary, fontSize: 13, fontWeight: '900' },
   filterTextActive: { color: colors.white },
-  resultText: { marginTop: 10, color: colors.muted, fontSize: 12, fontWeight: '800' },
+  resultBar: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 9, borderRadius: 13, backgroundColor: '#edf9f3', paddingHorizontal: 10 },
+  resultIcon: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 9, backgroundColor: colors.white },
+  resultText: { flex: 1, color: colors.secondary, fontSize: 12, fontWeight: '700' },
+  resultStrong: { color: colors.primary, fontWeight: '900' },
+  resultTotal: { color: colors.muted, fontSize: 11, fontWeight: '700' },
   loading: { minHeight: 230, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: colors.muted, fontWeight: '700' },
-  tripList: { gap: 14, marginTop: 18, paddingBottom: 96 },
+  tripList: { gap: 14, marginTop: 14, paddingBottom: 96 },
   emptyText: { borderRadius: 18, backgroundColor: colors.surfaceLow, padding: 16, color: colors.muted, fontSize: 13, fontWeight: '700' },
   tripCard: { gap: 14, borderRadius: 22, backgroundColor: colors.card, padding: 16 },
   tripCardHeader: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
