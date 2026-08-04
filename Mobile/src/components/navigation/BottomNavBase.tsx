@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/colors';
 
-export type BottomNavKey = 'home' | 'explore' | 'tickets' | 'activity' | 'history' | 'priority' | 'trips' | 'schedule' | 'chat' | 'support' | 'profile' | 'validate' | 'sell' | 'revenue';
+export type BottomNavKey = 'home' | 'explore' | 'tickets' | 'activity' | 'history' | 'priority' | 'trips' | 'schedule' | 'notifications' | 'chat' | 'support' | 'profile' | 'validate' | 'sell' | 'revenue';
 
 export type BottomNavItemConfig = {
   key: BottomNavKey;
@@ -56,7 +56,9 @@ export function BottomNavBase({ active, items, style }: BottomNavBaseProps) {
                 <Text style={styles.badgeText}>{item.badgeCount > 99 ? '99+' : item.badgeCount}</Text>
               </View>
             ) : null}
-            <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>{item.label}</Text>
+            <Text numberOfLines={1} style={[styles.navLabel, isCompact && styles.navLabelCompact, isActive && styles.navLabelActive]}>
+              {item.label}
+            </Text>
           </Pressable>
         );
       })}

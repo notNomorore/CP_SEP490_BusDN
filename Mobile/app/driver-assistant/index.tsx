@@ -8,12 +8,13 @@ import busAssistantApi from '@/api/busAssistant.api';
 import scheduleOperationsApi from '@/api/scheduleOperations.api';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
+import { formatDriverStatus, useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { ShiftRevenue } from '@/types/busAssistant';
 import type { AssignedTrip, ShiftSchedule } from '@/types/scheduleOperations';
 import { isDriverAssistantRole, normalizeRole } from '@/utils/roleNavigation';
-import { formatDate, formatTime, getTodayRange, getTripStatus, getTripVehicleLabel, isTripCompleted, isTripToday, toDateInput } from '@/utils/scheduleOperations';
-import { getErrorMessage } from '@/utils/validation';
+import { getTodayRange, getTripDepartureTimeLabel, getTripStatus, getTripVehicleLabel, isTripCompleted, isTripToday, toDateInput } from '@/utils/scheduleOperations';
+import { getErrorMessage, getErrorStatusCode, isPermissionError } from '@/utils/validation';
 
 const assignedTripsRoute = '/driver-assistant/assigned-trips' as Href;
 const shiftScheduleRoute = '/driver-assistant/shift-schedule' as Href;
@@ -82,6 +83,7 @@ export default function DriverBusAssistantHomeScreen() {
   const [revenue, setRevenue] = useState<ShiftRevenue | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [processingId, setProcessingId] = useState('');
+  const { language, t } = useDriverI18n();
   const normalizedRole = normalizeRole(user?.role);
   const isDriver = normalizedRole === 'DRIVER';
   const isBusAssistant = ['BUS_ASSISTANT', 'BUS ASSISTANT', 'CONDUCTOR'].includes(normalizedRole);
@@ -105,9 +107,8 @@ export default function DriverBusAssistantHomeScreen() {
       setShifts(shiftsPayload.shifts || []);
       setRevenue(revenuePayload);
     } catch (error) {
-      const message = getErrorMessage(error, 'Không thể tải lịch làm việc và chuyến được phân công.');
-      const statusCode = (error as { statusCode?: number; response?: { status?: number } })?.statusCode
-        || (error as { response?: { status?: number } })?.response?.status;
+      const message = getErrorMessage(error, t.home.loadErrorFallback);
+      const statusCode = getErrorStatusCode(error);
       const isAuthError = statusCode === 401 || message.toLowerCase().includes('no token provided');
 
       if (isAuthError) {
@@ -116,11 +117,18 @@ export default function DriverBusAssistantHomeScreen() {
         return;
       }
 
-      Alert.alert('Không thể tải trang chủ', message);
+      if (isPermissionError(error)) {
+        setTrips([]);
+        setShifts([]);
+        setRevenue(null);
+        return;
+      }
+
+      Alert.alert(t.home.loadErrorTitle, message);
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, isBusAssistant, isHydrated, logout]);
+  }, [isAuthenticated, isBusAssistant, isHydrated, logout, t.home.loadErrorFallback, t.home.loadErrorTitle]);
 
   useEffect(() => {
     if (isHydrated && !isAuthenticated) {
@@ -141,7 +149,14 @@ export default function DriverBusAssistantHomeScreen() {
   const todaysTrips = useMemo(() => trips.filter(isTripToday), [trips]);
   const nextTrip = todaysTrips.find((trip) => !isTripCompleted(trip)) || todaysTrips[0] || null;
   const upcomingShift = shifts[0] || null;
-  const displayName = user?.fullName || (isDriver ? 'Tài xế' : 'Phụ xe');
+  const displayName = user?.fullName || (isDriver ? t.common.driver : t.common.busAssistant);
+  const homeDate = useMemo(() => (
+    new Intl.DateTimeFormat(language === 'VN' ? 'vi-VN' : 'en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: '2-digit',
+    }).format(new Date())
+  ), [language]);
 
   const openInspection = (trip: AssignedTrip) => {
     router.push({
@@ -166,9 +181,9 @@ export default function DriverBusAssistantHomeScreen() {
         openInspection(updated);
         return;
       }
-      Alert.alert('Đã nhận chuyến', 'Bạn đã nhận chuyến được phân công.');
+      Alert.alert(t.home.acceptSuccessTitle, t.home.acceptSuccessMessage);
     } catch (error) {
-      Alert.alert('Không thể nhận chuyến', getErrorMessage(error, 'Không thể nhận chuyến được phân công này.'));
+      Alert.alert(t.home.acceptErrorTitle, getErrorMessage(error, t.home.acceptErrorFallback));
     } finally {
       setProcessingId('');
     }
@@ -188,11 +203,11 @@ export default function DriverBusAssistantHomeScreen() {
                 {user?.avatar ? <Image source={{ uri: user.avatar }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>{displayName.slice(0, 1).toUpperCase()}</Text>}
               </View>
               <View>
-                <Text style={styles.brand}>Đội ngũ BusDN</Text>
-                <Text style={styles.dateText}>{formatDate(new Date().toISOString())}</Text>
+                <Text style={styles.brand}>{t.home.brand}</Text>
+                <Text style={styles.dateText}>{homeDate}</Text>
               </View>
             </View>
-            <Pressable accessibilityLabel="Mở thông báo" onPress={() => router.push(route('/driver-assistant/notifications'))} style={styles.notificationButton}>
+            <Pressable accessibilityLabel={t.nav.notifications} onPress={() => router.push(notificationsRoute)} style={styles.notificationButton}>
               {isLoading ? <ActivityIndicator color={colors.primary} size="small" /> : <MaterialCommunityIcons color={colors.accent} name="bell-outline" size={22} />}
             </Pressable>
           </View>
@@ -200,9 +215,9 @@ export default function DriverBusAssistantHomeScreen() {
           <View style={styles.heroCard}>
             <View style={styles.greetingRow}>
               <View style={styles.greetingText}>
-                <Text style={styles.heroKicker}>TỔNG QUAN HÔM NAY</Text>
-                <Text numberOfLines={1} style={styles.heroTitle}>Xin chào, {displayName}</Text>
-                <Text style={styles.heroSubtitle}>Chúc bạn có một ca làm việc thuận lợi.</Text>
+                <Text style={styles.heroKicker}>{t.home.todayOverview}</Text>
+                <Text numberOfLines={1} style={styles.heroTitle}>{t.home.hello}, {displayName}</Text>
+                <Text style={styles.heroSubtitle}>{t.home.subtitle}</Text>
               </View>
               <View style={styles.greetingIcon}>
                 <MaterialCommunityIcons color={colors.accent} name="hand-wave-outline" size={26} />
@@ -212,9 +227,9 @@ export default function DriverBusAssistantHomeScreen() {
 
           <View style={styles.nextCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Chuyến tiếp theo</Text>
+              <Text style={styles.sectionTitle}>{t.home.nextTrip}</Text>
               <Pressable onPress={() => router.push(route('/driver-assistant/assigned-trips'))}>
-                <Text style={styles.linkText}>Tất cả chuyến</Text>
+                <Text style={styles.linkText}>{t.home.allTrips}</Text>
               </Pressable>
             </View>
             {nextTrip ? (
@@ -227,9 +242,9 @@ export default function DriverBusAssistantHomeScreen() {
                   <MaterialCommunityIcons color={colors.primary} name="bus-clock" size={25} />
                 </View>
                 <View style={styles.nextContent}>
-                  <Text style={styles.routeBadge}>{nextTrip.route?.routeNumber || nextTrip.tripCode || 'Chuyến'}</Text>
-                  <Text style={styles.nextTitle}>{nextTrip.route?.origin || 'Điểm đầu'} - {nextTrip.route?.destination || 'Điểm cuối'}</Text>
-                  <Text style={styles.nextMeta}>{formatTime(nextTrip.scheduledStart)} - {getTripVehicleLabel(nextTrip)} - {getTripStatus(nextTrip)}</Text>
+                  <Text style={styles.routeBadge}>{nextTrip.route?.routeNumber || nextTrip.tripCode || t.nav.trips}</Text>
+                  <Text style={styles.nextTitle}>{nextTrip.route?.origin || t.detail.origin} - {nextTrip.route?.destination || t.detail.destination}</Text>
+                  <Text style={styles.nextMeta}>{getTripDepartureTimeLabel(nextTrip)} - {getTripVehicleLabel(nextTrip)} - {formatDriverStatus(getTripStatus(nextTrip), t)}</Text>
                 </View>
                 {isDriver && canAcceptTrip(nextTrip) ? (
                   <Pressable
@@ -248,7 +263,7 @@ export default function DriverBusAssistantHomeScreen() {
                     {processingId === nextTrip.id ? (
                       <ActivityIndicator color={colors.white} size="small" />
                     ) : (
-                      <Text style={styles.startButtonText}>NHẬN CHUYẾN</Text>
+                      <Text style={styles.startButtonText}>{t.home.acceptTrip}</Text>
                     )}
                   </Pressable>
                 ) : isDriver && getAcceptanceStatus(nextTrip) === 'ACCEPTED' && !isTripCompleted(nextTrip) ? (
@@ -265,7 +280,7 @@ export default function DriverBusAssistantHomeScreen() {
                     style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}
                   >
                     <Text style={styles.startButtonText}>
-                      {nextTrip.inspection?.status === 'READY' ? 'BẮT ĐẦU' : 'KIỂM TRA'}
+                      {nextTrip.inspection?.status === 'READY' ? t.home.startTrip : t.home.inspectVehicle}
                     </Text>
                   </Pressable>
                 ) : canAcceptTrip(nextTrip) ? (
@@ -285,7 +300,7 @@ export default function DriverBusAssistantHomeScreen() {
                     {processingId === nextTrip.id ? (
                       <ActivityIndicator color={colors.white} size="small" />
                     ) : (
-                      <Text style={styles.startButtonText}>NHẬN CHUYẾN</Text>
+                      <Text style={styles.startButtonText}>{t.home.acceptTrip}</Text>
                     )}
                   </Pressable>
                 ) : (
@@ -302,8 +317,8 @@ export default function DriverBusAssistantHomeScreen() {
                   <MaterialCommunityIcons color={colors.primary} name="bus-clock" size={24} />
                 </View>
                 <View style={styles.emptyTripContent}>
-                  <Text style={styles.emptyTripTitle}>Xem các chuyến được phân công</Text>
-                  <Text style={styles.emptyTripSubtitle}>Hôm nay chưa có chuyến tiếp theo</Text>
+                  <Text style={styles.emptyTripTitle}>{t.home.viewAssignedTrips}</Text>
+                  <Text style={styles.emptyTripSubtitle}>{t.home.noNextTripToday}</Text>
                 </View>
                 <MaterialCommunityIcons color={colors.muted} name="chevron-right" size={23} />
               </Pressable>
@@ -313,18 +328,25 @@ export default function DriverBusAssistantHomeScreen() {
           <View style={styles.actionGrid}>
             {isDriver ? (
               <>
-                <ActionTile title="Chuyến được phân công" subtitle="Kiểm tra tuyến và bắt đầu công việc" icon="bus-clock" href={assignedTripsRoute} primary />
-                <ActionTile title={upcomingShift?.shiftName || 'Lịch ca làm'} subtitle="Xem giờ làm và nhiệm vụ" icon="calendar-month-outline" href={shiftScheduleRoute} />
-                <ActionTile title="Trò chuyện vận hành" subtitle="Trao đổi với điều hành và đồng đội" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
+                <ActionTile title={t.home.assignedTrips} subtitle={t.home.assignedTripsSub} icon="bus-clock" href={assignedTripsRoute} primary />
+                <ActionTile title={upcomingShift?.shiftName || t.home.shiftSchedule} subtitle={t.home.shiftScheduleSub} icon="calendar-month-outline" href={shiftScheduleRoute} />
+                <ActionTile title={t.home.operationNotifications} subtitle={t.home.operationNotificationsSub} icon="bell-ring-outline" href={notificationsRoute} />
+                <ActionTile title={t.home.operationChat} subtitle={t.home.operationChatSub} icon="chat-outline" href={route('/driver-assistant/group-chat')} />
               </>
             ) : (
               <>
-                <ActionTile title="Kiểm tra vé" subtitle="Quét QR hoặc nhập mã vé" icon="qrcode-scan" href={route('/driver-assistant/validate-ticket')} primary />
-                <ActionTile title="Bán vé" subtitle="Tạo vé tiền mặt hoặc chuyển khoản" icon="ticket-confirmation-outline" href={route('/driver-assistant/walkin-ticket')} />
-                <ActionTile title="Doanh thu ca" subtitle={`${revenue?.totalRevenue ? new Intl.NumberFormat('vi-VN').format(revenue.totalRevenue) : 0} đồng hôm nay`} icon="cash-register" href={route('/driver-assistant/shift-revenue')} />
-                <ActionTile title="Chuyến" subtitle="Xem các chuyến được phân công" icon="bus-clock" href={assignedTripsRoute} />
-                <ActionTile title={upcomingShift?.shiftName || 'Lịch ca làm'} subtitle="Xem giờ làm và nhiệm vụ" icon="calendar-month-outline" href={shiftScheduleRoute} />
-                <ActionTile title="Trò chuyện vận hành" subtitle="Trao đổi với điều hành và đồng đội" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
+                <ActionTile title={t.assistant.home.validateTicket} subtitle={t.assistant.home.validateTicketSub} icon="qrcode-scan" href={route('/driver-assistant/validate-ticket')} primary />
+                <ActionTile title={t.assistant.home.sellTicket} subtitle={t.assistant.home.sellTicketSub} icon="ticket-confirmation-outline" href={route('/driver-assistant/walkin-ticket')} />
+                <ActionTile
+                  title={t.assistant.home.shiftRevenue}
+                  subtitle={`${revenue?.totalRevenue ? new Intl.NumberFormat(language === 'VN' ? 'vi-VN' : 'en-US').format(revenue.totalRevenue) : 0} ${t.assistant.home.revenueToday}`}
+                  icon="cash-register"
+                  href={route('/driver-assistant/shift-revenue')}
+                />
+                <ActionTile title={t.assistant.home.trips} subtitle={t.assistant.home.tripsSub} icon="bus-clock" href={assignedTripsRoute} />
+                <ActionTile title={upcomingShift?.shiftName || t.home.shiftSchedule} subtitle={t.home.shiftScheduleSub} icon="calendar-month-outline" href={shiftScheduleRoute} />
+                <ActionTile title={t.home.operationNotifications} subtitle={t.home.operationNotificationsSub} icon="bell-ring-outline" href={notificationsRoute} />
+                <ActionTile title={t.home.operationChat} subtitle={t.home.operationChatSub} icon="chat-outline" href={route('/driver-assistant/group-chat')} />
               </>
             )}
           </View>

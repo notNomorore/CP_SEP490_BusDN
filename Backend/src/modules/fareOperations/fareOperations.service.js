@@ -1,12 +1,12 @@
 import mongoose from 'mongoose';
 import { HTTP_STATUS } from '../../constants/index.js';
 import { CustomError } from '../../middleware/errorHandler.js';
-import User from '../auth/User.js';
 import FareMatrix from './FareMatrix.js';
 import MonthlyPassPricing from './MonthlyPassPricing.js';
 import PriorityDiscount from './PriorityDiscount.js';
 import MonthlyPassSettings, { MONTHLY_PASS_SETTINGS_KEY, DEFAULT_MONTHLY_PASS_DAILY_RIDE_LIMIT } from './MonthlyPassSettings.js';
 import { assertPassengerCanPurchase } from '../passengerCompliance/passengerCompliance.service.js';
+import PriorityProfileRequest from '../priorityProfile/PriorityProfileRequest.js';
 
 const getActorId = (actor) => actor?.userId || actor?._id || null;
 const normalizeNullableNumber = (value) => (value === '' || value === undefined ? null : value);
@@ -161,13 +161,21 @@ const getActivePriorityDiscount = async (passengerId, baseAmount, date = new Dat
     return { discountAmount: 0, discount: null, priorityType: null };
   }
 
-  const passenger = await User.findById(passengerId).select('priorityStatus priorityProfile').lean();
-  const approvedProfile = passenger?.priorityStatus === 'APPROVED' && passenger?.priorityProfile?.status === 'APPROVED';
+  const approvedProfile = await PriorityProfileRequest.findOne({
+    passenger: passengerId,
+    status: 'APPROVED',
+    $or: [
+      { expiryDate: { $exists: false } },
+      { expiryDate: null },
+      { expiryDate: { $gte: date } },
+    ],
+  }).sort({ reviewedAt: -1, submittedAt: -1 }).lean();
+
   if (!approvedProfile) {
     return { discountAmount: 0, discount: null, priorityType: null };
   }
 
-  const priorityType = mapPriorityType(passenger.priorityProfile.profileType);
+  const priorityType = mapPriorityType(approvedProfile.profileType);
   if (!priorityType) {
     return { discountAmount: 0, discount: null, priorityType: null };
   }

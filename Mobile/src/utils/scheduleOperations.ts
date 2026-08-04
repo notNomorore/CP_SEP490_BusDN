@@ -72,6 +72,63 @@ export const formatDateKey = (value?: string | null) => {
   return toDateInput(value);
 };
 
+const parseTripCodeSchedule = (tripCode?: string | null) => {
+  const match = /-(\d{6})-(\d{4})(?:-|$)/.exec(String(tripCode || ''));
+  if (!match) return null;
+
+  const [, dateToken, timeToken] = match;
+  const year = 2000 + Number(dateToken.slice(0, 2));
+  const month = Number(dateToken.slice(2, 4));
+  const day = Number(dateToken.slice(4, 6));
+  const hour = Number(timeToken.slice(0, 2));
+  const minute = Number(timeToken.slice(2, 4));
+
+  if ([year, month, day, hour, minute].some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+
+  return {
+    date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+  };
+};
+
+const formatUtcClock = (value?: string | null) => {
+  if (!value) return 'N/A';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;
+};
+
+export const getTripServiceDateLabel = (trip?: AssignedTrip | null) => {
+  const parsed = parseTripCodeSchedule(trip?.tripCode);
+  return formatDate(parsed?.date || trip?.scheduledStart);
+};
+
+export const getTripServiceDateKey = (trip?: AssignedTrip | null) => {
+  const parsed = parseTripCodeSchedule(trip?.tripCode);
+  return parsed?.date || formatDateKey(trip?.scheduledStart);
+};
+
+export const getTripDepartureTimeLabel = (trip?: AssignedTrip | null) => {
+  const parsed = parseTripCodeSchedule(trip?.tripCode);
+  return parsed?.time || formatUtcClock(trip?.scheduledStart) || formatTime(trip?.scheduledStart);
+};
+
+export const getTripArrivalTimeLabel = (trip?: AssignedTrip | null) => (
+  parseTripCodeSchedule(trip?.tripCode) ? formatUtcClock(trip?.scheduledEnd) : formatTime(trip?.scheduledEnd)
+);
+
+export const getTripPlannedStartDate = (trip?: AssignedTrip | null) => {
+  const serviceDate = getTripServiceDateKey(trip);
+  const departureTime = getTripDepartureTimeLabel(trip);
+  if (serviceDate === 'unknown' || !/^\d{2}:\d{2}$/.test(departureTime)) {
+    return trip?.scheduledStart ? new Date(trip.scheduledStart) : null;
+  }
+
+  return parseScheduleDate(`${serviceDate}T${departureTime}:00`);
+};
+
 export const getTripRouteLabel = (trip: AssignedTrip) => (
   trip.route?.routeNumber || trip.route?.name || trip.tripCode || 'Unassigned route'
 );
@@ -97,15 +154,15 @@ export const getTripStatus = (trip: AssignedTrip) => {
 
 export const getShiftStatus = (shift: ShiftSchedule) => shift.assignmentStatus || 'ASSIGNED';
 
-export const isTripToday = (trip: AssignedTrip) => formatDateKey(trip.scheduledStart) === toDateInput();
+export const isTripToday = (trip: AssignedTrip) => getTripServiceDateKey(trip) === toDateInput();
 
 export const isTripUpcoming = (trip: AssignedTrip) => {
-  const start = trip.scheduledStart ? new Date(trip.scheduledStart) : null;
+  const start = getTripPlannedStartDate(trip);
   return Boolean(start && start > new Date() && !['COMPLETED', 'CANCELLED'].includes(getTripStatus(trip)));
 };
 
 export const isTripHistory = (trip: AssignedTrip) => {
-  const start = trip.scheduledStart ? new Date(trip.scheduledStart) : null;
+  const start = getTripPlannedStartDate(trip);
   const todayStart = parseScheduleDate(toDateInput());
   return Boolean(start && start < todayStart);
 };

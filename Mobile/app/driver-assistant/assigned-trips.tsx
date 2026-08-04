@@ -8,14 +8,17 @@ import { AppButton } from '@/components/AppButton';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
+import { formatDriverStatus, useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { AssignedTrip } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
 import { normalizeRole } from '@/utils/roleNavigation';
 import {
-  formatDate,
   formatTime,
   getAssignedTripsRange,
+  getTripArrivalTimeLabel,
+  getTripDepartureTimeLabel,
+  getTripServiceDateLabel,
   getTripVehicleLabel,
   getVehicleLabel,
   hasVehicleReplacement,
@@ -26,7 +29,7 @@ import {
   isTripToday,
   isTripUpcoming,
 } from '@/utils/scheduleOperations';
-import { getErrorMessage } from '@/utils/validation';
+import { getErrorMessage, getErrorStatusCode, isPermissionError } from '@/utils/validation';
 
 type FilterKey = 'ALL' | 'TODAY' | 'HISTORY' | 'UPCOMING' | 'COMPLETED' | 'DELAYED';
 type ActorKind = 'DRIVER' | 'BUS_ASSISTANT';
@@ -47,15 +50,6 @@ type BusAssistantIncidentForm = {
   handedTo: string;
   description: string;
 };
-
-const filters: Array<{ key: FilterKey; label: string }> = [
-  { key: 'ALL', label: 'Tất cả' },
-  { key: 'TODAY', label: 'Hôm nay' },
-  { key: 'HISTORY', label: 'Lịch sử' },
-  { key: 'UPCOMING', label: 'Sắp tới' },
-  { key: 'COMPLETED', label: 'Hoàn thành' },
-  { key: 'DELAYED', label: 'Bị trễ' },
-];
 
 const matchesFilter = (trip: AssignedTrip, filter: FilterKey) => {
   if (filter === 'ALL') return true;
@@ -102,7 +96,7 @@ const getActorKind = (role?: string | null): ActorKind => (
   normalizeRole(role) === 'DRIVER' ? 'DRIVER' : 'BUS_ASSISTANT'
 );
 
-const actorCopy: Record<ActorKind, {
+type ActorCopy = {
   kicker: string;
   title: string;
   searchPlaceholder: string;
@@ -116,90 +110,7 @@ const actorCopy: Record<ActorKind, {
   rejectPlaceholder: string;
   startAction: string;
   prepareAction: string;
-}> = {
-  DRIVER: {
-    kicker: 'DRIVER OPERATIONS',
-    title: 'Driver Trips',
-    searchPlaceholder: 'Search route, trip ID, bus number',
-    countSuffix: 'driver trips',
-    empty: 'No driver trips match this filter.',
-    roleLabel: 'Driver',
-    acceptSuccessTitle: 'Trip accepted',
-    acceptSuccessMessage: 'The assigned driver trip has been accepted.',
-    rejectReasonTitle: 'Reject driver trip',
-    rejectReasonHint: 'Enter the reason so dispatch can handle or reassign this driver trip.',
-    rejectPlaceholder: 'Rejection reason',
-    startAction: 'Start Trip',
-    prepareAction: 'Inspect Vehicle',
-  },
-  BUS_ASSISTANT: {
-    kicker: 'VẬN HÀNH PHỤ XE',
-    title: 'Chuyến được phân công',
-    searchPlaceholder: 'Tìm tuyến, mã chuyến hoặc biển số xe',
-    countSuffix: 'chuyến của phụ xe',
-    empty: 'Không có chuyến nào phù hợp với bộ lọc.',
-    roleLabel: 'Phụ xe',
-    acceptSuccessTitle: 'Đã nhận chuyến',
-    acceptSuccessMessage: 'Bạn đã nhận chuyến được phân công.',
-    rejectReasonTitle: 'Từ chối chuyến',
-    rejectReasonHint: 'Nhập lý do để điều hành phân công phụ xe khác.',
-    rejectPlaceholder: 'Lý do từ chối',
-    startAction: '',
-    prepareAction: '',
-  },
 };
-
-const busAssistantIncidentOptions: Array<{
-  type: BusAssistantIncidentType;
-  code: string;
-  title: string;
-  hint: string;
-}> = [
-  {
-    type: 'PASSENGER_VIOLATION',
-    code: 'UC50',
-    title: 'Vi phạm của hành khách',
-    hint: 'Vi phạm về vé, an toàn hoặc nội quy xe.',
-  },
-  {
-    type: 'PASSENGER_CONFLICT',
-    code: 'UC51',
-    title: 'Xung đột hành khách',
-    hint: 'Tranh cãi, tranh chấp hoặc xung đột thiếu an toàn.',
-  },
-  {
-    type: 'FOUND_ITEM',
-    code: 'UC52',
-    title: 'Đồ thất lạc',
-    hint: 'Đồ vật được tìm thấy trên xe sau chuyến đi.',
-  },
-];
-
-const severityOptions: Array<{ value: IncidentSeverity; label: string }> = [
-  { value: 'LOW', label: 'Thấp' },
-  { value: 'MEDIUM', label: 'Trung bình' },
-  { value: 'HIGH', label: 'Cao' },
-  { value: 'CRITICAL', label: 'Khẩn cấp' },
-];
-
-const violationCategories = [
-  { value: 'NO_TICKET', label: 'Không có vé' },
-  { value: 'WRONG_TICKET', label: 'Sai vé' },
-  { value: 'SMOKING', label: 'Hút thuốc' },
-  { value: 'LITTERING', label: 'Xả rác' },
-  { value: 'UNSAFE_BEHAVIOR', label: 'Hành vi không an toàn' },
-  { value: 'DISTURBANCE', label: 'Gây rối' },
-  { value: 'OTHER', label: 'Khác' },
-];
-
-const conflictCategories = [
-  { value: 'ARGUMENT', label: 'Tranh cãi' },
-  { value: 'FARE_DISPUTE', label: 'Tranh chấp giá vé' },
-  { value: 'SEAT_DISPUTE', label: 'Tranh chấp chỗ ngồi' },
-  { value: 'HARASSMENT', label: 'Quấy rối' },
-  { value: 'SAFETY_RISK', label: 'Nguy cơ an toàn' },
-  { value: 'OTHER', label: 'Khác' },
-];
 
 const getDefaultIncidentForm = (tripStatus?: string): BusAssistantIncidentForm => ({
   type: tripStatus === 'COMPLETED' ? 'FOUND_ITEM' : 'PASSENGER_VIOLATION',
@@ -252,6 +163,7 @@ function BusAssistantIncidentPanel({
   isProcessing: boolean;
   onSubmit: (trip: AssignedTrip, form: BusAssistantIncidentForm) => Promise<void>;
 }) {
+  const { t } = useDriverI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [form, setForm] = useState<BusAssistantIncidentForm>(() => getDefaultIncidentForm(getTripStatus(trip)));
   const tripStatus = getTripStatus(trip);
@@ -259,9 +171,53 @@ function BusAssistantIncidentPanel({
   const canReportRunning = tripStatus === 'IN_PROGRESS';
   const canReportFoundItem = tripStatus === 'COMPLETED';
   const canUseForm = isAccepted && (canReportRunning || canReportFoundItem);
-  const allowedTypes = busAssistantIncidentOptions.filter((option) => (
+  const incidentOptions = useMemo<Array<{
+    type: BusAssistantIncidentType;
+    title: string;
+    hint: string;
+  }>>(() => [
+    {
+      type: 'PASSENGER_VIOLATION',
+      title: t.assistant.incident.options.passengerViolation,
+      hint: t.assistant.incident.options.passengerViolationHint,
+    },
+    {
+      type: 'PASSENGER_CONFLICT',
+      title: t.assistant.incident.options.passengerConflict,
+      hint: t.assistant.incident.options.passengerConflictHint,
+    },
+    {
+      type: 'FOUND_ITEM',
+      title: t.assistant.incident.options.foundItem,
+      hint: t.assistant.incident.options.foundItemHint,
+    },
+  ], [t]);
+  const severityOptions = useMemo<Array<{ value: IncidentSeverity; label: string }>>(() => [
+    { value: 'LOW', label: t.lifecycle.low },
+    { value: 'MEDIUM', label: t.lifecycle.medium },
+    { value: 'HIGH', label: t.lifecycle.high },
+    { value: 'CRITICAL', label: t.lifecycle.critical },
+  ], [t]);
+  const violationCategories = useMemo(() => [
+    { value: 'NO_TICKET', label: t.assistant.incident.categories.noTicket },
+    { value: 'WRONG_TICKET', label: t.assistant.incident.categories.wrongTicket },
+    { value: 'SMOKING', label: t.assistant.incident.categories.smoking },
+    { value: 'LITTERING', label: t.assistant.incident.categories.littering },
+    { value: 'UNSAFE_BEHAVIOR', label: t.assistant.incident.categories.unsafeBehavior },
+    { value: 'DISTURBANCE', label: t.assistant.incident.categories.disturbance },
+    { value: 'OTHER', label: t.assistant.incident.categories.other },
+  ], [t]);
+  const conflictCategories = useMemo(() => [
+    { value: 'ARGUMENT', label: t.assistant.incident.categories.argument },
+    { value: 'FARE_DISPUTE', label: t.assistant.incident.categories.fareDispute },
+    { value: 'SEAT_DISPUTE', label: t.assistant.incident.categories.seatDispute },
+    { value: 'HARASSMENT', label: t.assistant.incident.categories.harassment },
+    { value: 'SAFETY_RISK', label: t.assistant.incident.categories.safetyRisk },
+    { value: 'OTHER', label: t.assistant.incident.categories.other },
+  ], [t]);
+  const allowedTypes = useMemo(() => incidentOptions.filter((option) => (
     canReportFoundItem ? option.type === 'FOUND_ITEM' : option.type !== 'FOUND_ITEM'
-  ));
+  )), [canReportFoundItem, incidentOptions]);
 
   useEffect(() => {
     setForm((current) => {
@@ -274,7 +230,7 @@ function BusAssistantIncidentPanel({
     if (isAccepted && tripStatus === 'SCHEDULED') {
       return (
         <View style={styles.assistantNotice}>
-          <Text style={styles.assistantNoticeText}>Đã nhận chuyến. Bạn có thể báo cáo sự cố khi chuyến bắt đầu.</Text>
+          <Text style={styles.assistantNoticeText}>{t.assistant.incident.waitingTripStart}</Text>
         </View>
       );
     }
@@ -287,22 +243,22 @@ function BusAssistantIncidentPanel({
 
   const validate = () => {
     if (form.description.trim().length < 10) {
-      Alert.alert('Thiếu mô tả', 'Vui lòng mô tả tình huống bằng ít nhất 10 ký tự.');
+      Alert.alert(t.assistant.incident.missingDescriptionTitle, t.assistant.incident.missingDescriptionMessage);
       return false;
     }
 
     if (form.type === 'PASSENGER_VIOLATION' && form.actionTaken.trim().length < 3) {
-      Alert.alert('Thiếu cách xử lý', 'Vui lòng nhập cách bạn đã xử lý.');
+      Alert.alert(t.assistant.incident.missingActionTitle, t.assistant.incident.missingActionMessage);
       return false;
     }
 
     if (form.type === 'PASSENGER_CONFLICT' && form.actionTaken.trim().length < 3) {
-      Alert.alert('Thiếu cách xử lý', 'Vui lòng nhập cách bạn đã xử lý.');
+      Alert.alert(t.assistant.incident.missingActionTitle, t.assistant.incident.missingActionMessage);
       return false;
     }
 
     if (form.type === 'FOUND_ITEM' && (form.itemName.trim().length < 2 || form.foundLocation.trim().length < 3)) {
-      Alert.alert('Thiếu thông tin đồ vật', 'Vui lòng nhập tên đồ vật và nơi tìm thấy.');
+      Alert.alert(t.assistant.incident.missingItemTitle, t.assistant.incident.missingItemMessage);
       return false;
     }
 
@@ -322,8 +278,8 @@ function BusAssistantIncidentPanel({
         <View style={styles.incidentTitleRow}>
           <MaterialCommunityIcons color={colors.error} name="alert-circle-outline" size={20} />
           <View style={styles.incidentTitleWrap}>
-            <Text style={styles.incidentTitle}>Báo cáo sự cố</Text>
-            <Text style={styles.incidentHint}>UC50/UC51 khi đang chạy; UC52 sau khi hoàn thành.</Text>
+            <Text style={styles.incidentTitle}>{t.assistant.incident.panelTitle}</Text>
+            <Text style={styles.incidentHint}>{t.assistant.incident.panelHint}</Text>
           </View>
         </View>
         <Pressable
@@ -332,7 +288,7 @@ function BusAssistantIncidentPanel({
           onPress={() => setIsOpen((current) => !current)}
           style={[styles.reportToggle, isProcessing && styles.disabledChip]}
         >
-          <Text style={styles.reportToggleText}>{isOpen ? 'Đóng' : 'Báo cáo'}</Text>
+          <Text style={styles.reportToggleText}>{isOpen ? t.assistant.incident.close : t.assistant.incident.open}</Text>
         </Pressable>
       </View>
 
@@ -347,7 +303,6 @@ function BusAssistantIncidentPanel({
                 onPress={() => updateForm('type', option.type)}
                 style={[styles.incidentOption, form.type === option.type && styles.incidentOptionActive]}
               >
-                <Text style={styles.incidentCode}>{option.code}</Text>
                 <Text style={styles.incidentOptionTitle}>{option.title}</Text>
                 <Text style={styles.incidentOptionHint}>{option.hint}</Text>
               </Pressable>
@@ -356,7 +311,7 @@ function BusAssistantIncidentPanel({
 
           {form.type !== 'FOUND_ITEM' ? (
             <View style={styles.fieldBlock}>
-              <FieldLabel>Mức độ</FieldLabel>
+              <FieldLabel>{t.assistant.incident.severity}</FieldLabel>
               <View style={styles.choiceRow}>
                 {severityOptions.map((severity) => (
                   <ChoiceChip
@@ -374,7 +329,7 @@ function BusAssistantIncidentPanel({
           {form.type === 'PASSENGER_VIOLATION' ? (
             <>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Loại vi phạm</FieldLabel>
+                <FieldLabel>{t.assistant.incident.violationType}</FieldLabel>
                 <View style={styles.choiceRow}>
                   {violationCategories.map((category) => (
                     <ChoiceChip
@@ -388,10 +343,10 @@ function BusAssistantIncidentPanel({
                 </View>
               </View>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Mô tả hành khách</FieldLabel>
+                <FieldLabel>{t.assistant.incident.passengerDescription}</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('passengerDescription', value)}
-                  placeholder="Example: blue shirt near rear door"
+                  placeholder={t.assistant.incident.passengerPlaceholder}
                   placeholderTextColor={colors.muted}
                   style={styles.incidentInput}
                   value={form.passengerDescription}
@@ -403,7 +358,7 @@ function BusAssistantIncidentPanel({
           {form.type === 'PASSENGER_CONFLICT' ? (
             <>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Loại xung đột</FieldLabel>
+                <FieldLabel>{t.assistant.incident.conflictType}</FieldLabel>
                 <View style={styles.choiceRow}>
                   {conflictCategories.map((category) => (
                     <ChoiceChip
@@ -417,10 +372,10 @@ function BusAssistantIncidentPanel({
                 </View>
               </View>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Các bên liên quan</FieldLabel>
+                <FieldLabel>{t.assistant.incident.partiesInvolved}</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('partiesInvolved', value)}
-                  placeholder="Example: two passengers in middle seats"
+                  placeholder={t.assistant.incident.partiesPlaceholder}
                   placeholderTextColor={colors.muted}
                   style={styles.incidentInput}
                   value={form.partiesInvolved}
@@ -432,30 +387,30 @@ function BusAssistantIncidentPanel({
           {form.type === 'FOUND_ITEM' ? (
             <>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Tên đồ vật</FieldLabel>
+                <FieldLabel>{t.assistant.incident.itemName}</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('itemName', value)}
-                  placeholder="Example: black wallet"
+                  placeholder={t.assistant.incident.itemPlaceholder}
                   placeholderTextColor={colors.muted}
                   style={styles.incidentInput}
                   value={form.itemName}
                 />
               </View>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Nơi tìm thấy</FieldLabel>
+                <FieldLabel>{t.assistant.incident.foundLocation}</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('foundLocation', value)}
-                  placeholder="Example: seat 12"
+                  placeholder={t.assistant.incident.locationPlaceholder}
                   placeholderTextColor={colors.muted}
                   style={styles.incidentInput}
                   value={form.foundLocation}
                 />
               </View>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Đã bàn giao cho</FieldLabel>
+                <FieldLabel>{t.assistant.incident.handedTo}</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('handedTo', value)}
-                  placeholder="Example: dispatch desk"
+                  placeholder={t.assistant.incident.handedToPlaceholder}
                   placeholderTextColor={colors.muted}
                   style={styles.incidentInput}
                   value={form.handedTo}
@@ -466,10 +421,10 @@ function BusAssistantIncidentPanel({
 
           {form.type !== 'FOUND_ITEM' ? (
             <View style={styles.fieldBlock}>
-              <FieldLabel>Cách đã xử lý</FieldLabel>
+              <FieldLabel>{t.assistant.incident.actionTaken}</FieldLabel>
               <TextInput
                 onChangeText={(value) => updateForm('actionTaken', value)}
-                placeholder="Example: reminded passenger of bus rules"
+                placeholder={t.assistant.incident.actionPlaceholder}
                 placeholderTextColor={colors.muted}
                 style={styles.incidentInput}
                 value={form.actionTaken}
@@ -478,11 +433,11 @@ function BusAssistantIncidentPanel({
           ) : null}
 
           <View style={styles.fieldBlock}>
-            <FieldLabel>Mô tả</FieldLabel>
+            <FieldLabel>{t.assistant.incident.description}</FieldLabel>
             <TextInput
               multiline
               onChangeText={(value) => updateForm('description', value)}
-              placeholder="Describe the situation and what was done."
+              placeholder={t.assistant.incident.descriptionPlaceholder}
               placeholderTextColor={colors.muted}
               style={[styles.incidentInput, styles.incidentTextArea]}
               textAlignVertical="top"
@@ -501,7 +456,7 @@ function BusAssistantIncidentPanel({
             ) : (
               <>
                 <MaterialCommunityIcons color={colors.white} name="send-outline" size={18} />
-                <Text style={styles.reportSubmitText}>Gửi báo cáo sự cố</Text>
+                <Text style={styles.reportSubmitText}>{t.assistant.incident.submit}</Text>
               </>
             )}
           </Pressable>
@@ -512,13 +467,54 @@ function BusAssistantIncidentPanel({
 }
 
 export default function AssignedTripsScreen() {
+  const { t } = useDriverI18n();
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isHydrated = useAuthStore((state) => state.isHydrated);
   const logout = useAuthStore((state) => state.logout);
   const actorKind = getActorKind(user?.role);
-  const copy = actorCopy[actorKind];
   const isDriver = actorKind === 'DRIVER';
+  const driverCopy = useMemo(() => ({
+    kicker: t.trips.kicker,
+    title: t.trips.title,
+    searchPlaceholder: t.trips.search,
+    countSuffix: t.trips.countSuffix,
+    empty: t.trips.empty,
+    roleLabel: t.common.driver,
+    acceptSuccessTitle: t.trips.acceptSuccessTitle,
+    acceptSuccessMessage: t.trips.acceptSuccessMessage,
+    rejectReasonTitle: t.trips.rejectTitle,
+    rejectReasonHint: t.trips.rejectHint,
+    rejectPlaceholder: t.trips.rejectPlaceholder,
+    startAction: t.trips.startTrip,
+    prepareAction: t.trips.inspectVehicle,
+  }), [t]);
+  const assistantCopy = useMemo<ActorCopy>(() => ({
+    kicker: t.assistant.trips.kicker,
+    title: t.assistant.trips.title,
+    searchPlaceholder: t.assistant.trips.search,
+    countSuffix: t.assistant.trips.countSuffix,
+    empty: t.assistant.trips.empty,
+    roleLabel: t.assistant.trips.roleLabel,
+    acceptSuccessTitle: t.home.acceptSuccessTitle,
+    acceptSuccessMessage: t.home.acceptSuccessMessage,
+    rejectReasonTitle: t.trips.rejectTitle,
+    rejectReasonHint: t.assistant.trips.rejectHint,
+    rejectPlaceholder: t.trips.rejectPlaceholder,
+    startAction: '',
+    prepareAction: '',
+  }), [t]);
+  const copy = isDriver ? driverCopy : assistantCopy;
+  const filterOptions = useMemo<Array<{ key: FilterKey; label: string }>>(() => (
+    [
+      { key: 'ALL', label: t.trips.all },
+      { key: 'TODAY', label: t.trips.today },
+      { key: 'HISTORY', label: t.trips.history },
+      { key: 'UPCOMING', label: t.trips.upcoming },
+      { key: 'COMPLETED', label: t.trips.completed },
+      { key: 'DELAYED', label: t.trips.delayed },
+    ]
+  ), [t]);
   const [trips, setTrips] = useState<AssignedTrip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [processingId, setProcessingId] = useState('');
@@ -538,9 +534,8 @@ export default function AssignedTripsScreen() {
       const payload = await scheduleOperationsApi.getAssignedTrips(getAssignedTripsRange());
       setTrips(payload.trips || []);
     } catch (error) {
-      const message = getErrorMessage(error, 'Không thể tải các chuyến được phân công.');
-      const statusCode = (error as { statusCode?: number; response?: { status?: number } })?.statusCode
-        || (error as { response?: { status?: number } })?.response?.status;
+      const message = getErrorMessage(error, isDriver ? t.trips.empty : t.assistant.trips.loadErrorFallback);
+      const statusCode = getErrorStatusCode(error);
       const isAuthError = statusCode === 401 || message.toLowerCase().includes('no token provided');
 
       if (isAuthError) {
@@ -549,11 +544,16 @@ export default function AssignedTripsScreen() {
         return;
       }
 
-      Alert.alert('Không thể tải chuyến', message);
+      if (isPermissionError(error)) {
+        setTrips([]);
+        return;
+      }
+
+      Alert.alert(isDriver ? t.home.loadErrorTitle : t.assistant.trips.loadErrorTitle, message);
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, isHydrated, logout]);
+  }, [isAuthenticated, isDriver, isHydrated, logout, t.assistant.trips.loadErrorFallback, t.assistant.trips.loadErrorTitle, t.home.loadErrorTitle, t.trips.empty]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -634,7 +634,7 @@ export default function AssignedTripsScreen() {
       Alert.alert(copy.acceptSuccessTitle, copy.acceptSuccessMessage);
       await loadTrips();
     } catch (error) {
-      Alert.alert('Không thể tiếp nhận chuyến', getErrorMessage(error, 'Không thể tiếp nhận chuyến được phân công.'));
+      Alert.alert(isDriver ? t.home.acceptErrorTitle : t.assistant.trips.acceptErrorTitle, getErrorMessage(error, isDriver ? t.home.acceptErrorFallback : t.assistant.trips.acceptErrorFallback));
     } finally {
       setProcessingId('');
     }
@@ -645,7 +645,7 @@ export default function AssignedTripsScreen() {
 
     const reason = rejectionReason.trim();
     if (reason.length < 5) {
-      Alert.alert('Cần lý do từ chối', 'Vui lòng nhập ít nhất 5 ký tự trước khi từ chối chuyến.');
+      Alert.alert(isDriver ? copy.rejectReasonTitle : t.assistant.trips.rejectNeedReasonTitle, isDriver ? copy.rejectReasonHint : t.assistant.trips.rejectNeedReasonMessage);
       return;
     }
 
@@ -654,10 +654,10 @@ export default function AssignedTripsScreen() {
       await scheduleOperationsApi.rejectAssignedTrip(rejectingTrip.id, { reason });
       setRejectingTrip(null);
       setRejectionReason('');
-      Alert.alert('Đã từ chối chuyến', 'Lý do từ chối đã được gửi về điều hành.');
+      Alert.alert(isDriver ? t.trips.rejectSuccessTitle : t.assistant.trips.rejectSuccessTitle, isDriver ? t.trips.rejectSuccessMessage : t.assistant.trips.rejectSuccessMessage);
       await loadTrips();
     } catch (error) {
-      Alert.alert('Không thể từ chối chuyến', getErrorMessage(error, 'Không thể từ chối chuyến được phân công.'));
+      Alert.alert(copy.rejectReasonTitle, getErrorMessage(error, copy.rejectReasonHint));
     } finally {
       setProcessingId('');
     }
@@ -668,7 +668,7 @@ export default function AssignedTripsScreen() {
     try {
       const locationText = form.type === 'FOUND_ITEM'
         ? form.foundLocation.trim()
-        : trip.route?.name || trip.route?.origin || trip.tripCode || 'Chuyến được phân công';
+        : trip.route?.name || trip.route?.origin || trip.tripCode || t.assistant.incident.locationFallback;
 
       await scheduleOperationsApi.reportOperationIncident(trip.id, {
         ...form,
@@ -676,10 +676,10 @@ export default function AssignedTripsScreen() {
         locationText,
       });
 
-      Alert.alert('Đã báo cáo sự cố', 'Báo cáo sự cố đã được gửi đến bộ phận điều hành.');
+      Alert.alert(t.assistant.incident.submitSuccessTitle, t.assistant.incident.submitSuccessMessage);
       await loadTrips();
     } catch (error) {
-      Alert.alert('Không thể báo cáo sự cố', getErrorMessage(error, 'Không thể gửi báo cáo sự cố.'));
+      Alert.alert(t.assistant.incident.submitErrorTitle, getErrorMessage(error, t.assistant.incident.submitErrorFallback));
     } finally {
       setProcessingId('');
     }
@@ -689,7 +689,7 @@ export default function AssignedTripsScreen() {
     <View style={styles.screenShell}>
       <Screen>
       <View style={styles.header}>
-        <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+        <Pressable accessibilityLabel={t.common.back} hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
           <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
         </Pressable>
         <View>
@@ -702,7 +702,7 @@ export default function AssignedTripsScreen() {
         <View style={styles.searchBox}>
           <MaterialCommunityIcons color={colors.muted} name="magnify" size={21} />
           <TextInput
-            accessibilityLabel="Tìm chuyến được phân công"
+            accessibilityLabel={copy.searchPlaceholder}
             onChangeText={setSearch}
             placeholder={copy.searchPlaceholder}
             placeholderTextColor={colors.muted}
@@ -713,7 +713,7 @@ export default function AssignedTripsScreen() {
         </View>
 
         <View style={styles.filterRow}>
-          {filters.map((filter) => (
+          {filterOptions.map((filter) => (
             <Pressable
               key={filter.key}
               accessibilityRole="button"
@@ -727,8 +727,10 @@ export default function AssignedTripsScreen() {
         {!isLoading ? (
           <View style={styles.resultBar}>
             <View style={styles.resultIcon}><MaterialCommunityIcons color={colors.accent} name="bus-clock" size={18} /></View>
-            <Text style={styles.resultText}><Text style={styles.resultStrong}>{filteredTrips.length}</Text> chuyến phù hợp</Text>
-            <Text style={styles.resultTotal}>Tổng {actorTrips.length}</Text>
+            <Text style={styles.resultText}>
+              <Text style={styles.resultStrong}>{filteredTrips.length}</Text> {copy.countSuffix}
+            </Text>
+            <Text style={styles.resultTotal}>{isDriver ? t.trips.all : t.assistant.trips.total} {actorTrips.length}</Text>
           </View>
         ) : null}
       </View>
@@ -736,7 +738,7 @@ export default function AssignedTripsScreen() {
       {isLoading ? (
         <View style={styles.loading}>
           <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Đang tải các chuyến được phân công...</Text>
+          <Text style={styles.loadingText}>{isDriver ? t.common.loading : t.assistant.trips.loading}</Text>
         </View>
       ) : (
         <View style={styles.tripList}>
@@ -744,6 +746,13 @@ export default function AssignedTripsScreen() {
             <Text style={styles.emptyText}>{copy.empty}</Text>
           ) : filteredTrips.map((trip) => {
             const status = getTripStatus(trip);
+            const statusLabel = formatDriverStatus(status, t);
+            const routeTitle =
+              trip.route?.name ||
+              [trip.route?.origin, trip.route?.destination].filter(Boolean).join(' - ') ||
+              trip.route?.routeNumber ||
+              (isDriver ? t.common.unknownRoute : t.assistant.trips.routeUnnamed);
+            const routeSubtitle = [trip.route?.origin, trip.route?.destination].filter(Boolean).join(' - ');
             const isCompleted = isTripCompleted(trip);
             const isAccepted = getAcceptanceStatus(trip) === 'ACCEPTED';
             const isVehicleReady = trip.inspection?.status === 'READY';
@@ -753,46 +762,46 @@ export default function AssignedTripsScreen() {
               <View key={trip.id} style={styles.tripCard}>
                 <View style={styles.tripCardHeader}>
                   <View>
-                    <Text style={styles.tripCode}>{trip.tripCode || trip.id}</Text>
-                    <Text style={styles.routeName}>{trip.route?.name || 'Tuyến chưa có tên'}</Text>
+                    <Text style={styles.tripCode}>{isDriver ? (trip.tripCode || routeTitle) : routeTitle}</Text>
+                    {isDriver || (routeSubtitle && routeSubtitle !== routeTitle) ? (
+                      <Text style={styles.routeName}>{isDriver ? routeTitle : routeSubtitle}</Text>
+                    ) : null}
                   </View>
                   <View style={styles.statusBadge}>
-                    <Text style={styles.statusBadgeText}>{status}</Text>
+                    <Text style={styles.statusBadgeText}>{statusLabel}</Text>
                   </View>
                 </View>
 
                 <View style={styles.infoGrid}>
-                  <InfoLine label="Mã tuyến" value={trip.route?.routeNumber || trip.route?.id} />
-                  <InfoLine label="Chiều chạy" value={trip.route?.direction} />
-                  <InfoLine label="Ngày chạy" value={formatDate(trip.scheduledStart)} />
-                  <InfoLine label="Giờ khởi hành" value={formatTime(trip.scheduledStart)} />
-                  <InfoLine label="Giờ đến" value={formatTime(trip.scheduledEnd)} />
-                  {trip.actualStartAt ? <InfoLine label="Đã bắt đầu" value={formatTime(trip.actualStartAt)} /> : null}
-                  {trip.actualEndAt ? <InfoLine label="Đã kết thúc" value={formatTime(trip.actualEndAt)} /> : null}
-                  <InfoLine label="Xe buýt" value={getTripVehicleLabel(trip)} />
-                  <InfoLine label="Tài xế" value={trip.driver?.fullName} />
-                  <InfoLine label="Phụ xe" value={trip.busAssistant?.fullName} />
-                  <InfoLine label="Vai trò của bạn" value={copy.roleLabel} />
+                  <InfoLine label={t.common.direction} value={trip.route?.direction} />
+                  <InfoLine label={t.trips.serviceDate} value={getTripServiceDateLabel(trip)} />
+                  <InfoLine label={t.common.departure} value={getTripDepartureTimeLabel(trip)} />
+                  <InfoLine label={t.common.arrival} value={getTripArrivalTimeLabel(trip)} />
+                  {trip.actualStartAt ? <InfoLine label={t.trips.startedAt} value={formatTime(trip.actualStartAt)} /> : null}
+                  {trip.actualEndAt ? <InfoLine label={t.trips.endedAt} value={formatTime(trip.actualEndAt)} /> : null}
+                  <InfoLine label={t.common.vehicle} value={getTripVehicleLabel(trip)} />
+                  <InfoLine label={t.common.driverName} value={trip.driver?.fullName} />
+                  <InfoLine label={t.common.assistantName} value={trip.busAssistant?.fullName} />
                 </View>
 
                 {hasVehicleReplacement(trip) ? (
                   <View style={styles.replacementNotice}>
                     <MaterialCommunityIcons color={colors.primary} name="swap-horizontal-bold" size={18} />
                     <View style={styles.replacementTextWrap}>
-                      <Text style={styles.replacementTitle}>Xe thay thế đã được phân phối</Text>
+                      <Text style={styles.replacementTitle}>{isDriver ? t.inspection.replacementTitle : t.assistant.trips.replacementTitle}</Text>
                       <Text style={styles.replacementText}>
-                        Xe cũ {getVehicleLabel(trip.vehicleReplacement?.previousVehicle)} đang bảo trì. Chuyến tiếp tục với xe {getVehicleLabel(trip.vehicleReplacement?.currentVehicle || trip.vehicle)}.
+                        {isDriver ? `${t.trips.oldVehicleMaintenance} ${t.trips.replacementPrefix} ${getVehicleLabel(trip.vehicleReplacement?.currentVehicle || trip.vehicle)}.` : `${t.assistant.trips.replacementTextPrefix} ${getVehicleLabel(trip.vehicleReplacement?.previousVehicle)} ${t.assistant.trips.replacementTextMiddle} ${getVehicleLabel(trip.vehicleReplacement?.currentVehicle || trip.vehicle)}.`}
                       </Text>
                     </View>
                   </View>
                 ) : null}
 
                 <View style={styles.actionsRow}>
-                  <AppButton title="Xem chi tiết" variant="secondary" onPress={() => void openFreshDetail(trip)} style={styles.actionButton} />
+                  <AppButton title={t.trips.details} variant="secondary" onPress={() => void openFreshDetail(trip)} style={styles.actionButton} />
                   {showDecisionActions ? (
                     <>
                       <AppButton
-                        title="Từ chối"
+                        title={t.trips.reject}
                         disabled={processingId === trip.id}
                         onPress={() => {
                           setRejectingTrip(trip);
@@ -802,7 +811,7 @@ export default function AssignedTripsScreen() {
                         style={styles.actionButton}
                       />
                       <AppButton
-                        title="Tiếp nhận"
+                        title={t.trips.accept}
                         loading={processingId === trip.id}
                         onPress={() => acceptTrip(trip)}
                         style={styles.actionButton}
@@ -853,13 +862,13 @@ export default function AssignedTripsScreen() {
             />
             <View style={styles.modalActions}>
               <AppButton
-                title="Hủy"
+                title={t.common.cancel}
                 onPress={() => setRejectingTrip(null)}
                 variant="secondary"
                 style={styles.modalButton}
               />
               <AppButton
-                title="Từ chối"
+                title={t.trips.reject}
                 loading={Boolean(rejectingTrip && processingId === rejectingTrip.id)}
                 onPress={rejectTrip}
                 style={styles.modalButton}
@@ -959,7 +968,6 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   incidentOptionActive: { borderColor: colors.error, backgroundColor: colors.errorContainer },
-  incidentCode: { color: colors.error, fontSize: 11, fontWeight: '900' },
   incidentOptionTitle: { color: colors.text, fontSize: 14, fontWeight: '900' },
   incidentOptionHint: { color: colors.muted, fontSize: 11, fontWeight: '700' },
   fieldBlock: { gap: 7 },

@@ -24,7 +24,7 @@
       ]
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": false
     },
     "ios": {
       "supportsTablet": true,

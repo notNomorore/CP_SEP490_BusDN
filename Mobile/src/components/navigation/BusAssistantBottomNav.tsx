@@ -1,14 +1,18 @@
 import type { BottomNavKey } from './BottomNavBase';
 import { BottomNavBase, type BottomNavItemConfig } from './BottomNavBase';
 
-const busAssistantItems: BottomNavItemConfig[] = [
-  { key: 'home', label: 'Trang chủ', icon: 'home', href: '/driver-assistant' },
-  { key: 'sell', label: 'Bán vé', icon: 'ticket-confirmation-outline', href: '/driver-assistant/walkin-ticket' },
-  { key: 'validate', label: 'Quét vé', icon: 'qrcode-scan', href: '/driver-assistant/validate-ticket' },
-  { key: 'trips', label: 'Chuyến', icon: 'bus-clock', href: '/driver-assistant/assigned-trips' },
-  { key: 'profile', label: 'Cá nhân', icon: 'account-outline', href: '/profile' },
-];
+import { useDriverI18n } from '@/i18n/driver';
 
 export function BusAssistantBottomNav({ active }: { active: BottomNavKey }) {
+  const { t } = useDriverI18n();
+  const busAssistantItems: BottomNavItemConfig[] = [
+    { key: 'home', label: t.nav.home, icon: 'home', href: '/driver-assistant' },
+    { key: 'sell', label: t.assistant.nav.sell, icon: 'ticket-confirmation-outline', href: '/driver-assistant/walkin-ticket' },
+    { key: 'validate', label: t.assistant.nav.validate, icon: 'qrcode-scan', href: '/driver-assistant/validate-ticket' },
+    { key: 'trips', label: t.nav.trips, icon: 'bus-clock', href: '/driver-assistant/assigned-trips' },
+    { key: 'schedule', label: t.nav.schedule, icon: 'calendar-month-outline', href: '/driver-assistant/shift-schedule' },
+    { key: 'notifications', label: t.nav.notifications, icon: 'bell-ring-outline', href: '/driver-assistant/notifications' },
+    { key: 'profile', label: t.nav.profile, icon: 'account-outline', href: '/profile' },
+  ];
   return <BottomNavBase active={active} items={busAssistantItems} />;
 }

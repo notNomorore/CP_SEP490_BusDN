@@ -114,7 +114,16 @@ export class PriorityProfileService {
       throw new Error('User not found');
     }
 
-    return user;
+    return {
+      _id: user._id,
+      fullName: user.fullName,
+      isPriorityGroup: false,
+      priorityStatus: 'NONE',
+      priorityProfile: {
+        status: 'NONE',
+        documents: [],
+      },
+    };
   }
 
   static async listPassengerRequests(userId) {

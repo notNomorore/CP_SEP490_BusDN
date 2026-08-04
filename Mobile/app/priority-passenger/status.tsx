@@ -90,8 +90,12 @@ export default function PriorityApprovalStatusScreen() {
   const requests = usePriorityProfileStore((state) => state.requests);
   const isLoading = usePriorityProfileStore((state) => state.isLoading);
   const loadStatus = usePriorityProfileStore((state) => state.loadStatus);
-  const current = status || requests[0] || null;
-  const currentStatus = normalizeStatus(current);
+  const validRequests = requests.filter((request) => Boolean(request.requestId) && getRequestStatus(request) !== 'NONE');
+  const rawCurrent = status?.requestId ? status : validRequests[0] || null;
+  const currentStatus = normalizeStatus(rawCurrent);
+  const hasApplication = Boolean(rawCurrent?.requestId) && currentStatus !== 'NONE';
+  const current = hasApplication ? rawCurrent : null;
+  const displayStatus: PriorityStatus = hasApplication ? currentStatus : 'NONE';
   const uploadedDocuments = current?.profile?.documents || [];
   const [previewFile, setPreviewFile] = useState<{ name: string; uri: string } | null>(null);
 
@@ -148,7 +152,7 @@ export default function PriorityApprovalStatusScreen() {
         <>
           <View style={styles.summaryCard}>
             <View style={styles.statusBadge}>
-              <Text style={styles.statusBadgeText}>{statusLabels[currentStatus] || currentStatus}</Text>
+              <Text style={styles.statusBadgeText}>{statusLabels[displayStatus] || displayStatus}</Text>
             </View>
             <View style={styles.summaryBlock}>
               <Text style={styles.label}>APPLICATION ID</Text>
@@ -169,32 +173,34 @@ export default function PriorityApprovalStatusScreen() {
               </View>
               <View style={styles.summaryItem}>
                 <Text style={styles.label}>CURRENT STATUS</Text>
-                <Text style={styles.smallValue}>{statusLabels[currentStatus] || currentStatus}</Text>
+                <Text style={styles.smallValue}>{statusLabels[displayStatus] || displayStatus}</Text>
               </View>
             </View>
           </View>
 
-          <View style={styles.timelineCard}>
-            <Text style={styles.sectionTitle}>Verification Timeline</Text>
-            {timeline.map((step) => {
-              const state = getStepState(currentStatus, step.key);
-              return (
-                <View key={step.key} style={styles.timelineRow}>
-                  <View style={[styles.timelineIcon, state === 'done' && styles.timelineDone, state === 'active' && styles.timelineActive]}>
-                    <MaterialCommunityIcons
-                      color={state === 'idle' ? colors.muted : colors.white}
-                      name={state === 'done' ? 'check' : step.icon}
-                      size={20}
-                    />
+          {hasApplication ? (
+            <View style={styles.timelineCard}>
+              <Text style={styles.sectionTitle}>Verification Timeline</Text>
+              {timeline.map((step) => {
+                const state = getStepState(displayStatus, step.key);
+                return (
+                  <View key={step.key} style={styles.timelineRow}>
+                    <View style={[styles.timelineIcon, state === 'done' && styles.timelineDone, state === 'active' && styles.timelineActive]}>
+                      <MaterialCommunityIcons
+                        color={state === 'idle' ? colors.muted : colors.white}
+                        name={state === 'done' ? 'check' : step.icon}
+                        size={20}
+                      />
+                    </View>
+                    <View style={[styles.timelineText, state === 'idle' && styles.timelineTextIdle]}>
+                      <Text style={styles.timelineTitle}>{step.label}</Text>
+                      <Text style={styles.timelineDescription}>{step.text}</Text>
+                    </View>
                   </View>
-                  <View style={[styles.timelineText, state === 'idle' && styles.timelineTextIdle]}>
-                    <Text style={styles.timelineTitle}>{step.label}</Text>
-                    <Text style={styles.timelineDescription}>{step.text}</Text>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
+                );
+              })}
+            </View>
+          ) : null}
 
           <View style={styles.documentsCard}>
             <Text style={styles.sectionTitle}>Uploaded Documents</Text>
@@ -230,7 +236,7 @@ export default function PriorityApprovalStatusScreen() {
             )}
           </View>
 
-          {currentStatus === 'REJECTED' ? (
+          {displayStatus === 'REJECTED' ? (
             <View style={styles.rejectionCard}>
               <MaterialCommunityIcons color={colors.error} name="alert-circle-outline" size={24} />
               <View style={styles.rejectionTextBlock}>
@@ -242,14 +248,14 @@ export default function PriorityApprovalStatusScreen() {
 
           <View style={styles.historyCard}>
             <Text style={styles.sectionTitle}>All Submitted Applications</Text>
-            {requests.length === 0 ? (
+            {validRequests.length === 0 ? (
               <View style={styles.emptyDocuments}>
                 <MaterialCommunityIcons color={colors.muted} name="clipboard-text-outline" size={24} />
                 <Text style={styles.emptyDocumentsText}>No submitted applications yet.</Text>
               </View>
             ) : (
               <View style={styles.historyList}>
-                {requests.map((request) => {
+                {validRequests.map((request) => {
                   const requestStatus = getRequestStatus(request);
                   const requestDocuments = request.profile?.documents || [];
 

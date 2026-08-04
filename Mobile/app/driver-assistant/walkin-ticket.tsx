@@ -8,25 +8,25 @@ import { AppButton } from '@/components/AppButton';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
+import { useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { WalkInTicketHistory, WalkInTicketResult } from '@/types/busAssistant';
 import type { AssignedTrip } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
-import { formatTime, getAssignedTripsRange, getTripStatus, toDateInput } from '@/utils/scheduleOperations';
-import { getErrorMessage } from '@/utils/validation';
+import { getAssignedTripsRange, getTripDepartureTimeLabel, getTripStatus, toDateInput } from '@/utils/scheduleOperations';
+import { getErrorMessage, isPermissionError } from '@/utils/validation';
 
 const passengerTypes = ['ADULT', 'STUDENT', 'CHILD', 'SENIOR'];
 const paymentMethods = ['CASH', 'BANK_TRANSFER'];
-const money = (value: number | string) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
+const money = (value: number | string, locale = 'vi-VN') => new Intl.NumberFormat(locale, { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
 const objectId = (value?: string | null) => String(value || '');
-const optionLabels: Record<string, string> = { ADULT: 'Người lớn', STUDENT: 'Học sinh / sinh viên', CHILD: 'Trẻ em', SENIOR: 'Người cao tuổi', CASH: 'Tiền mặt', BANK_TRANSFER: 'Chuyển khoản QR' };
 
 function DropdownSelect({
   label,
   value,
   options,
   onChange,
-  placeholder = 'Chọn thông tin',
+  placeholder,
 }: {
   label: string;
   value: string;
@@ -66,7 +66,9 @@ function DropdownSelect({
 }
 
 export default function WalkInTicketScreen() {
+  const { language, t } = useDriverI18n();
   const user = useAuthStore((state) => state.user);
+  const locale = language === 'VN' ? 'vi-VN' : 'en-US';
   const [trips, setTrips] = useState<AssignedTrip[]>([]);
   const [selectedTripId, setSelectedTripId] = useState('');
   const [fromStopId, setFromStopId] = useState('');
@@ -88,7 +90,15 @@ export default function WalkInTicketScreen() {
     [selectedTripId, trips],
   );
   const stops = selectedTrip?.route?.stops || [];
-  const stopOptions = stops.map((stop) => ({ value: objectId(stop.stationId || stop.id), label: stop.stopName || 'Điểm dừng' }));
+  const optionLabels = useMemo<Record<string, string>>(() => ({
+    ADULT: t.assistant.walkin.options.adult,
+    STUDENT: t.assistant.walkin.options.student,
+    CHILD: t.assistant.walkin.options.child,
+    SENIOR: t.assistant.walkin.options.senior,
+    CASH: t.assistant.walkin.options.cash,
+    BANK_TRANSFER: t.assistant.walkin.options.bankTransfer,
+  }), [t]);
+  const stopOptions = stops.map((stop) => ({ value: objectId(stop.stationId || stop.id), label: stop.stopName || t.assistant.walkin.stopFallback }));
   const changeQuantity = (delta: number) => {
     const next = Math.min(20, Math.max(1, (Number.parseInt(quantity, 10) || 1) + delta));
     setQuantity(String(next));
@@ -110,11 +120,11 @@ export default function WalkInTicketScreen() {
     try {
       setHistory(await busAssistantApi.getWalkInTicketHistory({ date }));
     } catch (error) {
-      Alert.alert('Không thể tải lịch sử', getErrorMessage(error, 'Không thể tải lịch sử bán vé.'));
+      Alert.alert(t.assistant.walkin.alerts.historyTitle, getErrorMessage(error, t.assistant.walkin.alerts.historyFallback));
     } finally {
       setIsLoadingHistory(false);
     }
-  }, [historyDate]);
+  }, [historyDate, t]);
 
   const loadTrips = useCallback(async () => {
     try {
@@ -128,9 +138,17 @@ export default function WalkInTicketScreen() {
       setFromStopId((current) => current || objectId(firstStops[0]?.stationId || firstStops[0]?.id));
       setToStopId((current) => current || objectId(firstStops[firstStops.length - 1]?.stationId || firstStops[firstStops.length - 1]?.id));
     } catch (error) {
-      Alert.alert('Không thể tải chuyến', getErrorMessage(error, 'Không thể tải các chuyến được phân công.'));
+      if (isPermissionError(error)) {
+        setTrips([]);
+        setSelectedTripId('');
+        setFromStopId('');
+        setToStopId('');
+        return;
+      }
+
+      Alert.alert(t.assistant.walkin.alerts.tripsTitle, getErrorMessage(error, t.assistant.walkin.alerts.tripsFallback));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadTrips();
@@ -149,7 +167,7 @@ export default function WalkInTicketScreen() {
 
   const createTicket = async () => {
     if (!selectedTrip?.route?.id || !selectedTrip.tripId || !fromStopId || !toStopId) {
-      Alert.alert('Thiếu thông tin chuyến', 'Chuyến đã chọn cần đầy đủ tuyến, chuyến và điểm dừng trước khi bán vé.');
+      Alert.alert(t.assistant.walkin.alerts.missingTripTitle, t.assistant.walkin.alerts.missingTripMessage);
       return;
     }
 
@@ -170,9 +188,12 @@ export default function WalkInTicketScreen() {
       });
       setResult(data);
       await loadHistory(historyDate);
-      Alert.alert(paymentMethod === 'CASH' ? 'Đã thu tiền và tạo vé' : 'Đã tạo mã thanh toán', paymentMethod === 'CASH' ? 'Hành khách có thể lên xe.' : 'Hãy đưa mã QR cho hành khách quét.');
+      Alert.alert(
+        paymentMethod === 'CASH' ? t.assistant.walkin.alerts.cashCreatedTitle : t.assistant.walkin.alerts.qrCreatedTitle,
+        paymentMethod === 'CASH' ? t.assistant.walkin.alerts.cashCreatedMessage : t.assistant.walkin.alerts.qrCreatedMessage,
+      );
     } catch (error) {
-      Alert.alert('Không thể tạo vé', getErrorMessage(error, 'Không thể tạo vé trực tiếp.'));
+      Alert.alert(t.assistant.walkin.alerts.createErrorTitle, getErrorMessage(error, t.assistant.walkin.alerts.createErrorFallback));
     } finally {
       setIsSubmitting(false);
     }
@@ -186,9 +207,9 @@ export default function WalkInTicketScreen() {
       const data = await busAssistantApi.confirmWalkInPayment(ticketId);
       setResult((current) => current ? { ...current, ...data, requiresPaymentConfirmation: false, paymentCompleted: true, confirmed: true } : data);
       await loadHistory(historyDate);
-      Alert.alert('Đã thanh toán', 'Đã xác nhận chuyển khoản. Hành khách có thể lên xe.');
+      Alert.alert(t.assistant.walkin.alerts.paidTitle, t.assistant.walkin.alerts.paidMessage);
     } catch (error) {
-      Alert.alert('Chưa nhận được thanh toán', getErrorMessage(error, 'Giao dịch chuyển khoản chưa hoàn tất.'));
+      Alert.alert(t.assistant.walkin.alerts.paymentPendingTitle, getErrorMessage(error, t.assistant.walkin.alerts.paymentPendingFallback));
     } finally {
       setIsSubmitting(false);
     }
@@ -201,7 +222,7 @@ export default function WalkInTicketScreen() {
       setResult(data);
       if (data.paymentCompleted) await loadHistory(historyDate);
     } catch (error) {
-      Alert.alert('Không thể thanh toán lại', getErrorMessage(error, 'Mã thanh toán không còn khả dụng.'));
+      Alert.alert(t.assistant.walkin.alerts.resumeTitle, getErrorMessage(error, t.assistant.walkin.alerts.resumeFallback));
     } finally {
       setResumingId('');
     }
@@ -211,43 +232,43 @@ export default function WalkInTicketScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+          <Pressable accessibilityLabel={t.common.back} hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View>
-            <Text style={styles.kicker}>BÁN VÉ TẠI XE</Text>
-            <Text style={styles.title}>Vé trực tiếp</Text>
+            <Text style={styles.kicker}>{t.assistant.walkin.kicker}</Text>
+            <Text style={styles.title}>{t.assistant.walkin.title}</Text>
           </View>
         </View>
 
         <View style={styles.panel}>
           <View style={styles.panelHeadingRow}>
-            <Text style={styles.panelTitle}>Chuyến được phân công</Text>
-            <Pressable accessibilityLabel="Tải lại chuyến" onPress={() => void loadTrips()} style={styles.reloadTripsButton}>
+            <Text style={styles.panelTitle}>{t.assistant.walkin.assignedTrips}</Text>
+            <Pressable accessibilityLabel={t.assistant.walkin.reloadTrips} onPress={() => void loadTrips()} style={styles.reloadTripsButton}>
               <MaterialCommunityIcons color={colors.primary} name="refresh" size={19} />
             </Pressable>
           </View>
           <View style={styles.optionColumn}>
             {trips.length ? trips.map((trip) => (
               <Pressable key={trip.id} onPress={() => setSelectedTripId(trip.id)} style={[styles.tripChip, selectedTrip?.id === trip.id && styles.tripChipActive]}>
-                <Text style={[styles.tripTitle, selectedTrip?.id === trip.id && styles.tripTextActive]}>{trip.route?.routeNumber || trip.tripCode || 'Chuyến'}</Text>
-                <Text style={[styles.tripMeta, selectedTrip?.id === trip.id && styles.tripTextActive]}>{formatTime(trip.scheduledStart)} - {trip.vehicle?.code || trip.vehicle?.plateNumber || 'Chưa có xe'}</Text>
+                <Text style={[styles.tripTitle, selectedTrip?.id === trip.id && styles.tripTextActive]}>{trip.route?.routeNumber || trip.tripCode || t.assistant.validate.tripFallback}</Text>
+                <Text style={[styles.tripMeta, selectedTrip?.id === trip.id && styles.tripTextActive]}>{getTripDepartureTimeLabel(trip)} - {trip.vehicle?.code || trip.vehicle?.plateNumber || t.assistant.validate.noVehicle}</Text>
               </Pressable>
-            )) : <Text style={styles.emptyText}>Không có chuyến đang hoạt động được phân công.</Text>}
+            )) : <Text style={styles.emptyText}>{t.assistant.walkin.activeTripEmpty}</Text>}
           </View>
         </View>
 
         <View style={styles.panel}>
-          <View style={styles.panelHeadingRow}><View style={styles.sectionIcon}><MaterialCommunityIcons color={colors.accent} name="map-marker-path" size={21} /></View><View style={styles.sectionToggleText}><Text style={styles.panelTitle}>Điểm dừng</Text><Text style={styles.sectionHint}>Chọn điểm lên và điểm xuống</Text></View></View>
-          <DropdownSelect label="ĐIỂM LÊN" value={fromStopId} options={stopOptions} onChange={setFromStopId} placeholder="Chọn điểm lên" />
-          <DropdownSelect label="ĐIỂM XUỐNG" value={toStopId} options={stopOptions} onChange={setToStopId} placeholder="Chọn điểm xuống" />
+          <View style={styles.panelHeadingRow}><View style={styles.sectionIcon}><MaterialCommunityIcons color={colors.accent} name="map-marker-path" size={21} /></View><View style={styles.sectionToggleText}><Text style={styles.panelTitle}>{t.assistant.walkin.stopsTitle}</Text><Text style={styles.sectionHint}>{t.assistant.walkin.stopsHint}</Text></View></View>
+          <DropdownSelect label={t.assistant.walkin.fromStop} value={fromStopId} options={stopOptions} onChange={setFromStopId} placeholder={t.assistant.walkin.chooseFromStop} />
+          <DropdownSelect label={t.assistant.walkin.toStop} value={toStopId} options={stopOptions} onChange={setToStopId} placeholder={t.assistant.walkin.chooseToStop} />
         </View>
 
         <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Thông tin vé</Text>
-          <DropdownSelect label="ĐỐI TƯỢNG HÀNH KHÁCH" value={passengerType} options={passengerTypes.map((value) => ({ value, label: optionLabels[value] }))} onChange={setPassengerType} />
+          <Text style={styles.panelTitle}>{t.assistant.walkin.ticketInfo}</Text>
+          <DropdownSelect label={t.assistant.walkin.passengerType} value={passengerType} options={passengerTypes.map((value) => ({ value, label: optionLabels[value] }))} onChange={setPassengerType} placeholder={t.assistant.walkin.selectPlaceholder} />
           <View style={styles.paymentGroup}>
-            <Text style={styles.fieldLabel}>PHƯƠNG THỨC THANH TOÁN</Text>
+            <Text style={styles.fieldLabel}>{t.assistant.walkin.paymentMethod}</Text>
             <View style={styles.paymentRow}>
               {paymentMethods.map((value) => {
                 const active = paymentMethod === value;
@@ -262,30 +283,30 @@ export default function WalkInTicketScreen() {
           </View>
           <View style={styles.inputRow}>
             <View style={styles.inputGroup}>
-              <Text style={styles.fieldLabel}>SỐ LƯỢNG VÉ</Text>
+              <Text style={styles.fieldLabel}>{t.assistant.walkin.quantity}</Text>
               <View style={styles.stepper}><Pressable onPress={() => changeQuantity(-1)} style={styles.stepperButton}><MaterialCommunityIcons color={colors.primary} name="minus" size={20} /></Pressable><Text style={styles.stepperValue}>{quantity}</Text><Pressable onPress={() => changeQuantity(1)} style={styles.stepperButton}><MaterialCommunityIcons color={colors.primary} name="plus" size={20} /></Pressable></View>
             </View>
             <View style={styles.inputGroup}>
-              <Text style={styles.fieldLabel}>Tổng tiền</Text>
-              <View style={styles.readonlyInput}><Text style={styles.readonlyValue}>{money(total)}</Text></View>
+              <Text style={styles.fieldLabel}>{t.assistant.walkin.total}</Text>
+              <View style={styles.readonlyInput}><Text style={styles.readonlyValue}>{money(total, locale)}</Text></View>
             </View>
           </View>
           {paymentMethod === 'CASH' ? (
             <View style={styles.cashPanel}>
               <View style={styles.inputGroup}>
-                <Text style={styles.fieldLabel}>Khách đưa</Text>
+                <Text style={styles.fieldLabel}>{t.assistant.walkin.cashReceived}</Text>
                 <TextInput keyboardType="number-pad" onChangeText={setCashReceived} placeholder="0" placeholderTextColor={colors.muted} style={styles.input} value={cashReceived} />
               </View>
               <View style={styles.changeBlock}>
-                <Text style={styles.fieldLabel}>Tiền thối lại</Text>
-                <Text style={[styles.changeValue, cashInsufficient && cashReceived !== '' && styles.changeError]}>{money(changeAmount)}</Text>
-                {cashInsufficient && cashReceived !== '' ? <Text style={styles.insufficientText}>Số tiền khách đưa chưa đủ.</Text> : null}
+                <Text style={styles.fieldLabel}>{t.assistant.walkin.change}</Text>
+                <Text style={[styles.changeValue, cashInsufficient && cashReceived !== '' && styles.changeError]}>{money(changeAmount, locale)}</Text>
+                {cashInsufficient && cashReceived !== '' ? <Text style={styles.insufficientText}>{t.assistant.walkin.cashInsufficient}</Text> : null}
               </View>
             </View>
           ) : null}
           <AppButton
             disabled={!selectedTrip || !fromStopId || !toStopId || cashInsufficient}
-            title={paymentMethod === 'CASH' ? 'Thu tiền và tạo vé' : 'Tạo mã QR thanh toán'}
+            title={paymentMethod === 'CASH' ? t.assistant.walkin.createCash : t.assistant.walkin.createQr}
             loading={isSubmitting}
             onPress={createTicket}
           />
@@ -293,25 +314,25 @@ export default function WalkInTicketScreen() {
 
         {result ? (
           <View style={[styles.panel, styles.resultPanel]}>
-            <View style={styles.resultHeading}><MaterialCommunityIcons color={colors.accent} name="receipt-text-outline" size={21} /><Text style={styles.panelTitle}>Thông tin vé</Text></View>
-            {result.qrCodeImage ? <><Image resizeMode="contain" source={{ uri: result.qrCodeImage }} style={styles.qrImage} /><Text style={styles.qrHint}>Đưa mã này cho hành khách quét bằng điện thoại.</Text></> : (
+            <View style={styles.resultHeading}><MaterialCommunityIcons color={colors.accent} name="receipt-text-outline" size={21} /><Text style={styles.panelTitle}>{t.assistant.walkin.ticketInfo}</Text></View>
+            {result.qrCodeImage ? <><Image resizeMode="contain" source={{ uri: result.qrCodeImage }} style={styles.qrImage} /><Text style={styles.qrHint}>{t.assistant.walkin.qrHint}</Text></> : (
               <View style={styles.successBox}>
                 <MaterialCommunityIcons color={colors.primary} name="check-circle-outline" size={34} />
-                <Text style={styles.successTitle}>Đã thu tiền và tạo vé thành công.</Text>
+                <Text style={styles.successTitle}>{t.assistant.walkin.cashSuccess}</Text>
                 <View style={styles.cashResultRow}>
-                  <View style={styles.cashResultItem}><Text style={styles.cashResultLabel}>Khách đưa</Text><Text style={styles.cashResultValue}>{money(result.cashReceived ?? received)}</Text></View>
+                  <View style={styles.cashResultItem}><Text style={styles.cashResultLabel}>{t.assistant.walkin.cashReceived}</Text><Text style={styles.cashResultValue}>{money(result.cashReceived ?? received, locale)}</Text></View>
                   <View style={styles.cashResultDivider} />
-                  <View style={styles.cashResultItem}><Text style={styles.cashResultLabel}>Tiền thối lại</Text><Text style={styles.cashResultValue}>{money(result.changeAmount ?? changeAmount)}</Text></View>
+                  <View style={styles.cashResultItem}><Text style={styles.cashResultLabel}>{t.assistant.walkin.change}</Text><Text style={styles.cashResultValue}>{money(result.changeAmount ?? changeAmount, locale)}</Text></View>
                 </View>
               </View>
             )}
-            <View style={styles.ticketIdentity}><Text style={styles.ticketCodeLabel}>Mã vé: <Text style={styles.ticketCodeValue}>{result.ticketData?.ticketCode}</Text></Text><Text style={styles.resultAmount}>{money(result.totalAmount || 0)}</Text></View>
+            <View style={styles.ticketIdentity}><Text style={styles.ticketCodeLabel}>{t.assistant.walkin.ticketCode}: <Text style={styles.ticketCodeValue}>{result.ticketData?.ticketCode}</Text></Text><Text style={styles.resultAmount}>{money(result.totalAmount || 0, locale)}</Text></View>
             <View style={[styles.statusPill, result.requiresPaymentConfirmation ? styles.statusPending : styles.statusPaid]}>
-              <Text style={styles.statusText}>{result.requiresPaymentConfirmation ? 'Chờ thanh toán' : 'Đã thanh toán'}</Text>
+              <Text style={styles.statusText}>{result.requiresPaymentConfirmation ? t.assistant.walkin.pendingPayment : t.assistant.walkin.paid}</Text>
             </View>
-            {result.checkoutUrl ? <Pressable onPress={() => void Linking.openURL(result.checkoutUrl!)}><Text style={styles.payOsLink}>Mở trang thanh toán PayOS</Text></Pressable> : null}
-            {result.requiresPaymentConfirmation ? <AppButton title="Xác nhận đã nhận chuyển khoản" loading={isSubmitting} onPress={confirmPayment} /> : null}
-            <AppButton title="Tạo vé mới" variant="secondary" onPress={() => { setResult(null); setCashReceived(''); }} />
+            {result.checkoutUrl ? <Pressable onPress={() => void Linking.openURL(result.checkoutUrl!)}><Text style={styles.payOsLink}>{t.assistant.walkin.openPayOs}</Text></Pressable> : null}
+            {result.requiresPaymentConfirmation ? <AppButton title={t.assistant.walkin.confirmTransfer} loading={isSubmitting} onPress={confirmPayment} /> : null}
+            <AppButton title={t.assistant.walkin.newTicket} variant="secondary" onPress={() => { setResult(null); setCashReceived(''); }} />
           </View>
         ) : null}
 
@@ -319,7 +340,7 @@ export default function WalkInTicketScreen() {
           <Pressable onPress={() => setShowHistory((value) => !value)} style={styles.historyHeader}>
             <View style={styles.historyTitleRow}>
               <MaterialCommunityIcons color={colors.accent} name="calendar-clock" size={22} />
-              <View><Text style={styles.panelTitle}>Lịch sử bán vé</Text><Text style={styles.historyHint}>Xem lại vé đã bán theo ngày</Text></View>
+              <View><Text style={styles.panelTitle}>{t.assistant.walkin.history}</Text><Text style={styles.historyHint}>{t.assistant.walkin.historyHint}</Text></View>
             </View>
             <View style={styles.historyActions}><View style={styles.historyCount}><Text style={styles.historyCountText}>{history.tickets.length}</Text></View><MaterialCommunityIcons color={colors.muted} name={showHistory ? 'chevron-up' : 'chevron-down'} size={24} /></View>
           </Pressable>
@@ -330,17 +351,17 @@ export default function WalkInTicketScreen() {
           {isLoadingHistory ? <ActivityIndicator color={colors.primary} /> : history.tickets.length ? history.tickets.map((ticket) => (
             <View key={ticket._id} style={styles.historyItem}>
               <View style={styles.historyItemTop}>
-                <Text style={styles.historyCode}>{ticket.ticketCode || 'Vé'}</Text>
-                <Text style={styles.historyAmount}>{money(ticket.totalAmount || 0)}</Text>
+                <Text style={styles.historyCode}>{ticket.ticketCode || t.assistant.walkin.ticketFallback}</Text>
+                <Text style={styles.historyAmount}>{money(ticket.totalAmount || 0, locale)}</Text>
               </View>
-              <Text style={styles.historyMeta}>{ticket.issuedAt ? new Date(ticket.issuedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--'} · {ticket.routeCode || ticket.routeName || 'Chưa có tuyến'} · {ticket.passengerCount || 1} khách</Text>
+              <Text style={styles.historyMeta}>{ticket.issuedAt ? new Date(ticket.issuedAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }) : '--:--'} · {ticket.routeCode || ticket.routeName || t.assistant.walkin.noRoute} · {ticket.passengerCount || 1} {t.assistant.walkin.passengerUnit}</Text>
               <View style={styles.historyFooter}>
-                <Text style={styles.historyPayment}>{ticket.paymentMethod === 'CASH' ? 'Tiền mặt' : 'Chuyển khoản QR'}</Text>
-                <Text style={ticket.status === 'COMPLETED' ? styles.paidText : styles.pendingText}>{ticket.status === 'COMPLETED' ? 'Đã thanh toán' : 'Chờ thanh toán'}</Text>
+                <Text style={styles.historyPayment}>{ticket.paymentMethod === 'CASH' ? t.assistant.walkin.options.cash : t.assistant.walkin.options.bankTransfer}</Text>
+                <Text style={ticket.status === 'COMPLETED' ? styles.paidText : styles.pendingText}>{ticket.status === 'COMPLETED' ? t.assistant.walkin.paid : t.assistant.walkin.pendingPayment}</Text>
               </View>
-              {ticket.canResumePayment ? <AppButton title={resumingId === ticket._id ? 'Đang mở...' : 'Thanh toán lại'} disabled={Boolean(resumingId)} onPress={() => void resumePayment(ticket._id)} /> : null}
+              {ticket.canResumePayment ? <AppButton title={resumingId === ticket._id ? t.assistant.walkin.resumeOpening : t.assistant.walkin.resumePayment} disabled={Boolean(resumingId)} onPress={() => void resumePayment(ticket._id)} /> : null}
             </View>
-          )) : <Text style={styles.emptyText}>Chưa có vé nào được bán trong ngày này.</Text>}</> : null}
+          )) : <Text style={styles.emptyText}>{t.assistant.walkin.emptyHistory}</Text>}</> : null}
         </View>
       </Screen>
       <RoleBottomNav active="sell" role={user?.role} />

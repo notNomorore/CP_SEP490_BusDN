@@ -9,26 +9,27 @@ import { AppButton } from '@/components/AppButton';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
+import { useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { TicketValidationResult } from '@/types/busAssistant';
 import type { AssignedTrip } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
-import { formatTime, getTodayRange, getTripStatus, isTripCompleted, toDateInput } from '@/utils/scheduleOperations';
-import { getErrorMessage } from '@/utils/validation';
+import { getTodayRange, getTripDepartureTimeLabel, getTripStatus, isTripCompleted, toDateInput } from '@/utils/scheduleOperations';
+import { getErrorMessage, isPermissionError } from '@/utils/validation';
 
 type ValidationHistoryItem = TicketValidationResult & {
   savedAt?: string;
   savedDate?: string;
 };
 
-const money = (value?: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
+const money = (value?: number, locale = 'vi-VN') => new Intl.NumberFormat(locale, { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
 const tripIdOf = (trip?: AssignedTrip | null) => String(trip?.tripId || '');
 
-const formatDateTime = (value?: string | null) => {
-  if (!value) return 'N/A';
+const formatDateTime = (value?: string | null, locale = 'vi-VN', emptyValue = 'N/A') => {
+  if (!value) return emptyValue;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' }).format(date);
 };
 
 const getDisplayTicket = (result?: TicketValidationResult | null) => result?.ticketInfo || {
@@ -67,28 +68,42 @@ const addDateDays = (dateKey: string, days: number) => {
   return toDateInput(date);
 };
 
-function TripChip({ trip, active, onPress }: { trip: AssignedTrip; active: boolean; onPress: () => void }) {
+function TripChip({
+  trip,
+  active,
+  onPress,
+  tripFallback,
+  noVehicle,
+}: {
+  trip: AssignedTrip;
+  active: boolean;
+  onPress: () => void;
+  tripFallback: string;
+  noVehicle: string;
+}) {
   return (
     <Pressable onPress={onPress} style={[styles.tripChip, active && styles.tripChipActive]}>
-      <Text style={[styles.tripChipCode, active && styles.tripChipTextActive]}>{trip.route?.routeNumber || trip.tripCode || 'Chuyến'}</Text>
+      <Text style={[styles.tripChipCode, active && styles.tripChipTextActive]}>{trip.route?.routeNumber || trip.tripCode || tripFallback}</Text>
       <Text numberOfLines={1} style={[styles.tripChipMeta, active && styles.tripChipTextActive]}>
-        {formatTime(trip.scheduledStart)} - {trip.vehicle?.code || trip.vehicle?.plateNumber || 'Chưa có xe'}
+        {getTripDepartureTimeLabel(trip)} - {trip.vehicle?.code || trip.vehicle?.plateNumber || noVehicle}
       </Text>
     </Pressable>
   );
 }
 
-function Detail({ label, value }: { label: string; value?: string | number | null }) {
+function Detail({ label, value, emptyValue }: { label: string; value?: string | number | null; emptyValue: string }) {
   return (
     <View style={styles.detailBox}>
       <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={styles.detailValue}>{value || 'N/A'}</Text>
+      <Text style={styles.detailValue}>{value || emptyValue}</Text>
     </View>
   );
 }
 
 export default function ValidateTicketScreen() {
+  const { language, t } = useDriverI18n();
   const user = useAuthStore((state) => state.user);
+  const locale = language === 'VN' ? 'vi-VN' : 'en-US';
   const [trips, setTrips] = useState<AssignedTrip[]>([]);
   const [selectedTripId, setSelectedTripId] = useState('');
   const [qrCode, setQrCode] = useState('');
@@ -117,11 +132,17 @@ export default function ValidateTicketScreen() {
       setTrips(usableTrips);
       setSelectedTripId((current) => current || usableTrips[0]?.id || '');
     } catch (error) {
-      Alert.alert('Không thể tải chuyến', getErrorMessage(error, 'Không thể tải các chuyến được phân công.'));
+      if (isPermissionError(error)) {
+        setTrips([]);
+        setSelectedTripId('');
+        return;
+      }
+
+      Alert.alert(t.assistant.validate.loadTripsTitle, getErrorMessage(error, t.assistant.validate.loadTripsFallback));
     } finally {
       setIsLoadingTrips(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadTrips();
@@ -146,7 +167,7 @@ export default function ValidateTicketScreen() {
   const validateTicketCode = useCallback(async (rawCode: string) => {
     const code = rawCode.trim();
     if (!code) {
-      Alert.alert('Cần nhập mã vé', 'Hãy nhập hoặc dán mã QR/mã vé trước khi kiểm tra.');
+      Alert.alert(t.assistant.validate.needCodeTitle, t.assistant.validate.needCodeMessage);
       return;
     }
     setIsSubmitting(true);
@@ -169,13 +190,13 @@ export default function ValidateTicketScreen() {
         }
       }
       setQrCode('');
-      setCameraMessage('Đã nhận diện và kiểm tra mã QR.');
+      setCameraMessage(t.assistant.validate.scannedMessage);
     } catch (error) {
-      setError(getErrorMessage(error, 'Không thể kiểm tra vé.'));
+      setError(getErrorMessage(error, t.assistant.validate.validateErrorFallback));
     } finally {
       setIsSubmitting(false);
     }
-  }, [historyDate, loadHistory, selectedTrip]);
+  }, [historyDate, loadHistory, selectedTrip, t]);
 
   const validateTicket = () => {
     void validateTicketCode(qrCode);
@@ -184,7 +205,7 @@ export default function ValidateTicketScreen() {
   const startCamera = async () => {
     const permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
     if (!permission.granted) {
-      Alert.alert('Cần quyền truy cập camera', 'Hãy cho phép sử dụng camera để quét mã QR vé.');
+      Alert.alert(t.assistant.validate.cameraPermissionTitle, t.assistant.validate.cameraPermissionMessage);
       return;
     }
 
@@ -213,24 +234,31 @@ export default function ValidateTicketScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+          <Pressable accessibilityLabel={t.common.back} hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View>
-            <Text style={styles.kicker}>KIỂM TRA LÊN XE</Text>
-            <Text style={styles.title}>Kiểm tra vé</Text>
+            <Text style={styles.kicker}>{t.assistant.validate.kicker}</Text>
+            <Text style={styles.title}>{t.assistant.validate.title}</Text>
           </View>
         </View>
 
         <View style={styles.panel}>
           <View style={styles.panelHeader}>
-            <Text style={styles.panelTitle}>Chuyến đang hoạt động</Text>
+            <Text style={styles.panelTitle}>{t.assistant.validate.activeTrips}</Text>
             {isLoadingTrips ? <ActivityIndicator color={colors.primary} /> : null}
           </View>
           <View style={styles.tripList}>
             {trips.length ? trips.map((trip) => (
-              <TripChip key={trip.id} trip={trip} active={selectedTrip?.id === trip.id} onPress={() => setSelectedTripId(trip.id)} />
-            )) : <Text style={styles.emptyText}>Hôm nay chưa có chuyến được phân công. Bạn vẫn có thể quét mã vé.</Text>}
+              <TripChip
+                key={trip.id}
+                trip={trip}
+                active={selectedTrip?.id === trip.id}
+                onPress={() => setSelectedTripId(trip.id)}
+                tripFallback={t.assistant.validate.tripFallback}
+                noVehicle={t.assistant.validate.noVehicle}
+              />
+            )) : <Text style={styles.emptyText}>{t.assistant.validate.noTrips}</Text>}
           </View>
         </View>
 
@@ -251,28 +279,28 @@ export default function ValidateTicketScreen() {
               </View>
               <Pressable accessibilityRole="button" onPress={() => setCameraActive(false)} style={styles.closeCameraButton}>
                 <MaterialCommunityIcons color={colors.white} name="close" size={18} />
-                <Text style={styles.closeCameraText}>Đóng</Text>
+                <Text style={styles.closeCameraText}>{t.assistant.validate.close}</Text>
               </Pressable>
             </View>
           ) : (
             <Pressable accessibilityRole="button" onPress={startCamera} style={styles.scanPrompt}>
               <MaterialCommunityIcons color={colors.accent} name="qrcode-scan" size={54} />
-              <Text style={styles.scannerTitle}>Mở camera quét mã</Text>
-              <Text style={styles.scannerSubtitle}>Quét mã QR vé của hành khách</Text>
+              <Text style={styles.scannerTitle}>{t.assistant.validate.openCamera}</Text>
+              <Text style={styles.scannerSubtitle}>{t.assistant.validate.cameraHint}</Text>
             </Pressable>
           )}
-          <Text style={styles.manualTitle}>Mã QR / mã vé</Text>
+          <Text style={styles.manualTitle}>{t.assistant.validate.manualTitle}</Text>
           <TextInput
             autoCapitalize="characters"
             onChangeText={setQrCode}
-            placeholder="Dán hoặc nhập mã vé"
+            placeholder={t.assistant.validate.manualPlaceholder}
             placeholderTextColor={colors.muted}
             style={styles.input}
             value={qrCode}
           />
           <View style={styles.buttonRow}>
-            <AppButton title="Quét QR" disabled={cameraActive} onPress={startCamera} variant="secondary" style={styles.rowButton} />
-            <AppButton title="Kiểm tra" loading={isSubmitting} onPress={validateTicket} style={styles.rowButton} />
+            <AppButton title={t.assistant.validate.scanQr} disabled={cameraActive} onPress={startCamera} variant="secondary" style={styles.rowButton} />
+            <AppButton title={t.assistant.validate.check} loading={isSubmitting} onPress={validateTicket} style={styles.rowButton} />
           </View>
           {cameraMessage ? (
             <View style={styles.successBox}>
@@ -288,25 +316,25 @@ export default function ValidateTicketScreen() {
 
         {result ? (
           <View style={styles.panel}>
-            <Text style={styles.panelTitle}>Kết quả kiểm tra</Text>
+            <Text style={styles.panelTitle}>{t.assistant.validate.resultTitle}</Text>
             <View style={isValidResult(result) ? styles.statusSuccess : styles.statusError}>
               <Text style={isValidResult(result) ? styles.statusSuccessText : styles.statusErrorText}>
                 {result.message || validationStatus}
               </Text>
             </View>
             <View style={styles.detailGrid}>
-              <Detail label="Trạng thái" value={validationStatus} />
-              <Detail label="Vé" value={displayTicket.ticketCode || displayTicket.passCode || displayTicket._id} />
-              <Detail label="Hành khách" value={displayPassenger.fullName || result.passengerName} />
-              <Detail label="Tuyến" value={displayRoute.name || displayRoute.routeCode || displayTicket.routeCode} />
-              <Detail label="Điểm đi" value={displayTicket.departureLocation || displayTicket.fromStop} />
-              <Detail label="Điểm đến" value={displayTicket.destinationLocation || displayTicket.toStop} />
-              <Detail label="Loại vé" value={displayTicket.ticketType || result.ticketType} />
-              <Detail label="Giá vé" value={displayTicket.amount || displayTicket.ticketPrice ? money(displayTicket.amount || displayTicket.ticketPrice) : 'Không có'} />
-              <Detail label="Hiệu lực từ" value={formatDateTime(displayTicket.validFrom || result.validFrom)} />
-              <Detail label="Hiệu lực đến" value={formatDateTime(displayTicket.validUntil || result.validUntil)} />
-              <Detail label="Thời điểm quét" value={formatDateTime(displayTicket.usedAt || result.usedAt)} />
-              <Detail label="Chuyến" value={displayTicket.tripId || result.tripId} />
+              <Detail label={t.assistant.validate.labels.status} value={validationStatus} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.ticket} value={displayTicket.ticketCode || displayTicket.passCode || displayTicket._id} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.passenger} value={displayPassenger.fullName || result.passengerName} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.route} value={displayRoute.name || displayRoute.routeCode || displayTicket.routeCode} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.from} value={displayTicket.departureLocation || displayTicket.fromStop} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.to} value={displayTicket.destinationLocation || displayTicket.toStop} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.type} value={displayTicket.ticketType || result.ticketType} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.price} value={displayTicket.amount || displayTicket.ticketPrice ? money(displayTicket.amount || displayTicket.ticketPrice, locale) : t.common.notAvailable} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.validFrom} value={formatDateTime(displayTicket.validFrom || result.validFrom, locale, t.common.notAvailable)} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.validUntil} value={formatDateTime(displayTicket.validUntil || result.validUntil, locale, t.common.notAvailable)} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.scannedAt} value={formatDateTime(displayTicket.usedAt || result.usedAt, locale, t.common.notAvailable)} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.trip} value={displayTicket.tripId || result.tripId} emptyValue={t.common.notAvailable} />
             </View>
           </View>
         ) : null}
@@ -314,8 +342,8 @@ export default function ValidateTicketScreen() {
         <View style={[styles.panel, styles.bottomSpace]}>
           <View style={styles.historyHeader}>
             <View>
-              <Text style={styles.panelTitle}>Lịch sử kiểm tra thành công</Text>
-              <Text style={styles.historySubtitle}>{history.length} vé trong ngày đã chọn</Text>
+              <Text style={styles.panelTitle}>{t.assistant.validate.historyTitle}</Text>
+              <Text style={styles.historySubtitle}>{history.length} {t.assistant.validate.historySuffix}</Text>
             </View>
             {isLoadingHistory ? <ActivityIndicator color={colors.primary} /> : null}
           </View>
@@ -335,22 +363,22 @@ export default function ValidateTicketScreen() {
               <MaterialCommunityIcons color={colors.primary} name="chevron-right" size={22} />
             </Pressable>
             <Pressable accessibilityRole="button" onPress={() => setHistoryDate(toDateInput())} style={styles.todayButton}>
-              <Text style={styles.todayText}>Hôm nay</Text>
+              <Text style={styles.todayText}>{t.assistant.validate.today}</Text>
             </Pressable>
           </View>
           {history.length ? history.map((item, index) => (
             <View key={`${item.savedAt}-${getDisplayTicket(item).ticketCode || index}`} style={styles.transactionRow}>
               <View>
-                <Text style={styles.transactionCode}>{getDisplayTicket(item).ticketCode || getDisplayTicket(item).passCode || getDisplayTicket(item)._id || 'Vé'}</Text>
+                <Text style={styles.transactionCode}>{getDisplayTicket(item).ticketCode || getDisplayTicket(item).passCode || getDisplayTicket(item)._id || t.assistant.validate.ticketFallback}</Text>
                 <Text style={styles.transactionMeta}>
-                  {formatDateTime(item.savedAt)} - {getDisplayPassenger(item).fullName || item.passengerName || 'Hành khách'} - {getValidationStatus(item)}
+                  {formatDateTime(item.savedAt, locale, t.common.notAvailable)} - {getDisplayPassenger(item).fullName || item.passengerName || t.assistant.validate.passengerFallback} - {getValidationStatus(item)}
                 </Text>
                 <Text style={styles.transactionMeta}>
-                  {getDisplayRoute(item).name || getDisplayRoute(item).routeCode || getDisplayTicket(item).routeCode || 'Chưa có tuyến'}
+                  {getDisplayRoute(item).name || getDisplayRoute(item).routeCode || getDisplayTicket(item).routeCode || t.assistant.validate.routeFallback}
                 </Text>
               </View>
             </View>
-          )) : <Text style={styles.emptyText}>Ngày này chưa có lượt kiểm tra thành công.</Text>}
+          )) : <Text style={styles.emptyText}>{t.assistant.validate.emptyHistory}</Text>}
         </View>
       </Screen>
       <RoleBottomNav active="validate" role={user?.role} />

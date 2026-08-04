@@ -433,28 +433,18 @@ export class ScheduleOperationsService {
 
     const AssignmentModel = isDriver ? DriverShiftAssignment : AssistantShiftAssignment;
     const staffField = isDriver ? 'driverId' : 'assistantId';
-    const [assignments, tripSchedules] = await Promise.all([
-      AssignmentModel.find({
-        [staffField]: userId,
-        workDate: { $gte: from, $lte: to },
-        status: { $ne: 'CANCELLED' },
+    const assignments = await AssignmentModel.find({
+      [staffField]: userId,
+      workDate: { $gte: from, $lte: to },
+      status: { $ne: 'CANCELLED' },
+    })
+      .populate({
+        path: 'shiftId',
+        match: { status: { $in: ['ACTIVE', 'APPROVED', 'DRAFT', 'PUBLISHED', 'IN_PROGRESS', 'COMPLETED'] } },
+        populate: { path: 'routeId', select: 'routeCode routeName' },
       })
-        .populate({
-          path: 'shiftId',
-          match: { status: { $in: ['ACTIVE', 'APPROVED', 'DRAFT', 'PUBLISHED', 'IN_PROGRESS', 'COMPLETED'] } },
-          populate: { path: 'routeId', select: 'routeCode routeName' },
-        })
-        .sort({ workDate: 1, createdAt: 1 })
-        .lean(),
-      TripSchedule.find({
-        ...this.buildActorScheduleQuery(userId, role),
-        serviceDate: { $gte: from, $lte: to },
-        status: { $ne: 'CANCELLED' },
-      })
-        .populate('routeId', 'routeCode routeName')
-        .sort({ serviceDate: 1, departureTime: 1 })
-        .lean(),
-    ]);
+      .sort({ workDate: 1, createdAt: 1 })
+      .lean();
 
     const manualShiftSchedules = assignments
       .filter((assignment) => assignment.shiftId)
@@ -463,11 +453,7 @@ export class ScheduleOperationsService {
         shift: assignment.shiftId,
       }));
 
-    const generatedTripShifts = tripSchedules
-      .filter((schedule) => isScheduleAssignedToActor(schedule, userId, role))
-      .map((schedule) => buildShiftScheduleFromTripSchedule(schedule, role));
-
-    return [...manualShiftSchedules, ...generatedTripShifts].sort((left, right) => {
+    return manualShiftSchedules.sort((left, right) => {
       const leftStart = buildTimeOnServiceDate(left.workDate || left.shift?.workDate, left.shift?.startTime);
       const rightStart = buildTimeOnServiceDate(right.workDate || right.shift?.workDate, right.shift?.startTime);
       return (leftStart?.getTime() || 0) - (rightStart?.getTime() || 0);
