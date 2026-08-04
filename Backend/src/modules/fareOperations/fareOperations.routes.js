@@ -5,6 +5,7 @@ import validateRequest from '../../middleware/validateRequest.js';
 import FareOperationsController from './fareOperations.controller.js';
 import {
   validateFareMatrixPayload,
+  validateMonthlyPassSettingsPayload,
   validateMonthlyPassPricingPayload,
   validateObjectIdParam,
   validatePriorityDiscountPayload,
@@ -14,6 +15,9 @@ import {
 const router = express.Router();
 
 router.use(authMiddleware, authorizeRole('ADMIN'));
+
+router.get('/monthly-pass-settings', asyncHandler(FareOperationsController.getMonthlyPassSettings));
+router.put('/monthly-pass-settings', validateRequest(validateMonthlyPassSettingsPayload), asyncHandler(FareOperationsController.updateMonthlyPassSettings));
 
 router.get('/matrix', asyncHandler(FareOperationsController.listFareMatrix));
 router.post('/matrix', validateRequest(validateFareMatrixPayload), asyncHandler(FareOperationsController.createFareMatrix));

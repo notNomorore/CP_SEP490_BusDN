@@ -1,5 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   BellRing,
   CalendarDays,
   CheckCircle2,
@@ -9,12 +10,15 @@ import {
   Plus,
   RefreshCw,
   Route,
+  Send,
   UserRound,
   XCircle,
 } from 'lucide-react';
 import useTheme from '../../../shared/hooks/useTheme.js';
+import useLanguage from '../../../shared/hooks/useLanguage.js';
 import useAuthStore from '../../auth/stores/authStore.js';
 import scheduleOperationsService from '../../scheduleOperations/services/scheduleOperationsService.js';
+import { translateBusAssistantPhrase } from '../busAssistantPhraseTranslations.js';
 
 const toInputDate = (date) => date.toISOString().slice(0, 10);
 
@@ -40,21 +44,24 @@ const getWeekRange = (anchor = new Date()) => {
   return { from, to: addCalendarDays(from, 6) };
 };
 
-const formatShiftDate = (value) => new Date(`${value}T00:00:00`).toLocaleDateString('vi-VN', {
+const getLocale = (language) => (language === 'vi' ? 'vi-VN' : 'en-US');
+
+const formatShiftDate = (value, language = 'vi') => new Date(`${value}T00:00:00`).toLocaleDateString(getLocale(language), {
   weekday: 'short',
   day: '2-digit',
   month: '2-digit',
 });
 
-const formatShortDate = (value) => {
+const formatShortDate = (value, language = 'vi') => {
   if (!value) return '--/--';
   const date = new Date(`${value}T00:00:00`);
-  return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+  return date.toLocaleDateString(getLocale(language), { day: '2-digit', month: '2-digit' });
 };
 
-const formatCompactDate = (value) => {
+const formatCompactDate = (value, language = 'vi') => {
   if (!value) return '--/--/----';
-  return value.split('-').reverse().join('/');
+  const [year, month, day] = value.split('-');
+  return language === 'vi' ? `${day}/${month}/${year}` : `${month}/${day}/${year}`;
 };
 
 const toShiftMinutes = (value) => {
@@ -74,6 +81,12 @@ const getShiftDurationHours = (shift) => {
 
 const formatHours = (value) => `${Number(value || 0).toFixed(1).replace('.0', '')}h`;
 
+const isWorkShiftSchedule = (shift = {}) => {
+  const source = String(shift.source || '').toUpperCase();
+  const code = String(shift.shiftCode || '').toUpperCase();
+  return source !== 'TRIP_SCHEDULE' && !code.startsWith('TRIP-');
+};
+
 const getDefaultRange = () => {
   const from = new Date();
   from.setDate(from.getDate() - 7);
@@ -89,12 +102,12 @@ const getDefaultRange = () => {
 const getErrorMessage = (error) => (
   error?.response?.data?.message
   || error?.message
-  || 'Không thể tải dữ liệu. Vui lòng thử lại.'
+  || 'Could not load data. Please try again.'
 );
 
-const formatDate = (value) => {
-  if (!value) return 'Chưa có';
-  return new Date(value).toLocaleDateString('vi-VN', {
+const formatDate = (value, language = 'vi') => {
+  if (!value) return 'Not available';
+  return new Date(value).toLocaleDateString(getLocale(language), {
     weekday: 'short',
     day: '2-digit',
     month: '2-digit',
@@ -102,17 +115,17 @@ const formatDate = (value) => {
   });
 };
 
-const formatTime = (value) => {
+const formatTime = (value, language = 'vi') => {
   if (!value) return '--:--';
-  return new Date(value).toLocaleTimeString('vi-VN', {
+  return new Date(value).toLocaleTimeString(getLocale(language), {
     hour: '2-digit',
     minute: '2-digit',
   });
 };
 
-const formatDateTime = (value) => {
-  if (!value) return 'Chưa có thời gian cập nhật';
-  return new Date(value).toLocaleString('vi-VN', {
+const formatDateTime = (value, language = 'vi') => {
+  if (!value) return 'No update time available';
+  return new Date(value).toLocaleString(getLocale(language), {
     hour: '2-digit',
     minute: '2-digit',
     day: '2-digit',
@@ -122,15 +135,15 @@ const formatDateTime = (value) => {
 };
 
 const statusLabels = {
-  PENDING: 'Chờ tiếp nhận',
-  ASSIGNED: 'Đã phân công',
-  ACCEPTED: 'Đã tiếp nhận',
-  REJECTED: 'Đã từ chối',
-  READY: 'Xe sẵn sàng',
-  SCHEDULED: 'Đã lên lịch',
-  IN_PROGRESS: 'Đang vận hành',
-  COMPLETED: 'Hoàn thành',
-  CANCELLED: 'Đã hủy',
+  PENDING: 'Pending acceptance',
+  ASSIGNED: 'Assigned',
+  ACCEPTED: 'Accepted',
+  REJECTED: 'Rejected',
+  READY: 'Vehicle ready',
+  SCHEDULED: 'Scheduled',
+  IN_PROGRESS: 'In progress',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
 };
 
 const statusClass = {
@@ -146,22 +159,59 @@ const statusClass = {
 };
 
 const incidentStatusLabels = {
-  PENDING: 'Chưa xử lý',
-  IN_PROGRESS: 'Đang xử lý',
-  RESOLVED: 'Đã xử lý',
-  REJECTED: 'Đã đóng',
+  PENDING: 'Pending',
+  IN_PROGRESS: 'Processing',
+  RESOLVED: 'Resolved',
+  REJECTED: 'Closed',
 };
 
-const notificationCategoryLabels = {
-  ROUTE_UPDATE: 'Cập nhật tuyến',
-  SCHEDULE_CHANGE: 'Đổi lịch vận hành',
-  EMERGENCY_INSTRUCTION: 'Chỉ đạo khẩn',
-  GENERAL: 'Thông báo',
-};
+const busAssistantIncidentTypes = [
+  {
+    value: 'PASSENGER_VIOLATION',
+    title: 'Report passenger violation',
+    description: 'Record a passenger bus-rule, ticket, or safety violation.',
+  },
+  {
+    value: 'PASSENGER_CONFLICT',
+    title: 'Report passenger conflict',
+    description: 'Record a dispute, argument, or situation requiring operation support.',
+  },
+  {
+    value: 'FOUND_ITEM',
+    title: 'Report found item',
+    description: 'Record lost property found on the bus for lost-and-found handling.',
+  },
+];
+
+const violationCategories = [
+  { value: 'NO_TICKET', label: 'No ticket / ticket not scanned' },
+  { value: 'WRONG_TICKET', label: 'Wrong ticket type' },
+  { value: 'SMOKING', label: 'Smoking on the bus' },
+  { value: 'LITTERING', label: 'Littering on the bus' },
+  { value: 'UNSAFE_BEHAVIOR', label: 'Unsafe behavior' },
+  { value: 'DISTURBANCE', label: 'Noise / disturbing passengers' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+const conflictCategories = [
+  { value: 'ARGUMENT', label: 'Argument / disturbance' },
+  { value: 'FARE_DISPUTE', label: 'Fare / payment dispute' },
+  { value: 'SEAT_DISPUTE', label: 'Seat dispute' },
+  { value: 'HARASSMENT', label: 'Harassment / threat' },
+  { value: 'SAFETY_RISK', label: 'Safety risk' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+const incidentSeverities = [
+  { value: 'LOW', label: 'Low' },
+  { value: 'MEDIUM', label: 'Medium' },
+  { value: 'HIGH', label: 'High' },
+  { value: 'CRITICAL', label: 'Critical' },
+];
 
 const getTripTitle = (assignment) => {
   const route = assignment.route || {};
-  return `${route.origin || 'Điểm đầu'} → ${route.destination || route.name || 'Điểm cuối'}`;
+  return `${route.origin || 'Start point'} → ${route.destination || route.name || 'End point'}`;
 };
 
 const PageShell = ({
@@ -217,7 +267,7 @@ const PageShell = ({
               className="inline-flex items-center justify-center gap-2 rounded bg-emerald-400 px-4 py-2 text-sm font-black text-slate-950 disabled:opacity-60"
             >
               <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
-              Làm mới
+              Refresh
             </button>
           </div>
         </div>
@@ -232,7 +282,223 @@ const PageShell = ({
   );
 };
 
-const TripCard = ({ assignment, onAccept, onReject, isProcessing }) => {
+const BusAssistantIncidentPanel = ({ assignment, isProcessing, onReportIncident }) => {
+  const { isDarkMode } = useTheme();
+  const { language } = useLanguage();
+  const [isOpen, setIsOpen] = useState(false);
+  const [form, setForm] = useState({
+    type: assignment.tripStatus === 'COMPLETED' ? 'FOUND_ITEM' : 'PASSENGER_VIOLATION',
+    severity: 'MEDIUM',
+    violationCategory: 'NO_TICKET',
+    passengerDescription: '',
+    conflictCategory: 'ARGUMENT',
+    partiesInvolved: '',
+    actionTaken: '',
+    itemName: '',
+    itemDescription: '',
+    foundLocation: '',
+    handedTo: '',
+    description: '',
+  });
+
+  const mutedText = isDarkMode ? 'text-slate-400' : 'text-slate-500';
+  const inputClass = isDarkMode
+    ? 'w-full rounded border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400'
+    : 'w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-emerald-500';
+  const canReportRunning = assignment.tripStatus === 'IN_PROGRESS';
+  const canReportFoundItem = assignment.tripStatus === 'COMPLETED';
+  const allowedTypes = busAssistantIncidentTypes.filter((type) => (
+    canReportFoundItem ? type.value === 'FOUND_ITEM' : type.value !== 'FOUND_ITEM'
+  ));
+  const canUseForm = assignment.actorRole === 'BUS_ASSISTANT'
+    && assignment.acceptanceStatus === 'ACCEPTED'
+    && (canReportRunning || canReportFoundItem);
+
+  useEffect(() => {
+    if (!allowedTypes.some((type) => type.value === form.type)) {
+      setForm((current) => ({ ...current, type: allowedTypes[0]?.value || 'PASSENGER_VIOLATION' }));
+    }
+  }, [allowedTypes, form.type]);
+
+  if (!canUseForm) return null;
+
+  const updateForm = (field, value) => {
+    setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const submit = () => {
+    if (form.description.trim().length < 10) {
+      window.alert(translateBusAssistantPhrase('Please describe the situation using at least 10 characters.', language));
+      return;
+    }
+    if (form.type === 'PASSENGER_VIOLATION' && form.actionTaken.trim().length < 3) {
+      window.alert(translateBusAssistantPhrase('Please enter the action taken for the passenger violation.', language));
+      return;
+    }
+    if (form.type === 'PASSENGER_CONFLICT' && form.actionTaken.trim().length < 3) {
+      window.alert(translateBusAssistantPhrase('Please enter the action taken for the conflict.', language));
+      return;
+    }
+    if (form.type === 'FOUND_ITEM' && (form.itemName.trim().length < 2 || form.foundLocation.trim().length < 3)) {
+      window.alert(translateBusAssistantPhrase('Please enter the found item name and where it was found.', language));
+      return;
+    }
+
+    onReportIncident(assignment.id, {
+      ...form,
+      severity: form.type === 'FOUND_ITEM' ? 'LOW' : form.severity,
+      locationText: form.type === 'FOUND_ITEM' ? form.foundLocation : getTripTitle(assignment),
+    });
+    setIsOpen(false);
+    setForm((current) => ({
+      ...current,
+      passengerDescription: '',
+      partiesInvolved: '',
+      actionTaken: '',
+      itemName: '',
+      itemDescription: '',
+      foundLocation: '',
+      handedTo: '',
+      description: '',
+    }));
+  };
+
+  return (
+    <section className={isDarkMode ? 'mt-4 rounded border border-rose-400/30 bg-rose-500/10 p-4' : 'mt-4 rounded border border-rose-100 bg-rose-50/80 p-4'}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={18} className="text-rose-600" />
+            <p className="font-black">Trip incident report</p>
+          </div>
+          <p className={`mt-1 text-sm ${mutedText}`}>
+            Report passenger violations or conflicts while the trip is running. Found items can be reported after trip completion.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsOpen((current) => !current)}
+          disabled={isProcessing}
+          className="inline-flex items-center justify-center gap-2 rounded bg-rose-700 px-4 py-2 text-sm font-black text-white hover:bg-rose-800 disabled:opacity-50"
+        >
+          <AlertTriangle size={16} />
+          {isOpen ? 'Close report' : 'Report incident'}
+        </button>
+      </div>
+
+      {isOpen ? (
+        <div className="mt-4 space-y-4 rounded bg-white/80 p-4">
+          <div className="grid gap-3 lg:grid-cols-3">
+            {allowedTypes.map((type) => (
+              <button
+                key={type.value}
+                type="button"
+                onClick={() => updateForm('type', type.value)}
+                disabled={isProcessing}
+                className={`rounded border p-3 text-left ${
+                  form.type === type.value
+                    ? 'border-emerald-500 bg-emerald-100 text-emerald-950'
+                    : 'border-slate-200 bg-white text-slate-900'
+                }`}
+              >
+                <p className="font-black">{type.title}</p>
+                <p className="mt-1 text-xs text-slate-500">{type.description}</p>
+              </button>
+            ))}
+          </div>
+
+          {form.type !== 'FOUND_ITEM' ? (
+            <label className="block space-y-1">
+              <span className={`text-xs font-bold uppercase ${mutedText}`}>Severity</span>
+              <select className={inputClass} value={form.severity} onChange={(event) => updateForm('severity', event.target.value)} disabled={isProcessing}>
+                {incidentSeverities.map((severity) => <option key={severity.value} value={severity.value}>{severity.label}</option>)}
+              </select>
+            </label>
+          ) : null}
+
+          {form.type === 'PASSENGER_VIOLATION' ? (
+            <div className="grid gap-3 lg:grid-cols-3">
+              <label className="space-y-1">
+                <span className={`text-xs font-bold uppercase ${mutedText}`}>Violation type</span>
+                <select className={inputClass} value={form.violationCategory} onChange={(event) => updateForm('violationCategory', event.target.value)} disabled={isProcessing}>
+                  {violationCategories.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className={`text-xs font-bold uppercase ${mutedText}`}>Passenger description</span>
+                <input className={inputClass} value={form.passengerDescription} onChange={(event) => updateForm('passengerDescription', event.target.value)} disabled={isProcessing} placeholder="Example: blue shirt, standing near the rear door" />
+              </label>
+              <label className="space-y-1">
+                <span className={`text-xs font-bold uppercase ${mutedText}`}>Action taken</span>
+                <input className={inputClass} value={form.actionTaken} onChange={(event) => updateForm('actionTaken', event.target.value)} disabled={isProcessing} placeholder="Example: reminded about rules, requested ticket scan" />
+              </label>
+            </div>
+          ) : null}
+
+          {form.type === 'PASSENGER_CONFLICT' ? (
+            <div className="grid gap-3 lg:grid-cols-3">
+              <label className="space-y-1">
+                <span className={`text-xs font-bold uppercase ${mutedText}`}>Conflict category</span>
+                <select className={inputClass} value={form.conflictCategory} onChange={(event) => updateForm('conflictCategory', event.target.value)} disabled={isProcessing}>
+                  {conflictCategories.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className={`text-xs font-bold uppercase ${mutedText}`}>Parties involved</span>
+                <input className={inputClass} value={form.partiesInvolved} onChange={(event) => updateForm('partiesInvolved', event.target.value)} disabled={isProcessing} placeholder="Example: 2 passengers in the middle-row seats" />
+              </label>
+              <label className="space-y-1">
+                <span className={`text-xs font-bold uppercase ${mutedText}`}>Action taken</span>
+                <input className={inputClass} value={form.actionTaken} onChange={(event) => updateForm('actionTaken', event.target.value)} disabled={isProcessing} placeholder="Example: separated passengers, notified driver" />
+              </label>
+            </div>
+          ) : null}
+
+          {form.type === 'FOUND_ITEM' ? (
+            <div className="grid gap-3 lg:grid-cols-3">
+              <label className="space-y-1">
+                <span className={`text-xs font-bold uppercase ${mutedText}`}>Item name</span>
+                <input className={inputClass} value={form.itemName} onChange={(event) => updateForm('itemName', event.target.value)} disabled={isProcessing} placeholder="Example: black leather wallet" />
+              </label>
+              <label className="space-y-1">
+                <span className={`text-xs font-bold uppercase ${mutedText}`}>Found location</span>
+                <input className={inputClass} value={form.foundLocation} onChange={(event) => updateForm('foundLocation', event.target.value)} disabled={isProcessing} placeholder="Example: seat 12" />
+              </label>
+              <label className="space-y-1">
+                <span className={`text-xs font-bold uppercase ${mutedText}`}>Handed over to</span>
+                <input className={inputClass} value={form.handedTo} onChange={(event) => updateForm('handedTo', event.target.value)} disabled={isProcessing} placeholder="Example: terminal operations desk" />
+              </label>
+            </div>
+          ) : null}
+
+          <label className="block space-y-1">
+            <span className={`text-xs font-bold uppercase ${mutedText}`}>Detailed description</span>
+            <textarea
+              className={inputClass}
+              rows={3}
+              value={form.description}
+              onChange={(event) => updateForm('description', event.target.value)}
+              disabled={isProcessing}
+              placeholder="Describe the situation clearly and include the action taken."
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={submit}
+            disabled={isProcessing}
+            className="inline-flex items-center justify-center gap-2 rounded bg-rose-700 px-4 py-2 text-sm font-black text-white hover:bg-rose-800 disabled:opacity-50"
+          >
+            <Send size={16} />
+            Submit report
+          </button>
+        </div>
+      ) : null}
+    </section>
+  );
+};
+
+const TripCard = ({ assignment, onAccept, onReject, onReportIncident, isProcessing }) => {
   const { isDarkMode } = useTheme();
   const mutedText = isDarkMode ? 'text-slate-400' : 'text-slate-500';
   const status = assignment.acceptanceStatus || assignment.shiftStatus || assignment.tripStatus;
@@ -242,7 +508,6 @@ const TripCard = ({ assignment, onAccept, onReject, isProcessing }) => {
     && !['IN_PROGRESS', 'COMPLETED'].includes(assignment.tripStatus);
   const isAssistantRejected = assignment.actorRole === 'BUS_ASSISTANT'
     && assignment.acceptanceStatus === 'REJECTED';
-
   return (
     <article className={isDarkMode ? 'rounded border border-white/10 bg-slate-950 p-4' : 'rounded border border-slate-200 bg-white p-4'}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -254,7 +519,7 @@ const TripCard = ({ assignment, onAccept, onReject, isProcessing }) => {
             <span className="text-sm font-bold text-slate-500">{assignment.tripCode || assignment.shiftCode}</span>
           </div>
           <h2 className="mt-2 text-lg font-black">{getTripTitle(assignment)}</h2>
-          <p className={`mt-1 text-sm ${mutedText}`}>{assignment.route?.name || 'Chưa có tên tuyến'}</p>
+          <p className={`mt-1 text-sm ${mutedText}`}>{assignment.route?.name || 'Route name unavailable'}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <span className={`rounded-full px-3 py-1 text-xs font-black ${statusClass[status] || statusClass.SCHEDULED}`}>
@@ -267,26 +532,26 @@ const TripCard = ({ assignment, onAccept, onReject, isProcessing }) => {
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <InfoBox label="Ngày vận hành" value={formatDate(assignment.scheduledStart)} icon={CalendarDays} />
-        <InfoBox label="Thời gian" value={`${formatTime(assignment.scheduledStart)} - ${formatTime(assignment.scheduledEnd)}`} icon={Clock3} />
-        <InfoBox label="Phương tiện" value={assignment.vehicle?.plateNumber || assignment.vehicle?.code || 'Chưa có'} icon={Route} />
-        <InfoBox label="Vai trò" value="Phụ xe" icon={CheckCircle2} />
+        <InfoBox label="Operation date" value={formatDate(assignment.scheduledStart)} icon={CalendarDays} />
+        <InfoBox label="Time" value={`${formatTime(assignment.scheduledStart)} - ${formatTime(assignment.scheduledEnd)}`} icon={Clock3} />
+        <InfoBox label="Vehicle" value={assignment.vehicle?.plateNumber || assignment.vehicle?.code || 'Not available'} icon={Route} />
+        <InfoBox label="Role" value="Bus assistant" icon={CheckCircle2} />
       </div>
 
       <div className={isDarkMode ? 'mt-4 rounded bg-white/5 p-3 text-sm' : 'mt-4 rounded bg-slate-50 p-3 text-sm'}>
-        <p><span className={mutedText}>Tài xế:</span> <strong>{assignment.driver?.fullName || 'Chưa phân công'}</strong></p>
-        <p className="mt-1"><span className={mutedText}>Ghi chú:</span> {assignment.notes || 'Không có ghi chú.'}</p>
+        <p><span className={mutedText}>Driver:</span> <strong>{assignment.driver?.fullName || 'Not assigned'}</strong></p>
+        <p className="mt-1"><span className={mutedText}>Notes:</span> {assignment.notes || 'No notes.'}</p>
       </div>
 
       {isAssistantAccepted ? (
         <div className="mt-4 rounded border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-300">
-          Phụ xe đã tiếp nhận chuyến. Vui lòng chờ tài xế bắt đầu vận hành.
+          The bus assistant accepted this trip. Please wait for the driver to begin operation.
         </div>
       ) : null}
 
       {isAssistantRejected ? (
         <div className="mt-4 rounded border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-300">
-          Phụ xe đã từ chối chuyến. Lý do đã được gửi về admin để xử lý phân công.
+          The bus assistant rejected this trip. The reason was sent to the administrator for reassignment.
         </div>
       ) : null}
 
@@ -299,7 +564,7 @@ const TripCard = ({ assignment, onAccept, onReject, isProcessing }) => {
             className="inline-flex items-center justify-center gap-2 rounded border border-rose-300 px-4 py-2 text-sm font-black text-rose-600 disabled:opacity-50"
           >
             <XCircle size={16} />
-            Từ chối chuyến
+            Reject trip
           </button>
           <button
             type="button"
@@ -308,10 +573,17 @@ const TripCard = ({ assignment, onAccept, onReject, isProcessing }) => {
             className="inline-flex items-center justify-center gap-2 rounded bg-emerald-400 px-4 py-2 text-sm font-black text-slate-950 disabled:opacity-50"
           >
             <CheckCircle2 size={16} />
-            Tiếp nhận chuyến
+            Accept trip
           </button>
         </div>
       ) : null}
+
+      <BusAssistantIncidentPanel
+        assignment={assignment}
+        isProcessing={isProcessing}
+        onReportIncident={onReportIncident}
+      />
+
     </article>
   );
 };
@@ -337,17 +609,19 @@ const EmptyState = ({ children }) => {
 
 const OperationNotificationCard = ({ notification }) => {
   const { isDarkMode } = useTheme();
+  const { language } = useLanguage();
   const metadata = notification.metadata || {};
   const isIncidentResponse = notification.sourceType === 'INCIDENT_REPORT_STATUS'
     || metadata.notificationKind === 'INCIDENT_RESPONSE';
   const status = metadata.currentStatus;
-  const statusLabel = metadata.currentStatusLabel || incidentStatusLabels[status] || status;
-  const categoryLabel = isIncidentResponse
-    ? 'Phản hồi báo cáo'
-    : notificationCategoryLabels[notification.category] || notification.category || 'Thông báo';
+  const statusLabel = translateBusAssistantPhrase(
+    metadata.currentStatusLabel || incidentStatusLabels[status] || status,
+    language
+  );
+  const title = translateBusAssistantPhrase(notification.title, language);
   const messageLines = String(notification.message || '')
     .split('\n')
-    .map((line) => line.trim())
+    .map((line) => translateBusAssistantPhrase(line.trim(), language))
     .filter(Boolean);
   const cardClass = isDarkMode
     ? 'rounded border border-white/10 bg-slate-950 p-4 text-slate-100'
@@ -371,25 +645,22 @@ const OperationNotificationCard = ({ notification }) => {
           </span>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">
-                {categoryLabel}
-              </span>
               {statusLabel ? (
                 <span className={`rounded-full px-3 py-1 text-xs font-black ${statusChipClass}`}>
                   {statusLabel}
                 </span>
               ) : null}
             </div>
-            <h2 className="mt-2 text-lg font-black">{notification.title}</h2>
+            <h2 className="mt-2 text-lg font-black">{title}</h2>
             <div className={isDarkMode ? 'mt-2 space-y-1 text-sm text-slate-300' : 'mt-2 space-y-1 text-sm text-slate-600'}>
               {messageLines.length ? messageLines.map((line) => (
                 <p key={line}>{line}</p>
-              )) : <p>Chưa có nội dung chi tiết.</p>}
+              )) : <p>No details available.</p>}
             </div>
           </div>
         </div>
         <p className={isDarkMode ? 'shrink-0 text-xs font-semibold text-slate-400' : 'shrink-0 text-xs font-semibold text-slate-500'}>
-          {formatDateTime(notification.updatedAt || notification.createdAt || notification.activeFrom)}
+          {formatDateTime(notification.updatedAt || notification.createdAt || notification.activeFrom, language)}
         </p>
       </div>
     </article>
@@ -397,6 +668,7 @@ const OperationNotificationCard = ({ notification }) => {
 };
 
 export const AssignedTripsPage = () => {
+  const { language } = useLanguage();
   const [filters, setFilters] = useState(getDefaultRange);
   const [assignments, setAssignments] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -437,19 +709,27 @@ export const AssignedTripsPage = () => {
   };
 
   const rejectTrip = (assignmentId) => {
-    const reason = window.prompt('Nhập lý do từ chối chuyến được phân công:');
+    const reason = window.prompt(translateBusAssistantPhrase('Enter a reason for rejecting the assigned trip:', language));
     if (!reason?.trim()) return;
     runDecision(
       assignmentId,
       () => scheduleOperationsService.rejectAssignedTrip(assignmentId, { reason: reason.trim() }),
-      'Đã gửi từ chối chuyến về điều hành.'
+      'The trip rejection was sent to operations.'
+    );
+  };
+
+  const reportIncident = (assignmentId, payload) => {
+    runDecision(
+      assignmentId,
+      () => scheduleOperationsService.reportOperationIncident(assignmentId, payload),
+      'The report was sent to operations. You may submit another report for a new situation.'
     );
   };
 
   return (
     <PageShell
-      title="Chuyến được phân công"
-      subtitle="Xem các chuyến mà điều hành đã phân cho phụ xe và tiếp nhận hoặc từ chối nếu có lý do."
+      title="Assigned trips"
+      subtitle="View trips assigned by operations and accept or reject them when necessary."
       icon={Route}
       filters={filters}
       setFilters={setFilters}
@@ -467,17 +747,19 @@ export const AssignedTripsPage = () => {
             onAccept={(assignmentId) => runDecision(
               assignmentId,
               () => scheduleOperationsService.acceptAssignedTrip(assignmentId),
-              'Đã tiếp nhận chuyến được phân công.'
+              'The assigned trip was accepted.'
             )}
             onReject={rejectTrip}
+            onReportIncident={reportIncident}
           />
-        )) : <EmptyState>Không có chuyến nào được phân công trong khoảng thời gian này.</EmptyState>}
+        )) : <EmptyState>No trips were assigned during this period.</EmptyState>}
       </div>
     </PageShell>
   );
 };
 
 export const ShiftSchedulePage = () => {
+  const { language } = useLanguage();
   const [filters, setFilters] = useState(() => getWeekRange());
   const [shifts, setShifts] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -505,24 +787,26 @@ export const ShiftSchedulePage = () => {
     Array.from({ length: 7 }, (_, index) => addCalendarDays(filters.from, index))
   ), [filters.from]);
 
-  const shiftsByDate = useMemo(() => shifts.reduce((result, shift) => {
+  const workShifts = useMemo(() => shifts.filter(isWorkShiftSchedule), [shifts]);
+
+  const shiftsByDate = useMemo(() => workShifts.reduce((result, shift) => {
     const key = toLocalInputDate(shift.workDate);
     result[key] = [...(result[key] || []), shift];
     return result;
-  }, {}), [shifts]);
+  }, {}), [workShifts]);
 
   const weeklyStats = useMemo(() => {
-    const totalHours = shifts.reduce((total, shift) => total + getShiftDurationHours(shift), 0);
-    const assignedCount = shifts.filter((shift) => ['ASSIGNED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED'].includes(shift.assignmentStatus)).length;
-    const completedCount = shifts.filter((shift) => shift.assignmentStatus === 'COMPLETED').length;
+    const totalHours = workShifts.reduce((total, shift) => total + getShiftDurationHours(shift), 0);
+    const assignedCount = workShifts.filter((shift) => ['ASSIGNED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED'].includes(shift.assignmentStatus)).length;
+    const completedCount = workShifts.filter((shift) => shift.assignmentStatus === 'COMPLETED').length;
 
     return {
       totalHours,
-      shiftCount: shifts.length,
+      shiftCount: workShifts.length,
       assignedCount,
       completedCount,
     };
-  }, [shifts]);
+  }, [workShifts]);
 
   const changeWeek = (offset) => {
     setFilters(getWeekRange(addCalendarDays(filters.from, offset * 7)));
@@ -532,7 +816,7 @@ export const ShiftSchedulePage = () => {
     if (value) setFilters(getWeekRange(value));
   };
 
-  const profileName = user?.fullName || user?.name || 'Phụ xe BusDN';
+  const profileName = user?.fullName || user?.name || 'BusDN bus assistant';
   const profileId = user?.employeeCode || user?.staffCode || user?.username || user?.email || 'BUS-ASSISTANT';
 
   return (
@@ -540,16 +824,16 @@ export const ShiftSchedulePage = () => {
       <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-black tracking-tight">Lịch ca làm việc</h1>
+            <h1 className="text-2xl font-black tracking-tight">Shift schedule</h1>
             <span className="hidden h-7 w-px bg-emerald-950/10 sm:block" />
             <span className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-900/75">
               <CalendarDays size={17} />
-              {formatCompactDate(filters.from)} - {formatCompactDate(filters.to)}
+              {formatCompactDate(filters.from, language)} - {formatCompactDate(filters.to, language)}
             </span>
           </div>
-          <p className="mt-8 text-3xl font-black tracking-tight lg:text-4xl">Hoạt động trợ lý xe buýt</p>
+          <p className="mt-8 text-3xl font-black tracking-tight lg:text-4xl">Bus assistant activity</p>
           <p className="mt-2 max-w-2xl text-base text-emerald-950/72">
-            Theo dõi các ca được phân công theo tuần. Chi tiết các ca của bạn hiển thị tại đây.
+            Track your assigned shifts by week. Your shift details appear here.
           </p>
         </div>
 
@@ -565,7 +849,7 @@ export const ShiftSchedulePage = () => {
             className="inline-flex items-center gap-2 rounded-full bg-[#001f14] px-6 py-4 text-sm font-black text-white shadow-[0_18px_34px_rgba(0,26,15,0.22)] disabled:opacity-60"
           >
             <Plus size={18} />
-            Thêm mới
+            Refresh
           </button>
         </div>
       </header>
@@ -578,15 +862,15 @@ export const ShiftSchedulePage = () => {
             <CalendarDays size={24} />
           </div>
           <div>
-            <h2 className="text-xl font-black">UC40 - Lịch ca làm việc</h2>
+            <h2 className="text-xl font-black">Weekly work schedule</h2>
             <p className="text-sm font-semibold text-emerald-950/60">
-              {formatCompactDate(filters.from)} - {formatCompactDate(filters.to)} · {shifts.length} ca được phân công
+              {formatCompactDate(filters.from, language)} - {formatCompactDate(filters.to, language)} · {workShifts.length} assigned shifts
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => changeWeek(-1)} className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-white text-emerald-950 shadow-[0_10px_24px_rgba(0,26,15,0.06)]" title="Tuần trước">
+          <button type="button" onClick={() => changeWeek(-1)} className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-white text-emerald-950 shadow-[0_10px_24px_rgba(0,26,15,0.06)]" title="Previous week">
             <ChevronLeft size={20} />
           </button>
           <input
@@ -594,12 +878,12 @@ export const ShiftSchedulePage = () => {
             value={filters.from}
             onChange={(event) => selectWeek(event.target.value)}
             className="h-12 rounded-xl bg-white px-4 text-sm font-bold text-emerald-950 outline-none shadow-[0_10px_24px_rgba(0,26,15,0.06)]"
-            aria-label="Chọn một ngày trong tuần cần xem"
+            aria-label="Select a day in the week to view"
           />
           <button type="button" onClick={() => setFilters(getWeekRange())} className="h-12 rounded-xl bg-white px-5 text-sm font-black text-emerald-950 shadow-[0_10px_24px_rgba(0,26,15,0.06)]">
-            Tuần này
+            This week
           </button>
-          <button type="button" onClick={() => changeWeek(1)} className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-white text-emerald-950 shadow-[0_10px_24px_rgba(0,26,15,0.06)]" title="Tuần sau">
+          <button type="button" onClick={() => changeWeek(1)} className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-white text-emerald-950 shadow-[0_10px_24px_rgba(0,26,15,0.06)]" title="Next week">
             <ChevronRight size={20} />
           </button>
         </div>
@@ -619,15 +903,15 @@ export const ShiftSchedulePage = () => {
               >
                 <div>
                   <p className={`text-xs font-black uppercase tracking-[0.18em] ${isToday ? 'text-emerald-300' : 'text-emerald-900/55'}`}>
-                    {formatShiftDate(date)}
+                    {formatShiftDate(date, language)}
                   </p>
-                  <p className="mt-1 text-2xl font-black">{formatShortDate(date)}</p>
+                  <p className="mt-1 text-2xl font-black">{formatShortDate(date, language)}</p>
                 </div>
 
                 <div className="mt-5 space-y-3">
                   {dayShifts.length ? dayShifts.map((shift) => (
                     <article
-                      key={shift.id || shift.shiftCode}
+                      key={shift.id || `${shift.workDate}-${shift.startTime}-${shift.endTime}`}
                       className={`rounded-2xl p-5 shadow-[0_12px_24px_rgba(0,26,15,0.08)] ${
                         isToday ? 'bg-white/12 text-white' : 'bg-white text-emerald-950'
                       }`}
@@ -635,20 +919,17 @@ export const ShiftSchedulePage = () => {
                       <div className="flex items-start justify-between gap-3">
                         <p className="text-lg font-black">{shift.startTime} - {shift.endTime}</p>
                         <span className="shrink-0 rounded-full bg-emerald-300 px-3 py-1 text-[10px] font-black uppercase text-emerald-950">
-                          {statusLabels[shift.assignmentStatus] || 'Đã phân công'}
+                          {statusLabels[shift.assignmentStatus] || 'Assigned'}
                         </span>
                       </div>
-                      <p className="mt-3 text-sm font-black">{shift.shiftName || 'Ca làm việc'}</p>
-                      <p className={`mt-1 text-xs font-semibold ${isToday ? 'text-emerald-300' : 'text-emerald-700'}`}>
-                        {shift.shiftCode || 'Chưa có mã ca'}
-                      </p>
+                      <p className="mt-3 text-sm font-black">{shift.shiftName || 'Work shift'}</p>
                       <p className={`mt-4 text-xs leading-5 ${isToday ? 'text-white/78' : 'text-emerald-950/62'}`}>
-                        {shift.description || shift.notes || 'Ca được hệ thống phân công theo lịch vận hành.'}
+                        {shift.description || shift.notes || 'This shift was assigned automatically from the operation schedule.'}
                       </p>
                     </article>
                   )) : (
                     <div className={`rounded-2xl px-4 py-8 text-center text-sm font-semibold ${isToday ? 'bg-white/12 text-white/70' : 'bg-white/70 text-emerald-950/45'}`}>
-                      Không có ca
+                      No shifts
                     </div>
                   )}
                 </div>
@@ -660,22 +941,22 @@ export const ShiftSchedulePage = () => {
 
       <div className="mt-8 grid gap-6 xl:grid-cols-[1fr_320px]">
         <section className="rounded-[28px] bg-white p-7 shadow-[0_20px_40px_rgba(0,26,15,0.06)]">
-          <h2 className="text-xl font-black">Hiệu suất hoạt động tuần này</h2>
+          <h2 className="text-xl font-black">This week's performance</h2>
           <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl bg-[#f2fcf8] p-5">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-950/55">Tổng giờ</p>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-950/55">Total hours</p>
               <p className="mt-3 text-2xl font-black">{formatHours(weeklyStats.totalHours)}</p>
             </div>
             <div className="rounded-2xl bg-[#f2fcf8] p-5">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-950/55">Số ca</p>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-950/55">Number of shifts</p>
               <p className="mt-3 text-2xl font-black">{String(weeklyStats.shiftCount).padStart(2, '0')}</p>
             </div>
             <div className="rounded-2xl bg-[#f2fcf8] p-5">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-950/55">Đã phân công</p>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-950/55">Assigned</p>
               <p className="mt-3 text-2xl font-black text-emerald-600">{weeklyStats.assignedCount}</p>
             </div>
             <div className="rounded-2xl bg-[#f2fcf8] p-5">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-950/55">Hoàn thành</p>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-950/55">Completed</p>
               <p className="mt-3 text-2xl font-black">{weeklyStats.completedCount}</p>
             </div>
           </div>
@@ -692,7 +973,7 @@ export const ShiftSchedulePage = () => {
             </div>
           </div>
           <p className="mt-6 text-sm leading-6 text-emerald-50/80">
-            Lịch chỉ hiển thị những ca thuộc về tài khoản đang đăng nhập. Vui lòng có mặt trước giờ bắt đầu ca để chuẩn bị vận hành.
+            The schedule only shows shifts assigned to the signed-in account. Please arrive before the shift starts.
           </p>
         </aside>
       </div>
@@ -738,8 +1019,8 @@ export const OperationNotificationsPage = () => {
 
   return (
     <PageShell
-      title="UC49 - Thông báo vận hành"
-      subtitle="Theo dõi phản hồi từ điều hành, thay đổi chuyến và cập nhật xử lý báo cáo đã gửi."
+      title="Operation notifications"
+      subtitle="Track operation responses, trip changes, and updates to submitted reports."
       icon={BellRing}
       filters={filters}
       setFilters={setFilters}
@@ -750,7 +1031,7 @@ export const OperationNotificationsPage = () => {
       <div className="space-y-3">
         {notifications.length ? notifications.map((notification) => (
           <OperationNotificationCard key={notification.id} notification={notification} />
-        )) : <EmptyState>Chưa có thông báo vận hành trong khoảng thời gian này.</EmptyState>}
+        )) : <EmptyState>No operation notifications during this period.</EmptyState>}
       </div>
     </PageShell>
   );

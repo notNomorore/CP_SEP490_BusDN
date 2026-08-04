@@ -52,6 +52,8 @@ const formatRoute = (trip) => {
     direction: trip?.direction || 'OUTBOUND',
     estimatedDistanceKm: directionDetail?.estimatedDistanceKm || 0,
     estimatedDurationMinutes: directionDetail?.estimatedDurationMinutes || 0,
+    fareConfig: routeDocument?.fareConfig || {},
+    fare: routeDocument?.fare || routeDocument?.baseFare || 0,
     stops,
     pathPoints,
   };
@@ -64,6 +66,20 @@ const formatVehicle = (vehicle = {}) => ({
   model: vehicle.busType || '',
   capacity: vehicle.capacity || 0,
 });
+
+const formatVehicleReplacement = (trip = {}) => {
+  const history = Array.isArray(trip.emergencyHistory) ? trip.emergencyHistory : [];
+  const latest = history.length ? history[history.length - 1] : null;
+
+  if (!latest?.previousVehicle?.busId) return null;
+
+  return {
+    reason: latest.reason || '',
+    changedAt: latest.changedAt || null,
+    previousVehicle: formatVehicle(latest.previousVehicle),
+    currentVehicle: formatVehicle(trip.vehicle),
+  };
+};
 
 const addMinutes = (value, minutes) => {
   if (!value) return null;
@@ -124,7 +140,8 @@ const formatTripStatus = (tripStatus, shiftStatus, inspectionStatus) => {
   if (tripStatus === 'IN_PROGRESS') return 'IN_PROGRESS';
   if (tripStatus === 'COMPLETED') return 'COMPLETED';
   if (tripStatus === 'CANCELLED') return 'CANCELLED';
-  if (shiftStatus === 'CONFIRMED' || inspectionStatus === 'READY') return 'READY';
+  if (inspectionStatus === 'READY') return 'READY';
+  if (shiftStatus === 'CONFIRMED' && !['IN_PROGRESS', 'ISSUE_REPORTED'].includes(inspectionStatus)) return 'READY';
   return 'SCHEDULED';
 };
 
@@ -210,6 +227,7 @@ export const ShiftAssignmentResponseDTO = {
     actorRole: resolvedActorRole,
     route: formatRoute(trip),
     vehicle: formatVehicle(trip.vehicle),
+    vehicleReplacement: formatVehicleReplacement(trip),
     driver: formatStaff(assignment.driver),
     busAssistant: formatStaff(assignment.busAssistant),
     scheduledStart,
@@ -244,6 +262,26 @@ export const ShiftAssignmentResponseDTO = {
   },
 };
 
+const formatWorkDateOnly = (value) => {
+  if (!value) return null;
+
+  const text = typeof value === 'string' ? value.trim() : '';
+  const match = /^(\d{4}-\d{2}-\d{2})$/.exec(text);
+  if (match) return match[1];
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+};
+
 export const StaffShiftScheduleResponseDTO = {
   format: (assignment) => {
     const shift = assignment.shift || assignment.shiftId || {};
@@ -251,8 +289,9 @@ export const StaffShiftScheduleResponseDTO = {
 
     return {
       id: assignment._id,
+      ...(assignment.source ? { source: assignment.source } : {}),
       assignmentStatus: assignment.status || 'ASSIGNED',
-      workDate: assignment.workDate || shift.workDate,
+      workDate: formatWorkDateOnly(assignment.workDate || shift.workDate),
       shiftCode: shift.shiftCode || '',
       shiftName: shift.shiftName || 'Ca làm việc',
       shiftType: shift.shiftType || 'CUSTOM',

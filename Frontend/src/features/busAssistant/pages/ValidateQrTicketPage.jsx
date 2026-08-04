@@ -309,12 +309,12 @@ const ValidateQrTicketPage = () => {
           </div>
           {cameraMessage ? <Alert type="success">{cameraMessage}</Alert> : null}
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
-            <Field label="Ticket code">
+            <Field label={t.ticketCode}>
               <input
                 className={inputClass}
                 value={form.ticketCode}
                 onChange={update('ticketCode')}
-                placeholder="Nhap ma ve, vi du TKT-F7BB16"
+                placeholder={t.ticketCodePlaceholder}
               />
             </Field>
             <button className="mt-6 inline-flex h-11 items-center justify-center gap-2 rounded bg-emerald-400 px-4 text-sm font-semibold text-slate-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60" disabled={loading}>
@@ -346,14 +346,14 @@ const ValidateQrTicketPage = () => {
                 <DetailItem label={t.ticket} value={displayTicket.ticketCode || displayTicket.passCode || displayTicket._id} strong />
                 <DetailItem label={t.passenger} value={displayPassenger.fullName || result.passengerName} />
                 <DetailItem label={t.route} value={displayRoute.name || displayRoute.routeCode || displayTicket.routeCode} />
-                <DetailItem label="From" value={displayTicket.departureLocation || displayTicket.fromStop} />
-                <DetailItem label="To" value={displayTicket.destinationLocation || displayTicket.toStop} />
-                <DetailItem label="Ticket type" value={displayTicket.ticketType || result.ticketType} />
-                <DetailItem label="Fare" value={displayTicket.amount || displayTicket.ticketPrice ? money(displayTicket.amount || displayTicket.ticketPrice) : 'N/A'} />
-                <DetailItem label="Valid from" value={formatDateTime(displayTicket.validFrom || result.validFrom)} />
-                <DetailItem label="Valid until" value={formatDateTime(displayTicket.validUntil || result.validUntil)} />
-                <DetailItem label="Scanned at" value={formatDateTime(displayTicket.usedAt || result.usedAt)} />
-                <DetailItem label="Trip" value={displayTicket.tripId || result.tripId} />
+                <DetailItem label={t.from} value={displayTicket.departureLocation || displayTicket.fromStop} />
+                <DetailItem label={t.to} value={displayTicket.destinationLocation || displayTicket.toStop} />
+                <DetailItem label={t.ticketType} value={displayTicket.ticketType || result.ticketType} />
+                <DetailItem label={t.fare} value={displayTicket.amount || displayTicket.ticketPrice ? money(displayTicket.amount || displayTicket.ticketPrice) : 'N/A'} />
+                <DetailItem label={t.validFrom} value={formatDateTime(displayTicket.validFrom || result.validFrom)} />
+                <DetailItem label={t.validUntil} value={formatDateTime(displayTicket.validUntil || result.validUntil)} />
+                <DetailItem label={t.scannedAt} value={formatDateTime(displayTicket.usedAt || result.usedAt)} />
+                <DetailItem label={t.tripId} value={displayTicket.tripId || result.tripId} />
               </div>
             </div>
           ) : <p className="text-sm text-slate-400">{t.noValidationYet}</p>}
@@ -367,16 +367,16 @@ const ValidateQrTicketPage = () => {
                 className={isDarkMode
                   ? 'rounded border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-100 hover:border-emerald-300/50'
                   : 'rounded border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-emerald-400'}
-                aria-label="Previous day"
+                aria-label={t.previousDay}
               >
-                Prev
+                {t.previous}
               </button>
               <input
                 className={inputClass}
                 type="date"
                 value={historyDate}
                 onChange={(event) => setHistoryDate(event.target.value || toDateKey())}
-                aria-label="Validation history date"
+                aria-label={t.validationHistoryDate}
               />
               <button
                 type="button"
@@ -384,19 +384,19 @@ const ValidateQrTicketPage = () => {
                 className={isDarkMode
                   ? 'rounded border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-100 hover:border-emerald-300/50'
                   : 'rounded border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-emerald-400'}
-                aria-label="Next day"
+                aria-label={t.nextDay}
               >
-                Next
+                {t.next}
               </button>
               <button
                 type="button"
                 onClick={() => setHistoryDate(toDateKey())}
                 className="rounded bg-emerald-400 px-3 py-2 text-sm font-bold text-slate-950 hover:bg-emerald-300"
               >
-                Today
+                {t.today}
               </button>
             </div>
-            <p className="text-xs font-semibold text-slate-400">{history.length} successful validation(s) on this date.</p>
+            <p className="text-xs font-semibold text-slate-400">{t.validationCount(history.length)}</p>
             {history.length ? history.map((item, index) => {
               const ticket = getDisplayTicket(item);
               const passenger = getDisplayPassenger(item);
@@ -409,7 +409,7 @@ const ValidateQrTicketPage = () => {
                   <p className={isDarkMode ? 'text-slate-500' : 'text-slate-500'}>{route.name || route.routeCode || ticket.routeCode || 'N/A'}</p>
                 </div>
               );
-            }) : <p className="text-sm text-slate-400">No successful validations saved for this date.</p>}
+            }) : <p className="text-sm text-slate-400">{t.noValidationsForDate}</p>}
           </div>
         </Panel>
       </div>

@@ -11,6 +11,21 @@ export class BusAssistantController {
     return res.created(result, result.message);
   }
 
+  static async confirmWalkInPayment(req, res) {
+    const result = await BusAssistantService.confirmWalkInPayment(req.params.ticketId, req.user, req);
+    return res.success(result, result.message);
+  }
+
+  static async getWalkInTicketHistory(req, res) {
+    const result = await BusAssistantService.getWalkInTicketHistory(req.query, req.user);
+    return res.success(result, 'Walk-in ticket history retrieved successfully');
+  }
+
+  static async resumeWalkInPayment(req, res) {
+    const result = await BusAssistantService.resumeWalkInPayment(req.params.ticketId, req.user);
+    return res.success(result, result.message);
+  }
+
   static async getShiftRevenue(req, res) {
     const result = await BusAssistantService.getShiftRevenue(req.query, req.user, req);
     return res.success(result, 'Shift revenue retrieved successfully');

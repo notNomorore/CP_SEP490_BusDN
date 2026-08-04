@@ -8,10 +8,13 @@ export type StaffMember = {
 } | null;
 
 export type RoutePoint = {
+  id?: string | null;
+  stationId?: string | null;
+  _id?: string | null;
   stopName?: string;
   address?: string;
-  latitude?: number | null;
-  longitude?: number | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
   stopOrder?: number | null;
   arrivalOffsetMinutes?: number;
   departureOffsetMinutes?: number;
@@ -19,8 +22,8 @@ export type RoutePoint = {
 };
 
 export type TripStartLocation = {
-  latitude?: number | null;
-  longitude?: number | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
   accuracyMeters?: number | null;
   capturedAt?: string | null;
 };
@@ -44,6 +47,7 @@ export type AssignedTrip = {
   tripCode?: string;
   actorRole?: StaffRole;
   route?: {
+    _id?: string | null;
     id?: string | null;
     routeNumber?: string;
     name?: string;
@@ -52,12 +56,21 @@ export type AssignedTrip = {
     direction?: string;
     estimatedDistanceKm?: number;
     estimatedDurationMinutes?: number;
+    fare?: number;
+    fareConfig?: {
+      baseFare?: number;
+      studentFare?: number;
+      childFare?: number;
+      seniorFare?: number;
+    };
     pathPoints?: RoutePoint[];
     stops?: Array<{
       id?: string | null;
       stationId?: string | null;
       stopName?: string;
       address?: string;
+      latitude?: number | string | null;
+      longitude?: number | string | null;
       stopOrder?: number | null;
     }>;
   };
@@ -68,6 +81,24 @@ export type AssignedTrip = {
     model?: string;
     capacity?: number;
   };
+  vehicleReplacement?: {
+    reason?: string;
+    changedAt?: string | null;
+    previousVehicle?: {
+      id?: string | null;
+      code?: string;
+      plateNumber?: string;
+      model?: string;
+      capacity?: number;
+    };
+    currentVehicle?: {
+      id?: string | null;
+      code?: string;
+      plateNumber?: string;
+      model?: string;
+      capacity?: number;
+    };
+  } | null;
   driver?: StaffMember;
   busAssistant?: StaffMember;
   scheduledStart?: string | null;
@@ -98,6 +129,7 @@ export type AssignedTrip = {
 
 export type ShiftSchedule = {
   id: string;
+  source?: string;
   assignmentStatus?: string;
   workDate?: string;
   shiftCode?: string;

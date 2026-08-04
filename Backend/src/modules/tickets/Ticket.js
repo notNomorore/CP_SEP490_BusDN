@@ -26,6 +26,12 @@ const TicketSchema = new mongoose.Schema(
     routeCode: { type: String, trim: true, default: '', index: true },
     routeNumber: { type: String, required: true, trim: true },
     tripId: { type: String, required: true, trim: true, index: true },
+    direction: {
+      type: String,
+      enum: ['OUTBOUND', 'INBOUND'],
+      default: 'OUTBOUND',
+      index: true,
+    },
     departureLocation: { type: String, required: true, trim: true },
     destinationLocation: { type: String, required: true, trim: true },
     passengerType: {
@@ -37,6 +43,9 @@ const TicketSchema = new mongoose.Schema(
     seatNumber: { type: String, trim: true, uppercase: true, default: '' },
     originalPrice: { type: Number, min: 0, default: 0 },
     discountAmount: { type: Number, min: 0, default: 0 },
+    priorityDiscountAmount: { type: Number, min: 0, default: 0 },
+    promotionDiscountAmount: { type: Number, min: 0, default: 0 },
+    appliedDiscount: { type: mongoose.Schema.Types.Mixed, default: null },
     promotionCode: { type: String, trim: true, uppercase: true, default: '' },
     promotionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Promotion', default: null },
     ticketPrice: { type: Number, required: true, min: 0 },

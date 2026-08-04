@@ -37,6 +37,11 @@ export const scheduleOperationsApi = {
     return unwrapData(response);
   },
 
+  getAssignedTripDetail: async (assignmentId: string): Promise<AssignedTrip> => {
+    const response = await apiClient.get(`/schedule-operations/assigned-trips/${assignmentId}`) as unknown as ApiEnvelope<AssignedTrip>;
+    return unwrapData(response);
+  },
+
   getShiftSchedule: async (params: ScheduleRangeParams = {}): Promise<ShiftSchedulePayload> => {
     const response = await apiClient.get('/schedule-operations/shift-schedule', { params }) as unknown as ApiEnvelope<ShiftSchedulePayload>;
     return unwrapData(response);

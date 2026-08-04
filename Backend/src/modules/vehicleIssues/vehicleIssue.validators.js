@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import {
+  EMERGENCY_BREAKDOWN_STATUSES,
   VEHICLE_ISSUE_DECISIONS,
   VEHICLE_ISSUE_SEVERITIES,
   VEHICLE_ISSUE_STATUSES,
@@ -25,6 +26,14 @@ export const validateVehicleIssueListQuery = (query) => {
 
   if (query.vehicleId && !mongoose.isValidObjectId(query.vehicleId)) {
     errors.vehicleId = 'Invalid vehicle identifier';
+  }
+
+  if (query.emergency && !['true', 'false', '1', '0'].includes(String(query.emergency))) {
+    errors.emergency = 'Invalid emergency filter';
+  }
+
+  if (query.emergencyStatus && !EMERGENCY_BREAKDOWN_STATUSES.includes(query.emergencyStatus)) {
+    errors.emergencyStatus = 'Invalid emergency status';
   }
 
   if (query.startDate && !isValidDate(query.startDate)) {
@@ -85,8 +94,27 @@ export const validateVehicleIssueReview = (body) => {
   return errors;
 };
 
+export const validateEmergencyBreakdownDispatch = (body) => {
+  const errors = {};
+
+  if (!body.standbyVehicleId || !mongoose.isValidObjectId(body.standbyVehicleId)) {
+    errors.standbyVehicleId = 'Valid standbyVehicleId is required';
+  }
+
+  if (body.assignedDriverId && !mongoose.isValidObjectId(body.assignedDriverId)) {
+    errors.assignedDriverId = 'Invalid assigned driver identifier';
+  }
+
+  if (body.adminNote !== undefined && String(body.adminNote).trim().length > 2000) {
+    errors.adminNote = 'Admin note must not exceed 2000 characters';
+  }
+
+  return errors;
+};
+
 export default {
   validateVehicleIssueListQuery,
   validateVehicleIssueIdParam,
   validateVehicleIssueReview,
+  validateEmergencyBreakdownDispatch,
 };

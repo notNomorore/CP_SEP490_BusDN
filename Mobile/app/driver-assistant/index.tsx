@@ -8,12 +8,13 @@ import busAssistantApi from '@/api/busAssistant.api';
 import scheduleOperationsApi from '@/api/scheduleOperations.api';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
+import { formatDriverStatus, useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { ShiftRevenue } from '@/types/busAssistant';
 import type { AssignedTrip, ShiftSchedule } from '@/types/scheduleOperations';
-import { isDriverAssistantRole } from '@/utils/roleNavigation';
-import { formatDate, formatTime, getTodayRange, getTripStatus, isTripCompleted, isTripToday, toDateInput } from '@/utils/scheduleOperations';
-import { getErrorMessage } from '@/utils/validation';
+import { isDriverAssistantRole, normalizeRole } from '@/utils/roleNavigation';
+import { getTodayRange, getTripDepartureTimeLabel, getTripStatus, getTripVehicleLabel, isTripCompleted, isTripToday, toDateInput } from '@/utils/scheduleOperations';
+import { getErrorMessage, getErrorStatusCode, isPermissionError } from '@/utils/validation';
 
 const assignedTripsRoute = '/driver-assistant/assigned-trips' as Href;
 const shiftScheduleRoute = '/driver-assistant/shift-schedule' as Href;
@@ -25,15 +26,6 @@ const lifecycleRoute = '/driver-assistant/trip-lifecycle' as Href;
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 const route = (pathname: string) => pathname as Href;
-
-function StatPill({ label, value }: { label: string; value: string | number }) {
-  return (
-    <View style={styles.statPill}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
 
 function ActionTile({
   title,
@@ -57,8 +49,16 @@ function ActionTile({
       <View style={[styles.actionIcon, primary && styles.actionIconPrimary]}>
         <MaterialCommunityIcons color={primary ? colors.white : colors.primary} name={icon} size={26} />
       </View>
-      <Text style={[styles.actionTitle, primary && styles.actionTitlePrimary]}>{title}</Text>
-      <Text style={[styles.actionSubtitle, primary && styles.actionSubtitlePrimary]}>{subtitle}</Text>
+      <View style={styles.actionTextBlock}>
+        <Text style={[styles.actionTitle, primary && styles.actionTitlePrimary]}>{title}</Text>
+        <Text numberOfLines={2} style={[styles.actionSubtitle, primary && styles.actionSubtitlePrimary]}>{subtitle}</Text>
+      </View>
+      <MaterialCommunityIcons
+        color={primary ? 'rgba(255,255,255,0.8)' : colors.outline}
+        name="chevron-right"
+        size={20}
+        style={styles.actionArrow}
+      />
     </Pressable>
   );
 }
@@ -77,29 +77,58 @@ export default function DriverBusAssistantHomeScreen() {
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isHydrated = useAuthStore((state) => state.isHydrated);
+  const logout = useAuthStore((state) => state.logout);
   const [trips, setTrips] = useState<AssignedTrip[]>([]);
   const [shifts, setShifts] = useState<ShiftSchedule[]>([]);
   const [revenue, setRevenue] = useState<ShiftRevenue | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [processingId, setProcessingId] = useState('');
+  const { language, t } = useDriverI18n();
+  const normalizedRole = normalizeRole(user?.role);
+  const isDriver = normalizedRole === 'DRIVER';
+  const isBusAssistant = ['BUS_ASSISTANT', 'BUS ASSISTANT', 'CONDUCTOR'].includes(normalizedRole);
 
   const loadDashboard = useCallback(async () => {
+    if (!isHydrated || !isAuthenticated) {
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     try {
       const [tripsPayload, shiftsPayload, revenuePayload] = await Promise.all([
         scheduleOperationsApi.getAssignedTrips(getTodayRange()),
         scheduleOperationsApi.getShiftSchedule(getTodayRange()),
-        busAssistantApi.getShiftRevenue({ date: toDateInput() }).catch(() => null),
+        isBusAssistant
+          ? busAssistantApi.getShiftRevenue({ date: toDateInput() }).catch(() => null)
+          : Promise.resolve(null),
       ]);
       setTrips(tripsPayload.trips || []);
       setShifts(shiftsPayload.shifts || []);
       setRevenue(revenuePayload);
     } catch (error) {
-      Alert.alert('Unable to load dashboard', getErrorMessage(error, 'Unable to load schedule and assignment data.'));
+      const message = getErrorMessage(error, t.home.loadErrorFallback);
+      const statusCode = getErrorStatusCode(error);
+      const isAuthError = statusCode === 401 || message.toLowerCase().includes('no token provided');
+
+      if (isAuthError) {
+        await logout();
+        router.replace('/auth/login');
+        return;
+      }
+
+      if (isPermissionError(error)) {
+        setTrips([]);
+        setShifts([]);
+        setRevenue(null);
+        return;
+      }
+
+      Alert.alert(t.home.loadErrorTitle, message);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isAuthenticated, isBusAssistant, isHydrated, logout, t.home.loadErrorFallback, t.home.loadErrorTitle]);
 
   useEffect(() => {
     if (isHydrated && !isAuthenticated) {
@@ -118,11 +147,16 @@ export default function DriverBusAssistantHomeScreen() {
   }, [isAuthenticated, isHydrated, loadDashboard, user?.role]);
 
   const todaysTrips = useMemo(() => trips.filter(isTripToday), [trips]);
-  const completedCount = useMemo(() => trips.filter(isTripCompleted).length, [trips]);
   const nextTrip = todaysTrips.find((trip) => !isTripCompleted(trip)) || todaysTrips[0] || null;
   const upcomingShift = shifts[0] || null;
-  const isDriver = user?.role === 'DRIVER';
-  const displayName = user?.fullName || (isDriver ? 'Driver' : 'Bus Assistant');
+  const displayName = user?.fullName || (isDriver ? t.common.driver : t.common.busAssistant);
+  const homeDate = useMemo(() => (
+    new Intl.DateTimeFormat(language === 'VN' ? 'vi-VN' : 'en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: '2-digit',
+    }).format(new Date())
+  ), [language]);
 
   const openInspection = (trip: AssignedTrip) => {
     router.push({
@@ -147,9 +181,9 @@ export default function DriverBusAssistantHomeScreen() {
         openInspection(updated);
         return;
       }
-      Alert.alert('Trip accepted', 'The assigned trip has been accepted.');
+      Alert.alert(t.home.acceptSuccessTitle, t.home.acceptSuccessMessage);
     } catch (error) {
-      Alert.alert('Unable to accept trip', getErrorMessage(error, 'Unable to accept this assigned trip.'));
+      Alert.alert(t.home.acceptErrorTitle, getErrorMessage(error, t.home.acceptErrorFallback));
     } finally {
       setProcessingId('');
     }
@@ -169,30 +203,33 @@ export default function DriverBusAssistantHomeScreen() {
                 {user?.avatar ? <Image source={{ uri: user.avatar }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>{displayName.slice(0, 1).toUpperCase()}</Text>}
               </View>
               <View>
-                <Text style={styles.brand}>BusDN Crew</Text>
-                <Text style={styles.dateText}>{formatDate(new Date().toISOString())}</Text>
+                <Text style={styles.brand}>{t.home.brand}</Text>
+                <Text style={styles.dateText}>{homeDate}</Text>
               </View>
             </View>
-            <Pressable accessibilityLabel="Open notifications" onPress={() => router.push(route('/driver-assistant/notifications'))} style={styles.notificationButton}>
+            <Pressable accessibilityLabel={t.nav.notifications} onPress={() => router.push(notificationsRoute)} style={styles.notificationButton}>
               {isLoading ? <ActivityIndicator color={colors.primary} size="small" /> : <MaterialCommunityIcons color={colors.accent} name="bell-outline" size={22} />}
             </Pressable>
           </View>
 
           <View style={styles.heroCard}>
-            <Text style={styles.heroKicker}>TODAY'S WORK</Text>
-            <Text style={styles.heroTitle}>Hi, {displayName}</Text>
-            <View style={styles.statsRow}>
-              <StatPill label="Trips" value={todaysTrips.length} />
-              <StatPill label="Done" value={completedCount} />
-              <StatPill label="Sales" value={revenue?.totalTicketsSold || 0} />
+            <View style={styles.greetingRow}>
+              <View style={styles.greetingText}>
+                <Text style={styles.heroKicker}>{t.home.todayOverview}</Text>
+                <Text numberOfLines={1} style={styles.heroTitle}>{t.home.hello}, {displayName}</Text>
+                <Text style={styles.heroSubtitle}>{t.home.subtitle}</Text>
+              </View>
+              <View style={styles.greetingIcon}>
+                <MaterialCommunityIcons color={colors.accent} name="hand-wave-outline" size={26} />
+              </View>
             </View>
           </View>
 
           <View style={styles.nextCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Next assignment</Text>
+              <Text style={styles.sectionTitle}>{t.home.nextTrip}</Text>
               <Pressable onPress={() => router.push(route('/driver-assistant/assigned-trips'))}>
-                <Text style={styles.linkText}>All trips</Text>
+                <Text style={styles.linkText}>{t.home.allTrips}</Text>
               </Pressable>
             </View>
             {nextTrip ? (
@@ -205,9 +242,9 @@ export default function DriverBusAssistantHomeScreen() {
                   <MaterialCommunityIcons color={colors.primary} name="bus-clock" size={25} />
                 </View>
                 <View style={styles.nextContent}>
-                  <Text style={styles.routeBadge}>{nextTrip.route?.routeNumber || nextTrip.tripCode || 'Trip'}</Text>
-                  <Text style={styles.nextTitle}>{nextTrip.route?.origin || 'Origin'} - {nextTrip.route?.destination || 'Destination'}</Text>
-                  <Text style={styles.nextMeta}>{formatTime(nextTrip.scheduledStart)} - {nextTrip.vehicle?.code || nextTrip.vehicle?.plateNumber || 'No bus'} - {getTripStatus(nextTrip)}</Text>
+                  <Text style={styles.routeBadge}>{nextTrip.route?.routeNumber || nextTrip.tripCode || t.nav.trips}</Text>
+                  <Text style={styles.nextTitle}>{nextTrip.route?.origin || t.detail.origin} - {nextTrip.route?.destination || t.detail.destination}</Text>
+                  <Text style={styles.nextMeta}>{getTripDepartureTimeLabel(nextTrip)} - {getTripVehicleLabel(nextTrip)} - {formatDriverStatus(getTripStatus(nextTrip), t)}</Text>
                 </View>
                 {isDriver && canAcceptTrip(nextTrip) ? (
                   <Pressable
@@ -226,7 +263,7 @@ export default function DriverBusAssistantHomeScreen() {
                     {processingId === nextTrip.id ? (
                       <ActivityIndicator color={colors.white} size="small" />
                     ) : (
-                      <Text style={styles.startButtonText}>ACCEPT</Text>
+                      <Text style={styles.startButtonText}>{t.home.acceptTrip}</Text>
                     )}
                   </Pressable>
                 ) : isDriver && getAcceptanceStatus(nextTrip) === 'ACCEPTED' && !isTripCompleted(nextTrip) ? (
@@ -243,7 +280,7 @@ export default function DriverBusAssistantHomeScreen() {
                     style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}
                   >
                     <Text style={styles.startButtonText}>
-                      {nextTrip.inspection?.status === 'READY' ? 'START' : 'INSPECT'}
+                      {nextTrip.inspection?.status === 'READY' ? t.home.startTrip : t.home.inspectVehicle}
                     </Text>
                   </Pressable>
                 ) : canAcceptTrip(nextTrip) ? (
@@ -263,33 +300,55 @@ export default function DriverBusAssistantHomeScreen() {
                     {processingId === nextTrip.id ? (
                       <ActivityIndicator color={colors.white} size="small" />
                     ) : (
-                      <Text style={styles.startButtonText}>ACCEPT</Text>
+                      <Text style={styles.startButtonText}>{t.home.acceptTrip}</Text>
                     )}
                   </Pressable>
                 ) : (
                   <MaterialCommunityIcons color={colors.muted} name="chevron-right" size={24} />
                 )}
               </Pressable>
-            ) : <Text style={styles.emptyText}>No next assignment for today.</Text>}
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => router.push(assignedTripsRoute)}
+                style={({ pressed }) => [styles.emptyTripButton, pressed && styles.pressed]}
+              >
+                <View style={styles.emptyTripIcon}>
+                  <MaterialCommunityIcons color={colors.primary} name="bus-clock" size={24} />
+                </View>
+                <View style={styles.emptyTripContent}>
+                  <Text style={styles.emptyTripTitle}>{t.home.viewAssignedTrips}</Text>
+                  <Text style={styles.emptyTripSubtitle}>{t.home.noNextTripToday}</Text>
+                </View>
+                <MaterialCommunityIcons color={colors.muted} name="chevron-right" size={23} />
+              </Pressable>
+            )}
           </View>
 
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Core actions</Text>
-          </View>
           <View style={styles.actionGrid}>
-            <ActionTile title="Validate ticket" subtitle="Check QR or ticket code" icon="qrcode-scan" href={route('/driver-assistant/validate-ticket')} primary />
-            <ActionTile title="Sell ticket" subtitle="Create onboard cash/QR ticket" icon="ticket-confirmation-outline" href={route('/driver-assistant/walkin-ticket')} />
-            <ActionTile title="Shift revenue" subtitle={`${revenue?.totalRevenue ? new Intl.NumberFormat('vi-VN').format(revenue.totalRevenue) : 0} VND today`} icon="cash-register" href={route('/driver-assistant/shift-revenue')} />
-            <ActionTile title="Submit summary" subtitle="Close shift cashbox" icon="clipboard-check-outline" href={route('/driver-assistant/revenue-summary')} />
-          </View>
-
-          <View style={styles.operationsSection}>
-            <Text style={styles.sectionTitle}>Operations</Text>
-            <View style={styles.actionGrid}>
-              <ActionTile title={upcomingShift?.shiftName || 'Shift schedule'} subtitle="View work hours and assignments" icon="calendar-month-outline" href={route('/driver-assistant/shift-schedule')} />
-              <ActionTile title="Operation chat" subtitle="Message dispatch and crew" icon="chat-outline" href={route('/driver-assistant/group-chat')} />
-              <ActionTile title="Incident report" subtitle="Open a trip to report issues" icon="alert-circle-outline" href={route('/driver-assistant/assigned-trips')} />
-            </View>
+            {isDriver ? (
+              <>
+                <ActionTile title={t.home.assignedTrips} subtitle={t.home.assignedTripsSub} icon="bus-clock" href={assignedTripsRoute} primary />
+                <ActionTile title={upcomingShift?.shiftName || t.home.shiftSchedule} subtitle={t.home.shiftScheduleSub} icon="calendar-month-outline" href={shiftScheduleRoute} />
+                <ActionTile title={t.home.operationNotifications} subtitle={t.home.operationNotificationsSub} icon="bell-ring-outline" href={notificationsRoute} />
+                <ActionTile title={t.home.operationChat} subtitle={t.home.operationChatSub} icon="chat-outline" href={route('/driver-assistant/group-chat')} />
+              </>
+            ) : (
+              <>
+                <ActionTile title={t.assistant.home.validateTicket} subtitle={t.assistant.home.validateTicketSub} icon="qrcode-scan" href={route('/driver-assistant/validate-ticket')} primary />
+                <ActionTile title={t.assistant.home.sellTicket} subtitle={t.assistant.home.sellTicketSub} icon="ticket-confirmation-outline" href={route('/driver-assistant/walkin-ticket')} />
+                <ActionTile
+                  title={t.assistant.home.shiftRevenue}
+                  subtitle={`${revenue?.totalRevenue ? new Intl.NumberFormat(language === 'VN' ? 'vi-VN' : 'en-US').format(revenue.totalRevenue) : 0} ${t.assistant.home.revenueToday}`}
+                  icon="cash-register"
+                  href={route('/driver-assistant/shift-revenue')}
+                />
+                <ActionTile title={t.assistant.home.trips} subtitle={t.assistant.home.tripsSub} icon="bus-clock" href={assignedTripsRoute} />
+                <ActionTile title={upcomingShift?.shiftName || t.home.shiftSchedule} subtitle={t.home.shiftScheduleSub} icon="calendar-month-outline" href={shiftScheduleRoute} />
+                <ActionTile title={t.home.operationNotifications} subtitle={t.home.operationNotificationsSub} icon="bell-ring-outline" href={notificationsRoute} />
+                <ActionTile title={t.home.operationChat} subtitle={t.home.operationChatSub} icon="chat-outline" href={route('/driver-assistant/group-chat')} />
+              </>
+            )}
           </View>
         </ScrollView>
         <RoleBottomNav active="home" role={user?.role} />
@@ -299,28 +358,28 @@ export default function DriverBusAssistantHomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#f7f8fb' },
-  screen: { flex: 1, backgroundColor: '#f7f8fb' },
-  scrollContent: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 16, paddingTop: 10 },
-  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  safeArea: { flex: 1, backgroundColor: '#f5f8f6' },
+  screen: { flex: 1, backgroundColor: '#f5f8f6' },
+  scrollContent: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 16, paddingTop: 8 },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   profileRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  avatar: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 20, borderWidth: 2, borderColor: 'rgba(43,164,113,0.25)', backgroundColor: colors.surfaceHigh },
+  avatar: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 22, borderWidth: 2, borderColor: '#bde6d2', backgroundColor: '#e8f7ef' },
   avatarImage: { width: '100%', height: '100%' },
   avatarText: { color: colors.primary, fontSize: 16, fontWeight: '900' },
-  brand: { color: colors.accent, fontSize: 18, fontWeight: '900' },
-  dateText: { color: colors.muted, fontSize: 12, fontWeight: '700' },
-  notificationButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 21, backgroundColor: colors.card },
-  heroCard: { gap: 14, borderRadius: 26, backgroundColor: colors.primary, padding: 20, marginBottom: 14 },
-  heroKicker: { color: '#aff4d1', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
-  heroTitle: { color: colors.white, fontSize: 28, lineHeight: 34, fontWeight: '900' },
-  statsRow: { flexDirection: 'row', gap: 9 },
-  statPill: { flex: 1, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.12)', padding: 12 },
-  statValue: { color: colors.white, fontSize: 21, fontWeight: '900' },
-  statLabel: { marginTop: 2, color: '#d4f2e5', fontSize: 11, fontWeight: '800' },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  sectionTitle: { color: colors.text, fontSize: 17, fontWeight: '900' },
+  brand: { color: colors.primary, fontSize: 17, fontWeight: '900' },
+  dateText: { marginTop: 1, color: colors.muted, fontSize: 11, fontWeight: '700' },
+  notificationButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, borderWidth: 1, borderColor: '#e2ebe6', backgroundColor: colors.card },
+  heroCard: { gap: 16, marginBottom: 18 },
+  greetingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 2 },
+  greetingText: { minWidth: 0, flex: 1 },
+  greetingIcon: { width: 50, height: 50, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: '#e1f6eb' },
+  heroKicker: { color: colors.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1.1 },
+  heroTitle: { marginTop: 4, color: colors.primary, fontSize: 25, lineHeight: 31, fontWeight: '900' },
+  heroSubtitle: { marginTop: 3, color: colors.muted, fontSize: 12, fontWeight: '600' },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, paddingHorizontal: 2 },
+  sectionTitle: { color: colors.text, fontSize: 18, fontWeight: '900' },
   linkText: { color: colors.accent, fontSize: 13, fontWeight: '900' },
-  nextCard: { borderRadius: 22, backgroundColor: colors.card, padding: 16, marginBottom: 18 },
+  nextCard: { borderWidth: 1, borderColor: '#cde8da', borderRadius: 20, backgroundColor: '#fafffc', padding: 16, marginBottom: 22 },
   nextRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   nextIcon: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 24, backgroundColor: '#d4f2e5' },
   nextContent: { flex: 1, minWidth: 0 },
@@ -330,16 +389,22 @@ const styles = StyleSheet.create({
   startButton: { minWidth: 72, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: colors.accent, paddingHorizontal: 14 },
   disabledButton: { opacity: 0.55 },
   startButtonText: { color: colors.white, fontSize: 12, fontWeight: '900' },
-  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 18 },
-  actionTile: { width: '48%', minHeight: 156, justifyContent: 'space-between', borderRadius: 22, borderWidth: 1, borderColor: '#e1e2e5', backgroundColor: colors.card, padding: 16 },
-  actionTilePrimary: { borderColor: colors.accent, backgroundColor: colors.accent },
-  actionIcon: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: '#d4f2e5' },
+  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
+  actionTile: { position: 'relative', width: '48.6%', minHeight: 140, borderRadius: 19, borderWidth: 1, borderColor: '#dfe7e3', backgroundColor: colors.card, padding: 13 },
+  actionTilePrimary: { borderColor: colors.accent, backgroundColor: '#35b97b' },
+  actionIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 13, backgroundColor: '#d9f4e7' },
   actionIconPrimary: { backgroundColor: 'rgba(255,255,255,0.18)' },
-  actionTitle: { color: colors.text, fontSize: 18, lineHeight: 22, fontWeight: '900' },
+  actionTextBlock: { flex: 1, justifyContent: 'flex-end', paddingTop: 10, paddingRight: 8 },
+  actionTitle: { color: colors.text, fontSize: 15, lineHeight: 19, fontWeight: '900' },
   actionTitlePrimary: { color: colors.white },
-  actionSubtitle: { color: colors.muted, fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  actionSubtitle: { marginTop: 3, color: colors.muted, fontSize: 10, lineHeight: 14, fontWeight: '700' },
   actionSubtitlePrimary: { color: '#d6f8e5' },
-  operationsSection: { gap: 12 },
-  emptyText: { borderRadius: 16, backgroundColor: colors.surfaceLow, padding: 14, color: colors.muted, fontSize: 13, fontWeight: '700' },
+  actionArrow: { position: 'absolute', right: 12, top: 23 },
+  emptyText: { borderRadius: 15, backgroundColor: '#edf6f2', paddingHorizontal: 14, paddingVertical: 13, color: colors.muted, fontSize: 13, fontWeight: '700' },
+  emptyTripButton: { minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 17, backgroundColor: '#edf6f2', paddingHorizontal: 13, paddingVertical: 12 },
+  emptyTripIcon: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: '#d5f1e3' },
+  emptyTripContent: { minWidth: 0, flex: 1 },
+  emptyTripTitle: { color: colors.primary, fontSize: 14, fontWeight: '900' },
+  emptyTripSubtitle: { marginTop: 3, color: colors.muted, fontSize: 11, lineHeight: 15, fontWeight: '700' },
   pressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
 });

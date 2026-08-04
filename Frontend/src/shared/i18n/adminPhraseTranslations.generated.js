@@ -3014,7 +3014,7 @@ export const adminPhraseTranslations = {
   },
   "Emergency replacement note is required": {
     "en": "Emergency replacement note is required",
-    "vi": "Cần có giấy báo thay thế khẩn cấp"
+    "vi": "Vui lòng nhập ghi chú hoặc lý do thay thế xe"
   },
   "EN": {
     "en": "EN",

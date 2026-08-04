@@ -84,12 +84,17 @@ const logAudit = async ({ action, actorId, taskId, metadata = {} }) => {
   }
 };
 
+const combineNotes = (...notes) => notes
+  .map((note) => String(note || '').trim())
+  .filter(Boolean)
+  .join('\n\n');
+
 export class MaintenanceApprovalService {
   static async getPendingApprovalTasks(query = {}) {
     const page = toPositiveInteger(query.page, PAGINATION.DEFAULT_PAGE);
     const limit = toPositiveInteger(query.limit, PAGINATION.DEFAULT_LIMIT, PAGINATION.MAX_LIMIT);
     const filter = {
-      status: 'completed',
+      status: { $in: ['assigned', 'in_progress', 'completed', 'pending_rework'] },
       approvalStatus: { $ne: 'approved' },
     };
 
@@ -146,6 +151,94 @@ export class MaintenanceApprovalService {
       canReturn: blockingCriticalIssues.length === 0,
       blockingCriticalIssues,
     };
+  }
+
+  static async startMaintenanceTask(taskId, adminId, payload = {}, io = null) {
+    const task = await MaintenanceTask.findById(taskId);
+    if (!task) {
+      throw new CustomError('Maintenance task not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    if (!['draft', 'assigned', 'pending_rework'].includes(task.status)) {
+      throw new CustomError('Only assigned or rework tasks can be started', HTTP_STATUS.CONFLICT);
+    }
+
+    task.status = 'in_progress';
+    task.approvalStatus = 'pending_approval';
+    task.adminNote = combineNotes(
+      task.adminNote,
+      payload.note || 'Maintenance work has started.'
+    );
+
+    await task.save();
+
+    await Promise.all([
+      FleetBus.updateOne({ _id: task.vehicleId }, { $set: { status: 'MAINTENANCE' } }),
+      Vehicle.updateOne({ _id: task.vehicleId }, { $set: { status: 'maintenance' } }),
+      task.vehicleIssueId ? VehicleIssue.updateOne(
+        { _id: task.vehicleIssueId },
+        { $set: { status: 'maintenance_required' } }
+      ) : null,
+    ].filter(Boolean));
+
+    await logAudit({
+      action: 'MAINTENANCE_TASK_STARTED',
+      actorId: adminId,
+      taskId: task._id,
+      metadata: { vehicleId: task.vehicleId, vehicleIssueId: task.vehicleIssueId },
+    });
+
+    const updatedTask = await this.getTaskById(task._id);
+    io?.to('fleet:operations').emit('server:maintenance:taskUpdated', updatedTask);
+    io?.emit('server:maintenance:taskUpdated', updatedTask);
+    return updatedTask;
+  }
+
+  static async completeMaintenanceTask(taskId, adminId, payload = {}, io = null) {
+    const task = await MaintenanceTask.findById(taskId);
+    if (!task) {
+      throw new CustomError('Maintenance task not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    if (!['assigned', 'in_progress', 'pending_rework'].includes(task.status)) {
+      throw new CustomError('Only active maintenance tasks can be completed', HTTP_STATUS.CONFLICT);
+    }
+
+    const completionNote = String(payload.completionNote || payload.note || '').trim();
+
+    task.status = 'completed';
+    task.approvalStatus = 'pending_approval';
+    task.adminNote = combineNotes(
+      task.adminNote,
+      completionNote || 'Maintenance work completed. Waiting for safety approval.'
+    );
+
+    await task.save();
+
+    await Promise.all([
+      FleetBus.updateOne({ _id: task.vehicleId }, { $set: { status: 'MAINTENANCE' } }),
+      Vehicle.updateOne({ _id: task.vehicleId }, { $set: { status: 'maintenance' } }),
+      task.vehicleIssueId ? VehicleIssue.updateOne(
+        { _id: task.vehicleIssueId },
+        { $set: { status: 'maintenance_required' } }
+      ) : null,
+    ].filter(Boolean));
+
+    await logAudit({
+      action: 'MAINTENANCE_TASK_COMPLETED',
+      actorId: adminId,
+      taskId: task._id,
+      metadata: {
+        vehicleId: task.vehicleId,
+        vehicleIssueId: task.vehicleIssueId,
+        completionNote,
+      },
+    });
+
+    const updatedTask = await this.getTaskById(task._id);
+    io?.to('fleet:operations').emit('server:maintenance:taskUpdated', updatedTask);
+    io?.emit('server:maintenance:taskUpdated', updatedTask);
+    return updatedTask;
   }
 
   static async approveMaintenanceTask(taskId, adminId, payload = {}, io = null) {

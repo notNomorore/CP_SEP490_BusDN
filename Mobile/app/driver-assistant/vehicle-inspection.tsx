@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, type Href, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import scheduleOperationsApi from '@/api/scheduleOperations.api';
@@ -8,34 +8,19 @@ import { AppButton } from '@/components/AppButton';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
+import { formatDriverStatus, useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { AssignedTrip, VehicleInspection } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
-import { formatTime, getTripStatus } from '@/utils/scheduleOperations';
+import { getTripDepartureTimeLabel, getTripStatus, getTripVehicleLabel, getVehicleLabel, hasVehicleReplacement } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
 type ChecklistKey = 'tires' | 'brakes' | 'lights' | 'fuelOrBattery' | 'safetyEquipment' | 'cleanliness';
 
-const checklistItems: Array<{ key: ChecklistKey; label: string }> = [
-  { key: 'tires', label: 'Lop xe' },
-  { key: 'brakes', label: 'He thong phanh' },
-  { key: 'lights', label: 'Den va tin hieu' },
-  { key: 'fuelOrBattery', label: 'Nhien lieu / pin' },
-  { key: 'safetyEquipment', label: 'Thiet bi an toan' },
-  { key: 'cleanliness', label: 'Ve sinh xe' },
-];
+const checklistKeys: ChecklistKey[] = ['tires', 'brakes', 'lights', 'fuelOrBattery', 'safetyEquipment', 'cleanliness'];
 
-const issueCategories = [
-  { value: 'OTHER', label: 'Khac' },
-  { value: 'BRAKE', label: 'Phanh' },
-  { value: 'ENGINE', label: 'Dong co' },
-  { value: 'LIGHT', label: 'Den / tin hieu' },
-  { value: 'TIRE', label: 'Lop xe' },
-  { value: 'SAFETY_EQUIPMENT', label: 'Thiet bi an toan' },
-];
-
-const emptyChecklist = checklistItems.reduce((result, item) => {
-  result[item.key] = false;
+const emptyChecklist = checklistKeys.reduce((result, key) => {
+  result[key] = false;
   return result;
 }, {} as Record<ChecklistKey, boolean>);
 
@@ -51,7 +36,9 @@ function parseTripParam(value: unknown): AssignedTrip | null {
 export default function VehicleInspectionScreen() {
   const params = useLocalSearchParams<{ trip?: string; assignmentId?: string }>();
   const user = useAuthStore((state) => state.user);
-  const trip = useMemo(() => parseTripParam(params.trip), [params.trip]);
+  const { t } = useDriverI18n();
+  const initialTrip = useMemo(() => parseTripParam(params.trip), [params.trip]);
+  const [trip, setTrip] = useState<AssignedTrip | null>(initialTrip);
   const assignmentId = trip?.id || params.assignmentId || '';
   const [checklist, setChecklist] = useState<Record<ChecklistKey, boolean>>({
     ...emptyChecklist,
@@ -61,8 +48,43 @@ export default function VehicleInspectionScreen() {
   const [issueCategory, setIssueCategory] = useState('OTHER');
   const [issueDescription, setIssueDescription] = useState('');
   const [processingAction, setProcessingAction] = useState('');
+  const checklistItems = useMemo(() => ([
+    { key: 'tires' as const, label: t.inspection.tires },
+    { key: 'brakes' as const, label: t.inspection.brakes },
+    { key: 'lights' as const, label: t.inspection.lights },
+    { key: 'fuelOrBattery' as const, label: t.inspection.fuel },
+    { key: 'safetyEquipment' as const, label: t.inspection.safetyEquipment },
+    { key: 'cleanliness' as const, label: t.inspection.cleanliness },
+  ]), [t]);
+  const issueCategories = useMemo(() => ([
+    { value: 'OTHER', label: t.inspection.categories.other },
+    { value: 'BRAKE', label: t.inspection.categories.brake },
+    { value: 'ENGINE', label: t.inspection.categories.engine },
+    { value: 'LIGHT', label: t.inspection.categories.light },
+    { value: 'TIRE', label: t.inspection.categories.tire },
+    { value: 'SAFETY_EQUIPMENT', label: t.inspection.categories.safety },
+  ]), [t]);
 
-  const allChecked = checklistItems.every((item) => checklist[item.key]);
+  const refreshTrip = useCallback(async () => {
+    if (!assignmentId) return;
+    try {
+      const updatedTrip = await scheduleOperationsApi.getAssignedTripDetail(assignmentId);
+      setTrip(updatedTrip);
+      setInspection(updatedTrip.inspection);
+      setChecklist({
+        ...emptyChecklist,
+        ...(updatedTrip.inspection?.checklist || {}),
+      });
+    } catch {
+      // Keep the navigation payload visible when refresh is temporarily unavailable.
+    }
+  }, [assignmentId]);
+
+  useEffect(() => {
+    void refreshTrip();
+  }, [refreshTrip]);
+
+  const allChecked = checklistKeys.every((key) => checklist[key]);
   const inspectionStatus = inspection?.status || 'NOT_STARTED';
   const isNotStarted = inspectionStatus === 'NOT_STARTED';
   const isInProgress = inspectionStatus === 'IN_PROGRESS';
@@ -88,9 +110,9 @@ export default function VehicleInspectionScreen() {
       const updated = await scheduleOperationsApi.startVehicleInspection(assignmentId, { checklist });
       setInspection(updated);
       setChecklist({ ...emptyChecklist });
-      Alert.alert('UC41 completed', 'Vehicle inspection has been started for this trip.');
+      Alert.alert(t.inspection.startSuccessTitle, t.inspection.startSuccessMessage);
     } catch (error) {
-      Alert.alert('Unable to start inspection', getErrorMessage(error, 'Unable to start vehicle inspection.'));
+      Alert.alert(t.inspection.startErrorTitle, getErrorMessage(error, t.inspection.startErrorFallback));
     } finally {
       setProcessingAction('');
     }
@@ -99,7 +121,7 @@ export default function VehicleInspectionScreen() {
   const confirmReady = async () => {
     if (!assignmentId) return;
     if (!allChecked) {
-      Alert.alert('Checklist incomplete', 'All checklist items must be checked before confirming vehicle ready.');
+      Alert.alert(t.inspection.incompleteTitle, t.inspection.incompleteMessage);
       return;
     }
 
@@ -122,7 +144,7 @@ export default function VehicleInspectionScreen() {
         },
       } as unknown as Href);
     } catch (error) {
-      Alert.alert('Unable to confirm ready', getErrorMessage(error, 'Unable to confirm vehicle readiness.'));
+      Alert.alert(t.inspection.readyErrorTitle, getErrorMessage(error, t.inspection.readyErrorFallback));
     } finally {
       setProcessingAction('');
     }
@@ -132,7 +154,7 @@ export default function VehicleInspectionScreen() {
     if (!assignmentId) return;
     const description = issueDescription.trim();
     if (description.length < 5) {
-      Alert.alert('Issue description required', 'Please describe the vehicle issue with at least 5 characters.');
+      Alert.alert(t.inspection.issueDescription, t.inspection.issueNeedDescription);
       return;
     }
 
@@ -143,9 +165,9 @@ export default function VehicleInspectionScreen() {
         issueDescription: description,
       });
       setInspection(updated);
-      Alert.alert('UC43 completed', 'The vehicle issue has been sent to operations.');
+      Alert.alert(t.inspection.issueSuccessTitle, t.inspection.issueSuccessMessage);
     } catch (error) {
-      Alert.alert('Unable to report issue', getErrorMessage(error, 'Unable to report vehicle issue.'));
+      Alert.alert(t.inspection.issueErrorTitle, getErrorMessage(error, t.inspection.issueErrorFallback));
     } finally {
       setProcessingAction('');
     }
@@ -173,46 +195,54 @@ export default function VehicleInspectionScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant/assigned-trips')}>
+          <Pressable accessibilityLabel={t.common.back} hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant/assigned-trips')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View>
-            <Text style={styles.kicker}>VEHICLE OPERATIONS</Text>
-            <Text style={styles.title}>{isNotStarted ? 'UC41 - Start Inspection' : 'Vehicle Inspection'}</Text>
+            <Text style={styles.kicker}>{t.inspection.kicker}</Text>
+            <Text style={styles.title}>{isNotStarted ? t.inspection.startTitle : t.inspection.title}</Text>
           </View>
         </View>
 
         <View style={styles.tripCard}>
-          <Text style={styles.tripCode}>{trip?.tripCode || assignmentId || 'Assigned trip'}</Text>
-          <Text style={styles.routeName}>{trip?.route?.name || 'Unnamed route'}</Text>
+          <Text style={styles.tripCode}>{trip?.tripCode || assignmentId || t.inspection.assignedTrip}</Text>
+          <Text style={styles.routeName}>{trip?.route?.name || t.inspection.unnamedRoute}</Text>
           <View style={styles.summaryGrid}>
-            <Text style={styles.summaryText}>Departure: {formatTime(trip?.scheduledStart)}</Text>
-            <Text style={styles.summaryText}>Vehicle: {trip?.vehicle?.code || trip?.vehicle?.plateNumber || 'N/A'}</Text>
-            <Text style={styles.summaryText}>Inspection: {inspectionStatus}</Text>
+            <Text style={styles.summaryText}>{t.common.departure}: {getTripDepartureTimeLabel(trip)}</Text>
+            <Text style={styles.summaryText}>{t.common.vehicle}: {getTripVehicleLabel(trip)}</Text>
+            <Text style={styles.summaryText}>{t.inspection.inspection}: {formatDriverStatus(inspectionStatus, t)}</Text>
           </View>
         </View>
+
+        {hasVehicleReplacement(trip) ? (
+          <View style={styles.replacementNotice}>
+            <MaterialCommunityIcons color={colors.primary} name="swap-horizontal-bold" size={19} />
+            <View style={styles.replacementTextWrap}>
+              <Text style={styles.replacementTitle}>{t.inspection.replacementTitle}</Text>
+              <Text style={styles.replacementText}>
+                {t.inspection.replacementText} {getVehicleLabel(trip?.vehicleReplacement?.currentVehicle || trip?.vehicle)}
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         {isNotStarted ? (
           <View style={styles.section}>
             <View style={styles.sectionTitleRow}>
               <MaterialCommunityIcons color={colors.primary} name="clipboard-check-outline" size={22} />
-              <Text style={styles.sectionTitle}>UC41 - Bat dau kiem tra xe</Text>
+              <Text style={styles.sectionTitle}>{t.inspection.startSection}</Text>
             </View>
-            <Text style={styles.helperText}>
-              Tai xe bat dau bien ban kiem tra truoc chuyen. Sau khi bat dau, he thong moi mo checklist de xac nhan xe san sang hoac bao loi.
-            </Text>
+            <Text style={styles.helperText}>{t.inspection.startHelper}</Text>
             {!canOperateVehicle ? (
-              <Text style={styles.warningText}>Chi tai xe duoc phan cong moi co the bat dau kiem tra xe.</Text>
+              <Text style={styles.warningText}>{t.inspection.driverOnly}</Text>
             ) : null}
             {canOperateVehicle && !tripAllowsInspection ? (
-              <Text style={styles.warningText}>Trang thai chuyen nay khong con cho phep bat dau kiem tra xe.</Text>
+              <Text style={styles.warningText}>{t.inspection.cannotInspect}</Text>
             ) : null}
             <View style={styles.explainBox}>
-              <Text style={styles.helperText}>
-                Khi bam bat dau, he thong tao ho so kiem tra xe va ghi nhan thoi diem bat dau de dieu hanh giam sat.
-              </Text>
+              <Text style={styles.helperText}>{t.inspection.explain}</Text>
               <AppButton
-                title="UC41 - Bat dau kiem tra"
+                title={t.inspection.startButton}
                 disabled={!canStart}
                 loading={processingAction === 'start'}
                 onPress={startInspection}
@@ -224,26 +254,36 @@ export default function VehicleInspectionScreen() {
             <View style={styles.sectionHeader}>
               <View style={styles.sectionTitleRow}>
                 <MaterialCommunityIcons color={colors.primary} name="clipboard-check-outline" size={22} />
-                <Text style={styles.sectionTitle}>Van hanh phuong tien</Text>
+                <Text style={styles.sectionTitle}>{t.inspection.operationTitle}</Text>
               </View>
               <View style={styles.statusPill}>
-                <Text style={styles.statusPillText}>{inspectionStatus}</Text>
+                <Text style={styles.statusPillText}>{formatDriverStatus(inspectionStatus, t)}</Text>
               </View>
             </View>
-            <Text style={styles.helperText}>
-              Luong thuc te: bat dau kiem tra, sau do xac nhan xe san sang hoac bao loi xe.
-            </Text>
+            <Text style={styles.helperText}>{t.inspection.operationHelper}</Text>
 
             {isReady ? (
               <>
-                <Text style={styles.successText}>Xe da duoc xac nhan san sang. Bien ban kiem tra nay da duoc khoa.</Text>
-                <AppButton title="Go to Start Trip" onPress={openTripLifecycle} />
+                <Text style={styles.successText}>{t.inspection.readyMessage}</Text>
+                <AppButton title={t.inspection.goToStartTrip} onPress={openTripLifecycle} />
               </>
             ) : null}
             {isIssueReported ? (
-              <Text style={styles.errorText}>
-                Da bao loi xe. Phuong tien duoc chuyen sang trang thai bao tri. {inspection?.issueDescription || ''}
-              </Text>
+              <>
+                <Text style={styles.errorText}>
+                  {t.inspection.issueReported} {inspection?.issueDescription || ''}
+                </Text>
+                <AppButton
+                  title={t.common.refresh}
+                  loading={processingAction === 'refresh'}
+                  onPress={async () => {
+                    setProcessingAction('refresh');
+                    await refreshTrip();
+                    setProcessingAction('');
+                  }}
+                  variant="secondary"
+                />
+              </>
             ) : null}
 
             <View style={styles.checklist}>
@@ -268,7 +308,7 @@ export default function VehicleInspectionScreen() {
             </View>
 
             <AppButton
-              title="UC42 - Xac nhan xe san sang"
+              title={t.inspection.confirmReady}
               disabled={!canConfirmReady}
               loading={processingAction === 'ready'}
               onPress={confirmReady}
@@ -277,9 +317,9 @@ export default function VehicleInspectionScreen() {
             {!isReady ? (
               <View style={styles.issuePanel}>
                 {!isInProgress ? (
-                  <Text style={styles.helperText}>Hay bat dau kiem tra xe truoc khi xac nhan san sang hoac bao loi.</Text>
+                  <Text style={styles.helperText}>{t.inspection.waitingReplacement}</Text>
                 ) : null}
-                <Text style={styles.fieldLabel}>Nhom loi</Text>
+                <Text style={styles.fieldLabel}>{t.inspection.issueGroup}</Text>
                 <View style={styles.categoryRow}>
                   {issueCategories.map((category) => (
                     <Pressable
@@ -301,12 +341,12 @@ export default function VehicleInspectionScreen() {
                     </Pressable>
                   ))}
                 </View>
-                <Text style={styles.fieldLabel}>Mo ta loi</Text>
+                <Text style={styles.fieldLabel}>{t.inspection.issueDescription}</Text>
                 <TextInput
                   editable={canInspect && !Boolean(processingAction)}
                   multiline
                   onChangeText={setIssueDescription}
-                  placeholder="Vi du: den xi nhan trai khong hoat dong, can kiem tra truoc khi xuat ben."
+                  placeholder={t.inspection.issuePlaceholder}
                   placeholderTextColor={colors.muted}
                   style={styles.issueInput}
                   value={issueDescription}
@@ -322,9 +362,9 @@ export default function VehicleInspectionScreen() {
                   ]}
                 >
                   {processingAction === 'issue' ? (
-                    <Text style={styles.dangerButtonText}>Dang gui...</Text>
+                    <Text style={styles.dangerButtonText}>{t.common.loading}</Text>
                   ) : (
-                    <Text style={styles.dangerButtonText}>UC43 - Bao loi xe</Text>
+                    <Text style={styles.dangerButtonText}>{t.inspection.reportIssue}</Text>
                   )}
                 </Pressable>
               </View>
@@ -349,6 +389,19 @@ const styles = StyleSheet.create({
   routeName: { color: colors.muted, fontSize: 13, fontWeight: '800' },
   summaryGrid: { gap: 4, marginTop: 4 },
   summaryText: { color: colors.text, fontSize: 13, fontWeight: '800' },
+  replacementNotice: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#b8e8d0',
+    backgroundColor: '#e8f8ef',
+    padding: 14,
+  },
+  replacementTextWrap: { flex: 1, gap: 3 },
+  replacementTitle: { color: colors.primary, fontSize: 14, fontWeight: '900' },
+  replacementText: { color: colors.muted, fontSize: 12, lineHeight: 18, fontWeight: '700' },
   section: { gap: 12, marginTop: 18, borderRadius: 22, backgroundColor: colors.card, padding: 16 },
   sectionHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
   sectionTitleRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },

@@ -1,8 +1,6 @@
 # CP_SEP490_BusDN
-nguyennhatminhnau@gmail.com |@Minh123| admin
-huhuhichic64@gmail.com | @Minh123 | khách
-skykidclone80@gmail.com / @Minh123
-Modern bus transportation booking system with real-time tracking, ticketing, and comprehensive fleet management.
+
+BusDN is a modern bus transportation management system for ticket booking, route operations, real-time tracking, passenger services, staff workflows, and admin reporting.
 
 ## Project Overview
 

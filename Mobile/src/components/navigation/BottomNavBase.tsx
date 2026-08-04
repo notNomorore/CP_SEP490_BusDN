@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/colors';
 
-export type BottomNavKey = 'home' | 'explore' | 'tickets' | 'priority' | 'trips' | 'schedule' | 'chat' | 'support' | 'profile' | 'validate' | 'sell' | 'revenue';
+export type BottomNavKey = 'home' | 'explore' | 'tickets' | 'activity' | 'history' | 'priority' | 'trips' | 'schedule' | 'notifications' | 'chat' | 'support' | 'profile' | 'validate' | 'sell' | 'revenue';
 
 export type BottomNavItemConfig = {
   key: BottomNavKey;
@@ -13,6 +13,7 @@ export type BottomNavItemConfig = {
   icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
   href?: Href;
   unavailableTitle?: string;
+  badgeCount?: number;
 };
 
 type BottomNavBaseProps = {
@@ -23,11 +24,13 @@ type BottomNavBaseProps = {
 
 export function BottomNavBase({ active, items, style }: BottomNavBaseProps) {
   const insets = useSafeAreaInsets();
+  const isCompact = items.length > 5;
 
   return (
     <View style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 10) }, style]}>
       {items.map((item) => {
         const isActive = item.key === active;
+        const isPrimaryScan = item.key === 'validate';
         return (
           <Pressable
             accessibilityRole="button"
@@ -37,16 +40,25 @@ export function BottomNavBase({ active, items, style }: BottomNavBaseProps) {
                 router.replace(item.href);
                 return;
               }
-              Alert.alert(item.unavailableTitle || item.label, `${item.label} is not available in the mobile app yet.`);
+              Alert.alert(item.unavailableTitle || item.label, `${item.label} hiện chưa có trên ứng dụng Mobile.`);
             }}
-            style={[styles.navItem, isActive && styles.navItemActive]}
+            style={[styles.navItem, isCompact && styles.navItemCompact, isActive && !isPrimaryScan && styles.navItemActive]}
           >
-            <MaterialCommunityIcons
-              color={isActive ? colors.primary : colors.muted}
-              name={item.icon}
-              size={21}
-            />
-            <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>{item.label}</Text>
+            <View style={isPrimaryScan ? [styles.primaryScanIcon, isActive && styles.primaryScanIconActive] : undefined}>
+              <MaterialCommunityIcons
+                color={isPrimaryScan ? colors.white : isActive ? colors.primary : colors.muted}
+                name={item.icon}
+                size={isPrimaryScan ? 23 : isCompact ? 20 : 21}
+              />
+            </View>
+            {item.badgeCount ? (
+              <View style={styles.badge} accessibilityLabel={`${item.badgeCount} thông báo chưa đọc`}>
+                <Text style={styles.badgeText}>{item.badgeCount > 99 ? '99+' : item.badgeCount}</Text>
+              </View>
+            ) : null}
+            <Text numberOfLines={1} style={[styles.navLabel, isCompact && styles.navLabelCompact, isActive && styles.navLabelActive]}>
+              {item.label}
+            </Text>
           </Pressable>
         );
       })}
@@ -77,9 +89,25 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     paddingHorizontal: 8,
     paddingVertical: 7,
+    position: 'relative',
+  },
+  navItemCompact: {
+    minWidth: 48,
+    paddingHorizontal: 5,
   },
   navItemActive: {
     backgroundColor: '#d7f4e6',
+  },
+  primaryScanIcon: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 21,
+    backgroundColor: '#39bd7d',
+  },
+  primaryScanIconActive: {
+    backgroundColor: colors.primary,
   },
   navLabel: {
     marginTop: 2,
@@ -87,8 +115,28 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
+  navLabelCompact: {
+    fontSize: 9,
+  },
   navLabelActive: {
     color: colors.primary,
+    fontWeight: '900',
+  },
+  badge: {
+    position: 'absolute',
+    top: 3,
+    right: 10,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: colors.error,
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    color: colors.white,
+    fontSize: 9,
     fontWeight: '900',
   },
 });

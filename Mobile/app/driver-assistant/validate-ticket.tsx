@@ -9,26 +9,27 @@ import { AppButton } from '@/components/AppButton';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
+import { useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { TicketValidationResult } from '@/types/busAssistant';
 import type { AssignedTrip } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
-import { formatTime, getTodayRange, getTripStatus, isTripCompleted, toDateInput } from '@/utils/scheduleOperations';
-import { getErrorMessage } from '@/utils/validation';
+import { getTodayRange, getTripDepartureTimeLabel, getTripStatus, isTripCompleted, toDateInput } from '@/utils/scheduleOperations';
+import { getErrorMessage, isPermissionError } from '@/utils/validation';
 
 type ValidationHistoryItem = TicketValidationResult & {
   savedAt?: string;
   savedDate?: string;
 };
 
-const money = (value?: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
+const money = (value?: number, locale = 'vi-VN') => new Intl.NumberFormat(locale, { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
 const tripIdOf = (trip?: AssignedTrip | null) => String(trip?.tripId || '');
 
-const formatDateTime = (value?: string | null) => {
-  if (!value) return 'N/A';
+const formatDateTime = (value?: string | null, locale = 'vi-VN', emptyValue = 'N/A') => {
+  if (!value) return emptyValue;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' }).format(date);
 };
 
 const getDisplayTicket = (result?: TicketValidationResult | null) => result?.ticketInfo || {
@@ -67,28 +68,42 @@ const addDateDays = (dateKey: string, days: number) => {
   return toDateInput(date);
 };
 
-function TripChip({ trip, active, onPress }: { trip: AssignedTrip; active: boolean; onPress: () => void }) {
+function TripChip({
+  trip,
+  active,
+  onPress,
+  tripFallback,
+  noVehicle,
+}: {
+  trip: AssignedTrip;
+  active: boolean;
+  onPress: () => void;
+  tripFallback: string;
+  noVehicle: string;
+}) {
   return (
     <Pressable onPress={onPress} style={[styles.tripChip, active && styles.tripChipActive]}>
-      <Text style={[styles.tripChipCode, active && styles.tripChipTextActive]}>{trip.route?.routeNumber || trip.tripCode || 'Trip'}</Text>
+      <Text style={[styles.tripChipCode, active && styles.tripChipTextActive]}>{trip.route?.routeNumber || trip.tripCode || tripFallback}</Text>
       <Text numberOfLines={1} style={[styles.tripChipMeta, active && styles.tripChipTextActive]}>
-        {formatTime(trip.scheduledStart)} - {trip.vehicle?.code || trip.vehicle?.plateNumber || 'No bus'}
+        {getTripDepartureTimeLabel(trip)} - {trip.vehicle?.code || trip.vehicle?.plateNumber || noVehicle}
       </Text>
     </Pressable>
   );
 }
 
-function Detail({ label, value }: { label: string; value?: string | number | null }) {
+function Detail({ label, value, emptyValue }: { label: string; value?: string | number | null; emptyValue: string }) {
   return (
     <View style={styles.detailBox}>
       <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={styles.detailValue}>{value || 'N/A'}</Text>
+      <Text style={styles.detailValue}>{value || emptyValue}</Text>
     </View>
   );
 }
 
 export default function ValidateTicketScreen() {
+  const { language, t } = useDriverI18n();
   const user = useAuthStore((state) => state.user);
+  const locale = language === 'VN' ? 'vi-VN' : 'en-US';
   const [trips, setTrips] = useState<AssignedTrip[]>([]);
   const [selectedTripId, setSelectedTripId] = useState('');
   const [qrCode, setQrCode] = useState('');
@@ -117,11 +132,17 @@ export default function ValidateTicketScreen() {
       setTrips(usableTrips);
       setSelectedTripId((current) => current || usableTrips[0]?.id || '');
     } catch (error) {
-      Alert.alert('Unable to load trips', getErrorMessage(error, 'Unable to load assigned trips.'));
+      if (isPermissionError(error)) {
+        setTrips([]);
+        setSelectedTripId('');
+        return;
+      }
+
+      Alert.alert(t.assistant.validate.loadTripsTitle, getErrorMessage(error, t.assistant.validate.loadTripsFallback));
     } finally {
       setIsLoadingTrips(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadTrips();
@@ -146,7 +167,7 @@ export default function ValidateTicketScreen() {
   const validateTicketCode = useCallback(async (rawCode: string) => {
     const code = rawCode.trim();
     if (!code) {
-      Alert.alert('Ticket code required', 'Enter or paste the QR/ticket code before validating.');
+      Alert.alert(t.assistant.validate.needCodeTitle, t.assistant.validate.needCodeMessage);
       return;
     }
     setIsSubmitting(true);
@@ -169,13 +190,13 @@ export default function ValidateTicketScreen() {
         }
       }
       setQrCode('');
-      setCameraMessage('QR code detected and validated.');
+      setCameraMessage(t.assistant.validate.scannedMessage);
     } catch (error) {
-      setError(getErrorMessage(error, 'Unable to validate ticket.'));
+      setError(getErrorMessage(error, t.assistant.validate.validateErrorFallback));
     } finally {
       setIsSubmitting(false);
     }
-  }, [historyDate, loadHistory, selectedTrip]);
+  }, [historyDate, loadHistory, selectedTrip, t]);
 
   const validateTicket = () => {
     void validateTicketCode(qrCode);
@@ -184,7 +205,7 @@ export default function ValidateTicketScreen() {
   const startCamera = async () => {
     const permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
     if (!permission.granted) {
-      Alert.alert('Camera permission needed', 'Allow camera access to scan ticket QR codes.');
+      Alert.alert(t.assistant.validate.cameraPermissionTitle, t.assistant.validate.cameraPermissionMessage);
       return;
     }
 
@@ -213,24 +234,31 @@ export default function ValidateTicketScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+          <Pressable accessibilityLabel={t.common.back} hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View>
-            <Text style={styles.kicker}>BOARDING</Text>
-            <Text style={styles.title}>Validate Ticket</Text>
+            <Text style={styles.kicker}>{t.assistant.validate.kicker}</Text>
+            <Text style={styles.title}>{t.assistant.validate.title}</Text>
           </View>
         </View>
 
         <View style={styles.panel}>
           <View style={styles.panelHeader}>
-            <Text style={styles.panelTitle}>Active trip</Text>
+            <Text style={styles.panelTitle}>{t.assistant.validate.activeTrips}</Text>
             {isLoadingTrips ? <ActivityIndicator color={colors.primary} /> : null}
           </View>
           <View style={styles.tripList}>
             {trips.length ? trips.map((trip) => (
-              <TripChip key={trip.id} trip={trip} active={selectedTrip?.id === trip.id} onPress={() => setSelectedTripId(trip.id)} />
-            )) : <Text style={styles.emptyText}>No assigned trip for today. You can still scan a ticket like the web validator.</Text>}
+              <TripChip
+                key={trip.id}
+                trip={trip}
+                active={selectedTrip?.id === trip.id}
+                onPress={() => setSelectedTripId(trip.id)}
+                tripFallback={t.assistant.validate.tripFallback}
+                noVehicle={t.assistant.validate.noVehicle}
+              />
+            )) : <Text style={styles.emptyText}>{t.assistant.validate.noTrips}</Text>}
           </View>
         </View>
 
@@ -251,28 +279,28 @@ export default function ValidateTicketScreen() {
               </View>
               <Pressable accessibilityRole="button" onPress={() => setCameraActive(false)} style={styles.closeCameraButton}>
                 <MaterialCommunityIcons color={colors.white} name="close" size={18} />
-                <Text style={styles.closeCameraText}>Close</Text>
+                <Text style={styles.closeCameraText}>{t.assistant.validate.close}</Text>
               </Pressable>
             </View>
           ) : (
             <Pressable accessibilityRole="button" onPress={startCamera} style={styles.scanPrompt}>
               <MaterialCommunityIcons color={colors.accent} name="qrcode-scan" size={54} />
-              <Text style={styles.scannerTitle}>Open camera scanner</Text>
-              <Text style={styles.scannerSubtitle}>Scan passenger QR ticket</Text>
+              <Text style={styles.scannerTitle}>{t.assistant.validate.openCamera}</Text>
+              <Text style={styles.scannerSubtitle}>{t.assistant.validate.cameraHint}</Text>
             </Pressable>
           )}
-          <Text style={styles.manualTitle}>QR / ticket code</Text>
+          <Text style={styles.manualTitle}>{t.assistant.validate.manualTitle}</Text>
           <TextInput
             autoCapitalize="characters"
             onChangeText={setQrCode}
-            placeholder="Paste or enter ticket code"
+            placeholder={t.assistant.validate.manualPlaceholder}
             placeholderTextColor={colors.muted}
             style={styles.input}
             value={qrCode}
           />
           <View style={styles.buttonRow}>
-            <AppButton title="Scan QR" disabled={cameraActive} onPress={startCamera} variant="secondary" style={styles.rowButton} />
-            <AppButton title="Validate" loading={isSubmitting} onPress={validateTicket} style={styles.rowButton} />
+            <AppButton title={t.assistant.validate.scanQr} disabled={cameraActive} onPress={startCamera} variant="secondary" style={styles.rowButton} />
+            <AppButton title={t.assistant.validate.check} loading={isSubmitting} onPress={validateTicket} style={styles.rowButton} />
           </View>
           {cameraMessage ? (
             <View style={styles.successBox}>
@@ -288,25 +316,25 @@ export default function ValidateTicketScreen() {
 
         {result ? (
           <View style={styles.panel}>
-            <Text style={styles.panelTitle}>Validation result</Text>
+            <Text style={styles.panelTitle}>{t.assistant.validate.resultTitle}</Text>
             <View style={isValidResult(result) ? styles.statusSuccess : styles.statusError}>
               <Text style={isValidResult(result) ? styles.statusSuccessText : styles.statusErrorText}>
                 {result.message || validationStatus}
               </Text>
             </View>
             <View style={styles.detailGrid}>
-              <Detail label="Status" value={validationStatus} />
-              <Detail label="Ticket" value={displayTicket.ticketCode || displayTicket.passCode || displayTicket._id} />
-              <Detail label="Passenger" value={displayPassenger.fullName || result.passengerName} />
-              <Detail label="Route" value={displayRoute.name || displayRoute.routeCode || displayTicket.routeCode} />
-              <Detail label="From" value={displayTicket.departureLocation || displayTicket.fromStop} />
-              <Detail label="To" value={displayTicket.destinationLocation || displayTicket.toStop} />
-              <Detail label="Ticket type" value={displayTicket.ticketType || result.ticketType} />
-              <Detail label="Fare" value={displayTicket.amount || displayTicket.ticketPrice ? money(displayTicket.amount || displayTicket.ticketPrice) : 'N/A'} />
-              <Detail label="Valid from" value={formatDateTime(displayTicket.validFrom || result.validFrom)} />
-              <Detail label="Valid until" value={formatDateTime(displayTicket.validUntil || result.validUntil)} />
-              <Detail label="Scanned at" value={formatDateTime(displayTicket.usedAt || result.usedAt)} />
-              <Detail label="Trip" value={displayTicket.tripId || result.tripId} />
+              <Detail label={t.assistant.validate.labels.status} value={validationStatus} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.ticket} value={displayTicket.ticketCode || displayTicket.passCode || displayTicket._id} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.passenger} value={displayPassenger.fullName || result.passengerName} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.route} value={displayRoute.name || displayRoute.routeCode || displayTicket.routeCode} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.from} value={displayTicket.departureLocation || displayTicket.fromStop} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.to} value={displayTicket.destinationLocation || displayTicket.toStop} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.type} value={displayTicket.ticketType || result.ticketType} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.price} value={displayTicket.amount || displayTicket.ticketPrice ? money(displayTicket.amount || displayTicket.ticketPrice, locale) : t.common.notAvailable} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.validFrom} value={formatDateTime(displayTicket.validFrom || result.validFrom, locale, t.common.notAvailable)} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.validUntil} value={formatDateTime(displayTicket.validUntil || result.validUntil, locale, t.common.notAvailable)} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.scannedAt} value={formatDateTime(displayTicket.usedAt || result.usedAt, locale, t.common.notAvailable)} emptyValue={t.common.notAvailable} />
+              <Detail label={t.assistant.validate.labels.trip} value={displayTicket.tripId || result.tripId} emptyValue={t.common.notAvailable} />
             </View>
           </View>
         ) : null}
@@ -314,8 +342,8 @@ export default function ValidateTicketScreen() {
         <View style={[styles.panel, styles.bottomSpace]}>
           <View style={styles.historyHeader}>
             <View>
-              <Text style={styles.panelTitle}>Successful validations</Text>
-              <Text style={styles.historySubtitle}>{history.length} ticket(s) on selected date</Text>
+              <Text style={styles.panelTitle}>{t.assistant.validate.historyTitle}</Text>
+              <Text style={styles.historySubtitle}>{history.length} {t.assistant.validate.historySuffix}</Text>
             </View>
             {isLoadingHistory ? <ActivityIndicator color={colors.primary} /> : null}
           </View>
@@ -335,22 +363,22 @@ export default function ValidateTicketScreen() {
               <MaterialCommunityIcons color={colors.primary} name="chevron-right" size={22} />
             </Pressable>
             <Pressable accessibilityRole="button" onPress={() => setHistoryDate(toDateInput())} style={styles.todayButton}>
-              <Text style={styles.todayText}>Today</Text>
+              <Text style={styles.todayText}>{t.assistant.validate.today}</Text>
             </Pressable>
           </View>
           {history.length ? history.map((item, index) => (
             <View key={`${item.savedAt}-${getDisplayTicket(item).ticketCode || index}`} style={styles.transactionRow}>
               <View>
-                <Text style={styles.transactionCode}>{getDisplayTicket(item).ticketCode || getDisplayTicket(item).passCode || getDisplayTicket(item)._id || 'Ticket'}</Text>
+                <Text style={styles.transactionCode}>{getDisplayTicket(item).ticketCode || getDisplayTicket(item).passCode || getDisplayTicket(item)._id || t.assistant.validate.ticketFallback}</Text>
                 <Text style={styles.transactionMeta}>
-                  {formatDateTime(item.savedAt)} - {getDisplayPassenger(item).fullName || item.passengerName || 'Passenger'} - {getValidationStatus(item)}
+                  {formatDateTime(item.savedAt, locale, t.common.notAvailable)} - {getDisplayPassenger(item).fullName || item.passengerName || t.assistant.validate.passengerFallback} - {getValidationStatus(item)}
                 </Text>
                 <Text style={styles.transactionMeta}>
-                  {getDisplayRoute(item).name || getDisplayRoute(item).routeCode || getDisplayTicket(item).routeCode || 'Route N/A'}
+                  {getDisplayRoute(item).name || getDisplayRoute(item).routeCode || getDisplayTicket(item).routeCode || t.assistant.validate.routeFallback}
                 </Text>
               </View>
             </View>
-          )) : <Text style={styles.emptyText}>No successful validations saved for this date.</Text>}
+          )) : <Text style={styles.emptyText}>{t.assistant.validate.emptyHistory}</Text>}
         </View>
       </Screen>
       <RoleBottomNav active="validate" role={user?.role} />

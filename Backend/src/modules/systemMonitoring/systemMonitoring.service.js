@@ -4,6 +4,13 @@ import { CustomError } from '../../middleware/errorHandler.js';
 import AuditLog from './AuditLog.js';
 import SuspiciousActivity from './SuspiciousActivity.js';
 import { createAuditLog } from './auditLogger.js';
+import User from '../auth/User.js';
+
+const LOCK_DURATION_HOURS = {
+  '2_HOURS': 2,
+  '5_HOURS': 5,
+  '10_HOURS': 10,
+};
 
 const positiveInt = (value, fallback, max = Number.MAX_SAFE_INTEGER) => {
   const parsed = Number.parseInt(value, 10);
@@ -73,6 +80,31 @@ const safeUser = (user) => user ? {
   role: user.role,
   avatar: user.avatar,
 } : null;
+
+const findSuspiciousUser = async (activity) => {
+  const directId = activity?.userId?._id || activity?.userId;
+  if (directId) {
+    const directUser = await User.findById(directId);
+    if (directUser) return directUser;
+  }
+
+  const email = String(activity?.userEmail || '').trim().toLowerCase();
+  if (email) {
+    const emailUser = await User.findOne({ email });
+    if (emailUser) return emailUser;
+  }
+
+  const relatedLog = await AuditLog.findOne({
+    _id: { $in: activity?.relatedLogIds || [] },
+    $or: [
+      { userId: { $ne: null } },
+      { userEmail: { $ne: '' } },
+    ],
+  }).sort({ createdAt: -1 }).lean();
+  if (relatedLog?.userId) return User.findById(relatedLog.userId);
+  if (relatedLog?.userEmail) return User.findOne({ email: String(relatedLog.userEmail).toLowerCase() });
+  return null;
+};
 
 export class SystemMonitoringService {
   static async getAuditLogs(query) {
@@ -201,6 +233,7 @@ export class SystemMonitoringService {
     if (!activity) {
       throw new CustomError('Suspicious activity not found', HTTP_STATUS.NOT_FOUND);
     }
+    const associatedUser = await findSuspiciousUser(activity);
 
     await createAuditLog({
       req,
@@ -215,8 +248,10 @@ export class SystemMonitoringService {
 
     return {
       ...activity,
-      user: safeUser(activity.userId),
-      userId: activity.userId?._id || activity.userId,
+      user: safeUser(associatedUser || activity.userId),
+      userId: associatedUser?._id || activity.userId?._id || activity.userId,
+      canLockAccount: Boolean(associatedUser),
+      accountLock: associatedUser?.accountLock || null,
       reviewedBy: safeUser(activity.reviewedBy),
     };
   }
@@ -226,6 +261,30 @@ export class SystemMonitoringService {
     if (!activity) {
       throw new CustomError('Suspicious activity not found', HTTP_STATUS.NOT_FOUND);
     }
+    const lockDuration = payload.lockDuration || 'NONE';
+    let lockedUser = null;
+    if (lockDuration !== 'NONE') {
+      const targetUser = await findSuspiciousUser(activity);
+      if (!targetUser) {
+        throw new CustomError('This suspicious activity is not associated with a user account', HTTP_STATUS.UNPROCESSABLE_ENTITY);
+      }
+      if (String(targetUser._id) === String(actor.userId)) {
+        throw new CustomError('Administrators cannot lock their own account', HTTP_STATUS.BAD_REQUEST);
+      }
+      if (String(targetUser.role).toUpperCase() === 'ADMIN') {
+        throw new CustomError('Administrator accounts cannot be locked from suspicious activity review', HTTP_STATUS.FORBIDDEN);
+      }
+
+      const hours = LOCK_DURATION_HOURS[lockDuration];
+      const lockedUntil = hours ? new Date(Date.now() + hours * 60 * 60 * 1000) : null;
+      const lockLabel = lockDuration === 'PERMANENT' ? 'vĩnh viễn' : `${hours} giờ`;
+      const reason = `Khóa ${lockLabel} do hoạt động đáng ngờ: ${activity.activityType}`;
+      targetUser.status = 'LOCKED';
+      targetUser.accountLock = { isLocked: true, lockedUntil, reason };
+      await targetUser.save();
+      lockedUser = { userId: targetUser._id, lockedUntil, lockDuration };
+    }
+
     activity.status = payload.status;
     activity.adminNote = String(payload.adminNote || '').trim();
     if (['RESOLVED', 'DISMISSED'].includes(payload.status)) {
@@ -246,7 +305,7 @@ export class SystemMonitoringService {
       resourceType: 'SuspiciousActivity',
       resourceId: activity._id,
       riskLevel: 'HIGH',
-      metadata: { status: payload.status },
+      metadata: { status: payload.status, ...(lockedUser || {}) },
     });
 
     return this.getSuspiciousDetail(id, actor, req);

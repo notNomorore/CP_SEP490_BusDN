@@ -16,6 +16,11 @@ export const ticketService = {
     return response.data;
   },
 
+  getPurchasableSchedules: async (params) => {
+    const response = await apiClient.get('/tickets/purchasable-schedules', { params });
+    return response.data;
+  },
+
   getMyTickets: async () => {
     const response = await apiClient.get('/tickets/me');
     return response.data;
@@ -46,6 +51,11 @@ export const ticketService = {
     return response.data;
   },
 
+  quotePurchase: async (payload) => {
+    const response = await apiClient.post('/tickets/quote', payload);
+    return response.data;
+  },
+
   createPayment: async (payload) => {
     const response = await apiClient.post('/tickets/payments', payload);
     return response.data;
@@ -58,6 +68,16 @@ export const ticketService = {
 
   createPendingTicketPayment: async (ticketId) => {
     const response = await apiClient.post(`/tickets/${ticketId}/payment`);
+    return response.data;
+  },
+
+  createPendingMonthlyPassPayment: async (passId) => {
+    const response = await apiClient.post(`/tickets/monthly-passes/${passId}/payment`);
+    return response.data;
+  },
+
+  cancelMonthlyPass: async (passId) => {
+    const response = await apiClient.patch(`/tickets/monthly-passes/${passId}/cancel`);
     return response.data;
   },
 };

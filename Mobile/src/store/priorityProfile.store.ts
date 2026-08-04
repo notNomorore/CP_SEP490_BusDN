@@ -12,12 +12,10 @@ import { getErrorMessage } from '@/utils/validation';
 export const initialPriorityDraft: PriorityRegistrationDraft = {
   fullName: '',
   dateOfBirth: '',
-  gender: '',
-  phoneNumber: '',
-  email: '',
-  residentialAddress: '',
   profileType: '',
   identityNumber: '',
+  cardNumber: '',
+  issuingAuthority: '',
   reason: '',
 };
 
@@ -45,6 +43,39 @@ type PriorityProfileState = {
   resetApplication: () => void;
   clearError: () => void;
 };
+
+const emptyPriorityStatus: PriorityProfileResponse = {
+  requestId: null,
+  isPriorityGroup: false,
+  priorityStatus: 'NONE',
+  profile: {
+    profileType: null,
+    fullName: '',
+    dateOfBirth: null,
+    identityNumber: null,
+    cardNumber: null,
+    issuingAuthority: null,
+    reason: null,
+    status: 'NONE',
+    rejectionReason: null,
+    expiryDate: null,
+    submittedAt: null,
+    reviewedAt: null,
+    documents: [],
+  },
+};
+
+const normalizePriorityResponse = (response?: PriorityProfileResponse | null): PriorityProfileResponse => {
+  if (!response?.requestId || response.priorityStatus === 'NONE' || response.profile?.status === 'NONE') {
+    return emptyPriorityStatus;
+  }
+
+  return response;
+};
+
+const normalizePriorityRequests = (requests?: PriorityProfileResponse[]) => (
+  (requests || []).filter((request) => Boolean(request.requestId) && request.priorityStatus !== 'NONE' && request.profile?.status !== 'NONE')
+);
 
 export const usePriorityProfileStore = create<PriorityProfileState>((set, get) => ({
   draft: initialPriorityDraft,
@@ -110,7 +141,10 @@ export const usePriorityProfileStore = create<PriorityProfileState>((set, get) =
         priorityProfileApi.getStatus(),
         priorityProfileApi.listMyRequests(),
       ]);
-      set({ status, requests });
+      set({
+        status: normalizePriorityResponse(status),
+        requests: normalizePriorityRequests(requests),
+      });
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to load priority application status.');
       set({ error: message });

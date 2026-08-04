@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../../auth/stores/authStore.js';
+import vehicleIssueService from '../vehicleIssues/services/vehicleIssueService.js';
 import useAdminI18n, { getAdminMessage } from '../../../shared/i18n/adminI18n.js';
 import { adminNavGroups, adminNavigation } from '../../../shared/i18n/adminMessages.js';
+import AdminI18nBoundary from './AdminI18nBoundary.jsx';
 
 const getNavigationTarget = (item) => {
   const [pathname, rawSearch = ''] = item.path.split('?');
@@ -12,11 +14,19 @@ const getNavigationTarget = (item) => {
   };
 };
 
+const pathnameMatchesAlias = (pathname, alias) => (
+  pathname === alias
+  || (alias !== '/admin' && pathname.startsWith(`${alias}/`))
+);
+
 const isNavigationItemActive = (location, item) => {
   const target = getNavigationTarget(item);
   const pathnameMatches = location.pathname === target.pathname
     || location.pathname.startsWith(`${target.pathname}/`)
-    || item.aliases?.some((alias) => location.pathname === alias || location.pathname.startsWith(`${alias}/`));
+    || item.aliases?.some((alias) => (
+      location.pathname === alias
+      || (alias !== '/admin' && location.pathname.startsWith(`${alias}/`))
+    ));
 
   if (!pathnameMatches) return false;
   if (target.search) return location.search === target.search;
@@ -27,7 +37,27 @@ const isNavigationItemActive = (location, item) => {
     return candidateTarget.pathname === location.pathname && candidateTarget.search === location.search;
   });
 };
-const SidebarItem = ({ item, isActive, label, onNavigate }) => (
+
+const isVehicleIssuesRoute = (location) => (
+  location.pathname === '/admin/vehicle-issues'
+  || location.pathname.startsWith('/admin/vehicle-issues/')
+);
+
+const AttentionBadge = ({ compact = false }) => (
+  <span
+    className={`inline-flex shrink-0 items-center justify-center rounded-full bg-error text-on-error shadow-sm shadow-error/30 ${
+      compact ? 'h-4 w-4 text-[12px]' : 'h-5 w-5 text-[14px]'
+    }`}
+    aria-label="Cần chú ý"
+    title="Cần chú ý"
+  >
+    <span className="material-symbols-outlined text-[inherit] leading-none" aria-hidden="true">
+      priority_high
+    </span>
+  </span>
+);
+
+const SidebarItem = ({ item, isActive, label, onNavigate, showAttention = false }) => (
   <NavLink
     to={item.path}
     onClick={onNavigate}
@@ -41,7 +71,8 @@ const SidebarItem = ({ item, isActive, label, onNavigate }) => (
     <span className="material-symbols-outlined shrink-0 text-[18px]" aria-hidden="true">
       {item.icon}
     </span>
-    <span>{label}</span>
+    <span className="min-w-0 flex-1">{label}</span>
+    {showAttention ? <AttentionBadge compact /> : null}
   </NavLink>
 );
 
@@ -53,6 +84,7 @@ const SidebarGroup = ({
   t,
   onToggle,
   onNavigate,
+  showAttention = false,
 }) => {
   const groupLabel = t(group.key);
   const toggleLabel = t(
@@ -77,6 +109,7 @@ const SidebarGroup = ({
           {group.icon}
         </span>
         <span className="min-w-0 flex-1">{groupLabel}</span>
+        {showAttention ? <AttentionBadge /> : null}
         <span
           className={`material-symbols-outlined shrink-0 text-[18px] transition-transform duration-200 ${
             isExpanded ? 'rotate-180' : ''
@@ -102,6 +135,10 @@ const SidebarGroup = ({
                 isActive={activeItemPath === item.path}
                 label={t(item.key)}
                 onNavigate={onNavigate}
+                showAttention={
+                  showAttention
+                  && item.key === 'admin.sidebar.vehicleIssues'
+                }
               />
             ))}
           </div>
@@ -118,8 +155,10 @@ const AdminCommandLayout = () => {
   const { language, toggleLanguage, t } = useAdminI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [hasPendingVehicleIssues, setHasPendingVehicleIssues] = useState(false);
   const displayName = user?.fullName?.trim() || 'Admin';
   const initial = displayName.charAt(0).toUpperCase();
+  const showVehicleIssueAttention = hasPendingVehicleIssues && !isVehicleIssuesRoute(location);
 
   const activeItem = useMemo(() => {
     return [...adminNavigation]
@@ -128,11 +167,17 @@ const AdminCommandLayout = () => {
       || adminNavigation[0];
   }, [location.pathname, location.search]);
 
-  const activeGroup = useMemo(() => (
-    adminNavGroups.find((group) => (
+  const activeGroup = useMemo(() => {
+    const groupByLocation = adminNavGroups.find((group) => (
+      group.children.some((item) => isNavigationItemActive(location, item))
+    ));
+
+    if (groupByLocation) return groupByLocation;
+
+    return adminNavGroups.find((group) => (
       group.children.some((item) => item.path === activeItem.path)
-    )) || adminNavGroups[0]
-  ), [activeItem.path]);
+    )) || adminNavGroups[0];
+  }, [activeItem.path, location]);
 
   const [openGroupId, setOpenGroupId] = useState(() => activeGroup.id);
 
@@ -169,6 +214,31 @@ const AdminCommandLayout = () => {
   }, [activeGroup.id, location.pathname]);
 
   useEffect(() => {
+    let isMounted = true;
+    const loadVehicleIssueAttention = async () => {
+      try {
+        const statuses = ['new', 'reviewed', 'maintenance_required'];
+        const results = await Promise.all(
+          statuses.map((status) => vehicleIssueService.getIssues({ status, limit: 1 }))
+        );
+        const hasPending = results.some((response) => (
+          Number(response.meta?.total || response.data?.length || 0) > 0
+        ));
+        if (isMounted) setHasPendingVehicleIssues(hasPending);
+      } catch {
+        if (isMounted) setHasPendingVehicleIssues(false);
+      }
+    };
+
+    loadVehicleIssueAttention();
+    const intervalId = window.setInterval(loadVehicleIssueAttention, 30000);
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [location.pathname]);
+
+  useEffect(() => {
     if (!mobileOpen) return undefined;
 
     const handleKeyDown = (event) => {
@@ -199,6 +269,7 @@ const AdminCommandLayout = () => {
             t={t}
             onToggle={() => setOpenGroupId((current) => (current === group.id ? '' : group.id))}
             onNavigate={() => setMobileOpen(false)}
+            showAttention={showVehicleIssueAttention && group.id === 'incidents-maintenance'}
           />
         ))}
         {!visibleGroups.length ? (
@@ -231,6 +302,7 @@ const AdminCommandLayout = () => {
   );
 
   return (
+    <AdminI18nBoundary>
     <div className="flex h-screen overflow-hidden bg-surface text-on-surface">
       <div className="hidden lg:block">{sidebar}</div>
 
@@ -279,16 +351,6 @@ const AdminCommandLayout = () => {
             </label>
             <button
               type="button"
-              disabled
-              title={t('admin.header.notificationsUnavailable')}
-              aria-label={t('admin.header.notificationsUnavailable')}
-              className="relative cursor-not-allowed rounded-full p-2 text-on-surface-variant opacity-60"
-            >
-              <span className="material-symbols-outlined" aria-hidden="true">notifications</span>
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-error" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
               onClick={toggleLanguage}
               title={t('admin.header.switchLanguage')}
               aria-label={t('admin.header.switchLanguage')}
@@ -329,6 +391,7 @@ const AdminCommandLayout = () => {
         }
       `}</style>
     </div>
+    </AdminI18nBoundary>
   );
 };
 

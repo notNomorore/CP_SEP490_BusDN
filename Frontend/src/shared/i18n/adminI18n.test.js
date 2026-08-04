@@ -34,4 +34,11 @@ describe('frontend i18n', () => {
     expect(translateAdminPhrase('Nơi xuất phát', 'en')).toBe('Departure');
     expect(translateAdminPhrase('Tuyến đường phổ biến', 'en')).toBe('Popular routes');
   });
+
+  it('keeps mixed admin source phrases consistent in either selected language', () => {
+    expect(translateAdminPhrase('Active buses', 'vi')).toBe('Xe đang hoạt động');
+    expect(translateAdminPhrase('Xe đang hoạt động', 'en')).toBe('Active buses');
+    expect(translateAdminPhrase('Vận hành đội xe', 'en')).toBe('Fleet Operations');
+    expect(translateAdminPhrase('Mất tín hiệu', 'en')).toBe('Lost signal');
+  });
 });

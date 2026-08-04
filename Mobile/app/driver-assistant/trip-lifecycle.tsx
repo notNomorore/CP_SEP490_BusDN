@@ -1,8 +1,8 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams, type Href } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Animated, PanResponder, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
 import scheduleOperationsApi from '@/api/scheduleOperations.api';
@@ -10,11 +10,20 @@ import { AppButton } from '@/components/AppButton';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
+import { formatDriverStatus, useDriverI18n, type DriverTranslation } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { AssignedTrip, RoutePoint } from '@/types/scheduleOperations';
 import { getDeviceGpsPayload, type DeviceGpsPayload, watchDeviceGps } from '@/utils/deviceGps';
 import { goBackOrReplace } from '@/utils/navigation';
-import { formatCoordinate, formatTime, getRouteStops, getTripStatus } from '@/utils/scheduleOperations';
+import {
+  formatCoordinate,
+  formatTime,
+  getRoutePathPoints,
+  getRouteStops,
+  getTripStatus,
+  getVehicleLabel,
+  hasVehicleReplacement,
+} from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
 const ARRIVAL_RADIUS_METERS = 30;
@@ -48,6 +57,7 @@ type RouteInstruction = {
 
 type DriverIncidentType = 'TRAFFIC_CONGESTION' | 'ACCIDENT' | 'VEHICLE_BREAKDOWN';
 type IncidentSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+type BreakdownType = 'ENGINE_FAILURE' | 'BRAKE_FAILURE' | 'FLAT_TIRE' | 'ACCIDENT' | 'OTHER';
 type EvidenceFile = {
   uri: string;
   name?: string;
@@ -56,56 +66,25 @@ type EvidenceFile = {
 
 const DRIVER_INCIDENT_OPTIONS: Array<{
   type: DriverIncidentType;
-  code: string;
-  label: string;
-  description: string;
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
 }> = [
   {
     type: 'TRAFFIC_CONGESTION',
-    code: 'UC46',
-    label: 'Bao ket xe',
-    description: 'Bao un tac, cham tuyen hoac duong bi chan.',
     icon: 'traffic-cone',
   },
   {
     type: 'ACCIDENT',
-    code: 'UC47',
-    label: 'Bao tai nan',
-    description: 'Bao tai nan, va cham hoac tinh huong can ho tro khan.',
     icon: 'alert-octagon-outline',
   },
   {
     type: 'VEHICLE_BREAKDOWN',
-    code: 'UC48',
-    label: 'Bao xe hong',
-    description: 'Bao xe hong trong chuyen, can ho tro ky thuat hoac xe thay the.',
     icon: 'bus-alert',
   },
 ];
 
-const INCIDENT_SEVERITIES: Array<{ value: IncidentSeverity; label: string }> = [
-  { value: 'LOW', label: 'Thap' },
-  { value: 'MEDIUM', label: 'Trung binh' },
-  { value: 'HIGH', label: 'Cao' },
-  { value: 'CRITICAL', label: 'Khan cap' },
-];
-
-const TRAFFIC_CATEGORIES = [
-  { value: 'HEAVY_TRAFFIC', label: 'Un tac dong phuong tien' },
-  { value: 'ROADWORK', label: 'Thi cong / rao chan duong' },
-  { value: 'FLOODING', label: 'Ngap nuoc / thoi tiet xau' },
-  { value: 'EVENT_CROWD', label: 'Su kien dong nguoi' },
-  { value: 'STOP_OVERLOAD', label: 'Diem dung qua tai' },
-  { value: 'TEMPORARY_BLOCK', label: 'Duong bi chan tam thoi' },
-  { value: 'OTHER', label: 'Khac' },
-];
-
 const isValidRouteCoordinate = (point: RoutePoint) => (
-  typeof point.latitude === 'number'
-  && typeof point.longitude === 'number'
-  && Number.isFinite(point.latitude)
-  && Number.isFinite(point.longitude)
+  Number.isFinite(Number(point.latitude))
+  && Number.isFinite(Number(point.longitude))
 );
 
 const isValidGpsCoordinate = (point?: DeviceGpsPayload | null) => (
@@ -115,10 +94,26 @@ const isValidGpsCoordinate = (point?: DeviceGpsPayload | null) => (
   && Number.isFinite(point.longitude)
 );
 
-const toMapPoints = (stops: RoutePoint[]): MapPoint[] => stops
+const toDeviceGpsPayload = (location?: AssignedTrip['startLocation'] | null): DeviceGpsPayload | null => {
+  const latitude = Number(location?.latitude);
+  const longitude = Number(location?.longitude);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return {
+    latitude,
+    longitude,
+    accuracyMeters: location?.accuracyMeters,
+    capturedAt: location?.capturedAt || undefined,
+  };
+};
+
+const toMapPoints = (stops: RoutePoint[], stopPrefix = 'Trạm'): MapPoint[] => stops
   .filter(isValidRouteCoordinate)
   .map((stop, index) => ({
-    name: stop.stopName || `Tram ${index + 1}`,
+    name: stop.stopName || `${stopPrefix} ${index + 1}`,
     address: stop.address || '',
     latitude: Number(stop.latitude),
     longitude: Number(stop.longitude),
@@ -138,20 +133,16 @@ const distanceMeters = (first?: Pick<MapPoint, 'latitude' | 'longitude'> | null,
   return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 };
 
-const formatDistance = (meters: number) => {
-  if (!Number.isFinite(meters) || meters <= 0) return 'Dang cap nhat';
+const formatDistance = (meters: number, t: DriverTranslation) => {
+  if (!Number.isFinite(meters) || meters <= 0) return t.lifecycle.updatingInstruction;
   if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
   return `${Math.max(1, Math.round(meters))} m`;
 };
 
-const formatEta = (seconds: number) => {
-  if (!Number.isFinite(seconds) || seconds <= 0) return 'Dang cap nhat';
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  return `${minutes} phut`;
-};
-
-const fallbackInstruction = (meters: number) => (
-  meters > 0 ? `Di thang ${formatDistance(meters)} den tram tiep theo` : 'Dang cap nhat huong dan'
+const fallbackInstruction = (meters: number, t: DriverTranslation) => (
+  meters > 0
+    ? t.lifecycle.straightDistance.replace('{{distance}}', formatDistance(meters, t))
+    : t.lifecycle.updatingInstruction
 );
 
 const sanitizeForHtml = <T,>(value: T): string => (
@@ -159,26 +150,52 @@ const sanitizeForHtml = <T,>(value: T): string => (
 );
 
 const buildNavigationMapHtml = ({
-  points,
+  routePoints,
+  stopPoints,
   driverLocation,
   currentStopIndex,
+  labels,
 }: {
-  points: MapPoint[];
+  routePoints: MapPoint[];
+  stopPoints: MapPoint[];
   driverLocation?: DriverMapPoint | null;
   currentStopIndex: number;
+  labels: {
+    driverLocation: string;
+    accuracy: string;
+    updatingInstruction: string;
+    straightToNextStop: string;
+    arriveNextStop: string;
+    straight: string;
+    left: string;
+    right: string;
+    roundabout: string;
+    continue: string;
+    after: string;
+    onto: string;
+  };
 }) => {
-  const serializedPoints = sanitizeForHtml(points);
+  const serializedRoutePoints = sanitizeForHtml(routePoints);
+  const serializedStopPoints = sanitizeForHtml(stopPoints);
   const serializedDriver = sanitizeForHtml(driverLocation || null);
+  const serializedLabels = sanitizeForHtml(labels);
 
   return `<!doctype html>
 <html>
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-    html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: #e8f4ef; }
+    html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: #e8f4ef; touch-action: none; }
     .leaflet-control-attribution { font-size: 9px; }
-    .leaflet-control-zoom { display: none; }
+    .leaflet-control-zoom { border: 0 !important; box-shadow: 0 6px 16px rgba(0, 26, 15, 0.22); }
+    .leaflet-control-zoom a {
+      width: 38px !important;
+      height: 38px !important;
+      line-height: 38px !important;
+      color: #002b1d !important;
+      font: 900 22px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+    }
     .stop-marker, .driver-marker {
       width: 31px;
       height: 31px;
@@ -210,11 +227,23 @@ const buildNavigationMapHtml = ({
   <div id="map"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    const points = ${serializedPoints};
+    const routePoints = ${serializedRoutePoints};
+    const stopPoints = ${serializedStopPoints};
     let driver = ${serializedDriver};
+    const labels = ${serializedLabels};
     const currentStopIndex = ${currentStopIndex};
     const fallbackCenter = [${DRIVER_FALLBACK_CENTER.latitude}, ${DRIVER_FALLBACK_CENTER.longitude}];
-    const map = L.map('map', { zoomControl: false, attributionControl: true, preferCanvas: true });
+    const map = L.map('map', {
+      zoomControl: true,
+      attributionControl: true,
+      preferCanvas: true,
+      dragging: true,
+      touchZoom: true,
+      scrollWheelZoom: true,
+      doubleClickZoom: true,
+      boxZoom: true,
+      keyboard: false
+    });
     const postMessage = (payload) => {
       if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(payload));
     };
@@ -227,13 +256,13 @@ const buildNavigationMapHtml = ({
     }).addTo(map);
     setTimeout(() => map.invalidateSize(), 120);
 
-    const routeLatLngs = points.map((point) => [point.latitude, point.longitude]);
-    const nextStop = points[currentStopIndex] || null;
+    const routeLatLngs = (routePoints.length ? routePoints : stopPoints).map((point) => [point.latitude, point.longitude]);
+    const nextStop = stopPoints[currentStopIndex] || null;
     if (routeLatLngs.length) {
       L.polyline(routeLatLngs, { color: '#2563eb', weight: 5, opacity: 0.62 }).addTo(map);
     }
 
-    points.forEach((point, index) => {
+    stopPoints.forEach((point, index) => {
       const state = index < currentStopIndex ? 'passed' : index === currentStopIndex ? 'next' : 'future';
       const size = state === 'next' ? 40 : 31;
       const icon = L.divIcon({
@@ -280,7 +309,7 @@ const buildNavigationMapHtml = ({
       });
       L.marker([driver.latitude, driver.longitude], { icon: driverIcon })
         .addTo(driverLayer)
-        .bindPopup('<div class="popup-title">Vi tri tai xe</div><div class="popup-address">Sai so: ' + Math.round(driver.accuracyMeters || 0) + ' m</div>');
+        .bindPopup('<div class="popup-title">' + labels.driverLocation + '</div><div class="popup-address">' + labels.accuracy + ': ' + Math.round(driver.accuracyMeters || 0) + ' m</div>');
       if (driver.accuracyMeters) {
         L.circle([driver.latitude, driver.longitude], {
           radius: driver.accuracyMeters,
@@ -341,20 +370,20 @@ const buildNavigationMapHtml = ({
       const modifier = String(maneuver.modifier || '');
       const type = String(maneuver.type || '');
       const distance = formatMeters(step?.distance || 0);
-      const roadName = step?.name ? ' vao ' + step.name : '';
-      const suffix = distance ? ' sau ' + distance : '';
-      if (type === 'arrive') return 'Den tram tiep theo';
-      if (modifier.includes('left')) return 'Re trai' + suffix + roadName;
-      if (modifier.includes('right')) return 'Re phai' + suffix + roadName;
+      const roadName = step?.name ? labels.onto + ' ' + step.name : '';
+      const suffix = distance ? labels.after + ' ' + distance : '';
+      if (type === 'arrive') return labels.arriveNextStop;
+      if (modifier.includes('left')) return labels.left + suffix + roadName;
+      if (modifier.includes('right')) return labels.right + suffix + roadName;
       if (modifier.includes('straight') || type === 'depart' || type === 'new name') {
-        return 'Di thang' + suffix + roadName;
+        return labels.straight + suffix + roadName;
       }
-      if (type === 'roundabout' || type === 'rotary') return 'Vao vong xoay' + suffix;
-      return 'Tiep tuc' + suffix + roadName;
+      if (type === 'roundabout' || type === 'rotary') return labels.roundabout + suffix;
+      return labels.continue + suffix + roadName;
     };
     const drawNavigation = async () => {
       if (!driver || !nextStop) {
-        postMessage({ type: 'route', distanceMeters: 0, durationSeconds: 0, instruction: 'Dang cap nhat huong dan' });
+        postMessage({ type: 'route', distanceMeters: 0, durationSeconds: 0, instruction: labels.updatingInstruction });
         return;
       }
       const routeKey = [
@@ -397,7 +426,7 @@ const buildNavigationMapHtml = ({
           type: 'route',
           distanceMeters: distance,
           durationSeconds: distance / 7,
-          instruction: 'Di thang den tram tiep theo',
+          instruction: labels.straightToNextStop,
         });
       }
     };
@@ -413,28 +442,27 @@ function NavigationMap({
   currentStopIndex,
   routeInfo,
   onRouteInfo,
+  nextInstructionLabel,
+  t,
 }: {
   trip: AssignedTrip | null;
   currentGps: DeviceGpsPayload | null;
   currentStopIndex: number;
   routeInfo: RouteInstruction;
   onRouteInfo: (info: RouteInstruction) => void;
+  nextInstructionLabel: string;
+  t: DriverTranslation;
 }) {
   const webViewRef = useRef<WebView | null>(null);
-  const mapPoints = useMemo(() => toMapPoints(getRouteStops(trip || ({} as AssignedTrip))), [trip]);
+  const routeMapPoints = useMemo(() => toMapPoints(getRoutePathPoints(trip || ({} as AssignedTrip)), t.lifecycle.stopPrefix), [t, trip]);
+  const routeStopPoints = useMemo(() => toMapPoints(getRouteStops(trip || ({} as AssignedTrip)), t.lifecycle.stopPrefix), [t, trip]);
+  const stopMapPoints = routeStopPoints.length ? routeStopPoints : routeMapPoints;
   const driverLocation = useMemo(() => {
-    const tripStartLocation: DeviceGpsPayload | null = trip?.startLocation
-      ? {
-        latitude: trip.startLocation.latitude,
-        longitude: trip.startLocation.longitude,
-        accuracyMeters: trip.startLocation.accuracyMeters,
-        capturedAt: trip.startLocation.capturedAt || undefined,
-      }
-      : null;
+    const tripStartLocation = toDeviceGpsPayload(trip?.startLocation);
     const driverSource = isValidGpsCoordinate(currentGps) ? currentGps : tripStartLocation;
     return driverSource && isValidGpsCoordinate(driverSource)
       ? {
-        name: 'Vi tri tai xe',
+        name: t.detail.driverGps,
         address: '',
         latitude: Number(driverSource.latitude),
         longitude: Number(driverSource.longitude),
@@ -443,8 +471,27 @@ function NavigationMap({
       : null;
   }, [currentGps, trip?.startLocation]);
   const html = useMemo(
-    () => buildNavigationMapHtml({ points: mapPoints, driverLocation: null, currentStopIndex }),
-    [currentStopIndex, mapPoints],
+    () => buildNavigationMapHtml({
+      routePoints: routeMapPoints,
+      stopPoints: stopMapPoints,
+      driverLocation: null,
+      currentStopIndex,
+      labels: {
+        driverLocation: t.detail.driverGps,
+        accuracy: t.common.accuracy,
+        updatingInstruction: t.lifecycle.updatingInstruction,
+        straightToNextStop: t.lifecycle.straightToNextStop,
+        arriveNextStop: t.lifecycle.arriveNextStop,
+        straight: t.lifecycle.straightCommand,
+        left: t.lifecycle.leftCommand,
+        right: t.lifecycle.rightCommand,
+        roundabout: t.lifecycle.roundaboutCommand,
+        continue: t.lifecycle.continueCommand,
+        after: t.lifecycle.afterDistance,
+        onto: t.lifecycle.ontoRoad,
+      },
+    }),
+    [currentStopIndex, routeMapPoints, stopMapPoints, t],
   );
 
   useEffect(() => {
@@ -477,7 +524,7 @@ function NavigationMap({
             const message = JSON.parse(event.nativeEvent.data);
             if (message.type === 'route') {
               onRouteInfo({
-                instruction: String(message.instruction || fallbackInstruction(message.distanceMeters)),
+                instruction: String(message.instruction || fallbackInstruction(message.distanceMeters, t)),
                 distanceMeters: Number(message.distanceMeters || 0),
                 durationSeconds: Number(message.durationSeconds || 0),
               });
@@ -487,7 +534,11 @@ function NavigationMap({
           }
         }}
         originWhitelist={['*']}
-        scrollEnabled={false}
+        bounces={false}
+        nestedScrollEnabled
+        scrollEnabled
+        setBuiltInZoomControls={false}
+        setDisplayZoomControls={false}
         setSupportMultipleWindows={false}
         source={{ html }}
         style={styles.mapWebView}
@@ -496,32 +547,18 @@ function NavigationMap({
       <View pointerEvents="none" style={styles.turnBanner}>
         <MaterialCommunityIcons color={colors.white} name="navigation-variant" size={24} />
         <View style={styles.turnTextWrap}>
-          <Text style={styles.turnLabel}>Huong dan tiep theo</Text>
+          <Text style={styles.turnLabel}>{nextInstructionLabel}</Text>
           <Text numberOfLines={2} style={styles.turnText}>{routeInfo.instruction}</Text>
         </View>
       </View>
 
       <View style={styles.floatingControls}>
         <Pressable
-          accessibilityLabel="My location"
+          accessibilityLabel={t.lifecycle.myLocation}
           onPress={() => webViewRef.current?.injectJavaScript('window.myLocation && window.myLocation(); true;')}
           style={styles.floatingButton}
         >
           <MaterialCommunityIcons color={colors.primary} name="crosshairs-gps" size={22} />
-        </Pressable>
-        <Pressable
-          accessibilityLabel="Zoom to route"
-          onPress={() => webViewRef.current?.injectJavaScript('window.zoomToRoute && window.zoomToRoute(); true;')}
-          style={styles.floatingButton}
-        >
-          <MaterialCommunityIcons color={colors.primary} name="map-search-outline" size={22} />
-        </Pressable>
-        <Pressable
-          accessibilityLabel="Recenter"
-          onPress={() => webViewRef.current?.injectJavaScript('window.recenterDriver && window.recenterDriver(); true;')}
-          style={styles.floatingButton}
-        >
-          <MaterialCommunityIcons color={colors.primary} name="navigation-variant-outline" size={22} />
         </Pressable>
       </View>
     </View>
@@ -532,17 +569,11 @@ export default function TripLifecycleScreen() {
   const params = useLocalSearchParams<{ trip?: string; assignmentId?: string }>();
   const { height: windowHeight } = useWindowDimensions();
   const user = useAuthStore((state) => state.user);
+  const { t } = useDriverI18n();
   const initialTrip = useMemo(() => parseTripParam(params.trip), [params.trip]);
   const [trip, setTrip] = useState<AssignedTrip | null>(initialTrip);
   const [currentGps, setCurrentGps] = useState<DeviceGpsPayload | null>(
-    initialTrip?.startLocation
-      ? {
-        latitude: initialTrip.startLocation.latitude,
-        longitude: initialTrip.startLocation.longitude,
-        accuracyMeters: initialTrip.startLocation.accuracyMeters,
-        capturedAt: initialTrip.startLocation.capturedAt || undefined,
-      }
-      : null,
+    toDeviceGpsPayload(initialTrip?.startLocation),
   );
   const [processingAction, setProcessingAction] = useState('');
   const [currentStopIndex, setCurrentStopIndex] = useState(0);
@@ -554,15 +585,43 @@ export default function TripLifecycleScreen() {
   const [estimatedDelayMinutes, setEstimatedDelayMinutes] = useState('10');
   const [injuriesReported, setInjuriesReported] = useState(false);
   const [policeNotified, setPoliceNotified] = useState(false);
-  const [canVehicleContinue, setCanVehicleContinue] = useState(true);
-  const [requiresReplacementVehicle, setRequiresReplacementVehicle] = useState(false);
+  const [breakdownType, setBreakdownType] = useState<BreakdownType>('ENGINE_FAILURE');
+  const [canVehicleContinue, setCanVehicleContinue] = useState(false);
+  const [requiresReplacementVehicle, setRequiresReplacementVehicle] = useState(true);
   const [incidentDescription, setIncidentDescription] = useState('');
   const [evidenceFiles, setEvidenceFiles] = useState<EvidenceFile[]>([]);
   const [routeInfo, setRouteInfo] = useState<RouteInstruction>({
-    instruction: 'Dang cap nhat huong dan',
+    instruction: t.lifecycle.updatingInstruction,
     distanceMeters: 0,
     durationSeconds: 0,
   });
+  const incidentOptions = useMemo(() => ([
+    { ...DRIVER_INCIDENT_OPTIONS[0], label: t.lifecycle.traffic, description: t.lifecycle.trafficDesc },
+    { ...DRIVER_INCIDENT_OPTIONS[1], label: t.lifecycle.accident, description: t.lifecycle.accidentDesc },
+    { ...DRIVER_INCIDENT_OPTIONS[2], label: t.lifecycle.breakdown, description: t.lifecycle.breakdownDesc },
+  ]), [t]);
+  const severityOptions = useMemo(() => ([
+    { value: 'LOW' as const, label: t.lifecycle.low },
+    { value: 'MEDIUM' as const, label: t.lifecycle.medium },
+    { value: 'HIGH' as const, label: t.lifecycle.high },
+    { value: 'CRITICAL' as const, label: t.lifecycle.critical },
+  ]), [t]);
+  const trafficCategoryOptions = useMemo(() => ([
+    { value: 'HEAVY_TRAFFIC', label: t.lifecycle.trafficHeavy },
+    { value: 'ROADWORK', label: t.lifecycle.roadwork },
+    { value: 'FLOODING', label: t.lifecycle.flooding },
+    { value: 'EVENT_CROWD', label: t.lifecycle.eventCrowd },
+    { value: 'STOP_OVERLOAD', label: t.lifecycle.stopOverload },
+    { value: 'TEMPORARY_BLOCK', label: t.lifecycle.temporaryBlock },
+    { value: 'OTHER', label: t.lifecycle.other },
+  ]), [t]);
+  const breakdownTypeOptions = useMemo(() => ([
+    { value: 'ENGINE_FAILURE' as const, label: t.lifecycle.engineFailure },
+    { value: 'BRAKE_FAILURE' as const, label: t.lifecycle.brakeFailure },
+    { value: 'FLAT_TIRE' as const, label: t.lifecycle.flatTire },
+    { value: 'ACCIDENT' as const, label: t.lifecycle.accident },
+    { value: 'OTHER' as const, label: t.lifecycle.other },
+  ]), [t]);
 
   const assignmentId = trip?.id || params.assignmentId || '';
   const tripStatus = trip ? getTripStatus(trip) : 'READY';
@@ -574,22 +633,59 @@ export default function TripLifecycleScreen() {
   const isVehicleReady = inspectionStatus === 'READY';
   const canStart = user?.role === 'DRIVER' && isTripReady && isVehicleReady && !isTripInProgress && !isTripClosed;
   const canComplete = user?.role === 'DRIVER' && isTripInProgress && !isTripClosed;
-  const mapPoints = useMemo(() => toMapPoints(getRouteStops(trip || ({} as AssignedTrip))), [trip]);
-  const nextStop = mapPoints[currentStopIndex] || null;
-  const progress = mapPoints.length ? Math.min(1, completedStopCount / mapPoints.length) : 0;
-  const remainingStops = Math.max(0, mapPoints.length - completedStopCount);
+  const mapPoints = useMemo(() => toMapPoints(getRoutePathPoints(trip || ({} as AssignedTrip)), t.lifecycle.stopPrefix), [t, trip]);
+  const routeStops = useMemo(() => toMapPoints(getRouteStops(trip || ({} as AssignedTrip)), t.lifecycle.stopPrefix), [t, trip]);
+  const stopPoints = routeStops.length ? routeStops : mapPoints;
+  const nextStop = stopPoints[currentStopIndex] || null;
   const driverPoint = currentGps?.latitude != null && currentGps?.longitude != null && isValidGpsCoordinate(currentGps)
     ? { latitude: Number(currentGps.latitude), longitude: Number(currentGps.longitude) }
     : null;
-  const fallbackMeters = distanceMeters(driverPoint, nextStop);
-  const displayDistance = routeInfo.distanceMeters || fallbackMeters;
-  const displayDuration = routeInfo.durationSeconds || (fallbackMeters ? fallbackMeters / 7 : 0);
   const navigationHeight = Math.max(620, Math.round(windowHeight * 0.78));
-  const selectedIncidentOption = DRIVER_INCIDENT_OPTIONS.find((option) => option.type === incidentType) || null;
+  const expandedSheetHeight = Math.min(245, Math.max(220, Math.round(windowHeight * 0.26)));
+  const collapsedSheetHeight = 66;
+  const maxSheetTranslate = expandedSheetHeight - collapsedSheetHeight;
+  const sheetTranslateY = useRef(new Animated.Value(0)).current;
+  const sheetOffsetRef = useRef(0);
+  const animateSheet = useCallback((toValue: number) => {
+    sheetOffsetRef.current = toValue;
+    Animated.spring(sheetTranslateY, {
+      toValue,
+      useNativeDriver: true,
+      damping: 24,
+      stiffness: 220,
+    }).start();
+  }, [sheetTranslateY]);
+  const sheetPanResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onStartShouldSetPanResponderCapture: () => true,
+    onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 2,
+    onMoveShouldSetPanResponderCapture: (_, gesture) => Math.abs(gesture.dy) > 2,
+    onPanResponderGrant: () => {
+      sheetTranslateY.stopAnimation((value) => {
+        sheetOffsetRef.current = Math.min(maxSheetTranslate, Math.max(0, Number(value) || 0));
+      });
+    },
+    onPanResponderMove: (_, gesture) => {
+      const nextValue = Math.min(maxSheetTranslate, Math.max(0, sheetOffsetRef.current + gesture.dy));
+      sheetTranslateY.setValue(nextValue);
+    },
+    onPanResponderRelease: (_, gesture) => {
+      if (Math.abs(gesture.dy) < 6) {
+        animateSheet(sheetOffsetRef.current > 0 ? 0 : maxSheetTranslate);
+        return;
+      }
+      const currentValue = Math.min(maxSheetTranslate, Math.max(0, sheetOffsetRef.current + gesture.dy));
+      const shouldCollapse = gesture.vy > 0.25 || currentValue > maxSheetTranslate / 2;
+      animateSheet(shouldCollapse ? maxSheetTranslate : 0);
+    },
+    onPanResponderTerminationRequest: () => false,
+    onShouldBlockNativeResponder: () => true,
+  }), [animateSheet, maxSheetTranslate, sheetTranslateY]);
+  const selectedIncidentOption = incidentOptions.find((option) => option.type === incidentType) || null;
   const canReportIncident = Boolean(
     incidentType
     && isTripInProgress
-    && incidentLocation.trim().length >= 3
+    && (incidentType === 'VEHICLE_BREAKDOWN' || incidentLocation.trim().length >= 3)
     && incidentDescription.trim().length >= 10
     && !processingAction
   );
@@ -605,7 +701,7 @@ export default function TripLifecycleScreen() {
         setTrip(updated);
       }
     } catch (error) {
-      Alert.alert('Khong the tai GPS', getErrorMessage(error, 'Unable to reload GPS for this trip.'));
+      Alert.alert(t.lifecycle.gpsUnavailable, getErrorMessage(error, t.lifecycle.gpsUnavailable));
     } finally {
       setProcessingAction('');
     }
@@ -613,18 +709,18 @@ export default function TripLifecycleScreen() {
 
   const markStopArrived = (manual = false) => {
     if (!nextStop) {
-      Alert.alert('Hoan thanh chuyen', 'Tat ca tram trong tuyen da hoan thanh. Tai xe co the ket thuc chuyen.');
+      Alert.alert(t.lifecycle.completeTrip, t.lifecycle.routeComplete);
       return;
     }
 
-    const nextCompletedCount = Math.min(mapPoints.length, currentStopIndex + 1);
+    const nextCompletedCount = Math.min(stopPoints.length, currentStopIndex + 1);
     setCompletedStopCount(nextCompletedCount);
-    setCurrentStopIndex((index) => Math.min(mapPoints.length, index + 1));
+    setCurrentStopIndex((index) => Math.min(stopPoints.length, index + 1));
 
-    if (nextCompletedCount >= mapPoints.length) {
-      Alert.alert('Hoan thanh tat ca tram', 'Da di het cac tram trong tuyen. Ban co the bam Hoan thanh chuyen.');
+    if (nextCompletedCount >= stopPoints.length) {
+      Alert.alert(t.lifecycle.completeTrip, t.lifecycle.routeComplete);
     } else if (manual) {
-      Alert.alert('Da den tram', `Dang huong den tram ${nextCompletedCount + 1}.`);
+      Alert.alert(t.lifecycle.headingTo, `${t.lifecycle.stopPrefix} ${nextCompletedCount + 1}`);
     }
   };
 
@@ -640,6 +736,32 @@ export default function TripLifecycleScreen() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!assignmentId) return undefined;
+
+    let isMounted = true;
+    const refreshTrip = async () => {
+      try {
+        const updatedTrip = await scheduleOperationsApi.getAssignedTripDetail(assignmentId);
+        if (isMounted) {
+          setTrip(updatedTrip);
+        }
+      } catch {
+        // Keep navigation available with the last known trip payload.
+      }
+    };
+
+    void refreshTrip();
+    const timer = setInterval(() => {
+      void refreshTrip();
+    }, 15000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, [assignmentId]);
 
   useEffect(() => {
     if (!isTripInProgress) return undefined;
@@ -683,9 +805,9 @@ export default function TripLifecycleScreen() {
       setCurrentGps(gps);
       const updated = await scheduleOperationsApi.startTrip(assignmentId, { gps });
       setTrip(updated);
-      Alert.alert('Bat dau chuyen', `Trip started. GPS: ${updated.gpsSync?.status || 'UNKNOWN'}.`);
+      Alert.alert(t.lifecycle.startTrip, `${t.lifecycle.startedGps}: ${updated.gpsSync?.status || 'UNKNOWN'}.`);
     } catch (error) {
-      Alert.alert('Khong the bat dau chuyen', getErrorMessage(error, 'Unable to start this trip.'));
+      Alert.alert(t.lifecycle.startTrip, getErrorMessage(error, t.lifecycle.startTrip));
     } finally {
       setProcessingAction('');
     }
@@ -693,17 +815,6 @@ export default function TripLifecycleScreen() {
 
   const completeTrip = async () => {
     if (!assignmentId) return;
-    if (completedStopCount < mapPoints.length) {
-      Alert.alert(
-        'Chua di het tram',
-        `Da di ${completedStopCount}/${mapPoints.length} tram. Ban van muon hoan thanh chuyen?`,
-        [
-          { text: 'Huy', style: 'cancel' },
-          { text: 'Hoan thanh', onPress: () => void completeTripRequest() },
-        ],
-      );
-      return;
-    }
     await completeTripRequest();
   };
 
@@ -718,7 +829,7 @@ export default function TripLifecycleScreen() {
         params: { assignmentId: updated.id || assignmentId, trip: JSON.stringify(updated) },
       } as unknown as Href);
     } catch (error) {
-      const message = getErrorMessage(error, 'Unable to complete this trip.');
+      const message = getErrorMessage(error, t.lifecycle.completeErrorFallback);
       if (message.toLowerCase().includes('already') && message.toLowerCase().includes('completed')) {
         const completedTrip = {
           ...trip,
@@ -731,7 +842,7 @@ export default function TripLifecycleScreen() {
         } as unknown as Href);
         return;
       }
-      Alert.alert('Khong the hoan thanh chuyen', message);
+      Alert.alert(t.lifecycle.completeTrip, message);
     } finally {
       setProcessingAction('');
     }
@@ -740,7 +851,7 @@ export default function TripLifecycleScreen() {
   const chooseEvidenceFiles = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Can quyen truy cap anh', 'Vui long cho phep truy cap thu vien anh de gui anh hien truong.');
+      Alert.alert(t.lifecycle.reportIncident, t.lifecycle.incidentPlaceholder);
       return;
     }
 
@@ -765,19 +876,24 @@ export default function TripLifecycleScreen() {
     if (!assignmentId || !incidentType) return;
     const description = incidentDescription.trim();
     if (description.length < 10) {
-      Alert.alert('Can mo ta su co', 'Vui long nhap it nhat 10 ky tu.');
+      Alert.alert(t.lifecycle.incidentDescription, t.lifecycle.incidentPlaceholder);
       return;
     }
-    if (incidentLocation.trim().length < 3) {
-      Alert.alert('Can vi tri su co', 'Vui long nhap vi tri su co.');
+    if (incidentType !== 'VEHICLE_BREAKDOWN' && incidentLocation.trim().length < 3) {
+      Alert.alert(t.lifecycle.locationRequiredTitle, t.lifecycle.locationRequiredMessage);
       return;
     }
+    const autoLocation = currentGps?.latitude != null && currentGps?.longitude != null
+      ? `${formatCoordinate(currentGps.latitude)}, ${formatCoordinate(currentGps.longitude)}`
+      : trip?.route?.name || trip?.tripCode || t.common.currentGpsLocation;
 
     const payload: Record<string, unknown> = {
       type: incidentType,
       severity: incidentType === 'ACCIDENT' && incidentSeverity === 'LOW' ? 'MEDIUM' : incidentSeverity,
       description,
-      locationText: incidentLocation.trim(),
+      locationText: incidentType === 'VEHICLE_BREAKDOWN'
+        ? (incidentLocation.trim() || autoLocation)
+        : incidentLocation.trim(),
       latitude: currentGps?.latitude,
       longitude: currentGps?.longitude,
       evidenceFiles,
@@ -795,6 +911,7 @@ export default function TripLifecycleScreen() {
     }
 
     if (incidentType === 'VEHICLE_BREAKDOWN') {
+      payload.breakdownType = breakdownType;
       payload.canContinue = canVehicleContinue;
       payload.requiresReplacementVehicle = requiresReplacementVehicle;
     }
@@ -806,9 +923,9 @@ export default function TripLifecycleScreen() {
       setIncidentLocation('');
       setEvidenceFiles([]);
       setIncidentType(null);
-      Alert.alert('Da gui bao cao', 'Su co da duoc gui ve dieu hanh.');
+      Alert.alert(t.lifecycle.reportIncident, t.lifecycle.incidentHint);
     } catch (error) {
-      Alert.alert('Khong the gui bao cao', getErrorMessage(error, 'Unable to report incident.'));
+      Alert.alert(t.lifecycle.reportIncident, getErrorMessage(error, t.lifecycle.reportIncident));
     } finally {
       setProcessingAction('');
     }
@@ -818,15 +935,15 @@ export default function TripLifecycleScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant/assigned-trips')}>
+          <Pressable accessibilityLabel={t.common.back} hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant/assigned-trips')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View style={styles.headerText}>
-            <Text style={styles.kicker}>TRIP NAVIGATION</Text>
-            <Text numberOfLines={1} style={styles.title}>{trip?.route?.routeNumber || trip?.tripCode || 'Dang van hanh'}</Text>
+            <Text style={styles.kicker}>{t.lifecycle.kicker}</Text>
+            <Text numberOfLines={1} style={styles.title}>{trip?.route?.routeNumber || trip?.tripCode || t.common.route}</Text>
           </View>
           <View style={styles.gpsPill}>
-            <Text style={styles.gpsPillText}>{gpsStatus}</Text>
+            <Text style={styles.gpsPillText}>{formatDriverStatus(gpsStatus, t)}</Text>
           </View>
         </View>
 
@@ -835,60 +952,54 @@ export default function TripLifecycleScreen() {
             currentGps={currentGps}
             currentStopIndex={currentStopIndex}
             onRouteInfo={setRouteInfo}
+            nextInstructionLabel={t.lifecycle.nextInstruction}
             routeInfo={routeInfo}
+            t={t}
             trip={trip}
           />
 
-          <View style={styles.bottomSheet}>
-            <View style={styles.sheetHandle} />
-            <Text numberOfLines={1} style={styles.routeTitle}>{trip?.route?.name || 'Tuyen xe bus'}</Text>
-            <Text style={styles.sheetLabel}>Dang huong den</Text>
+          <Animated.View
+            style={[
+              styles.bottomSheet,
+              {
+                height: expandedSheetHeight,
+                transform: [{ translateY: sheetTranslateY }],
+              },
+            ]}
+          >
+            <View
+              accessibilityLabel={t.lifecycle.dragTripSummary}
+              accessibilityRole="button"
+              style={styles.sheetHandleTouch}
+              {...sheetPanResponder.panHandlers}
+            >
+              <View style={styles.sheetHandle} />
+            </View>
+            <Text numberOfLines={1} style={styles.routeTitle}>{trip?.route?.name || t.common.route}</Text>
+            {hasVehicleReplacement(trip) ? (
+              <View style={styles.replacementNotice}>
+                <MaterialCommunityIcons color={colors.primary} name="swap-horizontal-bold" size={17} />
+                <Text numberOfLines={2} style={styles.replacementText}>
+                  {t.trips.replacementPrefix} {getVehicleLabel(trip?.vehicleReplacement?.currentVehicle || trip?.vehicle)}. {t.trips.oldVehicleMaintenance}
+                </Text>
+              </View>
+            ) : null}
+            <Text style={styles.sheetLabel}>{t.lifecycle.headingTo}</Text>
             <Text numberOfLines={2} style={styles.nextStopName}>
-              {nextStop ? `Tram ${currentStopIndex + 1} - ${nextStop.name}` : 'Tat ca tram da hoan thanh'}
+              {nextStop ? `${t.lifecycle.stopPrefix} ${currentStopIndex + 1} - ${nextStop.name}` : t.lifecycle.routeComplete}
             </Text>
 
-            <View style={styles.metricsRow}>
-              <View style={styles.metricBox}>
-                <Text style={styles.metricValue}>{formatDistance(displayDistance)}</Text>
-                <Text style={styles.metricLabel}>Con lai</Text>
-              </View>
-              <View style={styles.metricBox}>
-                <Text style={styles.metricValue}>{formatEta(displayDuration)}</Text>
-                <Text style={styles.metricLabel}>ETA</Text>
-              </View>
-              <View style={styles.metricBox}>
-                <Text style={styles.metricValue}>{remainingStops}</Text>
-                <Text style={styles.metricLabel}>Tram con lai</Text>
-              </View>
-            </View>
-
-            <View style={styles.progressHeader}>
-              <Text style={styles.progressText}>Da di {completedStopCount}/{mapPoints.length} tram</Text>
-              <Text style={styles.progressText}>{Math.round(progress * 100)}%</Text>
-            </View>
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
-            </View>
-
-            <View style={styles.driverInfoRow}>
-              <Text numberOfLines={1} style={styles.driverInfo}>Xe: {trip?.vehicle?.code || trip?.vehicle?.plateNumber || 'N/A'}</Text>
-              <Text numberOfLines={1} style={styles.driverInfo}>Gio: {formatTime(trip?.scheduledStart)}</Text>
-            </View>
-            <View style={styles.driverInfoRow}>
-              <Text numberOfLines={1} style={styles.driverInfo}>Vi do: {formatCoordinate(currentGps?.latitude)}</Text>
-              <Text numberOfLines={1} style={styles.driverInfo}>Kinh do: {formatCoordinate(currentGps?.longitude)}</Text>
-            </View>
-
             <View style={styles.sheetActions}>
+              {canStart ? (
+                <AppButton
+                  title={t.lifecycle.startTrip}
+                  loading={processingAction === 'start'}
+                  onPress={startTrip}
+                  style={styles.sheetAction}
+                />
+              ) : null}
               <AppButton
-                title={canStart ? 'Bat dau chuyen' : 'Da den tram'}
-                disabled={canStart ? false : !isTripInProgress || !nextStop}
-                loading={processingAction === 'start'}
-                onPress={canStart ? startTrip : () => markStopArrived(true)}
-                style={styles.sheetAction}
-              />
-              <AppButton
-                title="Hoan thanh chuyen"
+                title={t.lifecycle.completeTrip}
                 disabled={!canComplete}
                 loading={processingAction === 'complete'}
                 onPress={completeTrip}
@@ -904,29 +1015,29 @@ export default function TripLifecycleScreen() {
               style={({ pressed }) => [styles.gpsReload, pressed && styles.pressed]}
             >
               <MaterialCommunityIcons color={colors.primary} name="reload" size={18} />
-              <Text style={styles.gpsReloadText}>{processingAction === 'gps' ? 'Dang tai GPS...' : 'Tai lai GPS'}</Text>
+              <Text style={styles.gpsReloadText}>{processingAction === 'gps' ? t.common.loading : t.lifecycle.reloadGps}</Text>
             </Pressable>
-          </View>
+          </Animated.View>
         </View>
 
         <View style={styles.reportSection}>
           <View style={styles.reportHeader}>
             <View style={styles.reportTitleRow}>
               <MaterialCommunityIcons color={colors.error} name="alert-circle-outline" size={22} />
-              <Text style={styles.reportTitle}>Bao cao su co</Text>
+              <Text style={styles.reportTitle}>{t.lifecycle.reportIncident}</Text>
             </View>
             <View style={styles.reportStatusPill}>
-              <Text style={styles.reportStatusText}>{isTripInProgress ? 'Dang van hanh' : 'Chua mo'}</Text>
+              <Text style={styles.reportStatusText}>{isTripInProgress ? t.common.inProgress : t.common.notStart}</Text>
             </View>
           </View>
-          <Text style={styles.reportHint}>Chi bao su co khi chuyen dang van hanh. Bao cao se gui ve dieu hanh de xu ly.</Text>
+          <Text style={styles.reportHint}>{t.lifecycle.incidentHint}</Text>
 
           {!incidentType ? (
             <View style={styles.incidentPickerPanel}>
               <View style={styles.incidentPanelHeader}>
                 <View>
-                  <Text style={styles.incidentPanelTitle}>Bao cao su co</Text>
-                  <Text style={styles.reportHint}>Chon loai su co dang xay ra de mo dung form bao cao.</Text>
+                  <Text style={styles.incidentPanelTitle}>{t.lifecycle.reportIncident}</Text>
+                  <Text style={styles.reportHint}>{t.lifecycle.chooseIncident}</Text>
                 </View>
                 <Pressable
                   accessibilityRole="button"
@@ -935,12 +1046,12 @@ export default function TripLifecycleScreen() {
                   style={[styles.reportButtonSmall, !isTripInProgress && styles.reportButtonDisabled]}
                 >
                   <MaterialCommunityIcons color={colors.white} name="alert-outline" size={16} />
-                  <Text style={styles.reportButtonSmallText}>Bao cao</Text>
+                  <Text style={styles.reportButtonSmallText}>{t.lifecycle.reportIncident}</Text>
                 </Pressable>
               </View>
 
               <View style={styles.incidentCardsGrid}>
-                {DRIVER_INCIDENT_OPTIONS.map((option) => (
+                {incidentOptions.map((option) => (
                   <Pressable
                     key={option.type}
                     accessibilityRole="button"
@@ -959,7 +1070,7 @@ export default function TripLifecycleScreen() {
                     <View style={styles.incidentTypeIcon}>
                       <MaterialCommunityIcons color={colors.error} name={option.icon} size={22} />
                     </View>
-                    <Text style={styles.incidentTypeTitle}>{option.code} - {option.label}</Text>
+                    <Text style={styles.incidentTypeTitle}>{option.label}</Text>
                     <Text style={styles.incidentTypeDescription}>{option.description}</Text>
                   </Pressable>
                 ))}
@@ -970,23 +1081,23 @@ export default function TripLifecycleScreen() {
               <View style={styles.selectedIncidentHeader}>
                 <View style={styles.selectedIncidentTitleWrap}>
                   <Text style={styles.selectedIncidentTitle}>
-                    {selectedIncidentOption?.code} - {selectedIncidentOption?.label}
+                    {selectedIncidentOption?.label}
                   </Text>
-                  <Text style={styles.reportHint}>Nhap thong tin chi tiet de gui ve dieu hanh.</Text>
+                  <Text style={styles.reportHint}>{t.lifecycle.chooseIncident}</Text>
                 </View>
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => setIncidentType(null)}
                   style={styles.changeIncidentButton}
                 >
-                  <Text style={styles.changeIncidentText}>Doi loai su co</Text>
+                  <Text style={styles.changeIncidentText}>{t.lifecycle.chooseIncident}</Text>
                 </Pressable>
               </View>
 
               <View style={styles.fieldGroup}>
-                <Text style={styles.fieldLabel}>Muc do</Text>
+                <Text style={styles.fieldLabel}>{t.common.status}</Text>
                 <View style={styles.optionWrap}>
-                  {INCIDENT_SEVERITIES.map((severity) => {
+                  {severityOptions.map((severity) => {
                     const isDisabled = incidentType === 'ACCIDENT' && severity.value === 'LOW';
                     const isActive = incidentSeverity === severity.value;
                     return (
@@ -1009,11 +1120,11 @@ export default function TripLifecycleScreen() {
               </View>
 
               <View style={styles.fieldGroup}>
-                <Text style={styles.fieldLabel}>Vi tri</Text>
+                <Text style={styles.fieldLabel}>{t.detail.currentLocation}</Text>
                 <TextInput
                   editable={isTripInProgress && !Boolean(processingAction)}
                   onChangeText={setIncidentLocation}
-                  placeholder="Vi du: gan cau Rong"
+                  placeholder={t.detail.currentLocation}
                   placeholderTextColor={colors.muted}
                   style={styles.singleLineInput}
                   value={incidentLocation}
@@ -1023,9 +1134,9 @@ export default function TripLifecycleScreen() {
               {incidentType === 'TRAFFIC_CONGESTION' ? (
                 <>
                   <View style={styles.fieldGroup}>
-                    <Text style={styles.fieldLabel}>Loai ket xe</Text>
+                    <Text style={styles.fieldLabel}>{t.lifecycle.traffic}</Text>
                     <View style={styles.optionWrap}>
-                      {TRAFFIC_CATEGORIES.map((category) => {
+                      {trafficCategoryOptions.map((category) => {
                         const isActive = trafficCategory === category.value;
                         return (
                           <Pressable
@@ -1041,7 +1152,7 @@ export default function TripLifecycleScreen() {
                     </View>
                   </View>
                   <View style={styles.fieldGroup}>
-                    <Text style={styles.fieldLabel}>Uoc tinh tre phut</Text>
+                    <Text style={styles.fieldLabel}>ETA</Text>
                     <TextInput
                       editable={isTripInProgress && !Boolean(processingAction)}
                       keyboardType="number-pad"
@@ -1059,35 +1170,63 @@ export default function TripLifecycleScreen() {
                 <View style={styles.checkboxGrid}>
                   <Pressable style={styles.checkboxRow} onPress={() => setInjuriesReported((value) => !value)}>
                     <MaterialCommunityIcons color={injuriesReported ? colors.error : colors.muted} name={injuriesReported ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} />
-                    <Text style={styles.checkboxText}>Co nguoi bi thuong</Text>
+                    <Text style={styles.checkboxText}>{t.lifecycle.injuriesReported}</Text>
                   </Pressable>
                   <Pressable style={styles.checkboxRow} onPress={() => setPoliceNotified((value) => !value)}>
                     <MaterialCommunityIcons color={policeNotified ? colors.error : colors.muted} name={policeNotified ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} />
-                    <Text style={styles.checkboxText}>Da bao co quan chuc nang</Text>
+                    <Text style={styles.checkboxText}>{t.lifecycle.policeNotified}</Text>
                   </Pressable>
                 </View>
               ) : null}
 
               {incidentType === 'VEHICLE_BREAKDOWN' ? (
-                <View style={styles.checkboxGrid}>
-                  <Pressable style={styles.checkboxRow} onPress={() => setCanVehicleContinue((value) => !value)}>
-                    <MaterialCommunityIcons color={canVehicleContinue ? colors.error : colors.muted} name={canVehicleContinue ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} />
-                    <Text style={styles.checkboxText}>Xe con co the tiep tuc chay</Text>
-                  </Pressable>
-                  <Pressable style={styles.checkboxRow} onPress={() => setRequiresReplacementVehicle((value) => !value)}>
-                    <MaterialCommunityIcons color={requiresReplacementVehicle ? colors.error : colors.muted} name={requiresReplacementVehicle ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} />
-                    <Text style={styles.checkboxText}>Can xe thay the</Text>
-                  </Pressable>
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>{t.lifecycle.breakdown}</Text>
+                  <View style={styles.optionGrid}>
+                    {breakdownTypeOptions.map((type) => {
+                      const isActive = breakdownType === type.value;
+                      return (
+                        <Pressable
+                          key={type.value}
+                          accessibilityRole="button"
+                          disabled={!isTripInProgress || Boolean(processingAction)}
+                          onPress={() => setBreakdownType(type.value)}
+                          style={[styles.optionChipWide, isActive && styles.optionChipDanger]}
+                        >
+                          <Text style={[styles.optionChipText, isActive && styles.optionChipTextDanger]}>{type.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  <View style={styles.checkboxGrid}>
+                    <Pressable
+                      disabled={!isTripInProgress || Boolean(processingAction)}
+                      onPress={() => setCanVehicleContinue((value) => !value)}
+                      style={styles.checkboxRow}
+                    >
+                      <MaterialCommunityIcons color={canVehicleContinue ? colors.error : colors.muted} name={canVehicleContinue ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} />
+                      <Text style={styles.checkboxText}>{t.lifecycle.vehicleCanContinue}</Text>
+                    </Pressable>
+                    <Pressable
+                      disabled={!isTripInProgress || Boolean(processingAction)}
+                      onPress={() => setRequiresReplacementVehicle((value) => !value)}
+                      style={styles.checkboxRow}
+                    >
+                      <MaterialCommunityIcons color={requiresReplacementVehicle ? colors.error : colors.muted} name={requiresReplacementVehicle ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} />
+                      <Text style={styles.checkboxText}>{t.lifecycle.replacementRequired}</Text>
+                    </Pressable>
+                  </View>
+                  <Text style={styles.fileHelp}>{t.lifecycle.replacementHelp}</Text>
                 </View>
               ) : null}
 
               <View style={styles.fieldGroup}>
-                <Text style={styles.fieldLabel}>Mo ta</Text>
+                <Text style={styles.fieldLabel}>{t.lifecycle.incidentDescription}</Text>
                 <TextInput
                   editable={isTripInProgress && !Boolean(processingAction)}
                   multiline
                   onChangeText={setIncidentDescription}
-                  placeholder="Mo ta ro tinh huong, muc anh huong va hanh dong da thuc hien."
+                  placeholder={t.lifecycle.incidentPlaceholder}
                   placeholderTextColor={colors.muted}
                   style={styles.incidentInput}
                   value={incidentDescription}
@@ -1095,7 +1234,7 @@ export default function TripLifecycleScreen() {
               </View>
 
               <View style={styles.fieldGroup}>
-                <Text style={styles.fieldLabel}>Anh hien truong</Text>
+                <Text style={styles.fieldLabel}>{t.lifecycle.evidence}</Text>
                 <Pressable
                   accessibilityRole="button"
                   disabled={evidenceFiles.length >= 5 || Boolean(processingAction)}
@@ -1103,13 +1242,13 @@ export default function TripLifecycleScreen() {
                   style={styles.filePicker}
                 >
                   <View style={styles.filePickerButton}>
-                    <Text style={styles.filePickerButtonText}>Chon tep</Text>
+                    <Text style={styles.filePickerButtonText}>{t.common.chooseFile}</Text>
                   </View>
                   <Text numberOfLines={1} style={styles.filePickerText}>
-                    {evidenceFiles.length ? `${evidenceFiles.length} tep da chon` : 'Khong co tep nao duoc chon'}
+                    {evidenceFiles.length ? `${evidenceFiles.length}` : t.common.noFile}
                   </Text>
                 </Pressable>
-                <Text style={styles.fileHelp}>Co the chup hoac chon toi da 5 anh JPG, PNG, WEBP de admin xem tinh hinh ro hon.</Text>
+                <Text style={styles.fileHelp}>{t.lifecycle.evidenceHelp}</Text>
               </View>
 
               <Pressable
@@ -1123,7 +1262,7 @@ export default function TripLifecycleScreen() {
                 ]}
               >
                 <MaterialCommunityIcons color={colors.white} name="send-outline" size={18} />
-                <Text style={styles.reportButtonText}>{processingAction === 'incident' ? 'Dang gui...' : 'Gui bao cao su co'}</Text>
+                <Text style={styles.reportButtonText}>{processingAction === 'incident' ? t.common.loading : t.lifecycle.submitIncident}</Text>
               </Pressable>
             </View>
           )}
@@ -1186,32 +1325,37 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   bottomSheet: {
-    minHeight: 286,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
     backgroundColor: colors.card,
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingTop: 0,
     paddingBottom: 14,
     shadowColor: colors.primary,
     shadowOpacity: 0.18,
     shadowRadius: 18,
     elevation: 10,
   },
-  sheetHandle: { alignSelf: 'center', width: 48, height: 5, borderRadius: 999, backgroundColor: colors.outline, marginBottom: 10 },
+  sheetHandleTouch: { alignItems: 'center', justifyContent: 'center', minHeight: 30, marginBottom: 2 },
+  sheetHandle: { width: 48, height: 5, borderRadius: 999, backgroundColor: colors.outline },
   routeTitle: { color: colors.primary, fontSize: 15, fontWeight: '900' },
+  replacementNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    borderRadius: 14,
+    backgroundColor: '#e8f8ef',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  replacementText: { flex: 1, color: colors.primary, fontSize: 11, lineHeight: 16, fontWeight: '800' },
   sheetLabel: { marginTop: 8, color: colors.accent, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
   nextStopName: { marginTop: 3, color: colors.text, fontSize: 20, lineHeight: 25, fontWeight: '900' },
-  metricsRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  metricBox: { flex: 1, borderRadius: 16, backgroundColor: colors.surfaceLow, padding: 10 },
-  metricValue: { color: colors.primary, fontSize: 17, fontWeight: '900' },
-  metricLabel: { marginTop: 2, color: colors.muted, fontSize: 10, fontWeight: '800' },
-  progressHeader: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
-  progressText: { color: colors.muted, fontSize: 12, fontWeight: '900' },
-  progressTrack: { height: 10, overflow: 'hidden', borderRadius: 999, backgroundColor: colors.surfaceHigh, marginTop: 7 },
-  progressFill: { height: '100%', borderRadius: 999, backgroundColor: colors.accent },
-  driverInfoRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginTop: 9 },
-  driverInfo: { flex: 1, color: colors.muted, fontSize: 11, fontWeight: '800' },
   sheetActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
   sheetAction: { flex: 1, minHeight: 52 },
   gpsReload: {
@@ -1312,6 +1456,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   optionWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  optionGrid: { gap: 8 },
   optionChip: {
     minHeight: 40,
     justifyContent: 'center',
@@ -1331,9 +1476,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   optionChipActive: { borderColor: colors.error, backgroundColor: colors.error },
+  optionChipDanger: { borderColor: colors.error, backgroundColor: colors.error },
   optionChipDisabled: { opacity: 0.35 },
   optionChipText: { color: colors.text, fontSize: 12, fontWeight: '800' },
   optionChipTextActive: { color: colors.white },
+  optionChipTextDanger: { color: colors.white },
   checkboxGrid: { gap: 10 },
   checkboxRow: {
     minHeight: 48,

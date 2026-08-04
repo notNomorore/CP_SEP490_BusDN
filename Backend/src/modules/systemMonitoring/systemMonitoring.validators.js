@@ -61,11 +61,15 @@ export const validateIdParam = (params) => {
 
 export const validateSuspiciousStatusUpdate = (body) => {
   const errors = {};
+  const lockDurations = ['NONE', '2_HOURS', '5_HOURS', '10_HOURS', 'PERMANENT'];
   if (!SUSPICIOUS_STATUSES.includes(body.status)) {
     errors.status = 'Invalid investigation status';
   }
   if (['RESOLVED', 'DISMISSED'].includes(body.status) && !String(body.adminNote || '').trim()) {
     errors.adminNote = 'Admin note is required when resolving or dismissing a case';
+  }
+  if (body.lockDuration && !lockDurations.includes(body.lockDuration)) {
+    errors.lockDuration = 'Invalid account lock duration';
   }
   return errors;
 };

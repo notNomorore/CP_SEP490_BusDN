@@ -79,6 +79,7 @@ const RegisterPage = () => {
     ...rule,
     isValid: rule.test(password),
   }));
+  const showPasswordFollowup = password.length > 0;
   const isPasswordValid = passwordChecks.every((rule) => rule.isValid);
   const passwordsMatch = confirmPassword.length > 0 && confirmPassword === password;
   const canSubmit =
@@ -204,23 +205,26 @@ const RegisterPage = () => {
             </span>
           </label>
 
-          <div className="grid gap-2 rounded-3xl bg-surface-container-low p-4">
-            {passwordChecks.map((rule) => (
-              <div
-                key={rule.key}
-                className={`flex items-center gap-3 text-sm ${
-                  rule.isValid ? 'text-on-tertiary-container' : 'text-outline'
-                }`}
-              >
-                <span className="material-symbols-outlined text-base">
-                  {rule.isValid ? 'check_circle' : 'radio_button_unchecked'}
-                </span>
-                <span>{rule.label}</span>
-              </div>
-            ))}
-          </div>
+          {showPasswordFollowup ? (
+            <div className="grid gap-2 rounded-3xl bg-surface-container-low p-4">
+              {passwordChecks.map((rule) => (
+                <div
+                  key={rule.key}
+                  className={`flex items-center gap-3 text-sm ${
+                    rule.isValid ? 'text-on-tertiary-container' : 'text-outline'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-base">
+                    {rule.isValid ? 'check_circle' : 'radio_button_unchecked'}
+                  </span>
+                  <span>{rule.label}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
 
-          <label className="block space-y-2">
+          {showPasswordFollowup ? (
+            <label className="block space-y-2">
             <span className="text-sm font-semibold text-on-surface">Confirm password</span>
             <span className="flex items-center gap-3 rounded-2xl border border-outline-variant/60 bg-white px-4 py-2.5 shadow-sm focus-within:border-on-tertiary-container focus-within:ring-2 focus-within:ring-on-tertiary-container/20">
               <span className="material-symbols-outlined text-outline">password</span>
@@ -247,7 +251,8 @@ const RegisterPage = () => {
             {confirmPassword && !passwordsMatch && (
               <p className="text-sm text-error">Passwords do not match.</p>
             )}
-          </label>
+            </label>
+          ) : null}
 
           <label className="flex items-start gap-3 rounded-2xl border border-outline-variant/40 bg-white/70 px-4 py-2.5 text-sm text-on-surface-variant">
             <input

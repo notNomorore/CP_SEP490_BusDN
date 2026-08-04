@@ -18,10 +18,43 @@ const STATUS_BADGE = {
 
 const RECOVERY_BADGE = {
   REPORTED: 'bg-blue-100 text-blue-800',
+  SEARCHING: 'bg-indigo-100 text-indigo-800',
+  FOUND: 'bg-cyan-100 text-cyan-800',
   STORED: 'bg-amber-100 text-amber-900',
   RETURNED: 'bg-green-100 text-green-800',
   CANCELLED: 'bg-slate-100 text-slate-700',
+  UNRECOVERED: 'bg-red-100 text-red-800',
 };
+
+const PASSENGER_LOST_ITEM_RECOVERY_STATUSES = [
+  { value: 'ALL', label: 'Tất cả' },
+  { value: 'REPORTED', label: 'Đã báo cáo' },
+  { value: 'SEARCHING', label: 'Đang tìm kiếm' },
+  { value: 'FOUND', label: 'Đã tìm thấy' },
+  { value: 'RETURNED', label: 'Đã hoàn trả' },
+  { value: 'UNRECOVERED', label: 'Không tìm thấy' },
+];
+
+const LOST_ITEM_FILTER_STATUSES = [
+  { value: 'ALL', label: 'Tất cả' },
+  { value: 'REPORTED', label: 'Đã báo cáo' },
+  { value: 'SEARCHING', label: 'Đang tìm kiếm' },
+  { value: 'FOUND', label: 'Đã tìm thấy' },
+  { value: 'STORED', label: 'Đã lưu giữ' },
+  { value: 'RETURNED', label: 'Đã hoàn trả' },
+  { value: 'CANCELLED', label: 'Đã hủy' },
+  { value: 'UNRECOVERED', label: 'Không tìm thấy' },
+];
+
+const PASSENGER_RECOVERY_TO_CASE_STATUS = {
+  REPORTED: 'SUBMITTED',
+  SEARCHING: 'IN_PROGRESS',
+  FOUND: 'IN_PROGRESS',
+  RETURNED: 'RESOLVED',
+  UNRECOVERED: 'CLOSED',
+};
+
+const isPassengerLostItemCase = (lostItemCase) => lostItemCase?.sourceType === 'PASSENGER_LOST_ITEM';
 
 const formatDateTime = (value) => {
   if (!value) return 'Chưa có';
@@ -94,7 +127,7 @@ const AdminLostItemCasesPage = () => {
   const syncForm = (lostItemCase) => {
     setNextRecoveryStatus(lostItemCase?.recoveryStatus === 'RETURNED'
       ? 'RETURNED'
-      : lostItemCase?.recoveryStatus || 'STORED');
+      : lostItemCase?.recoveryStatus || (isPassengerLostItemCase(lostItemCase) ? 'SEARCHING' : 'STORED'));
     setHandedTo(lostItemCase?.handedTo || '');
     setAdminNote(lostItemCase?.adminNote || '');
   };
@@ -128,15 +161,23 @@ const AdminLostItemCasesPage = () => {
     setMessage('');
 
     try {
-      const response = await customerSupportService.updateAdminLostItem(selectedCase.id, {
-        recoveryStatus: nextRecoveryStatus,
-        handedTo,
-        adminNote,
-      });
+      if (isPassengerLostItemCase(selectedCase)) {
+        await customerSupportService.updateLostItemCase(selectedCase.id, {
+          recoveryStatus: nextRecoveryStatus,
+          status: PASSENGER_RECOVERY_TO_CASE_STATUS[nextRecoveryStatus] || selectedCase.caseStatus,
+          note: adminNote.trim() || undefined,
+        });
+      } else {
+        await customerSupportService.updateAdminLostItem(selectedCase.id, {
+          recoveryStatus: nextRecoveryStatus,
+          handedTo,
+          adminNote: adminNote.trim() || undefined,
+        });
+      }
 
-      setSelectedCase(response.data);
       setMessage('Hồ sơ đồ thất lạc đã được cập nhật.');
       await loadCases();
+      await loadCaseDetail(selectedCase.id);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -148,7 +189,7 @@ const AdminLostItemCasesPage = () => {
     <>
     <AdminPromotionShell
       title="Handle Lost Item Cases"
-      subtitle="Quản lý báo cáo đồ thất lạc từ tài xế/phụ xe, theo dõi quá trình lưu giữ và hoàn trả cho hành khách."
+      subtitle="Quản lý hồ sơ khách báo mất đồ và báo cáo đồ vật tìm thấy từ tài xế/phụ xe, theo dõi quá trình tìm kiếm, lưu giữ và hoàn trả."
       action={(
         <button
           type="button"
@@ -194,7 +235,7 @@ const AdminLostItemCasesPage = () => {
               }}
               className="rounded-2xl border-outline-variant/70 bg-white px-4 py-3 text-sm text-on-surface focus:border-on-tertiary-container focus:ring-on-tertiary-container"
             >
-              {LOST_ITEM_RECOVERY_STATUSES.map((item) => (
+              {LOST_ITEM_FILTER_STATUSES.map((item) => (
                 <option key={item.value} value={item.value}>{item.label}</option>
               ))}
             </select>
@@ -239,9 +280,12 @@ const AdminLostItemCasesPage = () => {
                           <p className="mt-1 text-xs text-on-surface-variant">
                             {lostItemCase.trip?.scheduleCode || lostItemCase.incidentCode} - {formatDateTime(lostItemCase.reportedAt)}
                           </p>
+                          <p className="mt-1 text-xs font-bold uppercase tracking-[0.12em] text-primary">
+                            {isPassengerLostItemCase(lostItemCase) ? 'Khách báo mất' : 'Nhân viên báo tìm thấy'}
+                          </p>
                         </div>
                         <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${RECOVERY_BADGE[lostItemCase.recoveryStatus]}`}>
-                          {getLabel(LOST_ITEM_RECOVERY_STATUSES, lostItemCase.recoveryStatus)}
+                          {getLabel(LOST_ITEM_FILTER_STATUSES, lostItemCase.recoveryStatus)}
                         </span>
                       </div>
                       <p className="mt-3 line-clamp-2 text-sm text-on-surface-variant">
@@ -287,7 +331,7 @@ const AdminLostItemCasesPage = () => {
                     {selectedCase.itemName || 'Đồ vật chưa đặt tên'}
                   </h3>
                   <p className="mt-1 text-sm text-on-surface-variant">
-                    {selectedCase.incidentCode} - báo bởi {selectedCase.reporter?.fullName || 'Nhân sự vận hành'}
+                    {selectedCase.incidentCode} - báo bởi {selectedCase.reporter?.fullName || (isPassengerLostItemCase(selectedCase) ? 'Hành khách' : 'Nhân sự vận hành')}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -295,7 +339,7 @@ const AdminLostItemCasesPage = () => {
                     {getLabel(OPERATION_INCIDENT_STATUSES, selectedCase.status)}
                   </span>
                   <span className={`rounded-full px-4 py-2 text-sm font-bold ${RECOVERY_BADGE[selectedCase.recoveryStatus]}`}>
-                    {getLabel(LOST_ITEM_RECOVERY_STATUSES, selectedCase.recoveryStatus)}
+                    {getLabel(LOST_ITEM_FILTER_STATUSES, selectedCase.recoveryStatus)}
                   </span>
                 </div>
               </div>
@@ -303,7 +347,7 @@ const AdminLostItemCasesPage = () => {
               <dl className="grid gap-3 md:grid-cols-2">
                 <InfoRow label="Tuyến/chuyến" value={selectedCase.trip?.scheduleCode || selectedCase.route?.name || 'Chưa có'} />
                 <InfoRow label="Xe" value={selectedCase.vehicle?.plateNumber || selectedCase.vehicle?.busCode || 'Chưa có'} />
-                <InfoRow label="Vị trí tìm thấy" value={selectedCase.foundLocation || 'Chưa có'} />
+                <InfoRow label={isPassengerLostItemCase(selectedCase) ? 'Vị trí dự kiến bị mất' : 'Vị trí tìm thấy'} value={selectedCase.foundLocation || 'Chưa có'} />
                 <InfoRow label="Thời điểm báo cáo" value={formatDateTime(selectedCase.reportedAt)} />
               </dl>
 
@@ -364,11 +408,15 @@ const AdminLostItemCasesPage = () => {
                       onChange={(event) => setNextRecoveryStatus(event.target.value)}
                       className="w-full rounded-2xl border-outline-variant/70 bg-white px-4 py-3 text-on-surface focus:border-on-tertiary-container focus:ring-on-tertiary-container"
                     >
-                      {LOST_ITEM_RECOVERY_STATUSES.filter((item) => item.value !== 'ALL').map((item) => (
+                      {(isPassengerLostItemCase(selectedCase)
+                        ? PASSENGER_LOST_ITEM_RECOVERY_STATUSES
+                        : LOST_ITEM_RECOVERY_STATUSES
+                      ).filter((item) => item.value !== 'ALL').map((item) => (
                         <option key={item.value} value={item.value}>{item.label}</option>
                       ))}
                     </select>
                   </label>
+                  {!isPassengerLostItemCase(selectedCase) ? (
                   <label className="block space-y-2">
                     <span className="text-sm font-semibold text-on-surface">Bàn giao / lưu tại</span>
                     <input
@@ -378,6 +426,7 @@ const AdminLostItemCasesPage = () => {
                       placeholder="Ví dụ: Quầy điều hành bến trung tâm"
                     />
                   </label>
+                  ) : null}
                   <label className="block space-y-2 md:col-span-2">
                     <span className="text-sm font-semibold text-on-surface">Ghi chú admin</span>
                     <textarea

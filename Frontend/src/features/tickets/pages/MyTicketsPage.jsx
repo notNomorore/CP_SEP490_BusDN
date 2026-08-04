@@ -91,6 +91,20 @@ const ticketTypeLabel = (type) => ({
   MONTHLY_PASS: 'Vé tháng',
 }[type] || type || 'Vé một lượt');
 
+const getTicketDisplayStatus = (ticket) => {
+  if (['CANCELLED', 'USED', 'REFUNDED'].includes(ticket?.status)) {
+    return ticket.status;
+  }
+
+  const serviceDate = String(ticket?.serviceDate || '').slice(0, 10);
+  const departureTime = String(ticket?.departureTime || '23:59');
+  const journeyTime = new Date(`${serviceDate}T${departureTime}:00+07:00`).getTime();
+
+  return Number.isFinite(journeyTime) && journeyTime <= Date.now()
+    ? 'EXPIRED'
+    : ticket?.status;
+};
+
 const isPendingPaymentTicket = (ticket) => (
   ticket?.status === 'PENDING'
   && ticket?.paymentStatus === 'PENDING'
@@ -133,10 +147,36 @@ const getPassDisplayStatus = (pass) => {
   return pass.passStatus || 'ACTIVE';
 };
 
+const isPendingMonthlyPass = (pass) => (
+  pass?.passStatus === 'PENDING' && pass?.paymentStatus === 'PENDING'
+);
+
+const canShowMonthlyPassQr = (pass) => {
+  if (pass?.paymentStatus !== 'PAID' || pass?.passStatus !== 'ACTIVE') return false;
+  const now = Date.now();
+  const validFrom = new Date(pass.validFrom || pass.startDate).getTime();
+  const validUntil = new Date(pass.validUntil || pass.expiryDate).getTime();
+  return Number.isFinite(validFrom) && Number.isFinite(validUntil)
+    && validFrom <= now && validUntil >= now;
+};
+
+const buildCheckoutOrderFromMonthlyPass = (pass) => ({
+  monthlyPassId: pass._id,
+  ticketType: 'MONTHLY_PASS',
+  routeNumber: pass.routeCode === 'ALL' ? 'Tất cả tuyến' : pass.routeCode,
+  departureLocation: 'Toàn mạng BusDN',
+  destinationLocation: `${pass.dailyRideLimit || 6} lượt/ngày`,
+  serviceDate: String(pass.startDate || '').slice(0, 10),
+  expiryDate: String(pass.expiryDate || '').slice(0, 10),
+  dailyRideLimit: pass.dailyRideLimit || 6,
+  price: pass.passPrice,
+});
+
 const MyTicketsPage = () => {
   const navigate = useNavigate();
   const [tickets, setTickets] = useState([]);
   const [monthlyPasses, setMonthlyPasses] = useState([]);
+  const [ticketView, setTicketView] = useState('ONE_WAY');
   const [query, setQuery] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -157,7 +197,10 @@ const MyTicketsPage = () => {
         ticketService.getMyTickets(),
         ticketService.getMyMonthlyPasses(),
       ]);
-      setTickets(ticketPayload.tickets || []);
+      setTickets((ticketPayload.tickets || []).map((ticket) => ({
+        ...ticket,
+        status: getTicketDisplayStatus(ticket),
+      })));
       setMonthlyPasses(passPayload.passes || []);
     } catch (err) {
       setError(err.message || 'Không thể tải lịch sử vé. Vui lòng thử lại sau.');
@@ -235,6 +278,47 @@ const MyTicketsPage = () => {
       await loadTickets();
     } catch (err) {
       const message = err?.message || 'Khong the huy ve nay.';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setProcessingTicketId('');
+    }
+  };
+
+  const handlePayPendingMonthlyPass = async (event, pass) => {
+    event.stopPropagation();
+    setProcessingTicketId(pass._id);
+    setError('');
+    try {
+      const payment = await ticketService.createPendingMonthlyPassPayment(pass._id);
+      if (payment.status === 'PAID') {
+        toast.success('Thanh toán thành công. Vé tháng đã được kích hoạt.');
+        await loadTickets();
+        return;
+      }
+      navigate('/tickets/checkout', {
+        state: { order: buildCheckoutOrderFromMonthlyPass(pass), payment },
+      });
+    } catch (err) {
+      const message = err?.message || 'Không thể tạo lại mã thanh toán cho vé tháng.';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setProcessingTicketId('');
+    }
+  };
+
+  const handleCancelPendingMonthlyPass = async (event, pass) => {
+    event.stopPropagation();
+    if (!window.confirm('Hủy vé tháng chưa thanh toán này?')) return;
+    setProcessingTicketId(pass._id);
+    setError('');
+    try {
+      await ticketService.cancelMonthlyPass(pass._id);
+      toast.success('Đã hủy vé tháng chưa thanh toán.');
+      await loadTickets();
+    } catch (err) {
+      const message = err?.message || 'Không thể hủy vé tháng này.';
       setError(message);
       toast.error(message);
     } finally {
@@ -340,7 +424,9 @@ const MyTicketsPage = () => {
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.22em] text-on-tertiary-container">Hoạt động hành khách</p>
-              <h1 className="mt-2 text-3xl font-headline font-black text-primary">Tất cả vé của tôi</h1>
+              <h1 className="mt-2 text-3xl font-headline font-black text-primary">
+                {ticketView === 'ONE_WAY' ? 'Vé một lượt của tôi' : 'Vé tháng của tôi'}
+              </h1>
               <p className="mt-2 max-w-2xl text-sm text-on-surface-variant">
                 Xem và quản lý vé đang hiệu lực, vé sắp dùng, vé đã sử dụng, vé hết hạn và vé tháng.
               </p>
@@ -379,6 +465,24 @@ const MyTicketsPage = () => {
             ))}
           </div>
 
+          <div className="mt-6 grid grid-cols-2 gap-3 rounded-[22px] bg-surface-container-low p-2">
+            <button
+              type="button"
+              onClick={() => setTicketView('ONE_WAY')}
+              className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl px-5 text-sm font-black transition ${ticketView === 'ONE_WAY' ? 'bg-primary text-white shadow-md' : 'bg-transparent text-primary hover:bg-white'}`}
+            >
+              <Ticket className="h-4 w-4" /> Vé một lượt
+            </button>
+            <button
+              type="button"
+              onClick={() => setTicketView('MONTHLY_PASS')}
+              className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl px-5 text-sm font-black transition ${ticketView === 'MONTHLY_PASS' ? 'bg-primary text-white shadow-md' : 'bg-transparent text-primary hover:bg-white'}`}
+            >
+              <CalendarDays className="h-4 w-4" /> Vé tháng
+            </button>
+          </div>
+
+          <div className={ticketView === 'ONE_WAY' ? 'block' : 'hidden'}>
           <div className="mt-6 grid gap-3 border-y border-outline-variant/40 py-5 lg:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(150px,0.7fr))]">
             <label className="flex items-center gap-3 rounded-2xl border border-outline-variant/50 bg-surface px-4 py-3">
               <Search className="h-5 w-5 text-outline" />
@@ -584,10 +688,12 @@ const MyTicketsPage = () => {
             </div>
           )}
 
-          <div className="mt-10 border-t border-outline-variant/40 pt-8">
+          </div>
+
+          <div className={ticketView === 'MONTHLY_PASS' ? 'mt-6' : 'hidden'}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.2em] text-on-tertiary-container">Đi lại không giới hạn</p>
+                
                 <h2 className="mt-2 text-2xl font-black text-primary">Vé tháng của tôi</h2>
               </div>
               <span className="rounded-full bg-primary-fixed px-4 py-2 text-sm font-black text-on-primary-fixed">
@@ -615,15 +721,18 @@ const MyTicketsPage = () => {
                         </span>
                       </div>
                       <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
-                        {pass.digitalPass?.qrCodeImage ? (
+                        {canShowMonthlyPassQr(pass) && pass.digitalPass?.qrCodeImage ? (
                           <div className="rounded-2xl bg-white px-4 py-3 sm:col-span-2">
-                            <p className="text-xs font-black uppercase tracking-wide text-outline">Mã QR vé tháng</p>
                             <img src={pass.digitalPass.qrCodeImage} alt="Monthly pass QR code" className="mx-auto mt-3 h-44 w-44 object-contain" />
-                            <p className="mt-2 break-all text-center font-mono text-[11px] font-bold text-outline">
-                              {pass.digitalPass.qrPayload?.slice(0, 32)}...
+                          </div>
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-outline-variant bg-surface-container-low px-4 py-6 text-center sm:col-span-2">
+                            <QrCode className="mx-auto h-8 w-8 text-outline" />
+                            <p className="mt-2 text-sm font-bold text-on-surface-variant">
+                              QR chưa khả dụng cho vé chưa thanh toán hoặc không còn hiệu lực.
                             </p>
                           </div>
-                        ) : null}
+                        )}
                         <div className="rounded-2xl bg-white px-4 py-3">
                           <p className="text-xs font-black uppercase tracking-wide text-outline">Đối tượng</p>
                           <p className="mt-1 font-bold text-primary">{passengerTypeLabel(pass.passType)}</p>
@@ -642,7 +751,36 @@ const MyTicketsPage = () => {
                             {paymentStatusLabel(pass.paymentStatus)} - {paymentMethodLabel(pass.paymentMethod)}
                           </p>
                         </div>
+                        <div className="rounded-2xl bg-white px-4 py-3 sm:col-span-2">
+                          <p className="text-xs font-black uppercase tracking-wide text-outline">Lượt đi hôm nay</p>
+                          <div className="mt-2 flex items-center justify-between gap-3">
+                            <p className="font-bold text-primary">
+                              {Math.min(Number(pass.ridesUsedToday) || 0, Number(pass.dailyRideLimit) || 6)} / {Number(pass.dailyRideLimit) || 6} lượt
+                            </p>
+                          </div>
+                        </div>
                       </div>
+                      {isPendingMonthlyPass(pass) ? (
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          <button
+                            type="button"
+                            onClick={(event) => handlePayPendingMonthlyPass(event, pass)}
+                            disabled={processingTicketId === pass._id}
+                            className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-black text-white disabled:opacity-60"
+                          >
+                            {processingTicketId === pass._id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                            Thanh toán lại
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => handleCancelPendingMonthlyPass(event, pass)}
+                            disabled={processingTicketId === pass._id}
+                            className="inline-flex items-center justify-center gap-2 rounded-full border border-red-200 px-4 py-3 text-sm font-black text-red-600 hover:bg-red-50 disabled:opacity-60"
+                          >
+                            <Trash2 className="h-4 w-4" /> Hủy vé
+                          </button>
+                        </div>
+                      ) : null}
                     </article>
                   );
                 })}
