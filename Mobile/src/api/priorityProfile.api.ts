@@ -7,12 +7,12 @@ import type {
 } from '@/types/priorityProfile';
 
 export const PROFILE_TYPES = [
-  { value: 'STUDENT', label: 'Student' },
-  { value: 'SENIOR', label: 'Senior Citizen' },
-  { value: 'DISABLED', label: 'Disabled Person' },
-  { value: 'PREGNANT', label: 'Pregnant Passenger' },
-  { value: 'CHILD_UNDER_6', label: 'Child Under 6' },
-  { value: 'OTHER', label: 'Other Priority Group' },
+  { value: 'STUDENT', label: 'Học sinh / sinh viên' },
+  { value: 'SENIOR', label: 'Người cao tuổi' },
+  { value: 'DISABLED', label: 'Người khuyết tật' },
+  { value: 'PREGNANT', label: 'Phụ nữ mang thai' },
+  { value: 'CHILD_UNDER_6', label: 'Trẻ em dưới 6 tuổi' },
+  { value: 'OTHER', label: 'Nhóm ưu tiên khác' },
 ] as const;
 
 export const DOCUMENT_TYPES = [
@@ -41,6 +41,8 @@ const buildProfilePayload = (draft: PriorityRegistrationDraft) => ({
   fullName: draft.fullName,
   dateOfBirth: draft.dateOfBirth,
   identityNumber: draft.identityNumber,
+  cardNumber: draft.cardNumber,
+  issuingAuthority: draft.issuingAuthority,
   reason: draft.reason,
 });
 

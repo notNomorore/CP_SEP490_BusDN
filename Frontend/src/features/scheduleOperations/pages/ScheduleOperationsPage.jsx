@@ -282,18 +282,6 @@ const isWorkShiftSchedule = (shift = {}) => {
   return source !== 'TRIP_SCHEDULE' && !code.startsWith('TRIP-');
 };
 
-const getShiftWorkDateKey = (shift = {}) => {
-  const explicitKey = String(shift.workDateKey || '').trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(explicitKey)) return explicitKey;
-
-  const value = String(shift.workDate || '').trim();
-  const match = /^(\d{4}-\d{2}-\d{2})/.exec(value);
-  if (match) return match[1];
-
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? 'unknown' : getDateInputValue(parsed);
-};
-
 const getWeekRange = (anchor = new Date()) => {
   const date = new Date(`${getDateInputValue(new Date(anchor))}T00:00:00`);
   date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
@@ -2061,7 +2049,7 @@ const ScheduleOperationsPage = () => {
 
   const scheduleByDate = useMemo(() => (
     workShiftSchedule.reduce((groups, shift) => {
-      const key = getShiftWorkDateKey(shift);
+      const key = getDateInputValue(new Date(shift.workDate));
       groups[key] = [...(groups[key] || []), shift];
       return groups;
     }, {})

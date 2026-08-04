@@ -127,6 +127,7 @@ export default function HomeScreen() {
             <ServiceTile icon="package-variant-closed" label="Đồ thất lạc" onPress={() => router.push('/my-lost-items' as Href)} />
             <ServiceTile icon="ticket-confirmation-outline" label="Vé của tôi" onPress={() => router.push('/my-tickets')} />
             <ServiceTile icon="bell-ring-outline" label="Thông báo" onPress={() => router.push('/notifications')} />
+            <ServiceTile icon="shield-star-outline" label="Hồ sơ ưu tiên" onPress={() => router.push(priorityPassengerRoute)} />
             <ServiceTile icon="directions" label="Lập hành trình" onPress={() => router.push('/plan-trip')} />
             <ServiceTile icon="history" label="Lịch sử" onPress={() => router.push('/travel-history')} />
             <ServiceTile icon="message-text-outline" label="Góp ý" onPress={() => router.push('/my-feedback' as Href)} />

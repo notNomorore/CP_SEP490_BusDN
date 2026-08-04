@@ -87,18 +87,6 @@ const isWorkShiftSchedule = (shift = {}) => {
   return source !== 'TRIP_SCHEDULE' && !code.startsWith('TRIP-');
 };
 
-const getShiftWorkDateKey = (shift = {}) => {
-  const explicitKey = String(shift.workDateKey || '').trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(explicitKey)) return explicitKey;
-
-  const value = String(shift.workDate || '').trim();
-  const match = /^(\d{4}-\d{2}-\d{2})/.exec(value);
-  if (match) return match[1];
-
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? 'unknown' : toLocalInputDate(parsed);
-};
-
 const getDefaultRange = () => {
   const from = new Date();
   from.setDate(from.getDate() - 7);
@@ -802,7 +790,7 @@ export const ShiftSchedulePage = () => {
   const workShifts = useMemo(() => shifts.filter(isWorkShiftSchedule), [shifts]);
 
   const shiftsByDate = useMemo(() => workShifts.reduce((result, shift) => {
-    const key = getShiftWorkDateKey(shift);
+    const key = toLocalInputDate(shift.workDate);
     result[key] = [...(result[key] || []), shift];
     return result;
   }, {}), [workShifts]);

@@ -27,6 +27,26 @@ export const getErrorMessage = (error: unknown, fallback: string) => {
   return fallback;
 };
 
+export const getErrorStatusCode = (error: unknown) => {
+  if (!error || typeof error !== 'object') return undefined;
+
+  const candidate = error as {
+    status?: unknown;
+    statusCode?: unknown;
+    response?: { status?: unknown };
+  };
+  const status = candidate.response?.status ?? candidate.statusCode ?? candidate.status;
+  return typeof status === 'number' ? status : undefined;
+};
+
+export const isPermissionError = (error: unknown) => {
+  const statusCode = getErrorStatusCode(error);
+  if (statusCode === 403) return true;
+
+  const message = getErrorMessage(error, '').toLowerCase();
+  return message.includes('forbidden') || message.includes('insufficient permissions');
+};
+
 export const validatePassword = (password: string) => {
   const checks = [
     { key: 'length', label: 'At least 8 characters', valid: password.length >= 8 },
@@ -45,12 +65,10 @@ export const validatePassword = (password: string) => {
 export type PriorityRegistrationValues = {
   fullName: string;
   dateOfBirth: string;
-  gender: string;
-  phoneNumber: string;
-  email: string;
-  residentialAddress: string;
   profileType: string;
   identityNumber: string;
+  cardNumber: string;
+  issuingAuthority: string;
   reason: string;
 };
 
@@ -69,23 +87,18 @@ const isValidIsoDate = (value: string) => {
 export const validatePriorityRegistration = (values: PriorityRegistrationValues) => {
   const errors: Partial<Record<keyof PriorityRegistrationValues, string>> = {};
 
-  if (!values.fullName.trim()) errors.fullName = 'Full name is required.';
+  if (!values.fullName.trim()) errors.fullName = 'Vui lòng nhập họ và tên.';
   if (!values.dateOfBirth.trim()) {
-    errors.dateOfBirth = 'Date of birth is required.';
+    errors.dateOfBirth = 'Vui lòng nhập ngày sinh.';
   } else if (!isValidIsoDate(values.dateOfBirth.trim())) {
-    errors.dateOfBirth = 'Use a valid date in YYYY-MM-DD format.';
+    errors.dateOfBirth = 'Vui lòng nhập ngày sinh hợp lệ theo định dạng YYYY-MM-DD.';
   } else if (new Date(values.dateOfBirth) > new Date()) {
-    errors.dateOfBirth = 'Date of birth cannot be in the future.';
+    errors.dateOfBirth = 'Ngày sinh không được ở tương lai.';
   }
-  if (!values.gender.trim()) errors.gender = 'Gender is required.';
-  if (!values.phoneNumber.trim()) errors.phoneNumber = 'Phone number is required.';
-  if (values.email.trim() && !/^\S+@\S+\.\S+$/.test(values.email.trim())) {
-    errors.email = 'Email address is invalid.';
-  }
-  if (!values.residentialAddress.trim()) errors.residentialAddress = 'Residential address is required.';
-  if (!values.profileType.trim()) errors.profileType = 'Priority type is required.';
-  if (!values.identityNumber.trim()) errors.identityNumber = 'Identification number is required.';
-  if (!values.reason.trim()) errors.reason = 'Reason for priority request is required.';
+  if (!values.profileType.trim()) errors.profileType = 'Vui lòng chọn nhóm ưu tiên.';
+  if (!values.identityNumber.trim()) errors.identityNumber = 'Vui lòng nhập số CCCD/CMND.';
+  if (!values.issuingAuthority.trim()) errors.issuingAuthority = 'Vui lòng nhập nơi cấp giấy tờ ưu tiên.';
+  if (!values.reason.trim()) errors.reason = 'Vui lòng nhập lý do đăng ký ưu tiên.';
 
   return errors;
 };

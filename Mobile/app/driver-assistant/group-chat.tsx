@@ -17,6 +17,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import operationChatApi from '@/api/operationChat.api';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
+import { useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { OperationChatGroup, OperationChatMessage } from '@/types/operationChat';
 import { goBackOrReplace } from '@/utils/navigation';
@@ -40,15 +41,16 @@ const getInitials = (value?: string) => {
   return words.slice(0, 2).map((word) => word[0]).join('').toUpperCase() || 'OP';
 };
 
-const getGroupPreview = (group: OperationChatGroup) => (
+const getGroupPreview = (group: OperationChatGroup, fallback: string) => (
   group.lastMessageContent
   || getMessageContent(group.lastMessage)
   || group.description
-  || 'Nhấn để mở nhóm trò chuyện vận hành'
+  || fallback
 );
 
 export default function OperationGroupChatScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useDriverI18n();
   const user = useAuthStore((state) => state.user);
   const [groups, setGroups] = useState<OperationChatGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState('');
@@ -76,11 +78,11 @@ export default function OperationGroupChatScreen() {
         current && nextGroups.some((group) => group.id === current) ? current : ''
       ));
     } catch (error) {
-      setLoadError(getErrorMessage(error, 'Không thể tải các nhóm trò chuyện vận hành.'));
+      setLoadError(getErrorMessage(error, t.chat.loadGroupsErrorFallback));
     } finally {
       setIsLoadingGroups(false);
     }
-  }, []);
+  }, [t.chat.loadGroupsErrorFallback]);
 
   const loadMessages = useCallback(async (groupId: string, options: { silent?: boolean } = {}) => {
     if (!groupId) return;
@@ -93,17 +95,17 @@ export default function OperationGroupChatScreen() {
       setMessages(payload.messages || []);
       await operationChatApi.markRead(groupId);
     } catch (error) {
-      const message = getErrorMessage(error, 'Không thể tải tin nhắn của nhóm vận hành.');
+      const message = getErrorMessage(error, t.chat.loadMessagesErrorFallback);
       setLoadError(message);
       if (!options.silent) {
-        Alert.alert('Không thể tải tin nhắn', message);
+        Alert.alert(t.chat.loadMessagesErrorTitle, message);
       }
     } finally {
       if (!options.silent) {
         setIsLoadingMessages(false);
       }
     }
-  }, []);
+  }, [t.chat.loadMessagesErrorFallback, t.chat.loadMessagesErrorTitle]);
 
   useEffect(() => {
     void loadGroups();
@@ -150,7 +152,7 @@ export default function OperationGroupChatScreen() {
       )));
       setDraft('');
     } catch (error) {
-      Alert.alert('Không thể gửi tin nhắn', getErrorMessage(error, 'Không thể gửi tin nhắn này.'));
+      Alert.alert(t.chat.sendErrorTitle, getErrorMessage(error, t.chat.sendErrorFallback));
     } finally {
       setIsSending(false);
     }
@@ -165,18 +167,18 @@ export default function OperationGroupChatScreen() {
         <View style={styles.screen}>
           <View style={styles.header}>
             <Pressable
-              accessibilityLabel="Quay lại"
+              accessibilityLabel={t.common.back}
               hitSlop={10}
               onPress={() => (selectedGroup ? closeThread() : goBackOrReplace('/driver-assistant'))}
             >
               <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
             </Pressable>
             <View style={styles.headerText}>
-              <Text style={styles.kicker}>TRÒ CHUYỆN VẬN HÀNH</Text>
-              <Text numberOfLines={1} style={styles.title}>{selectedGroup?.name || 'Trò chuyện'}</Text>
+              <Text style={styles.kicker}>{t.chat.kicker}</Text>
+              <Text numberOfLines={1} style={styles.title}>{selectedGroup?.name || t.chat.titleFallback}</Text>
               {selectedGroup ? (
                 <Text numberOfLines={1} style={styles.subtitle}>
-                  {selectedGroup.memberCount || 0} thành viên
+                  {selectedGroup.memberCount || 0} {t.chat.members}
                 </Text>
               ) : null}
             </View>
@@ -188,7 +190,7 @@ export default function OperationGroupChatScreen() {
               {isLoadingGroups ? (
                 <View style={styles.loading}>
                   <ActivityIndicator color={colors.primary} />
-                  <Text style={styles.loadingText}>Đang tải trò chuyện...</Text>
+                  <Text style={styles.loadingText}>{t.chat.loadingGroups}</Text>
                 </View>
               ) : loadError ? (
                 <View>
@@ -198,11 +200,11 @@ export default function OperationGroupChatScreen() {
                     onPress={() => void loadGroups()}
                     style={styles.retryButton}
                   >
-                    <Text style={styles.retryText}>Thử lại</Text>
+                    <Text style={styles.retryText}>{t.common.retry}</Text>
                   </Pressable>
                 </View>
               ) : groups.length === 0 ? (
-                <Text style={styles.emptyText}>Tài khoản này chưa có nhóm trò chuyện vận hành.</Text>
+                <Text style={styles.emptyText}>{t.chat.emptyGroups}</Text>
               ) : (
                 <ScrollView
                   contentContainerStyle={[styles.inboxList, { paddingBottom: 104 + insets.bottom }]}
@@ -228,7 +230,9 @@ export default function OperationGroupChatScreen() {
                             numberOfLines={1}
                             style={[styles.chatPreview, group.unreadCount ? styles.chatPreviewUnread : null]}
                           >
-                            {group.unreadCount ? `${group.unreadCount} tin nhắn mới` : getGroupPreview(group)}
+                            {group.unreadCount
+                              ? t.chat.unreadMessages.replace('{{count}}', String(group.unreadCount))
+                              : getGroupPreview(group, t.chat.groupPreview)}
                           </Text>
                           {group.unreadCount ? <View style={styles.unreadDot} /> : null}
                         </View>
@@ -243,7 +247,7 @@ export default function OperationGroupChatScreen() {
               {isLoadingMessages ? (
               <View style={styles.loading}>
                 <ActivityIndicator color={colors.primary} />
-                <Text style={styles.loadingText}>Đang tải tin nhắn...</Text>
+                <Text style={styles.loadingText}>{t.chat.loadingMessages}</Text>
               </View>
               ) : loadError ? (
               <View>
@@ -257,7 +261,7 @@ export default function OperationGroupChatScreen() {
                   }}
                   style={styles.retryButton}
                 >
-                  <Text style={styles.retryText}>Thử lại</Text>
+                  <Text style={styles.retryText}>{t.common.retry}</Text>
                 </Pressable>
               </View>
               ) : (
@@ -266,14 +270,14 @@ export default function OperationGroupChatScreen() {
                 showsVerticalScrollIndicator={false}
               >
                 {messages.length === 0 ? (
-                  <Text style={styles.emptyText}>Chưa có tin nhắn. Hãy bắt đầu trao đổi công việc.</Text>
+                  <Text style={styles.emptyText}>{t.chat.emptyMessages}</Text>
                 ) : messages.map((message) => {
                   const mine = String(message.sender?.id || '') === currentUserId;
                   const content = getMessageContent(message);
                   return (
                     <View key={message.id} style={[styles.messageBubble, mine ? styles.myMessage : styles.otherMessage]}>
                       {!mine ? (
-                        <Text style={styles.senderName}>{message.sender?.fullName || message.senderRole || 'Nhân viên vận hành'}</Text>
+                        <Text style={styles.senderName}>{message.sender?.fullName || message.senderRole || t.chat.staffFallback}</Text>
                       ) : null}
                       <Text style={[styles.messageText, mine && styles.myMessageText]}>{content}</Text>
                       <Text style={[styles.messageTime, mine && styles.myMessageTime]}>{formatTime(message.sentAt)}</Text>
@@ -288,10 +292,10 @@ export default function OperationGroupChatScreen() {
           {selectedGroup ? (
             <View style={[styles.inputBar, { bottom: 72 + Math.max(insets.bottom, 10) }]}>
               <TextInput
-                accessibilityLabel="Tin nhắn"
+                accessibilityLabel={t.chat.inputLabel}
                 multiline
                 onChangeText={setDraft}
-                placeholder="Nhắn tin cho nhóm vận hành..."
+                placeholder={t.chat.inputPlaceholder}
                 placeholderTextColor={colors.muted}
                 style={styles.input}
                 value={draft}

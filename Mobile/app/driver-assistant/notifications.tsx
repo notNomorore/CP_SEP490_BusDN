@@ -7,6 +7,7 @@ import scheduleOperationsApi from '@/api/scheduleOperations.api';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
+import { useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { OperationNotification } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
@@ -21,6 +22,7 @@ const priorityColor = (priority?: string) => {
 };
 
 export default function DriverNotificationsScreen() {
+  const { t } = useDriverI18n();
   const user = useAuthStore((state) => state.user);
   const [notifications, setNotifications] = useState<OperationNotification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -32,11 +34,11 @@ export default function DriverNotificationsScreen() {
       const payload = await scheduleOperationsApi.getOperationNotifications(getWeekRange());
       setNotifications(payload.notifications || []);
     } catch (error) {
-      Alert.alert('Không thể tải thông báo', getErrorMessage(error, 'Không thể tải thông báo vận hành.'));
+      Alert.alert(t.notifications.loadErrorTitle, getErrorMessage(error, t.notifications.loadErrorFallback));
     } finally {
       refresh ? setIsRefreshing(false) : setIsLoading(false);
     }
-  }, []);
+  }, [t.notifications.loadErrorFallback, t.notifications.loadErrorTitle]);
 
   useEffect(() => {
     void loadNotifications();
@@ -51,15 +53,15 @@ export default function DriverNotificationsScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+          <Pressable accessibilityLabel={t.common.back} hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View style={styles.headerText}>
-            <Text style={styles.kicker}>LỊCH VÀ PHÂN CÔNG</Text>
-            <Text style={styles.title}>Thông báo vận hành</Text>
+            <Text style={styles.kicker}>{t.schedule.kicker}</Text>
+            <Text style={styles.title}>{t.notifications.title}</Text>
           </View>
           <Pressable
-            accessibilityLabel="Làm mới thông báo"
+            accessibilityLabel={t.common.refresh}
             disabled={isRefreshing}
             hitSlop={8}
             onPress={() => void loadNotifications(true)}
@@ -75,7 +77,7 @@ export default function DriverNotificationsScreen() {
 
         <View style={styles.summaryCard}>
           <View>
-            <Text style={styles.summaryLabel}>Thông báo chưa đọc</Text>
+            <Text style={styles.summaryLabel}>{t.notifications.unread}</Text>
             <Text style={styles.summaryValue}>{unreadCount}</Text>
           </View>
           <MaterialCommunityIcons color="rgba(43,164,113,0.14)" name="bell-badge-outline" size={64} />
@@ -84,12 +86,12 @@ export default function DriverNotificationsScreen() {
         {isLoading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.primary} />
-            <Text style={styles.loadingText}>Đang tải thông báo vận hành...</Text>
+            <Text style={styles.loadingText}>{t.notifications.loading}</Text>
           </View>
         ) : (
           <View style={styles.notificationList}>
             {notifications.length === 0 ? (
-              <Text style={styles.emptyText}>Không có thông báo vận hành trong khoảng thời gian này.</Text>
+              <Text style={styles.emptyText}>{t.notifications.emptyRange}</Text>
             ) : notifications.map((notification) => {
               const tone = priorityColor(notification.priority);
               return (
@@ -99,8 +101,8 @@ export default function DriverNotificationsScreen() {
                     <View style={styles.notificationHeader}>
                       {!notification.isRead ? <View style={styles.unreadDot} /> : null}
                     </View>
-                    <Text style={styles.notificationTitle}>{notification.title || 'Thông báo vận hành'}</Text>
-                    <Text style={styles.notificationMessage}>{notification.message || 'Không có nội dung.'}</Text>
+                    <Text style={styles.notificationTitle}>{notification.title || t.notifications.fallbackTitle}</Text>
+                    <Text style={styles.notificationMessage}>{notification.message || t.notifications.fallbackMessage}</Text>
                     <View style={styles.metaRow}>
                       <MaterialCommunityIcons color={colors.muted} name="clock-outline" size={15} />
                       <Text style={styles.metaText}>

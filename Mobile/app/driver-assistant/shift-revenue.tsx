@@ -6,13 +6,14 @@ import busAssistantApi from '@/api/busAssistant.api';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
+import { useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { ShiftRevenue } from '@/types/busAssistant';
 import { goBackOrReplace } from '@/utils/navigation';
 import { toDateInput } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
-const money = (value?: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
+const money = (value?: number, locale = 'vi-VN') => new Intl.NumberFormat(locale, { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
 const TRANSACTIONS_PER_PAGE = 5;
 
 function Metric({ label, value, icon, tone }: { label: string; value: string | number; icon: keyof typeof MaterialCommunityIcons.glyphMap; tone: 'green' | 'blue' | 'amber' }) {
@@ -26,6 +27,8 @@ function Metric({ label, value, icon, tone }: { label: string; value: string | n
 
 export default function ShiftRevenueScreen() {
   const user = useAuthStore((state) => state.user);
+  const { language, t } = useDriverI18n();
+  const locale = language === 'VN' ? 'vi-VN' : 'en-US';
   const [revenue, setRevenue] = useState<ShiftRevenue | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [transactionPage, setTransactionPage] = useState(1);
@@ -43,11 +46,11 @@ export default function ShiftRevenueScreen() {
       setRevenue(data);
       setTransactionPage(1);
     } catch (error) {
-      Alert.alert('Không thể tải doanh thu', getErrorMessage(error, 'Không thể tải doanh thu ca.'));
+      Alert.alert(t.assistant.revenue.loadErrorTitle, getErrorMessage(error, t.assistant.revenue.loadErrorFallback));
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadRevenue();
@@ -57,14 +60,14 @@ export default function ShiftRevenueScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+          <Pressable accessibilityLabel={t.common.back} hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View style={styles.headerText}>
-            <Text style={styles.kicker}>DOANH THU CA</Text>
-            <Text style={styles.title}>Doanh thu ca</Text>
+            <Text style={styles.kicker}>{t.assistant.revenue.shiftKicker}</Text>
+            <Text style={styles.title}>{t.assistant.revenue.shiftTitle}</Text>
           </View>
-          <Pressable accessibilityLabel="Tải lại" hitSlop={10} onPress={() => void loadRevenue()}>
+          <Pressable accessibilityLabel={t.common.refresh} hitSlop={10} onPress={() => void loadRevenue()}>
             <MaterialCommunityIcons color={colors.primary} name="refresh" size={24} />
           </Pressable>
         </View>
@@ -72,49 +75,49 @@ export default function ShiftRevenueScreen() {
         {isLoading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.primary} />
-            <Text style={styles.emptyText}>Đang tải doanh thu ca...</Text>
+            <Text style={styles.emptyText}>{t.assistant.revenue.loadingShiftRevenue}</Text>
           </View>
         ) : (
           <>
             <View style={styles.metricGrid}>
-              <Metric label="VÉ ĐÃ BÁN" value={revenue?.totalTicketsSold || 0} icon="ticket-confirmation-outline" tone="green" />
-              <Metric label="TỔNG DOANH THU" value={money(revenue?.totalRevenue)} icon="trending-up" tone="green" />
-              <Metric label="TIỀN MẶT" value={money(revenue?.cashCollected)} icon="cash" tone="amber" />
-              <Metric label="THANH TOÁN ĐIỆN TỬ" value={money(revenue?.ePaymentAmount)} icon="credit-card-outline" tone="blue" />
+              <Metric label={t.assistant.revenue.soldTickets} value={revenue?.totalTicketsSold || 0} icon="ticket-confirmation-outline" tone="green" />
+              <Metric label={t.assistant.revenue.totalRevenue} value={money(revenue?.totalRevenue, locale)} icon="trending-up" tone="green" />
+              <Metric label={t.assistant.revenue.cash} value={money(revenue?.cashCollected, locale)} icon="cash" tone="amber" />
+              <Metric label={t.assistant.revenue.electronicPayment} value={money(revenue?.ePaymentAmount, locale)} icon="credit-card-outline" tone="blue" />
             </View>
 
             <View style={styles.panel}>
-              <View style={styles.panelHeading}><MaterialCommunityIcons color={colors.accent} name="credit-card-outline" size={20} /><Text style={styles.panelTitle}>Theo phương thức thanh toán</Text></View>
-              <View style={styles.tableHeader}><Text style={styles.tableMain}>PHƯƠNG THỨC</Text><Text style={styles.tableCenter}>GIAO DỊCH</Text><Text style={styles.tableRight}>SỐ TIỀN</Text></View>
+              <View style={styles.panelHeading}><MaterialCommunityIcons color={colors.accent} name="credit-card-outline" size={20} /><Text style={styles.panelTitle}>{t.assistant.revenue.byPaymentMethod}</Text></View>
+              <View style={styles.tableHeader}><Text style={styles.tableMain}>{t.assistant.revenue.paymentMethod}</Text><Text style={styles.tableCenter}>{t.assistant.revenue.transactions}</Text><Text style={styles.tableRight}>{t.assistant.revenue.amount}</Text></View>
               {(revenue?.paymentMethodBreakdown || []).length ? revenue?.paymentMethodBreakdown?.map((item) => (
                 <View key={item.paymentMethod} style={styles.row}>
-                  <View style={styles.tableMainValue}><Text style={[styles.methodPill, item.paymentMethod === 'CASH' ? styles.cashPill : styles.qrPill]}>{item.paymentMethod === 'CASH' ? 'Tiền mặt' : 'Chuyển khoản QR'}</Text></View>
+                  <View style={styles.tableMainValue}><Text style={[styles.methodPill, item.paymentMethod === 'CASH' ? styles.cashPill : styles.qrPill]}>{item.paymentMethod === 'CASH' ? t.assistant.revenue.cashMethod : t.assistant.revenue.qrMethod}</Text></View>
                   <Text style={styles.tableCenterValue}>{item.transactions}</Text>
-                  <Text style={styles.rowAmount}>{money(item.amount)}</Text>
+                  <Text style={styles.rowAmount}>{money(item.amount, locale)}</Text>
                 </View>
-              )) : <Text style={styles.emptyText}>Chưa có giao dịch thanh toán.</Text>}
+              )) : <Text style={styles.emptyText}>{t.assistant.revenue.noPayments}</Text>}
             </View>
 
             <View style={[styles.panel, styles.lastPanel]}>
-              <View style={styles.panelHeading}><MaterialCommunityIcons color={colors.accent} name="receipt-text-outline" size={20} /><Text style={styles.panelTitle}>Giao dịch gần đây</Text></View>
+              <View style={styles.panelHeading}><MaterialCommunityIcons color={colors.accent} name="receipt-text-outline" size={20} /><Text style={styles.panelTitle}>{t.assistant.revenue.recentTransactions}</Text></View>
               {recentTransactions.length ? visibleTransactions.map((item) => (
                 <View key={item._id} style={styles.row}>
                   <View style={styles.rowText}>
                     <Text numberOfLines={1} style={styles.rowTitle}>{item.transactionCode || item._id}</Text>
-                    <Text style={styles.rowMeta}>{item.ticketType === 'WALK_IN' ? 'Vé trực tiếp' : item.ticketType} · {item.paymentMethod === 'CASH' ? 'Tiền mặt' : 'Chuyển khoản QR'}</Text>
+                    <Text style={styles.rowMeta}>{item.ticketType === 'WALK_IN' ? t.assistant.revenue.walkInTicket : item.ticketType} · {item.paymentMethod === 'CASH' ? t.assistant.revenue.cashMethod : t.assistant.revenue.qrMethod}</Text>
                   </View>
-                  <View style={styles.transactionRight}><Text style={styles.rowAmount}>{money(item.amount)}</Text><Text style={[styles.transactionStatus, item.status === 'COMPLETED' ? styles.completedStatus : styles.pendingStatus]}>{item.status === 'COMPLETED' ? 'Hoàn tất' : 'Chờ xử lý'}</Text></View>
+                  <View style={styles.transactionRight}><Text style={styles.rowAmount}>{money(item.amount, locale)}</Text><Text style={[styles.transactionStatus, item.status === 'COMPLETED' ? styles.completedStatus : styles.pendingStatus]}>{item.status === 'COMPLETED' ? t.assistant.revenue.completed : t.assistant.revenue.pending}</Text></View>
                 </View>
-              )) : <Text style={styles.emptyText}>Chưa có giao dịch gần đây.</Text>}
+              )) : <Text style={styles.emptyText}>{t.assistant.revenue.noRecentTransactions}</Text>}
               {recentTransactions.length > TRANSACTIONS_PER_PAGE ? (
                 <View style={styles.pagination}>
                   <Pressable disabled={transactionPage === 1} onPress={() => setTransactionPage((page) => Math.max(1, page - 1))} style={[styles.pageButton, transactionPage === 1 && styles.pageButtonDisabled]}>
                     <MaterialCommunityIcons color={transactionPage === 1 ? colors.outline : colors.primary} name="chevron-left" size={20} />
-                    <Text style={[styles.pageButtonText, transactionPage === 1 && styles.pageButtonTextDisabled]}>Trước</Text>
+                    <Text style={[styles.pageButtonText, transactionPage === 1 && styles.pageButtonTextDisabled]}>{t.assistant.revenue.previous}</Text>
                   </Pressable>
                   <View style={styles.pageIndicator}><Text style={styles.pageIndicatorText}>{transactionPage} / {transactionPageCount}</Text></View>
                   <Pressable disabled={transactionPage === transactionPageCount} onPress={() => setTransactionPage((page) => Math.min(transactionPageCount, page + 1))} style={[styles.pageButton, transactionPage === transactionPageCount && styles.pageButtonDisabled]}>
-                    <Text style={[styles.pageButtonText, transactionPage === transactionPageCount && styles.pageButtonTextDisabled]}>Tiếp</Text>
+                    <Text style={[styles.pageButtonText, transactionPage === transactionPageCount && styles.pageButtonTextDisabled]}>{t.assistant.revenue.next}</Text>
                     <MaterialCommunityIcons color={transactionPage === transactionPageCount ? colors.outline : colors.primary} name="chevron-right" size={20} />
                   </Pressable>
                 </View>

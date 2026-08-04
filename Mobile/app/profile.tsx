@@ -18,6 +18,7 @@ import profileApi from '@/api/profile.api';
 import { useLogout } from '@/auth/hooks/useLogout';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
+import { useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { AuthUser, UserProfile } from '@/types/auth';
 
@@ -32,11 +33,11 @@ const fallbackUser: AuthUser = {
   isVerified: true,
 };
 
-function formatMemberSince(value?: string) {
+function formatMemberSince(value: string | undefined, locale: string) {
   if (!value) return 'Jan 2024';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Jan 2024';
-  return new Intl.DateTimeFormat('vi-VN', { month: 'short', year: 'numeric' }).format(date);
+  return new Intl.DateTimeFormat(locale, { month: 'short', year: 'numeric' }).format(date);
 }
 
 function getDaysLeft(expireDate?: string) {
@@ -106,8 +107,14 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const { language, toggleLanguage, t } = useDriverI18n();
 
   const displayUser = profile || storedUser || fallbackUser;
+  const normalizedRole = String(displayUser.role || '').toUpperCase();
+  const isStaffProfile = normalizedRole === 'DRIVER'
+    || normalizedRole === 'BUS_ASSISTANT'
+    || normalizedRole === 'CONDUCTOR';
+  const staffRoleLabel = normalizedRole === 'DRIVER' ? t.common.driver : t.common.busAssistant;
   const daysLeft = getDaysLeft(profile?.monthlyPass?.expireDate || displayUser.monthlyPassExpireDate);
   const passActive = profile?.monthlyPass?.isActive
     ?? (displayUser.monthlyPassStatus
@@ -148,13 +155,17 @@ export default function ProfileScreen() {
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <View style={styles.screen}>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Quay lại" hitSlop={8} onPress={() => router.back()} style={styles.headerButton}>
+          <Pressable accessibilityLabel={isStaffProfile ? t.common.back : 'Quay lại'} hitSlop={8} onPress={() => router.back()} style={styles.headerButton}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={24} />
           </Pressable>
-          <Text style={styles.headerTitle}>Hồ sơ của tôi</Text>
-          <Pressable accessibilityLabel="Tùy chọn hồ sơ" hitSlop={8} onPress={() => unavailable('Tùy chọn hồ sơ')} style={styles.headerButton}>
-            <MaterialCommunityIcons color={colors.primary} name="dots-vertical" size={24} />
-          </Pressable>
+          <Text style={styles.headerTitle}>{isStaffProfile ? t.profile.title : 'Hồ sơ của tôi'}</Text>
+          {isStaffProfile ? (
+            <View style={styles.headerButton} />
+          ) : (
+            <Pressable accessibilityLabel="Tùy chọn hồ sơ" hitSlop={8} onPress={() => unavailable('Tùy chọn hồ sơ')} style={styles.headerButton}>
+              <MaterialCommunityIcons color={colors.primary} name="dots-vertical" size={24} />
+            </Pressable>
+          )}
         </View>
 
         <ScrollView
@@ -171,83 +182,115 @@ export default function ProfileScreen() {
                   <Text style={styles.avatarInitials}>{initials}</Text>
                 )}
               </View>
-              <Pressable accessibilityLabel="Đổi ảnh đại diện" onPress={() => unavailable('Ảnh đại diện')} style={styles.cameraButton}>
-                <MaterialCommunityIcons color={colors.white} name="camera" size={18} />
-              </Pressable>
+              {isStaffProfile ? null : (
+                <Pressable accessibilityLabel="Đổi ảnh đại diện" onPress={() => unavailable('Ảnh đại diện')} style={styles.cameraButton}>
+                  <MaterialCommunityIcons color={colors.white} name="camera" size={18} />
+                </Pressable>
+              )}
             </View>
             <Text style={styles.name}>{displayUser.fullName}</Text>
-            <Text style={styles.contact}>{displayUser.email || 'Chưa cung cấp email'}</Text>
-            <Text style={styles.phone}>{displayUser.phoneNumber || displayUser.phone || 'Chưa cung cấp số điện thoại'}</Text>
+            <Text style={styles.contact}>{displayUser.email || (isStaffProfile ? t.common.noEmail : 'Chưa cung cấp email')}</Text>
+            <Text style={styles.phone}>{displayUser.phoneNumber || displayUser.phone || (isStaffProfile ? t.common.noPhone : 'Chưa cung cấp số điện thoại')}</Text>
           </View>
 
           {isLoading && !profile ? (
             <ActivityIndicator color={colors.accent} style={styles.loader} />
           ) : null}
 
-          <View style={styles.statusCard}>
-            <View>
-              <View style={styles.verifiedBadge}>
-                <MaterialCommunityIcons color="#17503a" name="check-decagram" size={15} />
-                <Text style={styles.verifiedText}>
-                  {displayUser.isVerified === false ? 'TÀI KHOẢN' : 'TÀI KHOẢN ĐÃ XÁC THỰC'}
-                </Text>
+          {isStaffProfile ? (
+            <>
+              <View style={styles.statusCard}>
+                <View>
+                  <View style={styles.verifiedBadge}>
+                    <MaterialCommunityIcons color="#17503a" name="check-decagram" size={15} />
+                    <Text style={styles.verifiedText}>{displayUser.isVerified === false ? t.common.accountOnly : t.common.verifiedAccount}</Text>
+                  </View>
+                  <Text style={styles.memberText}>{t.common.memberSince} {formatMemberSince(displayUser.createdAt, language === 'VN' ? 'vi-VN' : 'en-US')}</Text>
+                </View>
+                <View style={styles.passengerBlock}>
+                  <Text style={styles.passengerLabel}>{t.common.role}</Text>
+                  <Text style={styles.passengerValue}>{staffRoleLabel}</Text>
+                </View>
               </View>
-              <Text style={styles.memberText}>Thành viên từ {formatMemberSince(displayUser.createdAt)}</Text>
-            </View>
-            <View style={styles.passengerBlock}>
-              <Text style={styles.passengerLabel}>MÃ HÀNH KHÁCH</Text>
-              <Text style={styles.passengerValue}>{passengerId(displayUser.id)}</Text>
-            </View>
-          </View>
 
-          <Text style={styles.sectionTitle}>Tổng quan hành trình</Text>
-          <View style={styles.passCard}>
-            <View>
-              <Text style={styles.passKicker}>VÉ THÁNG</Text>
-              <Text style={styles.passTitle}>{passActive ? 'Đang hiệu lực' : 'Chưa kích hoạt'}</Text>
-            </View>
-            <View style={styles.progressRow}>
-              <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${passProgress * 100}%` }]} />
+              <Text style={styles.sectionTitle}>{t.common.account}</Text>
+              <View style={styles.settingsCard}>
+                <SettingRow icon="lock-outline" label={t.common.changePassword} onPress={() => router.push('/change-password')} />
+                <SettingRow
+                  icon="translate"
+                  label={`${t.common.language}: ${language}`}
+                  onPress={toggleLanguage}
+                />
               </View>
-              <Text style={styles.daysText}>Còn {daysLeft} ngày</Text>
-            </View>
-            <View style={styles.passGlow} />
-          </View>
-
-          <View style={styles.statsRow}>
-            <View style={styles.statCard}>
-              <MaterialCommunityIcons color={colors.accent} name="bus" size={23} />
-              <View>
-                <Text style={styles.statValue}>{totalTrips}</Text>
-                <Text style={styles.statLabel}>Tổng chuyến</Text>
+            </>
+          ) : (
+            <>
+              <View style={styles.statusCard}>
+                <View>
+                  <View style={styles.verifiedBadge}>
+                    <MaterialCommunityIcons color="#17503a" name="check-decagram" size={15} />
+                    <Text style={styles.verifiedText}>
+                      {displayUser.isVerified === false ? 'TÀI KHOẢN' : 'TÀI KHOẢN ĐÃ XÁC THỰC'}
+                    </Text>
+                  </View>
+                  <Text style={styles.memberText}>Thành viên từ {formatMemberSince(displayUser.createdAt, 'vi-VN')}</Text>
+                </View>
+                <View style={styles.passengerBlock}>
+                  <Text style={styles.passengerLabel}>MÃ HÀNH KHÁCH</Text>
+                  <Text style={styles.passengerValue}>{passengerId(displayUser.id)}</Text>
+                </View>
               </View>
-            </View>
-            <View style={styles.statCard}>
-              <MaterialCommunityIcons color={colors.secondary} name="ticket-confirmation-outline" size={23} />
-              <View>
-                <Text style={styles.statValue}>{String(activeTickets).padStart(2, '0')}</Text>
-                <Text style={styles.statLabel}>Vé hiệu lực</Text>
+
+              <Text style={styles.sectionTitle}>Tổng quan hành trình</Text>
+              <View style={styles.passCard}>
+                <View>
+                  <Text style={styles.passKicker}>VÉ THÁNG</Text>
+                  <Text style={styles.passTitle}>{passActive ? 'Đang hiệu lực' : 'Chưa kích hoạt'}</Text>
+                </View>
+                <View style={styles.progressRow}>
+                  <View style={styles.progressTrack}>
+                    <View style={[styles.progressFill, { width: `${passProgress * 100}%` }]} />
+                  </View>
+                  <Text style={styles.daysText}>Còn {daysLeft} ngày</Text>
+                </View>
+                <View style={styles.passGlow} />
               </View>
-            </View>
-          </View>
 
-          <Text style={styles.sectionTitle}>Truy cập nhanh</Text>
-          <View style={styles.actionGrid}>
-            <ActionCard icon="ticket-confirmation-outline" label="Vé của tôi" onPress={() => router.push('/my-tickets')} />
-            <ActionCard icon="history" label="Lịch sử hành trình" onPress={() => router.push('/travel-history')} />
-            <ActionCard icon="heart-outline" label="Yêu thích" onPress={() => router.push('/favorites' as Href)} />
-            <ActionCard icon="bell-ring-outline" label="Thông báo" onPress={() => router.push('/notifications')} />
-            <ActionCard icon="message-text-outline" label="Góp ý" onPress={() => router.push('/my-feedback' as Href)} />
-            <ActionCard icon="package-variant-closed" label="Đồ thất lạc" onPress={() => router.push('/my-lost-items' as Href)} />
-            <ActionCard icon="lock-outline" label="Bảo mật" onPress={() => router.push('/change-password')} />
-          </View>
+              <View style={styles.statsRow}>
+                <View style={styles.statCard}>
+                  <MaterialCommunityIcons color={colors.accent} name="bus" size={23} />
+                  <View>
+                    <Text style={styles.statValue}>{totalTrips}</Text>
+                    <Text style={styles.statLabel}>Tổng chuyến</Text>
+                  </View>
+                </View>
+                <View style={styles.statCard}>
+                  <MaterialCommunityIcons color={colors.secondary} name="ticket-confirmation-outline" size={23} />
+                  <View>
+                    <Text style={styles.statValue}>{String(activeTickets).padStart(2, '0')}</Text>
+                    <Text style={styles.statLabel}>Vé hiệu lực</Text>
+                  </View>
+                </View>
+              </View>
 
-          <View style={styles.settingsCard}>
-            <SettingRow icon="shield-check-outline" label="Chính sách riêng tư" onPress={() => unavailable('Chính sách riêng tư')} />
-            <SettingRow icon="file-document-outline" label="Điều khoản dịch vụ" onPress={() => unavailable('Điều khoản dịch vụ')} />
-            <SettingRow icon="help-box-outline" label="Trung tâm trợ giúp" onPress={() => unavailable('Trung tâm trợ giúp')} />
-          </View>
+              <Text style={styles.sectionTitle}>Truy cập nhanh</Text>
+              <View style={styles.actionGrid}>
+                <ActionCard icon="ticket-confirmation-outline" label="Vé của tôi" onPress={() => router.push('/my-tickets')} />
+                <ActionCard icon="history" label="Lịch sử hành trình" onPress={() => router.push('/travel-history')} />
+                <ActionCard icon="heart-outline" label="Yêu thích" onPress={() => router.push('/favorites' as Href)} />
+                <ActionCard icon="bell-ring-outline" label="Thông báo" onPress={() => router.push('/notifications')} />
+                <ActionCard icon="message-text-outline" label="Góp ý" onPress={() => router.push('/my-feedback' as Href)} />
+                <ActionCard icon="package-variant-closed" label="Đồ thất lạc" onPress={() => router.push('/my-lost-items' as Href)} />
+                <ActionCard icon="lock-outline" label="Bảo mật" onPress={() => router.push('/change-password')} />
+              </View>
+
+              <View style={styles.settingsCard}>
+                <SettingRow icon="shield-check-outline" label="Chính sách riêng tư" onPress={() => unavailable('Chính sách riêng tư')} />
+                <SettingRow icon="file-document-outline" label="Điều khoản dịch vụ" onPress={() => unavailable('Điều khoản dịch vụ')} />
+                <SettingRow icon="help-box-outline" label="Trung tâm trợ giúp" onPress={() => unavailable('Trung tâm trợ giúp')} />
+              </View>
+            </>
+          )}
 
           <Pressable
             accessibilityRole="button"
@@ -260,14 +303,14 @@ export default function ProfileScreen() {
             ) : (
               <>
                 <MaterialCommunityIcons color={colors.error} name="logout" size={21} />
-                <Text style={styles.logoutText}>Đăng xuất</Text>
+                <Text style={styles.logoutText}>{isStaffProfile ? t.common.logout : 'Đăng xuất'}</Text>
               </>
             )}
           </Pressable>
 
           <View style={styles.footer}>
             <Text style={styles.footerBrand}>BUSDN MOBILE</Text>
-            <Text style={styles.footerVersion}>PHIÊN BẢN 4.2.0 ỔN ĐỊNH</Text>
+            <Text style={styles.footerVersion}>{isStaffProfile ? t.common.version : 'PHIÊN BẢN 4.2.0 ỔN ĐỊNH'}</Text>
           </View>
         </ScrollView>
 
@@ -294,7 +337,7 @@ const styles = StyleSheet.create({
   contact: { marginTop: 5, color: colors.muted, fontSize: 13, fontWeight: '600' },
   phone: { marginTop: 3, color: '#65716c', fontSize: 12 },
   loader: { marginBottom: 12 },
-  statusCard: { minHeight: 92, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 18, borderRadius: 24, backgroundColor: colors.white, shadowColor: colors.primary, shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.05, shadowRadius: 18, elevation: 3 },
+  statusCard: { minHeight: 92, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: 18, borderRadius: 24, backgroundColor: colors.white, shadowColor: colors.primary, shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.05, shadowRadius: 18, elevation: 3 },
   verifiedBadge: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: '#b5efd1' },
   verifiedText: { color: '#17503a', fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
   memberText: { marginTop: 9, color: colors.muted, fontSize: 11 },
@@ -329,9 +372,4 @@ const styles = StyleSheet.create({
   footer: { alignItems: 'center', marginTop: 28 },
   footerBrand: { color: 'rgba(0,26,15,0.28)', fontSize: 9, fontWeight: '900', letterSpacing: 1.8 },
   footerVersion: { marginTop: 4, color: 'rgba(65,72,68,0.45)', fontSize: 8, fontWeight: '700', letterSpacing: 1.1 },
-  bottomNav: { position: 'absolute', right: 0, bottom: 0, left: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingTop: 9, paddingHorizontal: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#d5e4dd', borderTopLeftRadius: 18, borderTopRightRadius: 18, backgroundColor: '#e8f1ed', shadowColor: colors.primary, shadowOffset: { width: 0, height: -10 }, shadowOpacity: 0.06, shadowRadius: 20, elevation: 10 },
-  navItem: { minWidth: 67, alignItems: 'center', paddingHorizontal: 11, paddingVertical: 5, borderRadius: 24 },
-  navItemActive: { backgroundColor: '#b5efd1' },
-  navLabel: { marginTop: 2, color: '#527064', fontSize: 8, fontWeight: '600' },
-  navLabelActive: { color: '#17503a', fontWeight: '800' },
 });

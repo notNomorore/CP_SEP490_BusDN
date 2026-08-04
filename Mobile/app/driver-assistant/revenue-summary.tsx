@@ -7,16 +7,19 @@ import { AppButton } from '@/components/AppButton';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
+import { useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { ShiftRevenue } from '@/types/busAssistant';
 import { goBackOrReplace } from '@/utils/navigation';
 import { toDateInput } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
-const money = (value?: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
+const money = (value?: number, locale = 'vi-VN') => new Intl.NumberFormat(locale, { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
 
 export default function RevenueSummaryScreen() {
   const user = useAuthStore((state) => state.user);
+  const { language, t } = useDriverI18n();
+  const locale = language === 'VN' ? 'vi-VN' : 'en-US';
   const [revenue, setRevenue] = useState<ShiftRevenue | null>(null);
   const [actualAmount, setActualAmount] = useState('');
   const [note, setNote] = useState('');
@@ -35,11 +38,11 @@ export default function RevenueSummaryScreen() {
       setRevenue(data);
       setActualAmount(String(Math.round(Number(data.totalRevenue) || 0)));
     } catch (error) {
-      Alert.alert('Không thể tải doanh thu', getErrorMessage(error, 'Không thể tải doanh thu ca.'));
+      Alert.alert(t.assistant.revenue.loadErrorTitle, getErrorMessage(error, t.assistant.revenue.loadErrorFallback));
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadRevenue();
@@ -47,7 +50,7 @@ export default function RevenueSummaryScreen() {
 
   const submitSummary = async () => {
     if (!shiftId) {
-      Alert.alert('Thiếu thông tin ca', 'Không tìm thấy ca đang hoạt động để chốt doanh thu.');
+      Alert.alert(t.assistant.revenue.missingShiftTitle, t.assistant.revenue.missingShiftMessage);
       return;
     }
 
@@ -59,9 +62,9 @@ export default function RevenueSummaryScreen() {
         note,
         attachmentUrls: [],
       });
-      Alert.alert('Đã nộp báo cáo', result.message || `Trạng thái: ${result.reconciliationStatus || 'đã nộp'}`);
+      Alert.alert(t.assistant.revenue.submitSuccessTitle, result.message || `${t.assistant.revenue.submitSuccessStatusPrefix}: ${result.reconciliationStatus || t.assistant.revenue.submitted}`);
     } catch (error) {
-      Alert.alert('Không thể nộp báo cáo', getErrorMessage(error, 'Không thể nộp báo cáo doanh thu.'));
+      Alert.alert(t.assistant.revenue.submitErrorTitle, getErrorMessage(error, t.assistant.revenue.submitErrorFallback));
     } finally {
       setIsSubmitting(false);
     }
@@ -71,69 +74,69 @@ export default function RevenueSummaryScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant/shift-revenue')}>
+          <Pressable accessibilityLabel={t.common.back} hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant/shift-revenue')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View>
-            <Text style={styles.kicker}>KẾT THÚC CA</Text>
-            <Text style={styles.title}>Chốt doanh thu</Text>
+            <Text style={styles.kicker}>{t.assistant.revenue.summaryKicker}</Text>
+            <Text style={styles.title}>{t.assistant.revenue.summaryTitle}</Text>
           </View>
         </View>
 
         {isLoading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.primary} />
-            <Text style={styles.emptyText}>Đang tải báo cáo...</Text>
+            <Text style={styles.emptyText}>{t.assistant.revenue.loadingReport}</Text>
           </View>
         ) : (
           <>
             <View style={styles.heroCard}>
-              <Text style={styles.heroLabel}>{revenue?.shiftInfo?.shiftName || revenue?.shiftInfo?.shiftCode || 'Ca hiện tại'}</Text>
-              <Text style={styles.heroValue}>{money(systemAmount)}</Text>
-              <Text style={styles.heroMeta}>Số tiền hệ thống</Text>
+              <Text style={styles.heroLabel}>{revenue?.shiftInfo?.shiftName || revenue?.shiftInfo?.shiftCode || t.assistant.revenue.currentShift}</Text>
+              <Text style={styles.heroValue}>{money(systemAmount, locale)}</Text>
+              <Text style={styles.heroMeta}>{t.assistant.revenue.systemAmount}</Text>
             </View>
 
             <View style={styles.metricGrid}>
               <View style={styles.metric}>
-                <Text style={styles.metricLabel}>Tiền mặt</Text>
-                <Text style={styles.metricValue}>{money(revenue?.cashCollected)}</Text>
+                <Text style={styles.metricLabel}>{t.assistant.revenue.cashCollected}</Text>
+                <Text style={styles.metricValue}>{money(revenue?.cashCollected, locale)}</Text>
               </View>
               <View style={styles.metric}>
-                <Text style={styles.metricLabel}>Thanh toán điện tử</Text>
-                <Text style={styles.metricValue}>{money(revenue?.ePaymentAmount)}</Text>
+                <Text style={styles.metricLabel}>{t.assistant.revenue.electronicCollected}</Text>
+                <Text style={styles.metricValue}>{money(revenue?.ePaymentAmount, locale)}</Text>
               </View>
               <View style={styles.metric}>
-                <Text style={styles.metricLabel}>Số vé</Text>
+                <Text style={styles.metricLabel}>{t.assistant.revenue.ticketCount}</Text>
                 <Text style={styles.metricValue}>{revenue?.totalTicketsSold || 0}</Text>
               </View>
               <View style={styles.metric}>
-                <Text style={styles.metricLabel}>Chênh lệch</Text>
-                <Text style={[styles.metricValue, difference === 0 ? styles.match : styles.discrepancy]}>{money(difference)}</Text>
+                <Text style={styles.metricLabel}>{t.assistant.revenue.difference}</Text>
+                <Text style={[styles.metricValue, difference === 0 ? styles.match : styles.discrepancy]}>{money(difference, locale)}</Text>
               </View>
             </View>
 
             <View style={styles.panel}>
-              <Text style={styles.panelTitle}>Nộp số tiền thực thu</Text>
-              <Text style={styles.fieldLabel}>Tiền mặt thực thu</Text>
+              <Text style={styles.panelTitle}>{t.assistant.revenue.submitActualCash}</Text>
+              <Text style={styles.fieldLabel}>{t.assistant.revenue.actualCash}</Text>
               <TextInput keyboardType="number-pad" onChangeText={setActualAmount} style={styles.input} value={actualAmount} />
-              <Text style={styles.fieldLabel}>Ghi chú</Text>
+              <Text style={styles.fieldLabel}>{t.assistant.revenue.note}</Text>
               <TextInput
                 multiline
                 onChangeText={setNote}
-                placeholder="Ghi chú cho bộ phận tài chính hoặc quản trị viên"
+                placeholder={t.assistant.revenue.notePlaceholder}
                 placeholderTextColor={colors.muted}
                 style={[styles.input, styles.noteInput]}
                 textAlignVertical="top"
                 value={note}
               />
-              <AppButton title="Nộp báo cáo" loading={isSubmitting} onPress={submitSummary} />
+              <AppButton title={t.assistant.revenue.submitReport} loading={isSubmitting} onPress={submitSummary} />
             </View>
 
             <View style={[styles.panel, styles.bottomSpace]}>
-              <Text style={styles.panelTitle}>Kiểm tra trước khi nộp</Text>
-              <Text style={styles.checkItem}>Đã kiểm đếm tiền mặt và khớp với số tiền bên trên.</Text>
-              <Text style={styles.checkItem}>Đã kiểm tra các khoản QR/ví điện tử trong doanh thu ca.</Text>
-              <Text style={styles.checkItem}>Mọi chênh lệch đã được giải thích trong ghi chú.</Text>
+              <Text style={styles.panelTitle}>{t.assistant.revenue.beforeSubmit}</Text>
+              <Text style={styles.checkItem}>{t.assistant.revenue.checkCash}</Text>
+              <Text style={styles.checkItem}>{t.assistant.revenue.checkElectronic}</Text>
+              <Text style={styles.checkItem}>{t.assistant.revenue.checkDifference}</Text>
             </View>
           </>
         )}

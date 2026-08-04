@@ -7,10 +7,11 @@ import scheduleOperationsApi from '@/api/scheduleOperations.api';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
+import { useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { ShiftSchedule } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
-import { addDays, formatDate, formatDateKey, getShiftStatus, getTodayRange, getWeekRange, toDateInput } from '@/utils/scheduleOperations';
+import { addDays, formatDateKey, getShiftStatus, getTodayRange, getWeekRange, toDateInput } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
 const assignedStatuses = new Set(['ASSIGNED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED']);
@@ -41,6 +42,7 @@ const getShiftDurationHours = (shift: ShiftSchedule) => {
 };
 
 export default function ShiftScheduleScreen() {
+  const { language, t } = useDriverI18n();
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isHydrated = useAuthStore((state) => state.isHydrated);
@@ -50,6 +52,32 @@ export default function ShiftScheduleScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
+  const dateLocale = language === 'VN' ? 'vi-VN' : 'en-US';
+
+  const formatScheduleDate = useCallback((value?: string | null) => {
+    if (!value) return t.common.notAvailable;
+    const date = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return value;
+    return new Intl.DateTimeFormat(dateLocale, {
+      weekday: 'short',
+      month: 'short',
+      day: '2-digit',
+    }).format(date);
+  }, [dateLocale, t.common.notAvailable]);
+
+  const formatDayName = useCallback((value: string) => {
+    const date = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return value.slice(0, 3).toUpperCase();
+    return new Intl.DateTimeFormat(dateLocale, { weekday: 'short' }).format(date).toUpperCase();
+  }, [dateLocale]);
+
+  const formatShiftStatusLabel = useCallback((shift: ShiftSchedule) => {
+    const status = String(getShiftStatus(shift) || '').toUpperCase();
+    if (status === 'ASSIGNED' || status === 'ACCEPTED') return t.schedule.assigned;
+    if (status === 'COMPLETED') return t.schedule.completed;
+    if (status === 'IN_PROGRESS') return t.common.inProgress;
+    return status || t.common.notAvailable;
+  }, [t.common.inProgress, t.common.notAvailable, t.schedule.assigned, t.schedule.completed]);
 
   const loadSchedule = useCallback(async () => {
     if (!isHydrated || !isAuthenticated) {
@@ -59,7 +87,10 @@ export default function ShiftScheduleScreen() {
 
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
-    const requestedRange = { ...range };
+    const requestedRange = {
+      from: toDateInput(addDays(range.from, -1)),
+      to: range.to,
+    };
     setIsLoading(true);
     setError('');
     try {
@@ -68,7 +99,7 @@ export default function ShiftScheduleScreen() {
       setShifts((payload.shifts || []).filter(isWorkShiftSchedule));
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
-      const message = getErrorMessage(error, 'Không thể tải lịch ca làm việc.');
+      const message = getErrorMessage(error, t.schedule.loadErrorTitle);
       const statusCode = (error as { statusCode?: number; response?: { status?: number } })?.statusCode
         || (error as { response?: { status?: number } })?.response?.status;
       const isAuthError = statusCode === 401 || message.toLowerCase().includes('no token provided');
@@ -81,13 +112,13 @@ export default function ShiftScheduleScreen() {
       }
 
       setError(message);
-      Alert.alert('Không thể tải lịch ca', message);
+      Alert.alert(t.schedule.loadErrorTitle, message);
     } finally {
       if (requestId === requestIdRef.current) {
         setIsLoading(false);
       }
     }
-  }, [isAuthenticated, isHydrated, logout, range]);
+  }, [isAuthenticated, isHydrated, logout, range, t.schedule.loadErrorTitle]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -106,34 +137,27 @@ export default function ShiftScheduleScreen() {
   ), [range.from]);
 
   const workShifts = useMemo(() => shifts.filter(isWorkShiftSchedule), [shifts]);
+  const weekDaySet = useMemo(() => new Set(weekDays), [weekDays]);
+  const visibleWeekShifts = useMemo(() => (
+    workShifts.filter((shift) => weekDaySet.has(getShiftDateKey(shift)))
+  ), [weekDaySet, workShifts]);
 
   const todayShift = useMemo(() => (
     workShifts.find((shift) => getShiftDateKey(shift) === getTodayRange().from) || null
   ), [workShifts]);
 
-  const shiftsByDate = useMemo(() => workShifts.reduce<Record<string, ShiftSchedule[]>>((result, shift) => {
+  const shiftsByDate = useMemo(() => visibleWeekShifts.reduce<Record<string, ShiftSchedule[]>>((result, shift) => {
     const key = getShiftDateKey(shift);
     result[key] = [...(result[key] || []), shift];
     return result;
-  }, {}), [workShifts]);
-
-  const ungroupedShifts = useMemo(() => (
-    workShifts.filter((shift) => !weekDays.includes(getShiftDateKey(shift)))
-  ), [workShifts, weekDays]);
+  }, {}), [visibleWeekShifts]);
 
   const weeklyStats = useMemo(() => ({
-    totalHours: workShifts.reduce((total, shift) => total + getShiftDurationHours(shift), 0),
-    shiftCount: workShifts.length,
-    assignedCount: workShifts.filter((shift) => assignedStatuses.has(String(shift.assignmentStatus || ''))).length,
-    completedCount: workShifts.filter((shift) => shift.assignmentStatus === 'COMPLETED').length,
-  }), [workShifts]);
-
-  const nextShift = useMemo(() => (
-    [...workShifts].sort((left, right) => (
-      String(left.workDate || '').localeCompare(String(right.workDate || ''))
-      || String(left.startTime || '').localeCompare(String(right.startTime || ''))
-    ))[0] || null
-  ), [workShifts]);
+    totalHours: visibleWeekShifts.reduce((total, shift) => total + getShiftDurationHours(shift), 0),
+    shiftCount: visibleWeekShifts.length,
+    assignedCount: visibleWeekShifts.filter((shift) => assignedStatuses.has(String(shift.assignmentStatus || ''))).length,
+    completedCount: visibleWeekShifts.filter((shift) => shift.assignmentStatus === 'COMPLETED').length,
+  }), [visibleWeekShifts]);
 
   const changeWeek = (offset: number) => {
     setRange(getWeekRange(addDays(range.from, offset * 7)));
@@ -143,12 +167,12 @@ export default function ShiftScheduleScreen() {
     <View style={styles.screenShell}>
       <Screen>
       <View style={styles.header}>
-        <Pressable accessibilityLabel="Quay lại" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+        <Pressable accessibilityLabel={t.common.back} hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
           <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
         </Pressable>
         <View>
-          <Text style={styles.kicker}>LỊCH VÀ PHÂN CÔNG</Text>
-          <Text style={styles.title}>Lịch ca của tôi</Text>
+          <Text style={styles.kicker}>{t.schedule.kicker}</Text>
+          <Text style={styles.title}>{t.schedule.title}</Text>
         </View>
       </View>
 
@@ -157,8 +181,8 @@ export default function ShiftScheduleScreen() {
           <MaterialCommunityIcons color={colors.primary} name="chevron-left" size={23} />
         </Pressable>
         <Pressable accessibilityRole="button" onPress={() => setRange(getWeekRange())} style={styles.weekCenter}>
-          <Text style={styles.weekLabel}>{formatDate(range.from)} - {formatDate(range.to)}</Text>
-          <Text style={styles.weekHint}>Nhấn để về tuần hiện tại</Text>
+          <Text style={styles.weekLabel}>{formatScheduleDate(range.from)} - {formatScheduleDate(range.to)}</Text>
+          <Text style={styles.weekHint}>{t.schedule.weekHint}</Text>
         </Pressable>
         <Pressable accessibilityRole="button" onPress={() => changeWeek(1)} style={styles.weekButton}>
           <MaterialCommunityIcons color={colors.primary} name="chevron-right" size={23} />
@@ -167,54 +191,37 @@ export default function ShiftScheduleScreen() {
 
       <View style={styles.statsGrid}>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Tổng số giờ</Text>
+          <Text style={styles.statLabel}>{t.schedule.totalHours}</Text>
           <Text style={styles.statValue}>{weeklyStats.totalHours.toFixed(1)}</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Ca làm</Text>
+          <Text style={styles.statLabel}>{t.schedule.shifts}</Text>
           <Text style={styles.statValue}>{weeklyStats.shiftCount}</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Đã phân công</Text>
+          <Text style={styles.statLabel}>{t.schedule.assigned}</Text>
           <Text style={styles.statValueAccent}>{weeklyStats.assignedCount}</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Đã hoàn thành</Text>
+          <Text style={styles.statLabel}>{t.schedule.completed}</Text>
           <Text style={styles.statValue}>{weeklyStats.completedCount}</Text>
         </View>
       </View>
 
-      {nextShift ? (
-        <View style={styles.nextShiftCard}>
-          <View style={styles.nextShiftIcon}>
-            <MaterialCommunityIcons color={colors.white} name="calendar-clock" size={22} />
-          </View>
-          <View style={styles.nextShiftText}>
-            <Text style={styles.nextShiftLabel}>Ca được phân công tiếp theo</Text>
-            <Text numberOfLines={1} style={styles.nextShiftTitle}>
-              {formatDate(nextShift.workDate)} · {nextShift.startTime || 'N/A'} - {nextShift.endTime || 'N/A'}
-            </Text>
-            <Text numberOfLines={1} style={styles.nextShiftRoute}>
-              {nextShift.shiftName || 'Ca làm'}
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
       {isLoading ? (
         <View style={styles.loading}>
           <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Đang tải lịch ca...</Text>
+          <Text style={styles.loadingText}>{t.common.loading}</Text>
         </View>
       ) : error ? (
         <View>
           <Text style={styles.emptyText}>{error}</Text>
           <Pressable accessibilityRole="button" onPress={() => void loadSchedule()} style={styles.retryButton}>
-            <Text style={styles.retryText}>Thử lại</Text>
+            <Text style={styles.retryText}>{t.common.retry}</Text>
           </Pressable>
         </View>
-      ) : workShifts.length === 0 ? (
-        <Text style={styles.emptyText}>Tuần này chưa có lịch ca được phân công.</Text>
+      ) : visibleWeekShifts.length === 0 ? (
+        <Text style={styles.emptyText}>{t.schedule.emptyWeek}</Text>
       ) : (
         <>
           <View style={styles.calendarRow}>
@@ -223,7 +230,7 @@ export default function ShiftScheduleScreen() {
               const hasShift = Boolean(shiftsByDate[day]?.length);
               return (
                 <View key={day} style={[styles.dayTile, hasShift && styles.dayTileHasShift, isToday && styles.dayTileActive]}>
-                  <Text style={[styles.dayName, hasShift && styles.dayTextHasShift, isToday && styles.dayTextActive]}>{formatDate(day).slice(0, 3).toUpperCase()}</Text>
+                  <Text style={[styles.dayName, hasShift && styles.dayTextHasShift, isToday && styles.dayTextActive]}>{formatDayName(day)}</Text>
                   <Text style={[styles.dayNumber, hasShift && styles.dayTextHasShift, isToday && styles.dayTextActive]}>{Number(day.slice(-2))}</Text>
                   {hasShift ? <View style={[styles.shiftDot, isToday && styles.shiftDotActive]} /> : null}
                 </View>
@@ -232,47 +239,47 @@ export default function ShiftScheduleScreen() {
           </View>
 
           <View style={styles.todaySection}>
-            <Text style={styles.sectionTitle}>Ca làm hôm nay</Text>
+            <Text style={styles.sectionTitle}>{t.schedule.todayShift}</Text>
             {todayShift ? (
               <View style={styles.todayCard}>
                 <View style={styles.todayHeader}>
                   <View>
                     <View style={styles.shiftBadge}>
                       <MaterialCommunityIcons color={colors.primary} name="white-balance-sunny" size={18} />
-                      <Text style={styles.shiftBadgeText}>{todayShift.shiftName || 'Ca làm'}</Text>
+                      <Text style={styles.shiftBadgeText}>{todayShift.shiftName || t.schedule.shiftFallback}</Text>
                     </View>
                     <Text style={styles.shiftTime}>{todayShift.startTime || 'N/A'} - {todayShift.endTime || 'N/A'}</Text>
                   </View>
                   <View style={styles.statusBlock}>
-                    <Text style={styles.statusLabel}>Trạng thái</Text>
-                    <Text style={styles.statusValue}>{getShiftStatus(todayShift)}</Text>
+                    <Text style={styles.statusLabel}>{t.common.status}</Text>
+                    <Text style={styles.statusValue}>{formatShiftStatusLabel(todayShift)}</Text>
                   </View>
                 </View>
               </View>
             ) : (
-              <Text style={styles.emptyText}>Hôm nay chưa có ca làm được phân công.</Text>
+              <Text style={styles.emptyText}>{t.schedule.todayEmpty}</Text>
             )}
           </View>
 
           <View style={styles.timelineSection}>
-            <Text style={styles.sectionTitle}>Lịch làm việc trong tuần</Text>
+            <Text style={styles.sectionTitle}>{t.schedule.weeklyTitle}</Text>
             {weekDays.map((day) => {
               const dayShifts = shiftsByDate[day] || [];
               return (
                 <View key={day} style={styles.timelineGroup}>
                   <View style={styles.timelineDot} />
                   <View style={styles.timelineContent}>
-                    <Text style={styles.timelineDate}>{formatDate(day)}</Text>
+                    <Text style={styles.timelineDate}>{formatScheduleDate(day)}</Text>
                     {dayShifts.length ? dayShifts.map((shift) => (
                       <View key={shift.id} style={styles.shiftRow}>
                         <View>
                           <Text style={styles.shiftRowTime}>{shift.startTime || 'N/A'} - {shift.endTime || 'N/A'}</Text>
-                          <Text style={styles.shiftRowName}>{shift.shiftName || 'Ca làm'}</Text>
+                          <Text style={styles.shiftRowName}>{shift.shiftName || t.schedule.shiftFallback}</Text>
                         </View>
                       </View>
                     )) : (
                       <View style={styles.dayOffRow}>
-                        <Text style={styles.dayOffText}>Nghỉ</Text>
+                        <Text style={styles.dayOffText}>{t.schedule.noShift}</Text>
                         <MaterialCommunityIcons color={colors.error} name="calendar-remove-outline" size={20} />
                       </View>
                     )}
@@ -280,22 +287,6 @@ export default function ShiftScheduleScreen() {
                 </View>
               );
             })}
-            {ungroupedShifts.length ? (
-              <View style={styles.timelineGroup}>
-                <View style={styles.timelineDot} />
-                <View style={styles.timelineContent}>
-                  <Text style={styles.timelineDate}>Các ca được phân công khác</Text>
-                  {ungroupedShifts.map((shift) => (
-                    <View key={shift.id} style={styles.shiftRow}>
-                      <View>
-                        <Text style={styles.shiftRowTime}>{formatDate(shift.workDate)} · {shift.startTime || 'N/A'} - {shift.endTime || 'N/A'}</Text>
-                        <Text style={styles.shiftRowName}>{shift.shiftName || 'Ca làm'}</Text>
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            ) : null}
           </View>
         </>
       )}
@@ -320,12 +311,6 @@ const styles = StyleSheet.create({
   statLabel: { color: colors.muted, fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
   statValue: { marginTop: 8, color: colors.primary, fontSize: 22, fontWeight: '900' },
   statValueAccent: { marginTop: 8, color: colors.accent, fontSize: 22, fontWeight: '900' },
-  nextShiftCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18, borderRadius: 20, backgroundColor: colors.primary, padding: 14 },
-  nextShiftIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.14)' },
-  nextShiftText: { minWidth: 0, flex: 1 },
-  nextShiftLabel: { color: '#bfead5', fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
-  nextShiftTitle: { marginTop: 3, color: colors.white, fontSize: 15, fontWeight: '900' },
-  nextShiftRoute: { marginTop: 2, color: '#d4f2e5', fontSize: 12, fontWeight: '700' },
   loading: { minHeight: 260, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: colors.muted, fontWeight: '700' },
   emptyText: { borderRadius: 18, backgroundColor: colors.surfaceLow, padding: 16, color: colors.muted, fontSize: 13, fontWeight: '700' },
