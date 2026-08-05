@@ -18,6 +18,15 @@ import {
   calculatePriorityDiscount,
   getMonthlyPassSettings,
 } from '../fareOperations/fareOperations.service.js';
+import { config } from '../../config/environment.js';
+
+const getFrontendUrl = () => {
+  if (!config.frontend.url) {
+    throw new CustomError('FRONTEND_URL is required to create payment links.', HTTP_STATUS.INTERNAL_SERVER_ERROR);
+  }
+
+  return config.frontend.url.replace(/\/+$/, '');
+};
 
 const parseServiceDateParts = (value) => {
   const dateMatch = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -1686,7 +1695,7 @@ export class TicketService {
     }
 
     if (!paymentOrder.payos?.qrCode) {
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const frontendUrl = getFrontendUrl();
       const payosLink = await PayOSService.createPaymentLink({
         orderCode: paymentOrder.orderCode,
         amount,
@@ -1825,7 +1834,7 @@ export class TicketService {
     }
 
     if (!paymentOrder.payos?.qrCode) {
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const frontendUrl = getFrontendUrl();
       const payosLink = await PayOSService.createPaymentLink({
         orderCode: paymentOrder.orderCode,
         amount: paymentOrder.amount,
@@ -1917,7 +1926,7 @@ export class TicketService {
     if (paymentOrder.amount <= 0) {
       await this.completePaymentOrder(paymentOrder);
     } else if (!paymentOrder.payos?.qrCode) {
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const frontendUrl = getFrontendUrl();
       const payosLink = await PayOSService.createPaymentLink({
         orderCode: paymentOrder.orderCode,
         amount: paymentOrder.amount,

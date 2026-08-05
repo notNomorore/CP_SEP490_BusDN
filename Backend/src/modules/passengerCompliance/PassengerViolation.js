@@ -16,9 +16,19 @@ const PassengerViolationSchema = new mongoose.Schema(
     passengerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      default: null,
       index: true,
     },
+    sourceIncidentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'OperationIncident',
+      default: null,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
+    passengerDescription: { type: String, trim: true, default: '' },
+    actionTaken: { type: String, trim: true, default: '' },
     reporterId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

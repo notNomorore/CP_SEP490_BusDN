@@ -27,6 +27,7 @@ import ProfileSidebar from '../components/ProfileSidebar.jsx';
 import ProfileSkeleton from '../components/ProfileSkeleton.jsx';
 import SectionCard from '../components/SectionCard.jsx';
 import profileService from '../services/profileService.js';
+import { resolveBackendUrl } from '../../../shared/config/apiConfig.js';
 import {
   defaultProfileValues,
   genderOptions,
@@ -68,8 +69,7 @@ const getAvatarSource = (avatar) => {
     return avatar;
   }
 
-  const apiUrl = import.meta.env.VITE_API_URL?.trim() || 'http://localhost:3000';
-  return `${apiUrl.replace(/\/$/, '')}${avatar.startsWith('/') ? avatar : `/${avatar}`}`;
+  return resolveBackendUrl(avatar);
 };
 
 const formatDateValue = (value) => {

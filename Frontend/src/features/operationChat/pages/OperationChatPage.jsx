@@ -13,12 +13,8 @@ import {
   Smile,
 } from 'lucide-react';
 import useAuthStore from '../../auth/stores/authStore.js';
+import { SOCKET_URL } from '../../../shared/config/apiConfig.js';
 import operationChatService from '../services/operationChatService.js';
-
-const getApiOrigin = () => {
-  const configured = import.meta.env.VITE_API_URL?.trim();
-  return configured ? configured.replace(/\/$/, '') : 'http://localhost:3000';
-};
 
 const getToken = () => localStorage.getItem('authToken')
   || localStorage.getItem('token')
@@ -159,7 +155,7 @@ const OperationChatPage = ({ embedded = false }) => {
     const token = getToken();
     if (!token) return undefined;
 
-    const socket = io(getApiOrigin(), {
+    const socket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
     });
