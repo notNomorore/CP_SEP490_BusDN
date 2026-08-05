@@ -347,6 +347,7 @@ export default function DriverBusAssistantHomeScreen() {
                 <ActionTile title={upcomingShift?.shiftName || t.home.shiftSchedule} subtitle={t.home.shiftScheduleSub} icon="calendar-month-outline" href={shiftScheduleRoute} />
                 <ActionTile title={t.home.operationNotifications} subtitle={t.home.operationNotificationsSub} icon="bell-ring-outline" href={notificationsRoute} />
                 <ActionTile title={t.home.operationChat} subtitle={t.home.operationChatSub} icon="chat-outline" href={route('/driver-assistant/group-chat')} />
+                <ActionTile title={t.home.profileCard} subtitle={t.home.profileCardSub} icon="account-circle-outline" href={route('/profile')} />
               </>
             )}
           </View>

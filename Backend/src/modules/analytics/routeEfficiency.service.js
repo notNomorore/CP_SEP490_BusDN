@@ -35,6 +35,14 @@ const validDate = (value) => {
   return date && !Number.isNaN(date.getTime()) ? date : null;
 };
 
+const dateWithClock = (dateValue, clockValue) => {
+  const date = validDate(dateValue);
+  const match = /^(\d{2}):(\d{2})$/.exec(String(clockValue || ''));
+  if (!date || !match) return null;
+  date.setHours(Number(match[1]), Number(match[2]), 0, 0);
+  return date;
+};
+
 const minutesBetween = (start, end) => {
   const startDate = validDate(start);
   const endDate = validDate(end);
@@ -111,8 +119,12 @@ const buildRouteMap = async () => {
 };
 
 const buildVehicleMap = async () => {
-  const vehicles = await readCollection('vehicles');
-  return new Map(vehicles.map((vehicle) => [
+  const [vehicles, fleetBuses] = await Promise.all([
+    readCollection('vehicles'),
+    readCollection('fleetbuses'),
+  ]);
+  const allVehicles = [...vehicles, ...fleetBuses];
+  return new Map(allVehicles.map((vehicle) => [
     toId(vehicle._id),
     {
       capacity: toNumber(vehicle.capacity || vehicle.seatCapacity || vehicle.totalSeats, DEFAULT_VEHICLE_CAPACITY),
@@ -122,12 +134,16 @@ const buildVehicleMap = async () => {
 };
 
 const buildScheduleMap = async () => {
-  const schedules = await readCollection('schedules');
-  return new Map(schedules.map((schedule) => [
+  const [schedules, tripSchedules] = await Promise.all([
+    readCollection('schedules'),
+    readCollection('tripschedules'),
+  ]);
+  const allSchedules = [...schedules, ...tripSchedules];
+  return new Map(allSchedules.map((schedule) => [
     toId(schedule._id),
     {
-      scheduledStart: schedule.scheduledStart || schedule.startTime || schedule.departureTime,
-      scheduledEnd: schedule.scheduledEnd || schedule.endTime || schedule.arrivalTime,
+      scheduledStart: schedule.scheduledStart || schedule.startTime || dateWithClock(schedule.serviceDate, schedule.departureTime),
+      scheduledEnd: schedule.scheduledEnd || schedule.endTime || dateWithClock(schedule.serviceDate, schedule.expectedArrivalTime || schedule.arrivalTime),
       durationMinutes: toNumber(schedule.durationMinutes || schedule.expectedDuration),
     },
   ]));
@@ -180,23 +196,31 @@ const buildSyntheticTrips = (travelHistory) => {
 };
 
 const loadTrips = async ({ routeMap, vehicleMap, scheduleMap, travelHistory }) => {
-  const tripDocuments = await readCollection('trips');
-  const sourceTrips = tripDocuments.length ? tripDocuments : buildSyntheticTrips(travelHistory);
+  const [tripDocuments, tripSchedules] = await Promise.all([
+    readCollection('trips'),
+    readCollection('tripschedules'),
+  ]);
+  const linkedScheduleIds = new Set(tripDocuments.map((trip) => toId(trip.scheduleId)).filter(Boolean));
+  const unlinkedSchedules = tripSchedules.filter((schedule) => !linkedScheduleIds.has(toId(schedule._id)));
+  const storedTrips = [...tripDocuments, ...unlinkedSchedules];
+  const sourceTrips = storedTrips.length ? storedTrips : buildSyntheticTrips(travelHistory);
 
   return sourceTrips.map((trip) => {
     const routeId = toId(trip.routeId || trip.route?._id);
-    const vehicleId = toId(trip.vehicleId || trip.vehicle?._id);
-    const driverId = toId(trip.driverId || trip.driver?._id);
+    const vehicleId = toId(trip.vehicleId || trip.vehicle?.busId || trip.vehicle?._id);
+    const driverId = toId(trip.driverId || trip.driver?.userId || trip.driver?._id);
     const schedule = scheduleMap.get(toId(trip.scheduleId)) || {};
     const vehicle = vehicleMap.get(vehicleId) || {};
     const route = routeMap.get(routeId) || {};
-    const actualStart = validDate(trip.actualStart || trip.actualDepartureTime || trip.startedAt || trip.departureTime);
-    const actualEnd = validDate(trip.actualEnd || trip.actualArrivalTime || trip.completedAt || trip.arrivalTime);
+    const actualStart = validDate(trip.actualStart || trip.actualStartAt || trip.actualStartTime || trip.actualDepartureTime || trip.startedAt);
+    const actualEnd = validDate(trip.actualEnd || trip.actualEndAt || trip.actualEndTime || trip.actualArrivalTime || trip.completedAt);
     const scheduledStart = validDate(
-      trip.scheduledStart || trip.scheduledDepartureTime || schedule.scheduledStart
+      trip.scheduledStart || trip.plannedStartTime || trip.scheduledDepartureTime || schedule.scheduledStart
+      || dateWithClock(trip.serviceDate, trip.departureTime)
     );
     const scheduledEnd = validDate(
-      trip.scheduledEnd || trip.scheduledArrivalTime || schedule.scheduledEnd
+      trip.scheduledEnd || trip.plannedEndTime || trip.scheduledArrivalTime || schedule.scheduledEnd
+      || dateWithClock(trip.serviceDate, trip.expectedArrivalTime)
     );
     const scheduledTravelTime = toNumber(
       trip.scheduledTravelTimeMinutes
@@ -220,14 +244,14 @@ const loadTrips = async ({ routeMap, vehicleMap, scheduleMap, travelHistory }) =
     return {
       _id: toId(trip._id),
       routeId,
-      routeName: trip.routeName || trip.route?.name || route.name || 'Unassigned route',
+      routeName: trip.routeName || trip.routeCode || trip.route?.name || route.name || 'Unassigned route',
       vehicleId,
       driverId,
       date: actualStart || scheduledStart || validDate(trip.createdAt),
       status: normalizeStatus(trip.status, 'COMPLETED'),
       passengerCount: toNumber(trip.passengerCount || trip.boardedPassengers),
       vehicleCapacity: toNumber(
-        trip.vehicleCapacity || trip.capacity || vehicle.capacity,
+        trip.vehicleCapacity || trip.capacity || trip.vehicle?.capacity || vehicle.capacity,
         DEFAULT_VEHICLE_CAPACITY
       ),
       travelTime,
@@ -241,16 +265,21 @@ const loadTrips = async ({ routeMap, vehicleMap, scheduleMap, travelHistory }) =
 };
 
 const loadPassengerCounts = async () => {
-  const [boardingRecords, validations, tickets] = await Promise.all([
+  const [boardingRecords, validations, tickets, walkInTickets] = await Promise.all([
     readCollection('boardingrecords'),
     readCollection('ticketvalidations'),
     readCollection('tickets'),
+    readCollection('walkintickets'),
   ]);
-  const records = boardingRecords.length
+  const validatedRecords = boardingRecords.length
     ? boardingRecords
     : validations.length
       ? validations
       : tickets.filter((ticket) => ['VALIDATED', 'USED', 'COMPLETED'].includes(normalizeStatus(ticket.status)));
+  const records = [
+    ...validatedRecords,
+    ...walkInTickets.filter((ticket) => normalizeStatus(ticket.status) === 'COMPLETED'),
+  ];
   const byTrip = new Map();
 
   records.forEach((record) => {
@@ -259,7 +288,7 @@ const loadPassengerCounts = async () => {
       return;
     }
 
-    byTrip.set(tripId, (byTrip.get(tripId) || 0) + toNumber(record.passengerCount || record.quantity, 1));
+    byTrip.set(tripId, (byTrip.get(tripId) || 0) + toNumber(record.passengerCount || record.passengerQuantity || record.quantity, 1));
   });
 
   return byTrip;
@@ -370,12 +399,24 @@ const loadAnalyticsData = async (query) => {
       return false;
     }
     return true;
-  }).map((trip) => ({
-    ...trip,
-    passengerCount: passengerCounts.get(trip._id) || trip.passengerCount,
-    revenue: revenue.byTrip.get(trip._id) || trip.revenue,
-    incidentCount: incidents.byTrip.get(trip._id) || 0,
-  }));
+  }).map((trip) => {
+    const passengerCount = passengerCounts.get(trip._id) ?? trip.passengerCount;
+    const tripRevenue = revenue.byTrip.get(trip._id) ?? trip.revenue;
+    const hasCommercialActivity = passengerCount > 0 || tripRevenue > 0;
+
+    return {
+      ...trip,
+      // A sold/validated ticket proves that this assignment was operated even
+      // when its operational status was not closed correctly by the dispatcher.
+      // Keep cancelled trips excluded under all circumstances.
+      status: hasCommercialActivity && !CANCELLED_STATUSES.has(trip.status)
+        ? 'COMPLETED'
+        : trip.status,
+      passengerCount,
+      revenue: tripRevenue,
+      incidentCount: incidents.byTrip.get(trip._id) || 0,
+    };
+  });
 
   return {
     routeMap,
@@ -439,7 +480,10 @@ const aggregateRoutes = ({ routeMap, trips, routeRevenue, routeIncidents }) => {
 
   const routes = [...grouped.values()];
   const maxRevenuePerKm = Math.max(
-    ...routes.map((route) => route.distanceKm ? route.totalRevenue / route.distanceKm : 0),
+    ...routes.map((route) => {
+      const operatedDistanceKm = route.distanceKm * route.completedTrips;
+      return operatedDistanceKm ? route.totalRevenue / operatedDistanceKm : 0;
+    }),
     1
   );
   const maxPassengers = Math.max(...routes.map((route) => route.totalPassengers), 1);
@@ -448,7 +492,8 @@ const aggregateRoutes = ({ routeMap, trips, routeRevenue, routeIncidents }) => {
     const denominator = route.completedTrips || 1;
     const averageOccupancy = route.occupancyTotal / denominator;
     const onTimePerformance = (route.onTimeTrips / denominator) * 100;
-    const revenuePerKm = route.distanceKm ? route.totalRevenue / route.distanceKm : 0;
+    const operatedDistanceKm = route.distanceKm * route.completedTrips;
+    const revenuePerKm = operatedDistanceKm ? route.totalRevenue / operatedDistanceKm : 0;
     const occupancyScore = clamp(averageOccupancy) * 0.3;
     const onTimeScore = clamp(onTimePerformance) * 0.3;
     const revenueScore = clamp((revenuePerKm / maxRevenuePerKm) * 100) * 0.15;
@@ -460,6 +505,7 @@ const aggregateRoutes = ({ routeMap, trips, routeRevenue, routeIncidents }) => {
 
     return {
       ...route,
+      operatedDistanceKm: Number(operatedDistanceKm.toFixed(2)),
       averageOccupancy: Number(averageOccupancy.toFixed(2)),
       onTimePerformance: Number(onTimePerformance.toFixed(2)),
       averageTravelTime: Number((route.totalTravelTime / denominator).toFixed(2)),
@@ -520,6 +566,10 @@ const buildOverview = (data, query) => {
   const average = (field) => routes.length
     ? routes.reduce((total, route) => total + toNumber(route[field]), 0) / routes.length
     : 0;
+  const totalOperatedDistanceKm = routes.reduce(
+    (total, route) => total + toNumber(route.operatedDistanceKm),
+    0
+  );
 
   return {
     totalRoutes: routes.length,
@@ -530,7 +580,9 @@ const buildOverview = (data, query) => {
     averageDelayTime: Number(average('averageDelayTime').toFixed(2)),
     onTimePerformanceRate: Number(average('onTimePerformance').toFixed(2)),
     averageTravelTime: Number(average('averageTravelTime').toFixed(2)),
-    revenuePerKm: Number(average('revenuePerKm').toFixed(2)),
+    revenuePerKm: totalOperatedDistanceKm
+      ? Number((totalRevenue / totalOperatedDistanceKm).toFixed(2))
+      : 0,
     costPerKm: routes.some((route) => route.costPerKm !== null)
       ? Number(average('costPerKm').toFixed(2))
       : null,

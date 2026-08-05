@@ -216,7 +216,6 @@ export const adminNavGroups = [
       { path: '/admin/incidents', key: 'admin.sidebar.incidents', icon: 'report' },
       { path: '/admin/vehicle-issues', key: 'admin.sidebar.vehicleIssues', icon: 'build_circle' },
       { path: '/admin/maintenance-approval', key: 'admin.sidebar.maintenanceApproval', icon: 'fact_check' },
-      { path: '/admin/passenger-compliance', key: 'admin.sidebar.passengerCompliance', icon: 'gpp_bad' },
     ],
   },
   {
