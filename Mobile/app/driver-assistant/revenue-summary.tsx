@@ -11,7 +11,6 @@ import { useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { ShiftRevenue } from '@/types/busAssistant';
 import { goBackOrReplace } from '@/utils/navigation';
-import { toDateInput } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
 const money = (value?: number, locale = 'vi-VN') => new Intl.NumberFormat(locale, { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
@@ -34,7 +33,7 @@ export default function RevenueSummaryScreen() {
   const loadRevenue = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await busAssistantApi.getShiftRevenue({ date: toDateInput() });
+      const data = await busAssistantApi.getShiftRevenue();
       setRevenue(data);
       setActualAmount(String(Math.round(Number(data.totalRevenue) || 0)));
     } catch (error) {

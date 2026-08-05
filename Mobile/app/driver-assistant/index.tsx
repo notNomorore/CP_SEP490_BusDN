@@ -13,7 +13,7 @@ import { useAuthStore } from '@/store/auth.store';
 import type { ShiftRevenue } from '@/types/busAssistant';
 import type { AssignedTrip, ShiftSchedule } from '@/types/scheduleOperations';
 import { isDriverAssistantRole, normalizeRole } from '@/utils/roleNavigation';
-import { getTodayRange, getTripDepartureTimeLabel, getTripStatus, getTripVehicleLabel, isTripCompleted, isTripToday, toDateInput } from '@/utils/scheduleOperations';
+import { getTodayRange, getTripDepartureTimeLabel, getTripStatus, getTripVehicleLabel, isTripCompleted, isTripToday } from '@/utils/scheduleOperations';
 import { getErrorMessage, getErrorStatusCode, isPermissionError } from '@/utils/validation';
 
 const assignedTripsRoute = '/driver-assistant/assigned-trips' as Href;
@@ -100,7 +100,7 @@ export default function DriverBusAssistantHomeScreen() {
         scheduleOperationsApi.getAssignedTrips(getTodayRange()),
         scheduleOperationsApi.getShiftSchedule(getTodayRange()),
         isBusAssistant
-          ? busAssistantApi.getShiftRevenue({ date: toDateInput() }).catch(() => null)
+          ? busAssistantApi.getShiftRevenue().catch(() => null)
           : Promise.resolve(null),
       ]);
       setTrips(tripsPayload.trips || []);

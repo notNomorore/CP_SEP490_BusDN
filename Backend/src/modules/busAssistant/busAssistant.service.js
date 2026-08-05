@@ -22,9 +22,6 @@ const ACTIVE_TICKET_STATUSES = ['ACTIVE', 'VALID', 'PAID', 'CONFIRMED'];
 const USED_TICKET_STATUSES = ['USED', 'BOARDED', 'CONSUMED'];
 const ACTIVE_ROUTE_STATUSES = ['ACTIVE', 'PUBLISHED'];
 const ACTIVE_TRIP_STATUSES = ['scheduled', 'active', 'paused', 'delayed', 'PLANNED', 'ASSIGNED', 'IN_PROGRESS'];
-const COMPLETED_TRANSACTION_STATUSES = ['COMPLETED'];
-const E_PAYMENT_METHODS = ['QR', 'E_WALLET'];
-
 const toObjectId = (value) => new mongoose.Types.ObjectId(value);
 const idText = (value) => value ? String(value._id || value) : '';
 const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -216,61 +213,65 @@ const calculateFare = (route, passengerType, submittedAmount, passengerQuantity)
   };
 };
 
-const transactionFilter = ({ assistantId, shiftId, routeId, date }) => {
+const walkInRevenueFilter = ({ assistantId, shiftId, routeId, date }) => {
+  const { start, end } = todayRange(date || new Date());
   const filter = {
     busAssistantId: assistantId,
-    status: { $in: COMPLETED_TRANSACTION_STATUSES },
+    status: 'COMPLETED',
+    issuedAt: { $gte: start, $lte: end },
   };
   if (shiftId) filter.shiftId = toObjectId(shiftId);
   if (routeId) filter.routeId = toObjectId(routeId);
-  if (date) {
-    const { start, end } = todayRange(date);
-    filter.completedAt = { $gte: start, $lte: end };
-  }
   return filter;
 };
 
 const buildRevenue = async ({ assistantId, shiftId, routeId, date, limit = 10 }) => {
-  const transactions = await Transaction.find(transactionFilter({ assistantId, shiftId, routeId, date }))
-    .sort({ completedAt: -1 })
+  // The sales-history screen is the trusted source for sold walk-in tickets.
+  // Aggregate the same completed WalkInTicket rows here so revenue cannot drift
+  // when a payment provider updates the ticket before/after its transaction.
+  const tickets = await WalkInTicket.find(walkInRevenueFilter({ assistantId, shiftId, routeId, date }))
+    .populate('transactionId', 'transactionCode paymentMethod finalAmount amount discountAmount status completedAt')
+    .sort({ issuedAt: -1 })
     .lean();
-  const boardingDateFilter = date ? todayRange(date) : null;
+  const boardingDateFilter = todayRange(date || new Date());
   const boardingCount = await BoardingRecord.countDocuments({
     busAssistantId: assistantId,
     validationStatus: 'VALIDATED',
     ...(shiftId ? { shiftId } : {}),
     ...(routeId ? { routeId } : {}),
-    ...(boardingDateFilter ? { boardedAt: { $gte: boardingDateFilter.start, $lte: boardingDateFilter.end } } : {}),
+    boardedAt: { $gte: boardingDateFilter.start, $lte: boardingDateFilter.end },
   });
 
   const breakdown = new Map();
   const methodBreakdown = new Map();
-  transactions.forEach((item) => {
+  tickets.forEach((item) => {
+    const transaction = item.transactionId || {};
     const ticketType = item.ticketType || 'WALK_IN';
+    const amount = number(item.collectedAmount ?? item.totalAmount);
+    const paymentMethod = ['BANK_TRANSFER', 'QR'].includes(item.paymentMethod) ? 'QR' : item.paymentMethod || transaction.paymentMethod || 'CASH';
     const byType = breakdown.get(ticketType) || { ticketType, tickets: 0, revenue: 0, discountAmount: 0 };
     byType.tickets += 1;
-    byType.revenue += number(item.finalAmount || item.amount);
-    byType.discountAmount += number(item.discountAmount);
+    byType.revenue += amount;
+    byType.discountAmount += number(transaction.discountAmount);
     breakdown.set(ticketType, byType);
 
-    const method = item.paymentMethod || 'CASH';
-    const byMethod = methodBreakdown.get(method) || { paymentMethod: method, transactions: 0, amount: 0 };
+    const byMethod = methodBreakdown.get(paymentMethod) || { paymentMethod, transactions: 0, amount: 0 };
     byMethod.transactions += 1;
-    byMethod.amount += number(item.finalAmount || item.amount);
-    methodBreakdown.set(method, byMethod);
+    byMethod.amount += amount;
+    methodBreakdown.set(paymentMethod, byMethod);
   });
 
-  const totalRevenue = transactions.reduce((total, item) => total + number(item.finalAmount || item.amount), 0);
-  const cashCollected = transactions
+  const totalRevenue = tickets.reduce((total, item) => total + number(item.collectedAmount ?? item.totalAmount), 0);
+  const cashCollected = tickets
     .filter((item) => item.paymentMethod === 'CASH')
-    .reduce((total, item) => total + number(item.finalAmount || item.amount), 0);
-  const ePaymentAmount = transactions
-    .filter((item) => E_PAYMENT_METHODS.includes(item.paymentMethod))
-    .reduce((total, item) => total + number(item.finalAmount || item.amount), 0);
-  const discountAmount = transactions.reduce((total, item) => total + number(item.discountAmount), 0);
+    .reduce((total, item) => total + number(item.collectedAmount ?? item.totalAmount), 0);
+  const ePaymentAmount = tickets
+    .filter((item) => ['BANK_TRANSFER', 'QR', 'E_WALLET', 'WALLET', 'CARD'].includes(item.paymentMethod))
+    .reduce((total, item) => total + number(item.collectedAmount ?? item.totalAmount), 0);
+  const discountAmount = tickets.reduce((total, item) => total + number(item.transactionId?.discountAmount), 0);
 
   return {
-    totalTicketsSold: transactions.length,
+    totalTicketsSold: tickets.length,
     totalRevenue,
     cashCollected,
     ePaymentAmount,
@@ -278,14 +279,14 @@ const buildRevenue = async ({ assistantId, shiftId, routeId, date, limit = 10 })
     validatedETickets: boardingCount,
     revenueBreakdown: [...breakdown.values()],
     paymentMethodBreakdown: [...methodBreakdown.values()],
-    recentTransactions: transactions.slice(0, limit).map((item) => ({
-      _id: item._id,
-      transactionCode: item.transactionCode,
-      ticketType: item.ticketType,
-      paymentMethod: item.paymentMethod,
-      amount: number(item.finalAmount || item.amount),
+    recentTransactions: tickets.slice(0, limit).map((item) => ({
+      _id: item.transactionId?._id || item._id,
+      transactionCode: item.transactionId?.transactionCode || item.ticketCode,
+      ticketType: item.ticketType || 'WALK_IN',
+      paymentMethod: ['BANK_TRANSFER', 'QR'].includes(item.paymentMethod) ? 'QR' : item.paymentMethod || 'CASH',
+      amount: number(item.collectedAmount ?? item.totalAmount),
       status: item.status,
-      completedAt: item.completedAt,
+      completedAt: item.transactionId?.completedAt || item.updatedAt || item.issuedAt,
     })),
   };
 };
@@ -617,7 +618,9 @@ export class BusAssistantService {
     });
     const revenue = await buildRevenue({
       assistantId: actor.userId,
-      shiftId: query.shiftId || shiftContext?.shiftId || null,
+      // Match sales history: only apply a shift filter when the caller selected
+      // one explicitly. Legacy/current assignments may store a null shiftId.
+      shiftId: query.shiftId || null,
       routeId: query.routeId,
       date: query.date,
     });
