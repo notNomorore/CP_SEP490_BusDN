@@ -10,8 +10,6 @@ export function BusAssistantBottomNav({ active }: { active: BottomNavKey }) {
     { key: 'sell', label: t.assistant.nav.sell, icon: 'ticket-confirmation-outline', href: '/driver-assistant/walkin-ticket' },
     { key: 'validate', label: t.assistant.nav.validate, icon: 'qrcode-scan', href: '/driver-assistant/validate-ticket' },
     { key: 'trips', label: t.nav.trips, icon: 'bus-clock', href: '/driver-assistant/assigned-trips' },
-    { key: 'schedule', label: t.nav.schedule, icon: 'calendar-month-outline', href: '/driver-assistant/shift-schedule' },
-    { key: 'notifications', label: t.nav.notifications, icon: 'bell-ring-outline', href: '/driver-assistant/notifications' },
     { key: 'profile', label: t.nav.profile, icon: 'account-outline', href: '/profile' },
   ];
   return <BottomNavBase active={active} items={busAssistantItems} />;

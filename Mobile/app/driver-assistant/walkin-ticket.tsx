@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, AppState, Image, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import busAssistantApi from '@/api/busAssistant.api';
 import scheduleOperationsApi from '@/api/scheduleOperations.api';
@@ -13,7 +13,7 @@ import { useAuthStore } from '@/store/auth.store';
 import type { WalkInTicketHistory, WalkInTicketResult } from '@/types/busAssistant';
 import type { AssignedTrip } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
-import { getAssignedTripsRange, getTripDepartureTimeLabel, getTripStatus, toDateInput } from '@/utils/scheduleOperations';
+import { getTripDepartureTimeLabel, toDateInput } from '@/utils/scheduleOperations';
 import { getErrorMessage, isPermissionError } from '@/utils/validation';
 
 const passengerTypes = ['ADULT', 'STUDENT', 'CHILD', 'SENIOR'];
@@ -84,6 +84,7 @@ export default function WalkInTicketScreen() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [resumingId, setResumingId] = useState('');
   const [showHistory, setShowHistory] = useState(false);
+  const isAutoConfirmingRef = useRef(false);
 
   const selectedTrip = useMemo(
     () => trips.find((trip) => trip.id === selectedTripId) || trips[0] || null,
@@ -128,9 +129,12 @@ export default function WalkInTicketScreen() {
 
   const loadTrips = useCallback(async () => {
     try {
-      // Dùng cùng phạm vi với màn Chuyến để hai màn luôn nhận cùng danh sách.
-      const payload = await scheduleOperationsApi.getAssignedTrips(getAssignedTripsRange());
-      const usableTrips = (payload.trips || []).filter((trip) => !['COMPLETED', 'CANCELLED'].includes(getTripStatus(trip)));
+      // Keep this list identical to the web walk-in-ticket dropdown: use the
+      // backend's default assignment scope and filter by tripStatus only.
+      const payload = await scheduleOperationsApi.getAssignedTrips();
+      const usableTrips = (payload.trips || []).filter((trip) => (
+        !['COMPLETED', 'CANCELLED'].includes(String(trip.tripStatus || '').toUpperCase())
+      ));
       setTrips(usableTrips);
       const first = usableTrips[0];
       setSelectedTripId((current) => current || first?.id || '');
@@ -199,9 +203,10 @@ export default function WalkInTicketScreen() {
     }
   };
 
-  const confirmPayment = async () => {
+  const confirmPayment = async (showPendingError = true) => {
     const ticketId = result?.ticketData?._id;
-    if (!ticketId) return;
+    if (!ticketId || isAutoConfirmingRef.current) return;
+    isAutoConfirmingRef.current = true;
     setIsSubmitting(true);
     try {
       const data = await busAssistantApi.confirmWalkInPayment(ticketId);
@@ -209,11 +214,28 @@ export default function WalkInTicketScreen() {
       await loadHistory(historyDate);
       Alert.alert(t.assistant.walkin.alerts.paidTitle, t.assistant.walkin.alerts.paidMessage);
     } catch (error) {
-      Alert.alert(t.assistant.walkin.alerts.paymentPendingTitle, getErrorMessage(error, t.assistant.walkin.alerts.paymentPendingFallback));
+      if (showPendingError) {
+        Alert.alert(t.assistant.walkin.alerts.paymentPendingTitle, getErrorMessage(error, t.assistant.walkin.alerts.paymentPendingFallback));
+      }
     } finally {
+      isAutoConfirmingRef.current = false;
       setIsSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    if (!result?.requiresPaymentConfirmation || !result.ticketData?._id) return undefined;
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        // PayOS opens outside the app. As soon as the assistant returns, verify
+        // the payment and complete the transaction so revenue is updated.
+        void confirmPayment(false);
+      }
+    });
+
+    return () => subscription.remove();
+  }, [result?.requiresPaymentConfirmation, result?.ticketData?._id]);
 
   const resumePayment = async (ticketId: string) => {
     setResumingId(ticketId);
@@ -331,7 +353,7 @@ export default function WalkInTicketScreen() {
               <Text style={styles.statusText}>{result.requiresPaymentConfirmation ? t.assistant.walkin.pendingPayment : t.assistant.walkin.paid}</Text>
             </View>
             {result.checkoutUrl ? <Pressable onPress={() => void Linking.openURL(result.checkoutUrl!)}><Text style={styles.payOsLink}>{t.assistant.walkin.openPayOs}</Text></Pressable> : null}
-            {result.requiresPaymentConfirmation ? <AppButton title={t.assistant.walkin.confirmTransfer} loading={isSubmitting} onPress={confirmPayment} /> : null}
+            {result.requiresPaymentConfirmation ? <AppButton title={t.assistant.walkin.confirmTransfer} loading={isSubmitting} onPress={() => void confirmPayment(true)} /> : null}
             <AppButton title={t.assistant.walkin.newTicket} variant="secondary" onPress={() => { setResult(null); setCashReceived(''); }} />
           </View>
         ) : null}

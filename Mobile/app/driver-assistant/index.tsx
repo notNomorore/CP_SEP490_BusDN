@@ -13,7 +13,7 @@ import { useAuthStore } from '@/store/auth.store';
 import type { ShiftRevenue } from '@/types/busAssistant';
 import type { AssignedTrip, ShiftSchedule } from '@/types/scheduleOperations';
 import { isDriverAssistantRole, normalizeRole } from '@/utils/roleNavigation';
-import { getTodayRange, getTripDepartureTimeLabel, getTripStatus, getTripVehicleLabel, isTripCompleted, isTripToday, toDateInput } from '@/utils/scheduleOperations';
+import { getTodayRange, getTripDepartureTimeLabel, getTripStatus, getTripVehicleLabel, isTripCompleted, isTripToday } from '@/utils/scheduleOperations';
 import { getErrorMessage, getErrorStatusCode, isPermissionError } from '@/utils/validation';
 
 const assignedTripsRoute = '/driver-assistant/assigned-trips' as Href;
@@ -100,7 +100,7 @@ export default function DriverBusAssistantHomeScreen() {
         scheduleOperationsApi.getAssignedTrips(getTodayRange()),
         scheduleOperationsApi.getShiftSchedule(getTodayRange()),
         isBusAssistant
-          ? busAssistantApi.getShiftRevenue({ date: toDateInput() }).catch(() => null)
+          ? busAssistantApi.getShiftRevenue().catch(() => null)
           : Promise.resolve(null),
       ]);
       setTrips(tripsPayload.trips || []);
@@ -347,6 +347,7 @@ export default function DriverBusAssistantHomeScreen() {
                 <ActionTile title={upcomingShift?.shiftName || t.home.shiftSchedule} subtitle={t.home.shiftScheduleSub} icon="calendar-month-outline" href={shiftScheduleRoute} />
                 <ActionTile title={t.home.operationNotifications} subtitle={t.home.operationNotificationsSub} icon="bell-ring-outline" href={notificationsRoute} />
                 <ActionTile title={t.home.operationChat} subtitle={t.home.operationChatSub} icon="chat-outline" href={route('/driver-assistant/group-chat')} />
+                <ActionTile title={t.home.profileCard} subtitle={t.home.profileCardSub} icon="account-circle-outline" href={route('/profile')} />
               </>
             )}
           </View>

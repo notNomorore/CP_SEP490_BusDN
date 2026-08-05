@@ -1,23 +1,9 @@
 import axios from 'axios';
 
-const DEFAULT_API_URL = 'http://localhost:3000';
-const DEFAULT_API_PATH = '/api';
-const DEFAULT_API_BASE_URL = `${DEFAULT_API_URL}${DEFAULT_API_PATH}`;
-
-const getBaseUrl = () => {
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
-  if (apiBaseUrl) {
-    return apiBaseUrl.replace(/\/$/, '');
-  }
-
-  const apiUrl = import.meta.env.VITE_API_URL?.trim() || DEFAULT_API_URL;
-  const apiPath = import.meta.env.VITE_API_PATH?.trim() || DEFAULT_API_PATH;
-  const baseUrl = `${apiUrl.replace(/\/$/, '')}${apiPath.startsWith('/') ? apiPath : `/${apiPath}`}`;
-  return baseUrl || DEFAULT_API_BASE_URL;
-};
+import { API_BASE_URL } from '../config/apiConfig.js';
 
 const apiClient = axios.create({
-  baseURL: getBaseUrl(),
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },

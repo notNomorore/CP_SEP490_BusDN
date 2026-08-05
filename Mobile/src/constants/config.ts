@@ -1,11 +1,17 @@
-const RENDER_API_BASE_URL = 'https://cp-sep490-busdn.onrender.com/api';
-const RENDER_SOCKET_URL = 'https://cp-sep490-busdn.onrender.com';
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
 
+const requiredEnv = (key: 'EXPO_PUBLIC_API_URL' | 'EXPO_PUBLIC_SOCKET_URL') => {
+  const value = process.env[key]?.trim();
+
+  if (!value) {
+    throw new Error(`${key} is required for BusDN mobile API configuration.`);
+  }
+
+  return trimTrailingSlash(value);
+};
+
 export const config = {
-  // Mobile luôn sử dụng Backend đã deploy. Không cho biến môi trường cũ
-  // hoặc địa chỉ Metro/local ghi đè URL ở runtime.
-  apiBaseUrl: RENDER_API_BASE_URL,
-  configuredApiBaseUrl: RENDER_API_BASE_URL,
-  socketUrl: trimTrailingSlash(RENDER_SOCKET_URL),
+  apiBaseUrl: requiredEnv('EXPO_PUBLIC_API_URL'),
+  configuredApiBaseUrl: requiredEnv('EXPO_PUBLIC_API_URL'),
+  socketUrl: requiredEnv('EXPO_PUBLIC_SOCKET_URL'),
 };

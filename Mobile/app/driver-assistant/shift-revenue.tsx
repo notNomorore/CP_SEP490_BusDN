@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import busAssistantApi from '@/api/busAssistant.api';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
@@ -10,7 +10,7 @@ import { useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { ShiftRevenue } from '@/types/busAssistant';
 import { goBackOrReplace } from '@/utils/navigation';
-import { toDateInput } from '@/utils/scheduleOperations';
+import { addDays, toDateInput } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
 const money = (value?: number, locale = 'vi-VN') => new Intl.NumberFormat(locale, { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
@@ -31,6 +31,8 @@ export default function ShiftRevenueScreen() {
   const locale = language === 'VN' ? 'vi-VN' : 'en-US';
   const [revenue, setRevenue] = useState<ShiftRevenue | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(toDateInput());
+  const isSelectedDateValid = /^\d{4}-\d{2}-\d{2}$/.test(selectedDate) && selectedDate <= toDateInput();
   const [transactionPage, setTransactionPage] = useState(1);
   const recentTransactions = revenue?.recentTransactions || [];
   const transactionPageCount = Math.max(1, Math.ceil(recentTransactions.length / TRANSACTIONS_PER_PAGE));
@@ -40,9 +42,10 @@ export default function ShiftRevenueScreen() {
   }, [recentTransactions, transactionPage]);
 
   const loadRevenue = useCallback(async () => {
+    if (!isSelectedDateValid) return;
     setIsLoading(true);
     try {
-      const data = await busAssistantApi.getShiftRevenue({ date: toDateInput() });
+      const data = await busAssistantApi.getShiftRevenue({ date: selectedDate });
       setRevenue(data);
       setTransactionPage(1);
     } catch (error) {
@@ -50,7 +53,7 @@ export default function ShiftRevenueScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [t]);
+  }, [isSelectedDateValid, selectedDate, t]);
 
   useEffect(() => {
     void loadRevenue();
@@ -69,6 +72,19 @@ export default function ShiftRevenueScreen() {
           </View>
           <Pressable accessibilityLabel={t.common.refresh} hitSlop={10} onPress={() => void loadRevenue()}>
             <MaterialCommunityIcons color={colors.primary} name="refresh" size={24} />
+          </Pressable>
+        </View>
+
+        <View style={styles.dateNavigator}>
+          <Pressable disabled={!isSelectedDateValid} accessibilityLabel={t.assistant.revenue.previous} onPress={() => setSelectedDate(toDateInput(addDays(selectedDate, -1)))} style={[styles.dateButton, !isSelectedDateValid && styles.dateButtonDisabled]}>
+            <MaterialCommunityIcons color={isSelectedDateValid ? colors.primary : colors.outline} name="chevron-left" size={22} />
+          </Pressable>
+          <View style={styles.dateField}>
+            <MaterialCommunityIcons color={colors.accent} name="calendar-month-outline" size={19} />
+            <TextInput keyboardType="numbers-and-punctuation" maxLength={10} onChangeText={setSelectedDate} placeholder="YYYY-MM-DD" style={styles.dateInput} value={selectedDate} />
+          </View>
+          <Pressable disabled={!isSelectedDateValid || selectedDate >= toDateInput()} accessibilityLabel={t.assistant.revenue.next} onPress={() => setSelectedDate(toDateInput(addDays(selectedDate, 1)))} style={[styles.dateButton, (!isSelectedDateValid || selectedDate >= toDateInput()) && styles.dateButtonDisabled]}>
+            <MaterialCommunityIcons color={!isSelectedDateValid || selectedDate >= toDateInput() ? colors.outline : colors.primary} name="chevron-right" size={22} />
           </Pressable>
         </View>
 
@@ -136,6 +152,11 @@ const styles = StyleSheet.create({
   screenShell: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 },
   headerText: { flex: 1 },
+  dateNavigator: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 16 },
+  dateButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: '#c9eadb', backgroundColor: colors.card },
+  dateButtonDisabled: { opacity: .55, backgroundColor: colors.surfaceLow },
+  dateField: { flex: 1, height: 42, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, borderWidth: 1, borderColor: '#c9eadb', backgroundColor: colors.card, paddingHorizontal: 12 },
+  dateInput: { flex: 1, color: colors.primary, fontSize: 14, fontWeight: '900', paddingVertical: 0 },
   kicker: { color: colors.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
   title: { color: colors.primary, fontSize: 25, fontWeight: '900' },
   loading: { minHeight: 260, alignItems: 'center', justifyContent: 'center', gap: 12 },

@@ -2,9 +2,58 @@ import mongoose from 'mongoose';
 import { HTTP_STATUS, PAGINATION } from '../../constants/index.js';
 import { CustomError } from '../../middleware/errorHandler.js';
 import User from '../auth/User.js';
+import OperationIncident from '../scheduleOperations/OperationIncident.js';
 import { createAuditLog } from '../systemMonitoring/auditLogger.js';
 import PassengerRestriction from './PassengerRestriction.js';
 import PassengerViolation from './PassengerViolation.js';
+
+const INCIDENT_TYPE_MAP = {
+  NO_TICKET: 'FARE_EVASION',
+  WRONG_TICKET: 'INVALID_TICKET',
+  SMOKING: 'DISORDERLY_BEHAVIOR',
+  LITTERING: 'DISORDERLY_BEHAVIOR',
+  UNSAFE_BEHAVIOR: 'DISORDERLY_BEHAVIOR',
+  DISTURBANCE: 'DISORDERLY_BEHAVIOR',
+  OTHER: 'OTHER',
+};
+
+const INCIDENT_STATUS_MAP = {
+  OPEN: 'PENDING',
+  ACKNOWLEDGED: 'UNDER_REVIEW',
+  RESOLVED: 'RESOLVED',
+  CANCELLED: 'DISMISSED',
+};
+
+const syncOperationPassengerViolations = async () => {
+  const incidents = await OperationIncident.find({ type: 'PASSENGER_VIOLATION' }).lean();
+  if (!incidents.length) return;
+
+  await PassengerViolation.bulkWrite(incidents.map((incident) => ({
+    updateOne: {
+      filter: { sourceIncidentId: incident._id },
+      update: {
+        $set: {
+          reporterId: incident.driver,
+          routeId: incident.route || null,
+          tripId: incident.trip || null,
+          violationType: INCIDENT_TYPE_MAP[incident.passengerViolation?.violationCategory] || 'OTHER',
+          description: incident.description,
+          passengerDescription: incident.passengerViolation?.passengerDescription || '',
+          actionTaken: incident.passengerViolation?.actionTaken || '',
+          evidenceUrls: (incident.evidenceFiles || []).map((file) => file.url).filter(Boolean),
+          severity: incident.severity || 'MEDIUM',
+        },
+        $setOnInsert: {
+          sourceIncidentId: incident._id,
+          passengerId: incident.passengerViolation?.passengerId || null,
+          status: INCIDENT_STATUS_MAP[incident.status] || 'PENDING',
+          reportedAt: incident.reportedAt || incident.createdAt,
+        },
+      },
+      upsert: true,
+    },
+  })), { ordered: false });
+};
 
 const number = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
@@ -140,6 +189,7 @@ export const assertPassengerCanPurchase = async ({ passengerId, routeId = null, 
 
 export class PassengerComplianceService {
   static async listViolations(query, actor, req) {
+    await syncOperationPassengerViolations();
     await expireRestrictions();
     const page = number(query.page, PAGINATION.DEFAULT_PAGE);
     const limit = Math.min(number(query.limit, PAGINATION.DEFAULT_LIMIT), PAGINATION.MAX_LIMIT);
@@ -198,6 +248,7 @@ export class PassengerComplianceService {
   }
 
   static async getViolation(id, actor, req) {
+    await syncOperationPassengerViolations();
     await expireRestrictions();
     const violation = await PassengerViolation.findById(id)
       .populate('passengerId', 'fullName email phoneNumber avatar role status createdAt')
@@ -208,11 +259,11 @@ export class PassengerComplianceService {
     const [route, trip, history] = await Promise.all([
       relatedCollection(['routes', 'busroutes'], violation.routeId),
       relatedCollection(['trips', 'tripschedules'], violation.tripId),
-      PassengerRestriction.find({ passengerId: violation.passengerId._id })
+      violation.passengerId ? PassengerRestriction.find({ passengerId: violation.passengerId._id })
         .populate('appliedBy', 'fullName role')
         .populate('violationId', 'violationType severity reportedAt')
         .sort({ createdAt: -1 })
-        .lean(),
+        .lean() : [],
     ]);
     await createAuditLog({
       req,
@@ -227,7 +278,7 @@ export class PassengerComplianceService {
     return {
       ...violation,
       passenger: safeUser(violation.passengerId),
-      passengerId: violation.passengerId._id,
+      passengerId: violation.passengerId?._id || null,
       reporter: safeUser(violation.reporterId),
       reporterId: violation.reporterId?._id || violation.reporterId,
       route: routeSummary(route),
@@ -306,6 +357,46 @@ export class PassengerComplianceService {
       .populate('passengerId', 'fullName email avatar status')
       .populate('violationId', 'violationType severity reportedAt')
       .populate('appliedBy', 'fullName role');
+  }
+
+  static async updateViolationStatus(id, payload, actor, req) {
+    const violation = await PassengerViolation.findById(id);
+    if (!violation) throw new CustomError('Passenger violation not found', HTTP_STATUS.NOT_FOUND);
+    const previousStatus = violation.status;
+    violation.status = payload.status;
+    await violation.save();
+
+    if (violation.sourceIncidentId) {
+      const incidentStatus = payload.status === 'RESOLVED'
+        ? 'RESOLVED'
+        : payload.status === 'DISMISSED'
+          ? 'CANCELLED'
+          : 'ACKNOWLEDGED';
+      await OperationIncident.updateOne(
+        { _id: violation.sourceIncidentId },
+        {
+          $set: {
+            status: incidentStatus,
+            acknowledgedAt: new Date(),
+            ...(incidentStatus === 'RESOLVED' ? { resolvedAt: new Date() } : {}),
+          },
+        }
+      );
+    }
+
+    await createAuditLog({
+      req,
+      user: actor,
+      action: 'UPDATE_PASSENGER_VIOLATION',
+      module: 'PASSENGER_COMPLIANCE',
+      description: 'Admin updated passenger violation status.',
+      resourceType: 'PassengerViolation',
+      resourceId: violation._id,
+      metadata: { previousStatus, status: violation.status },
+    });
+    return PassengerViolation.findById(violation._id)
+      .populate('passengerId', 'fullName email avatar role status')
+      .populate('reporterId', 'fullName avatar role');
   }
 
   static async updateRestriction(id, payload, actor, req) {

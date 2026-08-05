@@ -106,10 +106,10 @@ cp .env.example .env.local
 npm run dev
 ```
 
-The backend runs at:
+The production backend API is:
 
 ```text
-http://localhost:3000
+https://cp-sep490-busdn.onrender.com/api
 ```
 
 Required backend environment variables:
@@ -117,7 +117,7 @@ Required backend environment variables:
 ```env
 NODE_ENV=development
 PORT=3000
-HOST=localhost
+HOST=0.0.0.0
 
 MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/dbname
 DATABASE_NAME=BusDN
@@ -133,7 +133,8 @@ SMTP_PASSWORD=your_app_password
 EMAIL_FROM=noreply@busdn.com
 
 SESSION_SECRET=session_secret_here
-CORS_ORIGIN=http://localhost:5173
+FRONTEND_URL=https://your-vercel-domain.vercel.app
+CORS_ORIGIN=https://your-vercel-domain.vercel.app
 
 UPLOAD_DIR=./uploads
 MAX_FILE_SIZE=5242880
@@ -144,14 +145,16 @@ MAX_FILE_SIZE=5242880
 ```bash
 cd Frontend
 npm install
-echo "VITE_API_BASE_URL=http://localhost:3000/api" > .env.local
+echo "VITE_API_URL=https://cp-sep490-busdn.onrender.com/api" > .env.local
+echo "VITE_SOCKET_URL=https://cp-sep490-busdn.onrender.com" >> .env.local
 npm run dev
 ```
 
-The frontend runs at:
+The Vercel frontend must define:
 
 ```text
-http://localhost:5173
+VITE_API_URL=https://cp-sep490-busdn.onrender.com/api
+VITE_SOCKET_URL=https://cp-sep490-busdn.onrender.com
 ```
 
 ## Mobile Setup
