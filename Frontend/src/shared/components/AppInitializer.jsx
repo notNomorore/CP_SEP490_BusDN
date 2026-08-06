@@ -1,12 +1,8 @@
 import React, { useEffect } from 'react';
 import { io } from 'socket.io-client';
 import useAuthStore from '../../features/auth/stores/authStore.js';
+import { SOCKET_URL } from '../config/apiConfig.js';
 import toast from '../utils/toast.js';
-
-const getApiOrigin = () => {
-  const configured = import.meta.env.VITE_API_URL?.trim();
-  return configured ? configured.replace(/\/$/, '') : 'http://localhost:3000';
-};
 
 const notificationTargetsCurrentUser = (notification, user) => {
   if (!user) return false;
@@ -63,7 +59,7 @@ export const AppInitializer = ({ children }) => {
     if (!isAuthenticated || !user) return undefined;
 
     const token = localStorage.getItem('authToken');
-    const socket = io(getApiOrigin(), {
+    const socket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
     });

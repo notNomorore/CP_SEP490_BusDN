@@ -1,27 +1,10 @@
 import React from 'react';
 
-const DEFAULT_BACKEND_URL = 'http://localhost:3000';
-
-const getBackendBaseUrl = () => {
-  const envApiUrl = import.meta.env.VITE_API_URL?.trim();
-  if (envApiUrl) {
-    return envApiUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
-  }
-
-  const storedApiBaseUrl = localStorage.getItem('apiBaseUrl');
-  if (storedApiBaseUrl) {
-    return storedApiBaseUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
-  }
-
-  return DEFAULT_BACKEND_URL;
-};
+import { resolveBackendUrl } from '../../config/apiConfig.js';
 
 export const resolveFileUrl = (url) => {
   if (!url) return '#';
-  if (/^(https?:|blob:|data:)/i.test(url)) return url;
-
-  const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
-  return `${getBackendBaseUrl()}${normalizedUrl}`;
+  return resolveBackendUrl(url);
 };
 
 export const getFileDisplayName = (file = {}) => (
