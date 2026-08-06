@@ -85,6 +85,26 @@ const parseDate = (value, fallback) => {
   return Number.isNaN(parsed.getTime()) ? fallback : parsed;
 };
 
+const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const VIETNAM_UTC_OFFSET_HOURS = 7;
+
+const parseRangeBoundary = (value, fallback, end = false) => {
+  const match = DATE_ONLY_PATTERN.exec(String(value || ''));
+  if (!match) {
+    const parsed = parseDate(value, fallback);
+    return end ? endOfDay(parsed) : startOfDay(parsed);
+  }
+
+  const [, year, month, day] = match;
+  const vietnamMidnightUtc = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    -VIETNAM_UTC_OFFSET_HOURS
+  );
+  return new Date(vietnamMidnightUtc + (end ? 86400000 - 1 : 0));
+};
+
 const normalizeScheduleStatus = (status) => {
   if (status === 'COMPLETED') return 'COMPLETED';
   if (status === 'CANCELLED') return 'CANCELLED';
@@ -395,8 +415,8 @@ export class ScheduleOperationsService {
   }
 
   static async listAssignedTrips(userId, role, query = {}) {
-    const from = startOfDay(parseDate(query.from, new Date()));
-    const to = endOfDay(parseDate(query.to, addDays(from, 7)));
+    const from = parseRangeBoundary(query.from, new Date());
+    const to = parseRangeBoundary(query.to, addDays(from, 7), true);
 
     const schedules = await TripSchedule.find({
       ...this.buildActorScheduleQuery(userId, role),
@@ -422,8 +442,8 @@ export class ScheduleOperationsService {
   }
 
   static async listShiftSchedule(userId, role, query = {}) {
-    const from = startOfDay(parseDate(query.from, new Date()));
-    const to = endOfDay(parseDate(query.to, addDays(from, 6)));
+    const from = parseRangeBoundary(query.from, new Date());
+    const to = parseRangeBoundary(query.to, addDays(from, 6), true);
     const isDriver = role === 'DRIVER';
     const isAssistant = role === 'BUS_ASSISTANT' || role === 'CONDUCTOR';
 
@@ -461,8 +481,8 @@ export class ScheduleOperationsService {
   }
 
   static async listOperationNotifications(userId, role, query = {}) {
-    const from = startOfDay(parseDate(query.from, new Date()));
-    const to = endOfDay(parseDate(query.to, addDays(from, 7)));
+    const from = parseRangeBoundary(query.from, new Date());
+    const to = parseRangeBoundary(query.to, addDays(from, 7), true);
     const now = new Date();
 
     const schedules = await TripSchedule.find({
