@@ -428,16 +428,10 @@ export class ScheduleOperationsService {
     await this.attachInspectionRecords(assignments);
 
     return assignments
-      .filter((assignment) => {
-        const scheduledStart = buildTimeOnServiceDate(assignment.trip?.serviceDate, assignment.trip?.departureTime);
-        return scheduledStart
-          && scheduledStart >= from
-          && scheduledStart <= to
-          && isScheduleAssignedToActor(assignment.trip, userId, role);
-      })
+      .filter((assignment) => isScheduleAssignedToActor(assignment.trip, userId, role))
       .sort((left, right) => (
-        buildTimeOnServiceDate(left.trip.serviceDate, left.trip.departureTime)
-        - buildTimeOnServiceDate(right.trip.serviceDate, right.trip.departureTime)
+        (buildTimeOnServiceDate(left.trip.serviceDate, left.trip.departureTime)?.getTime() || 0)
+        - (buildTimeOnServiceDate(right.trip.serviceDate, right.trip.departureTime)?.getTime() || 0)
       ));
   }
 
