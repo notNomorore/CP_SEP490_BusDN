@@ -1,5 +1,5 @@
 import RouteStation from '../admin/RouteStation.js';
-import BusRoute from '../admin/BusRoute.js';
+import Route from '../routes/Route.js';
 import BusStopSyncLog from './BusStopSyncLog.js';
 import { areSimilarStopNames, haversineDistanceMeters } from './bus-stop.utils.js';
 
@@ -41,7 +41,7 @@ export const findStationById = (id) => (
 );
 
 export const findRouteIndexByStation = async () => {
-  const routes = await BusRoute.find({ status: 'PUBLISHED' })
+  const routes = await Route.find({ status: 'PUBLISHED' })
     .select('_id routeCode routeName outboundRoute inboundRoute status')
     .lean();
 

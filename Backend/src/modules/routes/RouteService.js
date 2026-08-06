@@ -1,5 +1,8 @@
 import Route from './Route.js';
-import BusRoute from '../admin/BusRoute.js';
+import Trip from '../fleetOperations/Trip.js';
+import Vehicle from '../fleetOperations/Vehicle.js';
+
+const ACTIVE_PASSENGER_TRIP_STATUSES = ['scheduled', 'active', 'paused', 'delayed', 'incident', 'completed', 'cancelled'];
 
 const sampleRoutes = [
   {
@@ -508,15 +511,7 @@ const calculateDistanceKm = (start, end) => {
 
 export class RouteService {
   static async ensureSampleRoutes() {
-    await Route.deleteMany({ routeNumber: /^DN-DEMO/i });
-
-    for (const route of sampleRoutes) {
-      await Route.updateOne(
-        { routeNumber: route.routeNumber },
-        { $set: route },
-        { upsert: true }
-      );
-    }
+    return sampleRoutes.length;
   }
 
   static buildSearchQuery({ q, from, to }) {
@@ -604,26 +599,20 @@ export class RouteService {
   static async searchRoutes(params) {
     await this.ensureSampleRoutes();
 
-    const query = this.buildSearchQuery(params);
     const managedQuery = this.buildManagedSearchQuery(params);
-    const [routes, managedRoutes] = await Promise.all([
-      Route.find(query)
-        .sort({ routeNumber: 1 })
-        .limit(50)
-        .lean(),
-      BusRoute.find(managedQuery)
-        .sort({ routeCode: 1 })
-        .limit(50)
-        .lean(),
-    ]);
+    const managedRoutes = await Route.find(managedQuery)
+      .sort({ routeCode: 1 })
+      .limit(50)
+      .lean();
 
-    return [
-      ...managedRoutes.map((route) => this.formatManagedRoute(route)),
-      ...routes.map((route) => this.formatRoute(route)),
-    ];
+    return managedRoutes.map((route) => this.formatManagedRoute(route));
   }
 
   static formatRoute(route) {
+    if (route.routeCode || route.routeName || route.outboundRoute || route.fareConfig || route.scheduleConfig) {
+      return this.formatManagedRoute(route);
+    }
+
     return {
       id: route._id || route.id,
       routeNumber: route.routeNumber,
@@ -642,8 +631,20 @@ export class RouteService {
 
   static formatManagedRoute(route) {
     const outboundStops = route.outboundRoute?.orderedStops || [];
+    const inboundStops = route.inboundRoute?.orderedStops?.length
+      ? route.inboundRoute.orderedStops
+      : [...outboundStops].reverse();
     const startStation = route.outboundRoute?.startStation || outboundStops[0] || {};
     const endStation = route.outboundRoute?.endStation || outboundStops[outboundStops.length - 1] || {};
+    const formatStops = (stops) => stops.map((stop, index) => ({
+      name: stop.stopName,
+      order: index + 1,
+      estimatedOffsetMinutes: stop.arrivalOffsetMinutes || index * 6,
+      latitude: stop.latitude,
+      longitude: stop.longitude,
+    }));
+    const formattedOutboundStops = formatStops(outboundStops);
+    const formattedInboundStops = formatStops(inboundStops);
 
     return {
       _id: route._id,
@@ -652,13 +653,17 @@ export class RouteService {
       name: route.routeName,
       origin: startStation.stopName || '',
       destination: endStation.stopName || '',
-      stops: outboundStops.map((stop, index) => ({
-        name: stop.stopName,
-        order: stop.stopOrder || index + 1,
-        estimatedOffsetMinutes: stop.arrivalOffsetMinutes || index * 6,
-        latitude: stop.latitude,
-        longitude: stop.longitude,
-      })),
+      stops: formattedOutboundStops,
+      directions: {
+        OUTBOUND: {
+          label: 'Chiều đi',
+          stops: formattedOutboundStops,
+        },
+        INBOUND: {
+          label: 'Chiều về',
+          stops: formattedInboundStops,
+        },
+      },
       distanceKm: route.outboundRoute?.estimatedDistanceKm || 0,
       estimatedDurationMinutes: route.outboundRoute?.estimatedDurationMinutes || 0,
       fare: route.fareConfig?.baseFare || 0,
@@ -676,37 +681,19 @@ export class RouteService {
   static async findActiveRoute(routeId, routeNumber = routeId) {
     await this.ensureSampleRoutes();
 
-    let route = null;
-
-    if (routeId) {
-      try {
-        route = await Route.findOne({ _id: routeId, status: 'ACTIVE' }).lean();
-      } catch {
-        route = null;
-      }
-    }
-
-    if (!route && routeNumber) {
-      route = await Route.findOne({ routeNumber, status: 'ACTIVE' }).lean();
-    }
-
-    if (route) {
-      return route;
-    }
-
     let managedRoute = null;
 
     if (routeId) {
       try {
-        managedRoute = await BusRoute.findOne({ _id: routeId, status: 'PUBLISHED' }).lean();
+        managedRoute = await Route.findOne({ _id: routeId, status: 'PUBLISHED' }).lean();
       } catch {
         managedRoute = null;
       }
     }
 
     if (!managedRoute && routeNumber) {
-      managedRoute = await BusRoute.findOne({
-        routeCode: routeNumber,
+      managedRoute = await Route.findOne({
+        routeCode: String(routeNumber).toUpperCase(),
         status: 'PUBLISHED',
       }).lean();
     }
@@ -734,14 +721,8 @@ export class RouteService {
       throw new Error('Invalid latitude or longitude');
     }
 
-    const [legacyRoutes, managedRoutes] = await Promise.all([
-      Route.find({ status: 'ACTIVE' }).sort({ routeNumber: 1 }).lean(),
-      BusRoute.find({ status: 'PUBLISHED' }).sort({ routeCode: 1 }).lean(),
-    ]);
-    const routes = [
-      ...managedRoutes.map((route) => this.formatManagedRoute(route)),
-      ...legacyRoutes.map((route) => this.formatRoute(route)),
-    ];
+    const managedRoutes = await Route.find({ status: 'PUBLISHED' }).sort({ routeCode: 1 }).lean();
+    const routes = managedRoutes.map((route) => this.formatManagedRoute(route));
     const nearbyStops = [];
     const suggestedRouteMap = new Map();
 
@@ -851,14 +832,8 @@ export class RouteService {
     }
 
     const normalizedPreference = this.normalizePreference(preference);
-    const [legacyRoutes, managedRoutes] = await Promise.all([
-      Route.find({ status: 'ACTIVE' }).sort({ routeNumber: 1 }).lean(),
-      BusRoute.find({ status: 'PUBLISHED' }).sort({ routeCode: 1 }).lean(),
-    ]);
-    const routes = [
-      ...managedRoutes.map((route) => this.formatManagedRoute(route)),
-      ...legacyRoutes.map((route) => this.formatRoute(route)),
-    ];
+    const managedRoutes = await Route.find({ status: 'PUBLISHED' }).sort({ routeCode: 1 }).lean();
+    const routes = managedRoutes.map((route) => this.formatManagedRoute(route));
     const candidates = [];
 
     for (const route of routes) {
@@ -1026,6 +1001,80 @@ export class RouteService {
     };
   }
 
+  static normalizeTripStatus(status) {
+    const normalized = String(status || '').toLowerCase();
+    const statusMap = {
+      scheduled: 'SCHEDULED',
+      active: 'IN_PROGRESS',
+      in_progress: 'IN_PROGRESS',
+      paused: 'PAUSED',
+      delayed: 'DELAYED',
+      incident: 'DELAYED',
+      completed: 'COMPLETED',
+      cancelled: 'CANCELLED',
+    };
+
+    return statusMap[normalized] || 'UNKNOWN';
+  }
+
+  static calculateProgressPercentFromTrip(route, trip) {
+    if (trip.progressPercent !== undefined && trip.progressPercent !== null) {
+      return Math.min(Math.max(Math.round(Number(trip.progressPercent) || 0), 0), 100);
+    }
+
+    const stops = route.stops || [];
+    const currentStopIndex = Number(trip.currentStopIndex);
+
+    if (stops.length > 1 && Number.isFinite(currentStopIndex)) {
+      return Math.min(Math.max(Math.round((currentStopIndex / (stops.length - 1)) * 100), 0), 100);
+    }
+
+    return 0;
+  }
+
+  static buildTripStopProgress(route, trip, busId) {
+    const stops = route.stops || [];
+    const currentStopIndex = Math.min(Math.max(Number(trip.currentStopIndex) || 0, 0), Math.max(stops.length - 1, 0));
+    const status = this.normalizeTripStatus(trip.status);
+    const completedTrip = status === 'COMPLETED';
+    const cancelledTrip = status === 'CANCELLED';
+    const nextStop = stops.find((stop, index) => (
+      trip.nextStopId
+        ? String(stop.stopId || stop.id || this.buildStopId(route, stop)) === String(trip.nextStopId)
+        : index === Math.min(currentStopIndex + 1, stops.length - 1)
+    ));
+    const completedStops = stops
+      .filter((_stop, index) => completedTrip || (!cancelledTrip && index < currentStopIndex))
+      .map((stop) => ({
+        stopId: this.buildStopId(route, stop),
+        stopName: stop.name,
+        stopOrder: stop.order,
+      }));
+    const remainingStops = stops
+      .filter((_stop, index) => !completedTrip && index > currentStopIndex)
+      .map((stop) => ({
+        stopId: this.buildStopId(route, stop),
+        stopName: stop.name,
+        stopOrder: stop.order,
+      }));
+
+    return {
+      tripId: trip._id?.toString(),
+      tripCode: trip.tripCode || trip._id?.toString(),
+      busId,
+      routeId: String(route._id || route.id),
+      progressPercent: completedTrip ? 100 : this.calculateProgressPercentFromTrip(route, trip),
+      completedStops,
+      remainingStops,
+      tripStatus: status,
+      estimatedRemainingTime: trip.plannedEndTime ? new Date(trip.plannedEndTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '',
+      currentStop: completedTrip ? stops[stops.length - 1]?.name : stops[currentStopIndex]?.name,
+      currentStopIndex,
+      nextStop: completedTrip || cancelledTrip ? '' : nextStop?.name || '',
+      totalStops: stops.length,
+    };
+  }
+
   static async getLiveBusLocations(routeId) {
     const route = await this.findActiveRoute(routeId, routeId);
 
@@ -1033,84 +1082,73 @@ export class RouteService {
       throw new Error('Bus not found');
     }
 
-    const pathPoints = route.pathPoints?.length ? route.pathPoints : route.stops;
+    const routeObjectId = route._id || route.id;
+    const activeTrips = await Trip.find({
+      routeId: routeObjectId,
+      status: { $in: ACTIVE_PASSENGER_TRIP_STATUSES },
+    })
+      .sort({ lastGpsAt: -1, plannedStartTime: 1 })
+      .limit(10)
+      .lean();
 
-    if (!pathPoints?.length || pathPoints.length < 2) {
+    if (activeTrips.length) {
+      const vehicles = await Vehicle.find({
+        _id: { $in: [...new Set(activeTrips.map((trip) => String(trip.vehicleId)).filter(Boolean))] },
+      }).lean();
+      const vehicleMap = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle]));
+      const buses = activeTrips.map((trip) => {
+        const vehicle = vehicleMap.get(String(trip.vehicleId));
+        const busId = vehicle?.vehicleCode || vehicle?.plateNumber || trip.vehicleId?.toString() || trip._id?.toString();
+        const tripProgress = this.buildTripStopProgress(route, trip, busId);
+        const status = this.normalizeTripStatus(trip.status);
+        const currentLocation = typeof vehicle?.currentLocation?.lat === 'number' && typeof vehicle?.currentLocation?.lng === 'number'
+          ? {
+            latitude: vehicle.currentLocation.lat,
+            longitude: vehicle.currentLocation.lng,
+            heading: vehicle.currentLocation.heading,
+          }
+          : undefined;
+
+        return {
+          busId,
+          vehicleId: vehicle?._id?.toString() || trip.vehicleId?.toString(),
+          plateNumber: vehicle?.plateNumber,
+          tripId: trip._id?.toString(),
+          tripCode: trip.tripCode || trip._id?.toString(),
+          routeId: String(route._id || route.id),
+          routeNumber: route.routeNumber,
+          currentLocation,
+          estimatedArrivalTime: tripProgress.estimatedRemainingTime || '',
+          nextStop: tripProgress.nextStop,
+          stopEtas: this.calculateStopEtas(route, (tripProgress.progressPercent || 0) / 100, status),
+          tripProgress,
+          status,
+          delay: Number(trip.delayMinutes || 0) > 0 ? {
+            delayDurationMinutes: trip.delayMinutes,
+            delayReason: trip.delayReason || 'Trip delayed',
+          } : null,
+          lastUpdated: trip.lastGpsAt || vehicle?.currentLocation?.updatedAt || new Date().toISOString(),
+        };
+      });
+
       return {
         route: this.formatRoute(route),
-        buses: [],
-        message: 'Live location unavailable',
+        buses,
+        stopEtaSummary: [],
+        routeChange: this.getRouteChangeNotice(route),
+        count: buses.length,
         refreshedAt: new Date().toISOString(),
       };
     }
 
-    const now = Date.now();
-    const cycleMs = Math.max(route.estimatedDurationMinutes || 30, 10) * 60 * 1000;
-    const busOffsets = [0, 0.48];
-    const buses = busOffsets.map((offset, index) => {
-      const progress = ((now % cycleMs) / cycleMs + offset) % 1;
-      const currentLocation = this.interpolatePathPosition(pathPoints, progress);
-      const nextStop = this.findNextStop(route, progress);
-      const status = index === 1 && progress > 0.82 ? 'Delayed' : 'Running';
-      const busId = `${route.routeNumber}-BUS-${index + 1}`;
-      const remainingMinutes = Math.max(
-        Math.round((1 - progress) * (route.estimatedDurationMinutes || 30)),
-        1
-      );
-      const arrivalToNextStopMinutes = nextStop
-        ? Math.max(Math.round(((nextStop.estimatedOffsetMinutes || 0) / (route.estimatedDurationMinutes || 30) - progress) * (route.estimatedDurationMinutes || 30)), 1)
-        : remainingMinutes;
-      const stopEtas = this.calculateStopEtas(route, progress, status);
-      const tripProgress = this.calculateTripProgress(route, progress, busId, status);
-      const delayDurationMinutes = status === 'Delayed'
-        ? Math.max(Math.round((progress - 0.82) * (route.estimatedDurationMinutes || 30)) + 5, 5)
-        : 0;
-
-      return {
-        busId,
-        routeId: String(route._id || route.id),
-        routeNumber: route.routeNumber,
-        currentLocation,
-        estimatedArrivalTime: `${Math.max(arrivalToNextStopMinutes, 1)} min`,
-        nextStop: nextStop?.name || route.destination,
-        stopEtas,
-        tripProgress,
-        status,
-        delay: status === 'Delayed' ? {
-          delayDurationMinutes,
-          delayReason: 'Traffic congestion',
-          updatedEta: `${Math.max(arrivalToNextStopMinutes + delayDurationMinutes, 1)} min`,
-        } : null,
-        lastUpdated: new Date(now).toISOString(),
-      };
-    });
-    const stopEtaSummary = (route.stops || []).map((stop) => {
-      const activeEtas = buses
-        .map((bus) => bus.stopEtas.find((eta) => eta.stopOrder === stop.order))
-        .filter((eta) => eta && typeof eta.etaMinutes === 'number')
-        .sort((first, second) => first.etaMinutes - second.etaMinutes);
-
-      return {
-        stopId: this.buildStopId(route, stop),
-        stopName: stop.name,
-        stopOrder: stop.order,
-        nextBusId: activeEtas[0] ? buses.find((bus) => (
-          bus.stopEtas.some((eta) => eta.stopId === activeEtas[0].stopId && eta.etaMinutes === activeEtas[0].etaMinutes)
-        ))?.busId : null,
-        etaMinutes: activeEtas[0]?.etaMinutes || null,
-        estimatedArrivalTime: activeEtas[0]?.estimatedArrivalTime || 'ETA unavailable',
-        status: activeEtas[0]?.status || 'Unavailable',
-      };
-    });
-    const routeChange = this.getRouteChangeNotice(route);
-
     return {
       route: this.formatRoute(route),
-      buses,
-      stopEtaSummary,
-      routeChange,
-      count: buses.length,
-      refreshedAt: new Date(now).toISOString(),
+      buses: [],
+      stopEtaSummary: [],
+      routeChange: this.getRouteChangeNotice(route),
+      count: 0,
+      message: 'No active trips found for this route',
+      refreshedAt: new Date().toISOString(),
     };
   }
 

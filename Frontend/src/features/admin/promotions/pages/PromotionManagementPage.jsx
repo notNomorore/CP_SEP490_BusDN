@@ -32,6 +32,8 @@ const defaultFormValues = {
   usageLimit: '',
   usagePerUser: 1,
   status: 'ACTIVE',
+  notifyPassengers: false,
+  notificationScheduledAt: '',
 };
 
 const statusClassName = {
@@ -64,6 +66,20 @@ const toDateInput = (value) => {
   }
 };
 
+const toDateTimeInput = (value) => {
+  if (!value) {
+    return '';
+  }
+
+  try {
+    const date = new Date(value);
+    const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return localDate.toISOString().slice(0, 16);
+  } catch {
+    return '';
+  }
+};
+
 const normalizeNumber = (value) => {
   if (value === '' || value === null || value === undefined) {
     return undefined;
@@ -83,6 +99,10 @@ const buildPayload = (formValues) => {
     minOrderAmount: normalizeNumber(formValues.minOrderAmount) ?? 0,
     usageLimit: normalizeNumber(formValues.usageLimit) ?? null,
     usagePerUser: normalizeNumber(formValues.usagePerUser) ?? 1,
+    notifyPassengers: Boolean(formValues.notifyPassengers),
+    notificationScheduledAt: formValues.notifyPassengers && formValues.notificationScheduledAt
+      ? new Date(formValues.notificationScheduledAt).toISOString()
+      : null,
     routeIds:
       formValues.applicableTo === 'SELECTED_ROUTES'
         ? formValues.routeIds
@@ -119,6 +139,42 @@ const validateForm = (values) => {
 
   if (values.applicableTo === 'SELECTED_ROUTES' && !values.routeIds.trim()) {
     errors.routeIds = 'Route IDs are required for selected routes';
+  }
+
+  if (values.usageLimit && Number(values.usageLimit) < 1) {
+    errors.usageLimit = 'Usage limit must be greater than 0';
+  }
+
+  if (values.usagePerUser && Number(values.usagePerUser) < 1) {
+    errors.usagePerUser = 'Usage per user must be greater than 0';
+  }
+
+  if (values.maxDiscountAmount && Number(values.maxDiscountAmount) < 0) {
+    errors.maxDiscountAmount = 'Max discount amount cannot be negative';
+  }
+
+  if (values.minOrderAmount && Number(values.minOrderAmount) < 0) {
+    errors.minOrderAmount = 'Minimum order amount cannot be negative';
+  }
+
+  if (values.notifyPassengers) {
+    if (!values.notificationScheduledAt) {
+      errors.notificationScheduledAt = 'Notification time is required';
+    } else {
+      const scheduledAt = new Date(values.notificationScheduledAt);
+      const startDate = values.startDate ? new Date(`${values.startDate}T00:00`) : null;
+      const endDate = values.endDate ? new Date(`${values.endDate}T23:59:59`) : null;
+
+      if (Number.isNaN(scheduledAt.getTime())) {
+        errors.notificationScheduledAt = 'Invalid notification time';
+      } else if (scheduledAt <= new Date()) {
+        errors.notificationScheduledAt = 'Notification time cannot be in the past';
+      } else if (startDate && scheduledAt < startDate) {
+        errors.notificationScheduledAt = 'Notification time must be within promotion validity period';
+      } else if (endDate && scheduledAt > endDate) {
+        errors.notificationScheduledAt = 'Notification time must be within promotion validity period';
+      }
+    }
   }
 
   return errors;
@@ -231,6 +287,7 @@ const PromotionFormModal = ({ initialValues, isSaving, onClose, onSubmit }) => {
               onChange={(event) => updateValue('maxDiscountAmount', event.target.value)}
               className={fieldClassName}
             />
+            {errors.maxDiscountAmount ? <span className="text-sm text-error">{errors.maxDiscountAmount}</span> : null}
           </label>
           <label className="space-y-2">
             <span className="text-sm font-semibold text-on-surface">Min order amount</span>
@@ -241,6 +298,7 @@ const PromotionFormModal = ({ initialValues, isSaving, onClose, onSubmit }) => {
               onChange={(event) => updateValue('minOrderAmount', event.target.value)}
               className={fieldClassName}
             />
+            {errors.minOrderAmount ? <span className="text-sm text-error">{errors.minOrderAmount}</span> : null}
           </label>
           <label className="space-y-2">
             <span className="text-sm font-semibold text-on-surface">Applicable to</span>
@@ -294,6 +352,7 @@ const PromotionFormModal = ({ initialValues, isSaving, onClose, onSubmit }) => {
               onChange={(event) => updateValue('usageLimit', event.target.value)}
               className={fieldClassName}
             />
+            {errors.usageLimit ? <span className="text-sm text-error">{errors.usageLimit}</span> : null}
           </label>
           <label className="space-y-2">
             <span className="text-sm font-semibold text-on-surface">Usage per user</span>
@@ -304,6 +363,7 @@ const PromotionFormModal = ({ initialValues, isSaving, onClose, onSubmit }) => {
               onChange={(event) => updateValue('usagePerUser', event.target.value)}
               className={fieldClassName}
             />
+            {errors.usagePerUser ? <span className="text-sm text-error">{errors.usagePerUser}</span> : null}
           </label>
           <label className="space-y-2">
             <span className="text-sm font-semibold text-on-surface">Status</span>
@@ -317,6 +377,43 @@ const PromotionFormModal = ({ initialValues, isSaving, onClose, onSubmit }) => {
               <option value="EXPIRED">Expired</option>
             </select>
           </label>
+          <label className="flex items-center gap-3 rounded-2xl border border-outline-variant/50 bg-surface px-4 py-3 md:col-span-2">
+            <input
+              type="checkbox"
+              checked={values.notifyPassengers}
+              disabled={values.notificationStatus === 'sent'}
+              onChange={(event) => updateValue('notifyPassengers', event.target.checked)}
+              className="h-4 w-4 rounded border-outline-variant text-primary"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-on-surface">
+                Send notification to passengers
+              </span>
+              <span className="block text-xs text-on-surface-variant">
+                Passengers will receive an in-app notification with this promotion code at the selected time.
+              </span>
+            </span>
+          </label>
+          {values.notifyPassengers ? (
+            <label className="space-y-2 md:col-span-2">
+              <span className="text-sm font-semibold text-on-surface">Notification send time</span>
+              <input
+                type="datetime-local"
+                value={values.notificationScheduledAt}
+                disabled={values.notificationStatus === 'sent'}
+                onChange={(event) => updateValue('notificationScheduledAt', event.target.value)}
+                className={fieldClassName}
+              />
+              {values.status !== 'ACTIVE' ? (
+                <span className="text-sm text-on-surface-variant">
+                  Notification will only be sent while the promotion is active and inside the validity period.
+                </span>
+              ) : null}
+              {errors.notificationScheduledAt ? (
+                <span className="text-sm text-error">{errors.notificationScheduledAt}</span>
+              ) : null}
+            </label>
+          ) : null}
         </div>
 
         <div className="mt-6 flex justify-end gap-3">
@@ -390,6 +487,8 @@ const PromotionManagementPage = () => {
       routeIds: (modalPromotion.routeIds || []).join(', '),
       maxDiscountAmount: modalPromotion.maxDiscountAmount ?? '',
       usageLimit: modalPromotion.usageLimit ?? '',
+      notifyPassengers: Boolean(modalPromotion.notifyPassengers),
+      notificationScheduledAt: toDateTimeInput(modalPromotion.notificationScheduledAt),
     };
   }, [modalPromotion]);
 
@@ -398,12 +497,21 @@ const PromotionManagementPage = () => {
   };
 
   const handleSave = async (payload) => {
+    if (modalPromotion?.usedCount > 0) {
+      const confirmed = window.confirm(
+        'This promotion already has successful usage. Existing paid orders keep their stored discount snapshot; changes apply only to future purchases. Continue?'
+      );
+      if (!confirmed) return;
+    }
+
     setIsSaving(true);
 
     try {
       if (modalPromotion) {
-        await promotionAdminService.updatePromotion(modalPromotion._id, payload);
+        const response = await promotionAdminService.updatePromotion(modalPromotion._id, payload);
+        const warnings = response?.data?.warnings || [];
         toast.success('Promotion updated successfully');
+        warnings.forEach((warning) => toast.error(warning));
       } else {
         await promotionAdminService.createPromotion(payload);
         toast.success('Promotion created successfully');
@@ -421,6 +529,12 @@ const PromotionManagementPage = () => {
 
   const handleStatusToggle = async (promotion) => {
     const nextStatus = promotion.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    if (nextStatus === 'INACTIVE' && promotion.usedCount > 0) {
+      const confirmed = window.confirm(
+        'Deactivate this promotion? New purchases cannot apply it, but existing paid orders remain unchanged.'
+      );
+      if (!confirmed) return;
+    }
 
     try {
       await promotionAdminService.updatePromotionStatus(promotion._id, nextStatus);
@@ -656,6 +770,12 @@ const PromotionManagementPage = () => {
                 ['Usage', `${detailPromotion.usedCount || 0}${detailPromotion.usageLimit ? ` / ${detailPromotion.usageLimit}` : ''}`],
                 ['Usage per user', detailPromotion.usagePerUser],
                 ['Status', detailPromotion.status],
+                [
+                  'Notification',
+                  detailPromotion.notifyPassengers
+                    ? `${detailPromotion.notificationStatus || 'pending'} at ${detailPromotion.notificationScheduledAt ? formatDate(detailPromotion.notificationScheduledAt) : 'N/A'}`
+                    : 'Disabled',
+                ],
               ].map(([label, value]) => (
                 <div key={label} className="rounded-[20px] bg-surface-container-low p-4">
                   <dt className="text-xs font-bold uppercase tracking-[0.16em] text-outline">

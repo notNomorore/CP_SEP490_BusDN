@@ -1,8 +1,7 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { io } from 'socket.io-client';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   MapContainer,
   Marker,
@@ -11,17 +10,11 @@ import {
   ZoomControl,
 } from 'react-leaflet';
 import fleetMonitoringService from '../services/fleetMonitoringService.js';
+import { acquireFleetSocket, releaseFleetSocket } from '../services/fleetSocket.js';
 import toast from '../../../../shared/utils/toast.js';
 
 const DA_NANG_CENTER = [16.0544, 108.2022];
 const POLL_INTERVAL_MS = 20000;
-const FLEET_SECTIONS = [
-  { label: 'Live Fleet Map', path: '/admin/dashboard', icon: 'location_on' },
-  { label: 'Active Trips', path: '/admin/fleet/active-trips', icon: 'route' },
-  { label: 'Delayed Trips', path: '/admin/fleet/delayed-trips', icon: 'schedule' },
-  { label: 'Vehicle Issues', path: '/admin/vehicle-issues', icon: 'build_circle' },
-  { label: 'Maintenance', path: '/admin/maintenance-approval', icon: 'fact_check' },
-];
 
 const STATUS_META = {
   active: { label: 'Active', color: '#059669', icon: 'directions_bus' },
@@ -29,12 +22,6 @@ const STATUS_META = {
   delayed: { label: 'Delayed', color: '#d97706', icon: 'schedule' },
   incident: { label: 'Incident', color: '#dc2626', icon: 'warning' },
   lost_signal: { label: 'Lost signal', color: '#4b5563', icon: 'signal_disconnected' },
-};
-
-const getApiOrigin = () => {
-  const configured = import.meta.env.VITE_API_URL?.trim();
-  if (configured) return configured.replace(/\/$/, '');
-  return 'http://localhost:3000';
 };
 
 const formatTime = (value) => {
@@ -175,7 +162,6 @@ const FleetMap = ({ fleet, selectedId, onSelect }) => (
 );
 
 const AdminFleetLocationPage = () => {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const focusedVehicleId = searchParams.get('vehicleId') || '';
   const [fleet, setFleet] = useState([]);
@@ -190,7 +176,6 @@ const AdminFleetLocationPage = () => {
   const [socketConnected, setSocketConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState('');
-  const socketRef = useRef(null);
 
   const loadLocations = useCallback(async () => {
     const params = {
@@ -213,20 +198,13 @@ const AdminFleetLocationPage = () => {
   }, [loadLocations]);
 
   useEffect(() => {
-    const token = localStorage.getItem('authToken');
-    const socket = io(getApiOrigin(), {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
+    const socket = acquireFleetSocket();
+    const handleConnect = () => {
       setSocketConnected(true);
       socket.emit('admin:fleet:subscribe');
-    });
-    socket.on('disconnect', () => setSocketConnected(false));
-    socket.on('connect_error', () => setSocketConnected(false));
-    socket.on('server:fleet:locationUpdated', (payload) => {
+    };
+    const handleDisconnect = () => setSocketConnected(false);
+    const handleLocationUpdated = (payload) => {
       const next = normalizeFleetItem(payload);
       setFleet((current) => {
         const exists = current.some((item) => item.id === next.id);
@@ -234,12 +212,21 @@ const AdminFleetLocationPage = () => {
           ? current.map((item) => (item.id === next.id ? next : item))
           : [next, ...current];
       });
-    });
+    };
+
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('connect_error', handleDisconnect);
+    socket.on('server:fleet:locationUpdated', handleLocationUpdated);
+    if (socket.connected) handleConnect();
 
     return () => {
-      socket.emit('admin:fleet:unsubscribe');
-      socket.disconnect();
-      socketRef.current = null;
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('connect_error', handleDisconnect);
+      socket.off('server:fleet:locationUpdated', handleLocationUpdated);
+      setSocketConnected(false);
+      releaseFleetSocket();
     };
   }, []);
 
@@ -327,28 +314,6 @@ const AdminFleetLocationPage = () => {
           </button>
         </div>
       </section>
-
-      <nav
-        aria-label="Fleet operations sections"
-        className="flex gap-2 overflow-x-auto rounded-2xl border border-outline-variant/30 bg-white/80 p-2 shadow-sm"
-      >
-        {FLEET_SECTIONS.map((section, index) => (
-          <button
-            key={section.path}
-            type="button"
-            onClick={() => navigate(section.path)}
-            className={`inline-flex min-h-10 shrink-0 items-center gap-2 rounded-xl px-4 text-sm font-bold ${
-              index === 0
-                ? 'bg-primary text-on-primary'
-                : 'text-primary hover:bg-surface-container-low'
-            }`}
-            aria-current={index === 0 ? 'page' : undefined}
-          >
-            <span className="material-symbols-outlined text-lg" aria-hidden="true">{section.icon}</span>
-            {section.label}
-          </button>
-        ))}
-      </nav>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <KpiCard icon="directions_bus" label="Active buses" value={liveKpis.activeBuses} tone="bg-on-tertiary-container/10 text-on-tertiary-container" />

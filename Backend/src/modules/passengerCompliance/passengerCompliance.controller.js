@@ -17,6 +17,16 @@ export class PassengerComplianceController {
     return res.success(violation, 'Passenger violation detail retrieved successfully');
   }
 
+  static async updateViolationStatus(req, res) {
+    const violation = await PassengerComplianceService.updateViolationStatus(
+      req.params.id,
+      req.body,
+      req.user,
+      req
+    );
+    return res.success(violation, 'Passenger violation status updated successfully');
+  }
+
   static async applyRestriction(req, res) {
     const restriction = await PassengerComplianceService.applyRestriction(req.body, req.user, req);
     return res.created(restriction, 'Passenger restriction applied successfully');

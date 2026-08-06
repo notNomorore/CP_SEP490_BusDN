@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import BusRoute from './BusRoute.js';
+import Route from '../routes/Route.js';
 import FleetBus from './FleetBus.js';
 import TripSchedule from './TripSchedule.js';
 import User from '../auth/User.js';
@@ -252,7 +252,7 @@ export default class ScheduleGenerationService {
     if (!startDate || !endDate || startDate > endDate) throw Object.assign(new Error('Khoảng ngày không hợp lệ.'), { statusCode: 400 });
     if ((endDate - startDate) / 86400000 > 31) throw Object.assign(new Error('Chỉ được sinh tối đa 31 ngày.'), { statusCode: 400 });
 
-    const route = await BusRoute.findById(routeId).lean();
+    const route = await Route.findById(routeId).lean();
     if (!route) throw Object.assign(new Error('Không tìm thấy tuyến.'), { statusCode: 404 });
     if (route.status !== 'PUBLISHED') {
       throw Object.assign(new Error('Chỉ có thể sinh lịch cho tuyến đã công bố.'), { statusCode: 409 });
@@ -418,7 +418,7 @@ export default class ScheduleGenerationService {
     });
 
     const routeIds = [...new Set(normalizedRows.map((row) => getId(row.routeId)).filter(Boolean))];
-    const routes = await BusRoute.find({ _id: { $in: routeIds } }).select('scheduleConfig routeCode').lean();
+    const routes = await Route.find({ _id: { $in: routeIds } }).select('scheduleConfig routeCode').lean();
     const routesById = new Map(routes.map((route) => [getId(route), route]));
     for (const row of normalizedRows) {
       const route = routesById.get(getId(row.routeId));

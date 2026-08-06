@@ -76,6 +76,12 @@ export const validateRestrictionStatus = (body) => {
     : { status: 'Restriction status must be ACTIVE or REVOKED' };
 };
 
+export const validateViolationStatus = (body) => (
+  ['UNDER_REVIEW', 'RESOLVED', 'DISMISSED'].includes(body.status)
+    ? {}
+    : { status: 'Violation status must be UNDER_REVIEW, RESOLVED, or DISMISSED' }
+);
+
 export const validateRestrictionListQuery = (query) => {
   const errors = {};
   if (query.passengerId && !mongoose.isValidObjectId(query.passengerId)) {
@@ -95,5 +101,6 @@ export default {
   validateIdParam,
   validateRestrictionPayload,
   validateRestrictionStatus,
+  validateViolationStatus,
   validateRestrictionListQuery,
 };

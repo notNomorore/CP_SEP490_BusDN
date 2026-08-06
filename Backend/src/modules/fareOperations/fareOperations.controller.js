@@ -2,6 +2,16 @@ import ApiResponse from '../../utils/response.js';
 import FareOperationsService from './fareOperations.service.js';
 
 export class FareOperationsController {
+  static async getMonthlyPassSettings(req, res) {
+    const settings = await FareOperationsService.getMonthlyPassSettings();
+    return res.success(settings, 'Monthly pass settings retrieved successfully');
+  }
+
+  static async updateMonthlyPassSettings(req, res) {
+    const settings = await FareOperationsService.updateMonthlyPassSettings(req.body, req.user);
+    return res.success(settings, 'Monthly pass settings updated successfully');
+  }
+
   static async listFareMatrix(req, res) {
     const result = await FareOperationsService.listFareMatrix(req.query);
     return res.apiResponse(ApiResponse.success(result.items, 'Fare matrix rules retrieved successfully', 200, result.pagination));

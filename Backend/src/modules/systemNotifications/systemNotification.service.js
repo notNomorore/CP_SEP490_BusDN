@@ -6,6 +6,7 @@ import User from '../auth/User.js';
 import Trip from '../fleetOperations/Trip.js';
 import TripSchedule from '../admin/TripSchedule.js';
 import Notification from './Notification.js';
+import NotificationReceipt from './NotificationReceipt.js';
 
 const ACTIVE_USER_FILTER = { status: 'ACTIVE', 'accountLock.isLocked': { $ne: true } };
 const IMMEDIATE_SKEW_MS = 30 * 1000;
@@ -169,6 +170,7 @@ export const resolveNotificationRecipients = async (payload) => {
 
 const buildSocketPayload = (notification) => ({
   _id: normalizeId(notification._id),
+  id: normalizeId(notification._id),
   title: notification.title,
   message: notification.message,
   type: notification.type,
@@ -176,14 +178,70 @@ const buildSocketPayload = (notification) => ({
   targetAudience: notification.targetAudience,
   routeId: normalizeId(notification.routeId) || null,
   tripId: normalizeId(notification.tripId) || null,
+  relatedPromotionId: normalizeId(notification.relatedPromotionId) || null,
+  promotionCode: notification.promotionCode || '',
+  actionUrl: notification.actionUrl || '',
+  metadata: notification.metadata || {},
   recipientUserIds: (notification.recipientUserIds || []).map(normalizeId),
   createdAt: notification.createdAt,
   sentAt: notification.deliverySummary?.sentAt || new Date(),
   isUrgent: notification.priority === 'urgent' || notification.type === 'emergency',
 });
 
+const getAudienceForRole = (role) => ({
+  PASSENGER: 'passengers',
+  DRIVER: 'drivers',
+  BUS_ASSISTANT: 'bus_assistants',
+  ADMIN: 'admins',
+}[String(role || '').toUpperCase()] || '');
+
+const buildMyNotificationFilter = (user) => {
+  const userId = user?.userId || user?._id;
+
+  return {
+    status: 'sent',
+    $and: [
+      {
+        $or: [
+          { expiresAt: null },
+          { expiresAt: { $gte: new Date() } },
+        ],
+      },
+      {
+        $or: [
+          { targetAudience: 'all' },
+          { targetAudience: getAudienceForRole(user?.role) },
+          { recipientUserIds: userId },
+        ],
+      },
+    ],
+  };
+};
+
+const decorateReadState = async (items, userId) => {
+  if (!items.length) return items;
+
+  const receipts = await NotificationReceipt.find({
+    userId: toObjectId(userId, 'userId'),
+    notificationId: { $in: items.map((item) => item._id) },
+  }).lean();
+  const readByNotificationId = new Map(
+    receipts.map((receipt) => [normalizeId(receipt.notificationId), receipt.readAt])
+  );
+
+  return items.map((item) => {
+    const readAt = readByNotificationId.get(normalizeId(item._id)) || null;
+    return {
+      ...item,
+      id: normalizeId(item._id),
+      readAt,
+      isRead: Boolean(readAt),
+    };
+  });
+};
+
 export const sendNotificationNow = async (notificationId, io = null) => {
-  const notification = await Notification.findById(notificationId);
+  let notification = await Notification.findById(notificationId);
 
   if (!notification) {
     throw new CustomError('Notification not found', HTTP_STATUS.NOT_FOUND);
@@ -191,6 +249,20 @@ export const sendNotificationNow = async (notificationId, io = null) => {
 
   if (notification.status === 'cancelled') {
     throw new CustomError('Cancelled notification cannot be sent', HTTP_STATUS.CONFLICT);
+  }
+
+  if (notification.status === 'sent') {
+    return notification;
+  }
+
+  notification = await Notification.findOneAndUpdate(
+    { _id: notificationId, status: { $ne: 'sent' } },
+    { $set: { status: 'sent' } },
+    { new: true }
+  );
+
+  if (!notification) {
+    return Notification.findById(notificationId);
   }
 
   const recipientIds = await resolveNotificationRecipients(notification);
@@ -224,6 +296,12 @@ export const createBroadcastNotification = async (payload, adminId, io = null) =
     targetAudience: payload.targetAudience,
     routeId: payload.routeId || null,
     tripId: payload.tripId || null,
+    relatedPromotionId: payload.relatedPromotionId || null,
+    promotionCode: payload.promotionCode || '',
+    actionUrl: payload.actionUrl || '',
+    sourceType: payload.sourceType || '',
+    sourceId: payload.sourceId || null,
+    metadata: payload.metadata || {},
     userIds: payload.userIds || [],
     scheduledAt,
     expiresAt: payload.expiresAt ? new Date(payload.expiresAt) : null,
@@ -245,6 +323,67 @@ export const createBroadcastNotification = async (payload, adminId, io = null) =
     logger.error('Immediate notification send failed:', error);
     throw error;
   }
+};
+
+export const createPromotionNotificationOnce = async (promotion, io = null) => {
+  const discountText = promotion.discountType === 'PERCENTAGE'
+    ? `${promotion.discountValue}%`
+    : `${Number(promotion.discountValue || 0).toLocaleString('vi-VN')} VND`;
+  const validUntil = new Intl.DateTimeFormat('vi-VN').format(new Date(promotion.endDate));
+  const message = [
+    `Use code ${promotion.code} to get ${discountText} off your next BusDN ticket.`,
+    `Valid until ${validUntil}.`,
+    promotion.description || '',
+  ].filter(Boolean).join(' ');
+
+  let notification;
+  try {
+    notification = await Notification.findOneAndUpdate(
+      { type: 'promotion', relatedPromotionId: promotion._id },
+      {
+        $setOnInsert: {
+          title: promotion.name || 'New promotion available',
+          message,
+          type: 'promotion',
+          priority: 'normal',
+          targetAudience: 'passengers',
+          relatedPromotionId: promotion._id,
+          promotionCode: promotion.code,
+          actionUrl: '/tickets/purchase',
+          sourceType: 'Promotion',
+          sourceId: promotion._id,
+          scheduledAt: promotion.notificationScheduledAt,
+          expiresAt: promotion.endDate,
+          createdBy: promotion.updatedBy || promotion.createdBy,
+          status: 'draft',
+          metadata: {
+            promotionId: normalizeId(promotion._id),
+            promotionCode: promotion.code,
+            discountType: promotion.discountType,
+            discountValue: promotion.discountValue,
+            startDate: promotion.startDate,
+            endDate: promotion.endDate,
+          },
+        },
+      },
+      { upsert: true, new: true }
+    );
+  } catch (error) {
+    if (error?.code === 11000) {
+      notification = await Notification.findOne({
+        type: 'promotion',
+        relatedPromotionId: promotion._id,
+      });
+    } else {
+      throw error;
+    }
+  }
+
+  if (notification.status === 'sent') {
+    return notification;
+  }
+
+  return sendNotificationNow(notification._id, io);
 };
 
 export const listNotifications = async (query = {}) => {
@@ -283,6 +422,96 @@ export const listNotifications = async (query = {}) => {
       totalPages: Math.ceil(total / limit) || 1,
     },
   };
+};
+
+export const listMyNotifications = async (user, query = {}) => {
+  const page = Math.max(Number(query.page) || 1, 1);
+  const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
+  const userId = user?.userId || user?._id;
+  const filter = buildMyNotificationFilter(user);
+
+  const [rawItems, total] = await Promise.all([
+    Notification.find(filter)
+      .sort({ 'deliverySummary.sentAt': -1, createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    Notification.countDocuments(filter),
+  ]);
+  const items = await decorateReadState(rawItems, userId);
+
+  return {
+    items,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    },
+  };
+};
+
+export const getMyUnreadCount = async (user) => {
+  const userId = toObjectId(user?.userId || user?._id, 'userId');
+  const filter = buildMyNotificationFilter(user);
+  const [total, readReceipts] = await Promise.all([
+    Notification.countDocuments(filter),
+    NotificationReceipt.find({ userId, readAt: { $ne: null } }).select('notificationId').lean(),
+  ]);
+  const readIds = readReceipts.map((receipt) => receipt.notificationId);
+  const readableReadCount = readIds.length
+    ? await Notification.countDocuments({ ...filter, _id: { $in: readIds } })
+    : 0;
+
+  return { unreadCount: Math.max(total - readableReadCount, 0) };
+};
+
+export const markMyNotificationRead = async (user, notificationId) => {
+  const userId = toObjectId(user?.userId || user?._id, 'userId');
+  const id = toObjectId(notificationId, 'notificationId');
+  const notification = await Notification.findOne({
+    ...buildMyNotificationFilter(user),
+    _id: id,
+  }).lean();
+
+  if (!notification) {
+    throw new CustomError('Notification not found', HTTP_STATUS.NOT_FOUND);
+  }
+
+  const receipt = await NotificationReceipt.findOneAndUpdate(
+    { notificationId: id, userId },
+    { $set: { readAt: new Date() } },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  ).lean();
+
+  return {
+    ...notification,
+    id: normalizeId(notification._id),
+    readAt: receipt.readAt,
+    isRead: true,
+  };
+};
+
+export const markAllMyNotificationsRead = async (user) => {
+  const userId = toObjectId(user?.userId || user?._id, 'userId');
+  const notifications = await Notification.find(buildMyNotificationFilter(user)).select('_id').lean();
+  const now = new Date();
+
+  if (!notifications.length) {
+    return { updatedCount: 0 };
+  }
+
+  await NotificationReceipt.bulkWrite(
+    notifications.map((notification) => ({
+      updateOne: {
+        filter: { notificationId: notification._id, userId },
+        update: { $set: { readAt: now } },
+        upsert: true,
+      },
+    }))
+  );
+
+  return { updatedCount: notifications.length };
 };
 
 export const getNotificationById = async (id) => {
@@ -324,8 +553,13 @@ export const cancelNotification = async (id, adminId) => {
 export default {
   resolveNotificationRecipients,
   createBroadcastNotification,
+  createPromotionNotificationOnce,
   sendNotificationNow,
   listNotifications,
+  listMyNotifications,
+  getMyUnreadCount,
+  markMyNotificationRead,
+  markAllMyNotificationsRead,
   getNotificationById,
   cancelNotification,
 };

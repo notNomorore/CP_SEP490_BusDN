@@ -6,6 +6,7 @@ import {
   INCIDENT_STATUSES,
   INCIDENT_TYPES,
 } from './IncidentReport.js';
+import { INCIDENT_REPORT_SCOPES } from './incidentReport.service.js';
 
 const isValidDate = (value) => value && !Number.isNaN(new Date(value).getTime());
 
@@ -14,6 +15,10 @@ export const validateIncidentListQuery = (query) => {
 
   if (query.incidentType && !INCIDENT_TYPES.includes(query.incidentType)) {
     errors.incidentType = 'Invalid incident type';
+  }
+
+  if (query.scope && !Object.hasOwn(INCIDENT_REPORT_SCOPES, query.scope)) {
+    errors.scope = 'Invalid incident scope';
   }
 
   if (query.severity && !INCIDENT_SEVERITIES.includes(query.severity)) {

@@ -19,7 +19,7 @@ const ShiftSchema = new mongoose.Schema(
     },
     routeId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'BusRoute',
+      ref: 'Route',
     },
     startTime: {
       type: String,

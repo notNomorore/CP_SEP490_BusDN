@@ -126,11 +126,49 @@ const isScheduleAssignedToActor = (schedule, userId, role) => {
     return String(schedule?.driver?.userId || '') === String(userId);
   }
 
-  if (role === 'BUS_ASSISTANT') {
+  if (role === 'BUS_ASSISTANT' || role === 'CONDUCTOR') {
     return String(schedule?.assistant?.userId || '') === String(userId);
   }
 
   return false;
+};
+
+const getShiftTypeFromClock = (timeValue = '') => {
+  const hour = Number(String(timeValue).split(':')[0]);
+  return Number.isFinite(hour) && hour >= 12 ? 'AFTERNOON' : 'MORNING';
+};
+
+const buildShiftScheduleFromTripSchedule = (schedule, role) => {
+  const acceptance = role === 'DRIVER'
+    ? schedule.driverAcceptance || {}
+    : schedule.assistantAcceptance || {};
+  const acceptanceStatus = ['IN_PROGRESS', 'COMPLETED'].includes(schedule.status)
+    ? schedule.status
+    : acceptance.status || 'ASSIGNED';
+
+  return {
+    _id: `trip-schedule-${schedule._id}`,
+    status: acceptanceStatus === 'PENDING' ? 'ASSIGNED' : acceptanceStatus,
+    workDate: schedule.serviceDate,
+    source: 'TRIP_SCHEDULE',
+    shift: {
+      _id: schedule._id,
+      workDate: schedule.serviceDate,
+      shiftCode: `TRIP-${schedule.scheduleCode}`,
+      shiftName: schedule.shiftLabel || `Chuyến ${schedule.scheduleCode}`,
+      shiftType: getShiftTypeFromClock(schedule.departureTime),
+      startTime: schedule.departureTime || '',
+      endTime: schedule.expectedArrivalTime || schedule.turnaroundEndTime || '',
+      description: schedule.notes || `${schedule.routeCode || ''} ${schedule.routeName || ''}`.trim(),
+      routeId: schedule.routeId && schedule.routeId._id
+        ? schedule.routeId
+        : {
+          _id: schedule.routeId,
+          routeCode: schedule.routeCode || '',
+          routeName: schedule.routeName || '',
+        },
+    },
+  };
 };
 
 const INCIDENT_TYPES = [
@@ -141,7 +179,18 @@ const INCIDENT_TYPES = [
   'PASSENGER_CONFLICT',
   'FOUND_ITEM',
 ];
+const DRIVER_INCIDENT_TYPES = [
+  'TRAFFIC_CONGESTION',
+  'ACCIDENT',
+  'VEHICLE_BREAKDOWN',
+];
+const BUS_ASSISTANT_INCIDENT_TYPES = [
+  'PASSENGER_VIOLATION',
+  'PASSENGER_CONFLICT',
+  'FOUND_ITEM',
+];
 const INCIDENT_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+const BREAKDOWN_TYPES = ['ENGINE_FAILURE', 'BRAKE_FAILURE', 'FLAT_TIRE', 'ACCIDENT', 'OTHER'];
 
 const normalizeStartGpsPayload = (payload = {}, startedAt = new Date()) => {
   const latitude = Number(payload.latitude);
@@ -226,7 +275,7 @@ export class ScheduleOperationsService {
       return { 'driver.userId': userId };
     }
 
-    if (role === 'BUS_ASSISTANT') {
+    if (role === 'BUS_ASSISTANT' || role === 'CONDUCTOR') {
       return { 'assistant.userId': userId };
     }
 
@@ -391,18 +440,24 @@ export class ScheduleOperationsService {
     })
       .populate({
         path: 'shiftId',
-        match: { status: 'ACTIVE' },
+        match: { status: { $in: ['ACTIVE', 'APPROVED', 'DRAFT', 'PUBLISHED', 'IN_PROGRESS', 'COMPLETED'] } },
         populate: { path: 'routeId', select: 'routeCode routeName' },
       })
       .sort({ workDate: 1, createdAt: 1 })
       .lean();
 
-    return assignments
+    const manualShiftSchedules = assignments
       .filter((assignment) => assignment.shiftId)
       .map((assignment) => ({
         ...assignment,
         shift: assignment.shiftId,
       }));
+
+    return manualShiftSchedules.sort((left, right) => {
+      const leftStart = buildTimeOnServiceDate(left.workDate || left.shift?.workDate, left.shift?.startTime);
+      const rightStart = buildTimeOnServiceDate(right.workDate || right.shift?.workDate, right.shift?.startTime);
+      return (leftStart?.getTime() || 0) - (rightStart?.getTime() || 0);
+    });
   }
 
   static async listOperationNotifications(userId, role, query = {}) {
@@ -479,9 +534,45 @@ export class ScheduleOperationsService {
       return;
     }
 
+    const scheduleById = assignments.reduce((map, assignment) => {
+      const scheduleId = String(assignment.trip?._id || assignment._id);
+      map.set(scheduleId, assignment.trip || assignment);
+      return map;
+    }, new Map());
+
     const inspections = await VehicleInspection.find({
       trip: { $in: assignments.map((assignment) => assignment.trip?._id || assignment._id) },
     });
+
+    await Promise.all(inspections.map(async (inspection) => {
+      const schedule = scheduleById.get(String(inspection.trip));
+      const currentVehicleId = getScheduleVehicleId(schedule);
+      const inspectionVehicleId = inspection.vehicle;
+      const shouldResetForReplacement = inspection.status === 'ISSUE_REPORTED'
+        && currentVehicleId
+        && inspectionVehicleId
+        && String(currentVehicleId) !== String(inspectionVehicleId);
+
+      if (!shouldResetForReplacement) return inspection;
+
+      inspection.vehicle = currentVehicleId;
+      inspection.status = 'IN_PROGRESS';
+      inspection.checklist = {
+        tires: false,
+        brakes: false,
+        lights: false,
+        fuelOrBattery: false,
+        safetyEquipment: false,
+        cleanliness: false,
+      };
+      inspection.issueCategory = null;
+      inspection.issueDescription = '';
+      inspection.startedAt = new Date();
+      inspection.confirmedAt = null;
+      inspection.reportedAt = null;
+      await inspection.save();
+      return inspection;
+    }));
 
     const inspectionByAssignment = inspections.reduce((map, inspection) => {
       map.set(String(inspection.trip), inspection);
@@ -505,7 +596,9 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    return buildTripScheduleAssignment(schedule, 'DRIVER');
+    const assignment = buildTripScheduleAssignment(schedule, 'DRIVER');
+    await this.attachInspectionRecords([assignment]);
+    return assignment;
   }
 
   static async getActorAssignment(userId, role, assignmentId) {
@@ -520,7 +613,9 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    return buildTripScheduleAssignment(schedule, role);
+    const assignment = buildTripScheduleAssignment(schedule, role);
+    await this.attachInspectionRecords([assignment]);
+    return assignment;
   }
 
   static assertTripAccepted(assignment) {
@@ -560,18 +655,18 @@ export class ScheduleOperationsService {
       }
     );
 
-    if (role === 'BUS_ASSISTANT') {
-      await this.resolveAssistantReassignmentIncident(trip._id, userId);
+    if (['DRIVER', 'BUS_ASSISTANT'].includes(role)) {
+      await this.resolveStaffReassignmentIncident(trip._id, userId, role);
     }
 
     const updatedSchedule = await TripSchedule.findById(trip._id).populate('routeId');
     return buildTripScheduleAssignment(updatedSchedule, role);
   }
 
-  static async resolveAssistantReassignmentIncident(tripId, assistantId) {
+  static async resolveStaffReassignmentIncident(tripId, staffId, role) {
     const incident = await IncidentReport.findOne({
       incidentType: 'TRIP_REJECTION',
-      reporterRole: 'BUS_ASSISTANT',
+      reporterRole: role,
       tripId,
       status: 'IN_PROGRESS',
       handlingAction: 'REASSIGN_TRIP',
@@ -581,18 +676,19 @@ export class ScheduleOperationsService {
       return;
     }
 
-    const [assistant, schedule] = await Promise.all([
-      User.findById(assistantId).select('fullName role').lean(),
+    const [staff, schedule] = await Promise.all([
+      User.findById(staffId).select('fullName role').lean(),
       TripSchedule.findById(tripId).select('scheduleCode routeName routeCode vehicle routeId').lean(),
     ]);
 
     const previousStatus = incident.status;
-    const assistantName = assistant?.fullName || 'Phụ xe thay thế';
-    const resolutionSummary = `Phụ xe thay thế ${assistantName} đã tiếp nhận chuyến. Sự cố phân công đã được xử lý.`;
+    const staffRoleLabel = role === 'DRIVER' ? 'Tài xế' : 'Phụ xe';
+    const staffName = staff?.fullName || `${staffRoleLabel} thay thế`;
+    const resolutionSummary = `${staffRoleLabel} thay thế ${staffName} đã tiếp nhận chuyến. Sự cố phân công đã được xử lý.`;
 
     incident.status = 'RESOLVED';
     incident.resolutionSummary = resolutionSummary;
-    incident.resolvedBy = assistantId;
+    incident.resolvedBy = staffId;
     incident.resolvedAt = new Date();
     incident.statusHistory.push({
       fromStatus: previousStatus,
@@ -601,7 +697,7 @@ export class ScheduleOperationsService {
       resolutionSummary,
       handlingAction: 'REASSIGN_TRIP',
       responsibleUnit: incident.responsibleUnit || 'OPERATION_CENTER',
-      changedBy: assistantId,
+      changedBy: staffId,
       changedAt: new Date(),
     });
     await incident.save();
@@ -639,7 +735,7 @@ export class ScheduleOperationsService {
           activeFrom: new Date(),
           expiresAt: null,
           status: 'ACTIVE',
-          createdBy: assistantId,
+          createdBy: staffId,
           sourceType: 'INCIDENT_REPORT_STATUS',
           sourceId: incident._id,
           metadata: {
@@ -652,8 +748,9 @@ export class ScheduleOperationsService {
             initialStatusLabel: 'Đang xử lý',
             handlingAction: 'REASSIGN_TRIP',
             handlingActionLabel: 'Điều phối lại chuyến / nhân sự',
-            replacementAssistantId: assistantId,
-            replacementAssistantName: assistantName,
+            replacementStaffId: staffId,
+            replacementStaffName: staffName,
+            replacementRole: role,
             scheduleCode: schedule?.scheduleCode || '',
             resolutionSummary,
           },
@@ -668,17 +765,18 @@ export class ScheduleOperationsService {
 
     await OperationNotification.findOneAndUpdate(
       {
-        sourceType: 'ASSISTANT_REASSIGNMENT',
+        sourceType: role === 'DRIVER' ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT',
         sourceId: incident._id,
       },
       {
         $set: {
           status: 'ARCHIVED',
           metadata: {
-            notificationKind: 'ASSISTANT_REASSIGNMENT',
+            notificationKind: role === 'DRIVER' ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT',
             incidentId: incident._id,
             tripId,
-            replacementAssistantId: assistantId,
+            replacementStaffId: staffId,
+            replacementRole: role,
             acceptedAt: new Date(),
           },
         },
@@ -758,19 +856,22 @@ export class ScheduleOperationsService {
       `Lý do: ${reason}`,
     ].join('\n');
 
-    if (role === 'BUS_ASSISTANT') {
+    if (['DRIVER', 'BUS_ASSISTANT'].includes(role)) {
       const existingReassignmentReport = await IncidentReport.findOne({
         tripId: trip._id,
         incidentType: 'TRIP_REJECTION',
-        reporterRole: 'BUS_ASSISTANT',
+        reporterRole: role,
         handlingAction: 'REASSIGN_TRIP',
         status: 'IN_PROGRESS',
       });
 
       if (existingReassignmentReport) {
         const previousStatus = existingReassignmentReport.status;
-        const rejectedAssistantName = assignment.busAssistant?.fullName || reporterLabel;
-        const resetNote = `Phụ xe thay thế ${rejectedAssistantName} đã từ chối chuyến. Lý do: ${reason}. Vui lòng phân công phụ xe khác.`;
+        const rejectedStaffName = role === 'DRIVER'
+          ? assignment.driver?.fullName || reporterLabel
+          : assignment.busAssistant?.fullName || reporterLabel;
+        const replacementLabel = role === 'DRIVER' ? 'Tài xế' : 'Phụ xe';
+        const resetNote = `${replacementLabel} thay thế ${rejectedStaffName} đã từ chối chuyến. Lý do: ${reason}. Vui lòng phân công ${replacementLabel.toLowerCase()} khác.`;
 
         existingReassignmentReport.reporterId = userId;
         existingReassignmentReport.title = title;
@@ -796,7 +897,7 @@ export class ScheduleOperationsService {
 
         await OperationNotification.findOneAndUpdate(
           {
-            sourceType: 'ASSISTANT_REASSIGNMENT',
+            sourceType: role === 'DRIVER' ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT',
             sourceId: existingReassignmentReport._id,
           },
           {
@@ -804,9 +905,10 @@ export class ScheduleOperationsService {
               status: 'ARCHIVED',
               expiresAt: new Date(),
               metadata: {
-                notificationKind: 'ASSISTANT_REASSIGNMENT',
+                notificationKind: role === 'DRIVER' ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT',
                 incidentId: existingReassignmentReport._id,
                 rejectedBy: userId,
+                rejectedRole: role,
                 rejectionReason: reason,
               },
             },
@@ -1036,20 +1138,6 @@ export class ScheduleOperationsService {
       { upsert: true, new: true }
     );
 
-    await Promise.all([
-      VehicleIssueService.createFromDriverReport({
-        assignment,
-        inspection,
-        userId,
-        payload,
-      }),
-      TripSchedule.updateOne({ _id: assignment.trip._id }, { $set: { status: 'ASSIGNED' } }),
-      FleetBus.updateOne(
-        { _id: getScheduleVehicleId(assignment.trip) },
-        { $set: { status: 'MAINTENANCE' } }
-      ),
-    ]);
-
     const incident = await OperationIncident.create({
       incidentCode: this.buildIncidentCode(assignment, 'VEHICLE_ISSUE'),
       type: 'VEHICLE_ISSUE',
@@ -1066,6 +1154,21 @@ export class ScheduleOperationsService {
       ].join('\n'),
       reportedAt: new Date(),
     });
+
+    await Promise.all([
+      VehicleIssueService.createFromDriverReport({
+        assignment,
+        inspection,
+        userId,
+        payload,
+        operationIncident: incident,
+      }),
+      TripSchedule.updateOne({ _id: assignment.trip._id }, { $set: { status: 'ASSIGNED' } }),
+      FleetBus.updateOne(
+        { _id: getScheduleVehicleId(assignment.trip) },
+        { $set: { status: 'MAINTENANCE' } }
+      ),
+    ]);
 
     await this.syncToAdminIncidentReport({
       sourceType: 'OPERATION_VEHICLE_ISSUE',
@@ -1317,7 +1420,7 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    if (locationText.length < 3) {
+    if (type !== 'VEHICLE_BREAKDOWN' && locationText.length < 3) {
       const error = new Error('Incident location is required');
       error.statusCode = 400;
       throw error;
@@ -1350,8 +1453,8 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    if (type === 'VEHICLE_BREAKDOWN' && parseBoolean(payload.canContinue) === null) {
-      const error = new Error('Vehicle breakdown report must specify whether the vehicle can continue');
+    if (type === 'VEHICLE_BREAKDOWN' && !BREAKDOWN_TYPES.includes(payload.breakdownType || '')) {
+      const error = new Error('Vehicle breakdown type is invalid');
       error.statusCode = 400;
       throw error;
     }
@@ -1509,10 +1612,13 @@ export class ScheduleOperationsService {
       affectedDirection,
     } = this.validateIncidentPayload(payload);
 
-    if (
-      role === 'BUS_ASSISTANT'
-      && !['PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'].includes(type)
-    ) {
+    if (role === 'DRIVER' && !DRIVER_INCIDENT_TYPES.includes(type)) {
+      const error = new Error('Drivers can only report traffic congestion, accidents, or vehicle breakdowns');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (role === 'BUS_ASSISTANT' && !BUS_ASSISTANT_INCIDENT_TYPES.includes(type)) {
       const error = new Error('Bus assistants can only report passenger violations, passenger conflicts, or found items');
       error.statusCode = 403;
       throw error;
@@ -1591,16 +1697,26 @@ export class ScheduleOperationsService {
     });
 
     if (type === 'VEHICLE_BREAKDOWN') {
+      await VehicleIssueService.createEmergencyBreakdownFromOperationIncident({
+        assignment,
+        userId,
+        payload,
+        operationIncident: incident,
+      });
+    }
+
+    if (type === 'VEHICLE_BREAKDOWN') {
       await FleetBus.updateOne(
         { _id: getScheduleVehicleId(assignment.trip) },
         { $set: { status: 'MAINTENANCE' } }
       );
     }
 
-    if (['TRAFFIC_CONGESTION', 'ACCIDENT', 'PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'].includes(type)) {
+    if (['TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN', 'PASSENGER_VIOLATION', 'PASSENGER_CONFLICT', 'FOUND_ITEM'].includes(type)) {
       const titleLabel = {
         TRAFFIC_CONGESTION: 'Báo kẹt xe',
         ACCIDENT: 'Báo tai nạn',
+        VEHICLE_BREAKDOWN: 'Báo xe hỏng khẩn cấp',
         PASSENGER_VIOLATION: 'Báo hành khách vi phạm',
         PASSENGER_CONFLICT: 'Báo xung đột hành khách',
         FOUND_ITEM: 'Báo đồ tìm thấy',
@@ -1632,6 +1748,12 @@ export class ScheduleOperationsService {
             : '',
           type === 'ACCIDENT'
             ? `Đã báo cơ quan chức năng: ${payload.policeNotified ? 'Có' : 'Không'}.`
+            : '',
+          type === 'VEHICLE_BREAKDOWN'
+            ? `Loại xe hỏng: ${payload.breakdownType}.`
+            : '',
+          type === 'VEHICLE_BREAKDOWN'
+            ? `Cần xe dự phòng: Có.`
             : '',
           type === 'PASSENGER_VIOLATION'
             ? `Loại vi phạm: ${payload.violationCategory}.`

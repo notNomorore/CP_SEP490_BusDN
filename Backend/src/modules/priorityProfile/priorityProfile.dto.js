@@ -119,8 +119,8 @@ export const PriorityProfileResponseDTO = {
     return {
       requestId: isRequestDocument ? source._id : null,
       userId: user?._id || source.passenger,
-      isPriorityGroup: user?.isPriorityGroup || false,
-      priorityStatus: user?.priorityStatus || profile.status || 'NONE',
+      isPriorityGroup: isRequestDocument ? profile.status === 'APPROVED' : user?.isPriorityGroup || false,
+      priorityStatus: isRequestDocument ? profile.status || 'NONE' : user?.priorityStatus || profile.status || 'NONE',
       profile: {
         profileType: profile.profileType || null,
         fullName: profile.fullName || user?.fullName || '',

@@ -2,13 +2,23 @@ import CustomerSupportService from './CustomerSupportService.js';
 import {
   CreateSupportCaseDTO,
   FoundItemCaseResponseDTO,
+  FeedbackAdminActionDTO,
+  PassengerLostItemCaseResponseDTO,
+  PassengerFeedbackReplyDTO,
   RespondSupportCaseDTO,
   SupportCaseResponseDTO,
   UpdateFoundItemCaseDTO,
+  UpdateLostItemCaseDTO,
 } from './customerSupport.dto.js';
 import logger from '../../utils/logger.js';
 
 export class CustomerSupportController {
+  static formatAdminLostItemCase({ sourceType, record }) {
+    return sourceType === 'PASSENGER_LOST_ITEM'
+      ? PassengerLostItemCaseResponseDTO.format(record)
+      : FoundItemCaseResponseDTO.format(record);
+  }
+
   static async createCase(req, res, next) {
     try {
       let lostItem = req.body.lostItem;
@@ -54,13 +64,105 @@ export class CustomerSupportController {
     }
   }
 
+  static async listCases(req, res, next) {
+    try {
+      const result = await CustomerSupportService.listCases(req.query, req.user.userId);
+
+      return res.json({
+        success: true,
+        data: result.items.map((supportCase) => SupportCaseResponseDTO.format(supportCase, { includeInternal: true })),
+        meta: result.meta,
+      });
+    } catch (error) {
+      logger.error('List support cases error:', error);
+      next(error);
+    }
+  }
+
+  static async listMyFeedback(req, res, next) {
+    try {
+      const result = await CustomerSupportService.listMyFeedback(req.user.userId, req.query);
+
+      return res.json({
+        success: true,
+        data: result.items.map((supportCase) => SupportCaseResponseDTO.format(supportCase)),
+        meta: result.meta,
+      });
+    } catch (error) {
+      logger.error('List passenger feedback error:', error);
+      next(error);
+    }
+  }
+
+  static async getMyFeedback(req, res, next) {
+    try {
+      const supportCase = await CustomerSupportService.getMyFeedback(req.user.userId, req.params.caseId);
+
+      return res.json({
+        success: true,
+        data: SupportCaseResponseDTO.format(supportCase, { includeInternal: true }),
+      });
+    } catch (error) {
+      logger.error('Get passenger feedback error:', error);
+
+      if (error.statusCode === 404 || error.message.includes('not found')) {
+        return res.status(404).json({
+          success: false,
+          message: 'Feedback not found',
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async addPassengerFeedbackReply(req, res, next) {
+    try {
+      const validationErrors = PassengerFeedbackReplyDTO.validate(req.body);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const supportCase = await CustomerSupportService.addPassengerFeedbackReply(
+        req.user.userId,
+        req.params.caseId,
+        req.body
+      );
+
+      return res.json({
+        success: true,
+        message: 'Feedback reply submitted successfully',
+        data: SupportCaseResponseDTO.format(supportCase),
+      });
+    } catch (error) {
+      logger.error('Passenger feedback reply error:', error);
+
+      if (error.statusCode === 400) {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
   static async listMyLostItemCases(req, res, next) {
     try {
       const cases = await CustomerSupportService.listMyLostItemCases(req.user.userId);
+
       return res.json({
         success: true,
         data: cases,
-        meta: { total: cases.length },
+        meta: {
+          total: cases.length,
+        },
       });
     } catch (error) {
       logger.error('List passenger lost item cases error:', error);
@@ -74,24 +176,21 @@ export class CustomerSupportController {
         req.user.userId,
         req.params.caseId
       );
-      return res.json({ success: true, data: supportCase });
-    } catch (error) {
-      logger.error('Get passenger lost item case error:', error);
-      next(error);
-    }
-  }
-
-  static async listCases(req, res, next) {
-    try {
-      const result = await CustomerSupportService.listCases(req.query);
 
       return res.json({
         success: true,
-        data: result.items.map((supportCase) => SupportCaseResponseDTO.format(supportCase)),
-        meta: result.meta,
+        data: supportCase,
       });
     } catch (error) {
-      logger.error('List support cases error:', error);
+      logger.error('Get passenger lost item case error:', error);
+
+      if (error.statusCode === 404 || error.message.includes('not found')) {
+        return res.status(404).json({
+          success: false,
+          message: 'Lost item case not found',
+        });
+      }
+
       next(error);
     }
   }
@@ -139,7 +238,7 @@ export class CustomerSupportController {
       return res.json({
         success: true,
         message: 'Complaint response recorded successfully',
-        data: SupportCaseResponseDTO.format(supportCase),
+        data: SupportCaseResponseDTO.format(supportCase, { includeInternal: true }),
       });
     } catch (error) {
       logger.error('Respond to complaint error:', error);
@@ -157,11 +256,11 @@ export class CustomerSupportController {
 
   static async listFoundItemCases(req, res, next) {
     try {
-      const result = await CustomerSupportService.listFoundItemCases(req.query);
+      const result = await CustomerSupportService.listAdminLostItemCases(req.query);
 
       return res.json({
         success: true,
-        data: result.items.map((incident) => FoundItemCaseResponseDTO.format(incident)),
+        data: result.items.map((item) => CustomerSupportController.formatAdminLostItemCase(item)),
         meta: result.meta,
       });
     } catch (error) {
@@ -172,11 +271,11 @@ export class CustomerSupportController {
 
   static async getFoundItemCaseDetail(req, res, next) {
     try {
-      const incident = await CustomerSupportService.getFoundItemCaseById(req.params.caseId);
+      const item = await CustomerSupportService.getAdminLostItemCaseById(req.params.caseId);
 
       return res.json({
         success: true,
-        data: FoundItemCaseResponseDTO.format(incident),
+        data: CustomerSupportController.formatAdminLostItemCase(item),
       });
     } catch (error) {
       logger.error('Get found item case detail error:', error);
@@ -225,6 +324,121 @@ export class CustomerSupportController {
         });
       }
 
+      next(error);
+    }
+  }
+
+  static async updateLostItemCase(req, res, next) {
+    try {
+      const validationErrors = UpdateLostItemCaseDTO.validate(req.body);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const supportCase = await CustomerSupportService.updateLostItemCase(
+        req.params.caseId,
+        req.user.userId,
+        req.body
+      );
+
+      return res.json({
+        success: true,
+        message: 'Lost item case updated successfully',
+        data: SupportCaseResponseDTO.format(supportCase, { includeInternal: true }),
+      });
+    } catch (error) {
+      logger.error('Update lost item case error:', error);
+
+      if (error.message.includes('Only lost item')) {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async assignFeedback(req, res, next) {
+    try {
+      const supportCase = await CustomerSupportService.assignFeedback(
+        req.params.caseId,
+        req.user.userId,
+        req.body
+      );
+
+      return res.json({
+        success: true,
+        message: 'Feedback assignment updated successfully',
+        data: SupportCaseResponseDTO.format(supportCase, { includeInternal: true }),
+      });
+    } catch (error) {
+      logger.error('Assign feedback error:', error);
+
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async updateFeedback(req, res, next) {
+    try {
+      const validationErrors = FeedbackAdminActionDTO.validate(req.body);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const supportCase = await CustomerSupportService.updateFeedback(
+        req.params.caseId,
+        req.user.userId,
+        req.body
+      );
+
+      return res.json({
+        success: true,
+        message: 'Feedback ticket updated successfully',
+        data: SupportCaseResponseDTO.format(supportCase, { includeInternal: true }),
+      });
+    } catch (error) {
+      logger.error('Update feedback error:', error);
+
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async getFeedbackAnalytics(req, res, next) {
+    try {
+      const analytics = await CustomerSupportService.getFeedbackAnalytics();
+
+      return res.json({
+        success: true,
+        data: analytics,
+      });
+    } catch (error) {
+      logger.error('Feedback analytics error:', error);
       next(error);
     }
   }

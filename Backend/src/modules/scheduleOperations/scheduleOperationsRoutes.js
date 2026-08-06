@@ -1,5 +1,6 @@
 import express from 'express';
 import { authMiddleware, authorizeCurrentUserRole } from '../../middleware/authMiddleware.js';
+import OperationChatController from '../operationChat/operationChat.controller.js';
 import ScheduleOperationsController from './ScheduleOperationsController.js';
 import { uploadIncidentEvidence } from './scheduleOperationsUpload.js';
 
@@ -9,8 +10,13 @@ router.use(authMiddleware);
 router.use(authorizeCurrentUserRole('DRIVER', 'BUS_ASSISTANT'));
 
 router.get('/assigned-trips', ScheduleOperationsController.listAssignedTrips);
+router.get('/assigned-trips/:assignmentId', ScheduleOperationsController.getAssignedTripDetail);
 router.get('/shift-schedule', ScheduleOperationsController.listShiftSchedule);
 router.get('/operation-notifications', ScheduleOperationsController.listOperationNotifications);
+router.get('/operation-chat/groups', OperationChatController.listGroups);
+router.get('/operation-chat/groups/:groupId/messages', OperationChatController.listMessages);
+router.post('/operation-chat/groups/:groupId/messages', OperationChatController.sendMessage);
+router.patch('/operation-chat/groups/:groupId/read', OperationChatController.markGroupRead);
 router.patch(
   '/assigned-trips/:assignmentId/accept',
   ScheduleOperationsController.acceptAssignedTrip

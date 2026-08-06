@@ -5,13 +5,34 @@ import TicketController from './TicketController.js';
 
 const router = express.Router();
 
-router.use(authMiddleware, authorizeRole('PASSENGER'));
+router.use(authMiddleware);
 
-router.post('/one-way', asyncHandler(TicketController.purchaseOneWay));
-router.get('/me', asyncHandler(TicketController.listMyTickets));
-router.post('/monthly-pass', asyncHandler(TicketController.purchaseMonthlyPass));
-router.get('/monthly-passes/me', asyncHandler(TicketController.listMyMonthlyPasses));
-router.get('/:ticketId', asyncHandler(TicketController.getMyTicket));
-router.patch('/:ticketId/cancel', asyncHandler(TicketController.cancelMyTicket));
+router.post(
+  '/validate-qr',
+  authorizeRole('BUS_ASSISTANT', 'ADMIN'),
+  asyncHandler(TicketController.validateQRCode)
+);
+
+router.get(
+  '/validation-history',
+  authorizeRole('BUS_ASSISTANT', 'ADMIN'),
+  asyncHandler(TicketController.getValidationHistory)
+);
+
+router.post('/one-way', authorizeRole('PASSENGER'), asyncHandler(TicketController.purchaseOneWay));
+router.get('/me', authorizeRole('PASSENGER'), asyncHandler(TicketController.listMyTickets));
+router.post('/monthly-pass', authorizeRole('PASSENGER'), asyncHandler(TicketController.purchaseMonthlyPass));
+router.get('/monthly-passes/me', authorizeRole('PASSENGER'), asyncHandler(TicketController.listMyMonthlyPasses));
+router.post('/monthly-passes/:passId/payment', authorizeRole('PASSENGER'), asyncHandler(TicketController.createPendingMonthlyPassPayment));
+router.patch('/monthly-passes/:passId/cancel', authorizeRole('PASSENGER'), asyncHandler(TicketController.cancelMyMonthlyPass));
+router.get('/purchasable-schedules', authorizeRole('PASSENGER'), asyncHandler(TicketController.listPurchasableSchedules));
+router.post('/quote', authorizeRole('PASSENGER'), asyncHandler(TicketController.quotePurchase));
+router.post('/promotions/apply', authorizeRole('PASSENGER'), asyncHandler(TicketController.previewPromotion));
+router.post('/payments', authorizeRole('PASSENGER'), asyncHandler(TicketController.createPayment));
+router.get('/payments/:orderCode', authorizeRole('PASSENGER'), asyncHandler(TicketController.getPaymentStatus));
+router.get('/transactions/me', authorizeRole('PASSENGER'), asyncHandler(TicketController.listMyTransactions));
+router.post('/:ticketId/payment', authorizeRole('PASSENGER'), asyncHandler(TicketController.createPendingTicketPayment));
+router.get('/:ticketId', authorizeRole('PASSENGER'), asyncHandler(TicketController.getMyTicket));
+router.patch('/:ticketId/cancel', authorizeRole('PASSENGER'), asyncHandler(TicketController.cancelMyTicket));
 
 export default router;

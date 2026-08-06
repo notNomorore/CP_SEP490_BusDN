@@ -5,16 +5,15 @@ import {
   Banknote,
   BellRing,
   CalendarDays,
-  ClipboardCheck,
   FileWarning,
+  ClipboardCheck,
   LogOut,
-  Moon,
+  MessageCircle,
   Pencil,
   QrCode,
   ReceiptText,
   Route,
   Save,
-  Sun,
   UserRound,
   X,
 } from 'lucide-react';
@@ -22,27 +21,26 @@ import useLanguage from '../../../shared/hooks/useLanguage.js';
 import useTheme from '../../../shared/hooks/useTheme.js';
 import { getBusAssistantText } from '../busAssistantI18n.js';
 import useAuthStore from '../../auth/stores/authStore.js';
+import BusAssistantI18nBoundary from '../BusAssistantI18nBoundary.jsx';
 
 const navItems = [
   { to: '/bus-assistant/assigned-trips', labelKey: 'assignedTrips', label: 'Chuyến được phân công', icon: Route },
   { to: '/bus-assistant/shift-schedule', labelKey: 'shiftSchedule', label: 'Lịch ca làm việc', icon: CalendarDays },
   { to: '/bus-assistant/operation-notifications', labelKey: 'operationNotifications', label: 'Thông báo vận hành', icon: BellRing },
+  { to: '/bus-assistant/operation-chat', labelKey: 'operationChat', label: 'Nhóm trò chuyện', icon: MessageCircle },
   { to: '/bus-assistant/validate-ticket', labelKey: 'validateQr', icon: QrCode },
   { to: '/bus-assistant/walkin-ticket', labelKey: 'walkInTicket', icon: ReceiptText },
-  { to: '/bus-assistant/incident-reports', labelKey: 'incidentReports', label: 'Báo cáo sự cố', icon: FileWarning },
   { to: '/bus-assistant/shift-revenue', labelKey: 'shiftRevenue', icon: Banknote },
-  { to: '/bus-assistant/revenue-summary', labelKey: 'revenueSummary', icon: ClipboardCheck },
 ];
 
 const navItemOrder = [
   '/bus-assistant/validate-ticket',
   '/bus-assistant/walkin-ticket',
-  '/bus-assistant/incident-reports',
   '/bus-assistant/shift-revenue',
-  '/bus-assistant/revenue-summary',
   '/bus-assistant/assigned-trips',
   '/bus-assistant/shift-schedule',
   '/bus-assistant/operation-notifications',
+  '/bus-assistant/operation-chat',
 ];
 
 const orderedNavItems = navItemOrder
@@ -52,7 +50,7 @@ const orderedNavItems = navItemOrder
 const BusAssistantShell = () => {
   const navigate = useNavigate();
   const { language, toggleLanguage } = useLanguage();
-  const { isDarkMode, toggleTheme } = useTheme();
+  const { isDarkMode } = useTheme();
   const { user, logout, updateProfile, isLoading } = useAuthStore();
   const t = getBusAssistantText(language);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -61,8 +59,28 @@ const BusAssistantShell = () => {
   const [profileError, setProfileError] = useState('');
 
   const displayName = user?.fullName || user?.email || 'Bus Assistant';
-  const roleLabel = user?.role === 'BUS_ASSISTANT' ? t.busAssistantRole : user?.role || '';
+  const normalizedRole = String(user?.role || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+  const roleLabel = ['BUS_ASSISTANT', 'CONDUCTOR', 'ASSISTANT', 'CAR_ASSISTANT'].includes(normalizedRole)
+    ? t.busAssistantRole
+    : user?.role || '';
   const initial = displayName.charAt(0).toUpperCase();
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const previousDarkMode = root.classList.contains('dark');
+    const previousTheme = root.dataset.theme;
+    const previousColorScheme = root.style.colorScheme;
+    root.classList.remove('dark');
+    root.dataset.theme = 'light';
+    root.style.colorScheme = 'light';
+
+    return () => {
+      root.classList.toggle('dark', previousDarkMode);
+      if (previousTheme) root.dataset.theme = previousTheme;
+      else delete root.dataset.theme;
+      root.style.colorScheme = previousColorScheme;
+    };
+  }, []);
 
   useEffect(() => {
     if (isProfileOpen) {
@@ -97,12 +115,13 @@ const BusAssistantShell = () => {
   };
 
   return (
+    <BusAssistantI18nBoundary>
     <div className={isDarkMode ? 'min-h-screen bg-slate-950 text-slate-100' : 'min-h-screen bg-[#f4f8f6] text-slate-950'}>
       <header className={isDarkMode ? 'border-b border-white/10 bg-slate-950/95' : 'border-b border-emerald-100 bg-white shadow-sm'}>
         <div className="flex w-full flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between xl:px-10 2xl:px-12">
           <button
             type="button"
-            onClick={() => navigate('/bus-assistant/assigned-trips')}
+            onClick={() => navigate('/bus-assistant/validate-ticket')}
             className="flex items-center gap-3 text-left"
           >
             <span className="grid h-10 w-10 place-items-center rounded bg-emerald-400 text-slate-950">
@@ -124,17 +143,6 @@ const BusAssistantShell = () => {
                 : 'inline-flex h-10 w-12 shrink-0 items-center justify-center rounded border border-emerald-100 bg-emerald-50 text-sm font-bold text-emerald-800 hover:bg-emerald-100'}
             >
               {t.languageButton}
-            </button>
-            <button
-              type="button"
-              onClick={toggleTheme}
-              title={t.switchTheme}
-              aria-label={t.switchTheme}
-              className={isDarkMode
-                ? 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10'
-                : 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded border border-amber-100 bg-amber-50 text-amber-700 hover:bg-amber-100'}
-            >
-              {isDarkMode ? <Sun size={17} /> : <Moon size={17} />}
             </button>
             <div className={isDarkMode
               ? 'flex items-center gap-2 rounded border border-white/10 bg-white/[0.04] px-2 py-1.5'
@@ -299,6 +307,7 @@ const BusAssistantShell = () => {
         </div>
       ) : null}
     </div>
+    </BusAssistantI18nBoundary>
   );
 };
 

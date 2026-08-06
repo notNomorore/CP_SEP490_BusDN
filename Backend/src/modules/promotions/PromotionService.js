@@ -3,6 +3,9 @@ import { HTTP_STATUS, PAGINATION } from '../../constants/index.js';
 import { CustomError } from '../../middleware/errorHandler.js';
 import Promotion from './Promotion.js';
 import PromotionUsage from './PromotionUsage.js';
+import Route from '../routes/Route.js';
+import SystemNotificationService from '../systemNotifications/systemNotification.service.js';
+import logger from '../../utils/logger.js';
 
 const appliedUsageMatch = { status: 'APPLIED' };
 
@@ -45,6 +48,10 @@ const sanitizePromotionPayload = (payload) => {
     'usageLimit',
     'usagePerUser',
     'status',
+    'notifyPassengers',
+    'notificationScheduledAt',
+    'notificationStatus',
+    'notificationTarget',
   ].forEach((field) => {
     if (payload[field] !== undefined) {
       sanitized[field] = payload[field];
@@ -95,11 +102,44 @@ const sanitizePromotionPayload = (payload) => {
     sanitized.endDate = new Date(sanitized.endDate);
   }
 
+  if (sanitized.notifyPassengers !== undefined) {
+    sanitized.notifyPassengers = Boolean(sanitized.notifyPassengers);
+  }
+
+  if (sanitized.notificationScheduledAt === '' || sanitized.notificationScheduledAt === null) {
+    sanitized.notificationScheduledAt = null;
+  } else if (sanitized.notificationScheduledAt !== undefined) {
+    sanitized.notificationScheduledAt = new Date(sanitized.notificationScheduledAt);
+  }
+
+  if (sanitized.notificationTarget && sanitized.notificationTarget !== 'all_passengers') {
+    sanitized.notificationTarget = 'all_passengers';
+  }
+
   if (sanitized.applicableTo !== 'SELECTED_ROUTES') {
     sanitized.routeIds = [];
   }
 
   return sanitized;
+};
+
+const buildEffectivePromotionStatus = (promotion, now = new Date()) => {
+  if (promotion.status === 'EXPIRED' || promotion.endDate < now) return 'EXPIRED';
+  if (promotion.status !== 'ACTIVE') return promotion.status;
+  if (promotion.startDate > now) return 'SCHEDULED';
+  return 'ACTIVE';
+};
+
+const startOfDay = (value) => {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const endOfDay = (value) => {
+  const date = new Date(value);
+  date.setHours(23, 59, 59, 999);
+  return date;
 };
 
 const buildPromotionFilter = (query) => {
@@ -189,7 +229,30 @@ const logAudit = async ({ action, actorId, promotionId, metadata = {} }) => {
   }
 };
 
-const assertPromotionBusinessRules = (promotion) => {
+const assertUniqueCode = async (code, excludedId = null) => {
+  if (!code) return;
+
+  const existing = await Promotion.findOne({
+    code: String(code).trim().toUpperCase(),
+    ...(excludedId ? { _id: { $ne: excludedId } } : {}),
+  }).select('_id').lean();
+
+  if (existing) {
+    throw new CustomError('Promotion code already exists', HTTP_STATUS.CONFLICT);
+  }
+};
+
+const assertRoutesExist = async (routeIds = []) => {
+  if (!routeIds.length) return;
+
+  const uniqueRouteIds = [...new Set(routeIds.map((routeId) => String(routeId)))];
+  const existingCount = await Route.countDocuments({ _id: { $in: uniqueRouteIds } });
+  if (existingCount !== uniqueRouteIds.length) {
+    throw new CustomError('One or more applicable routes do not exist', HTTP_STATUS.BAD_REQUEST);
+  }
+};
+
+const assertPromotionBusinessRules = async (promotion) => {
   if (promotion.startDate >= promotion.endDate) {
     throw new CustomError('Start date must be before end date', HTTP_STATUS.BAD_REQUEST);
   }
@@ -206,6 +269,10 @@ const assertPromotionBusinessRules = (promotion) => {
     throw new CustomError('Route IDs are required for selected routes', HTTP_STATUS.BAD_REQUEST);
   }
 
+  if (promotion.applicableTo === 'SELECTED_ROUTES') {
+    await assertRoutesExist(promotion.routeIds);
+  }
+
   if (promotion.usageLimit && promotion.usedCount > promotion.usageLimit) {
     throw new CustomError('Usage limit cannot be lower than used count', HTTP_STATUS.BAD_REQUEST);
   }
@@ -216,6 +283,25 @@ const assertPromotionBusinessRules = (promotion) => {
 
   if (promotion.status === 'ACTIVE' && promotion.usageLimit && promotion.usedCount >= promotion.usageLimit) {
     throw new CustomError('Promotion usage limit has been reached', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  if (promotion.notifyPassengers) {
+    if (!promotion.notificationScheduledAt) {
+      throw new CustomError('Notification time is required', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const scheduledAt = new Date(promotion.notificationScheduledAt);
+    if (Number.isNaN(scheduledAt.getTime())) {
+      throw new CustomError('Invalid notification time', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    if (scheduledAt <= new Date() && promotion.notificationStatus !== 'sent') {
+      throw new CustomError('Notification time cannot be in the past', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    if (scheduledAt < promotion.startDate || scheduledAt > endOfDay(promotion.endDate)) {
+      throw new CustomError('Notification time must be within promotion validity period', HTTP_STATUS.BAD_REQUEST);
+    }
   }
 };
 
@@ -247,6 +333,59 @@ const summarizeUsage = async (match) => {
     originalRevenue: summary?.originalRevenue || 0,
     finalRevenue: summary?.finalRevenue || 0,
   };
+};
+
+const buildUpdateWarnings = async (existingPromotion, nextData) => {
+  const successfulUses = await PromotionUsage.countDocuments({
+    promotionId: existingPromotion._id,
+    status: 'APPLIED',
+  });
+
+  if (!successfulUses) return [];
+
+  const sensitiveFields = [
+    'discountType',
+    'discountValue',
+    'applicableTo',
+    'routeIds',
+    'startDate',
+    'endDate',
+    'usageLimit',
+  ];
+
+  const changedFields = sensitiveFields.filter((field) => {
+    if (nextData[field] === undefined) return false;
+    return JSON.stringify(existingPromotion[field]) !== JSON.stringify(nextData[field]);
+  });
+
+  if (!changedFields.length) return [];
+
+  return [
+    `Promotion has ${successfulUses} successful use(s). Historical paid orders keep their stored discount snapshot.`,
+    `Changed sensitive field(s): ${changedFields.join(', ')}.`,
+  ];
+};
+
+const applyNotificationSchedulingState = (promotion, nextData = {}) => {
+  if (!promotion.notifyPassengers) {
+    if (promotion.notificationStatus !== 'sent') {
+      promotion.notificationStatus = 'cancelled';
+      promotion.notificationScheduledAt = null;
+      promotion.notificationJobLastCheckedAt = null;
+    }
+    return;
+  }
+
+  promotion.notificationTarget = 'all_passengers';
+  if (promotion.notificationStatus !== 'sent') {
+    promotion.notificationStatus = 'pending';
+    promotion.notificationSentAt = null;
+  } else if (
+    nextData.notificationScheduledAt !== undefined
+    && String(new Date(nextData.notificationScheduledAt)) !== String(new Date(promotion.notificationScheduledAt))
+  ) {
+    throw new CustomError('Promotion notification has already been sent', HTTP_STATUS.CONFLICT);
+  }
 };
 
 const getTopPromotionsByUsage = async (match, limit = 5) => {
@@ -355,13 +494,24 @@ const getUsageByPaymentMethod = async (match) => {
 export class PromotionService {
   static async createPromotion(payload, actor) {
     const data = sanitizePromotionPayload(payload);
-    assertPromotionBusinessRules({ ...data, usedCount: 0, routeIds: data.routeIds || [] });
+    data.notificationStatus = data.notifyPassengers ? 'pending' : 'cancelled';
+    data.notificationTarget = 'all_passengers';
+    await assertUniqueCode(data.code);
+    await assertPromotionBusinessRules({ ...data, usedCount: 0, routeIds: data.routeIds || [] });
 
-    const promotion = await Promotion.create({
-      ...data,
-      createdBy: getActorId(actor),
-      updatedBy: getActorId(actor),
-    });
+    let promotion;
+    try {
+      promotion = await Promotion.create({
+        ...data,
+        createdBy: getActorId(actor),
+        updatedBy: getActorId(actor),
+      });
+    } catch (error) {
+      if (error?.code === 11000) {
+        throw new CustomError('Promotion code already exists', HTTP_STATUS.CONFLICT);
+      }
+      throw error;
+    }
 
     await logAudit({
       action: 'PROMOTION_CREATED',
@@ -370,7 +520,7 @@ export class PromotionService {
       metadata: { code: promotion.code },
     });
 
-    return promotion;
+    return promotion.toObject();
   }
 
   static async getPromotions(query) {
@@ -388,7 +538,11 @@ export class PromotionService {
     ]);
 
     return {
-      items,
+      items: items.map((item) => ({
+        ...item,
+        effectiveStatus: buildEffectivePromotionStatus(item),
+        remainingUsage: item.usageLimit ? Math.max(Number(item.usageLimit) - Number(item.usedCount || 0), 0) : null,
+      })),
       pagination: {
         page,
         limit,
@@ -405,7 +559,11 @@ export class PromotionService {
       throw new CustomError('Promotion not found', HTTP_STATUS.NOT_FOUND);
     }
 
-    return promotion;
+    return {
+      ...promotion,
+      effectiveStatus: buildEffectivePromotionStatus(promotion),
+      remainingUsage: promotion.usageLimit ? Math.max(Number(promotion.usageLimit) - Number(promotion.usedCount || 0), 0) : null,
+    };
   }
 
   static async updatePromotion(id, payload, actor) {
@@ -416,9 +574,19 @@ export class PromotionService {
     }
 
     const data = sanitizePromotionPayload(payload);
+    await assertUniqueCode(data.code, id);
+    const warnings = await buildUpdateWarnings(existingPromotion, data);
     Object.assign(existingPromotion, data, { updatedBy: getActorId(actor) });
-    assertPromotionBusinessRules(existingPromotion);
-    await existingPromotion.save();
+    applyNotificationSchedulingState(existingPromotion, data);
+    await assertPromotionBusinessRules(existingPromotion);
+    try {
+      await existingPromotion.save();
+    } catch (error) {
+      if (error?.code === 11000) {
+        throw new CustomError('Promotion code already exists', HTTP_STATUS.CONFLICT);
+      }
+      throw error;
+    }
 
     await logAudit({
       action: 'PROMOTION_UPDATED',
@@ -427,7 +595,11 @@ export class PromotionService {
       metadata: { code: existingPromotion.code },
     });
 
-    return existingPromotion;
+    return {
+      ...existingPromotion.toObject(),
+      warnings,
+      effectiveStatus: buildEffectivePromotionStatus(existingPromotion),
+    };
   }
 
   static async updatePromotionStatus(id, status, actor) {
@@ -443,7 +615,10 @@ export class PromotionService {
 
     promotion.status = status;
     promotion.updatedBy = getActorId(actor);
-    assertPromotionBusinessRules(promotion);
+    if (status !== 'ACTIVE' && promotion.notificationStatus === 'pending') {
+      promotion.notificationStatus = 'cancelled';
+    }
+    await assertPromotionBusinessRules(promotion);
     await promotion.save();
 
     await logAudit({
@@ -453,7 +628,10 @@ export class PromotionService {
       metadata: { code: promotion.code, status },
     });
 
-    return promotion;
+    return {
+      ...promotion.toObject(),
+      effectiveStatus: buildEffectivePromotionStatus(promotion),
+    };
   }
 
   static async getPromotionStatistics(id, query, actor) {
@@ -480,6 +658,8 @@ export class PromotionService {
 
     return {
       promotion,
+      effectiveStatus: buildEffectivePromotionStatus(promotion),
+      remainingUsage: promotion.usageLimit ? Math.max(Number(promotion.usageLimit) - Number(promotion.usedCount || 0), 0) : null,
       totalPromotions: 1,
       activePromotions: promotion.status === 'ACTIVE' ? 1 : 0,
       expiredPromotions: promotion.status === 'EXPIRED' ? 1 : 0,
@@ -555,6 +735,83 @@ export class PromotionService {
       usageByDate,
       usageByRoute,
       usageByPaymentMethod,
+    };
+  }
+
+  static async dispatchDuePromotionNotifications({ io = null, now = new Date(), limit = 20 } = {}) {
+    const todayStart = startOfDay(now);
+    const duePromotions = await Promotion.find({
+      notifyPassengers: true,
+      notificationStatus: 'pending',
+      notificationScheduledAt: { $lte: now },
+      status: 'ACTIVE',
+      startDate: { $lte: now },
+      endDate: { $gte: todayStart },
+    })
+      .sort({ notificationScheduledAt: 1 })
+      .limit(limit);
+
+    let sent = 0;
+    let failed = 0;
+
+    for (const promotion of duePromotions) {
+      // eslint-disable-next-line no-await-in-loop
+      const claimedPromotion = await Promotion.findOneAndUpdate(
+        {
+          _id: promotion._id,
+          notifyPassengers: true,
+          notificationStatus: 'pending',
+          notificationScheduledAt: { $lte: now },
+          status: 'ACTIVE',
+          startDate: { $lte: now },
+          endDate: { $gte: todayStart },
+        },
+        { $set: { notificationJobLastCheckedAt: now } },
+        { new: true }
+      );
+
+      if (!claimedPromotion) {
+        continue;
+      }
+
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await SystemNotificationService.createPromotionNotificationOnce(claimedPromotion, io);
+        claimedPromotion.notificationStatus = 'sent';
+        claimedPromotion.notificationSentAt = now;
+        claimedPromotion.notificationJobLastCheckedAt = now;
+        // eslint-disable-next-line no-await-in-loop
+        await claimedPromotion.save();
+        sent += 1;
+      } catch (error) {
+        logger.error('Promotion notification dispatch failed:', error);
+        claimedPromotion.notificationStatus = 'failed';
+        claimedPromotion.notificationJobLastCheckedAt = now;
+        // eslint-disable-next-line no-await-in-loop
+        await claimedPromotion.save();
+        failed += 1;
+      }
+    }
+
+    const expiredPending = await Promotion.updateMany(
+      {
+        notifyPassengers: true,
+        notificationStatus: 'pending',
+        endDate: { $lt: todayStart },
+      },
+      {
+        $set: {
+          notificationStatus: 'cancelled',
+          notificationJobLastCheckedAt: now,
+        },
+      }
+    );
+
+    return {
+      checked: duePromotions.length,
+      sent,
+      failed,
+      cancelledExpired: expiredPending.modifiedCount || 0,
     };
   }
 }

@@ -10,7 +10,7 @@ const Header = ({ forceDarkMode = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isAuthenticated, isAdmin, isDriver, isBusAssistant, logout } = useAuthStore();
-  const { language, toggleLanguage, t } = useAdminI18n();
+  const { language } = useAdminI18n();
   const [isScrolled, setIsScrolled] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -29,38 +29,70 @@ const Header = ({ forceDarkMode = false }) => {
   }, []);
 
   const navLinks = [
-    { key: 'passenger.nav.manageBooking', path: '/profile', requiresAuth: true },
-    { key: 'passenger.nav.promotions', path: '/admin/promotions', requiresAuth: true, adminOnly: true },
-    { key: 'passenger.nav.revenue', path: '/admin/revenue', requiresAuth: true, adminOnly: true },
-    { key: 'passenger.nav.walkIn', path: '/admin/walkin-tickets', requiresAuth: true, adminOnly: true },
-    { key: 'passenger.nav.compliance', path: '/admin/passenger-compliance', requiresAuth: true, adminOnly: true },
-    { key: 'passenger.nav.analytics', path: '/admin/analytics/route-efficiency', requiresAuth: true, adminOnly: true },
-    { key: 'passenger.nav.incidents', path: '/admin/incidents', requiresAuth: true, adminOnly: true },
-    { key: 'passenger.nav.monitoring', path: '/admin/system-monitoring', requiresAuth: true, adminOnly: true },
-    { key: 'passenger.nav.partner', href: '/#partners', hideForAdmin: true },
-    { key: 'passenger.nav.routes', path: '/search', hideForAdmin: true },
-    { key: 'passenger.nav.tickets', label: 'My Tickets', path: '/my-tickets', requiresAuth: true, hideForAdmin: true },
-    { key: 'passenger.nav.history', label: 'Travel History', path: '/travel-history', requiresAuth: true, hideForAdmin: true },
-    { key: 'passenger.nav.feedback', label: 'Feedback', path: '/submit-feedback', requiresAuth: true, hideForAdmin: true },
-    { key: 'passenger.nav.lostItems', label: 'Lost Items', path: '/lost-item-cases', requiresAuth: true, hideForAdmin: true },
-    { key: 'passenger.nav.help', href: '/#support', hideForAdmin: true }
+    { key: 'passenger.nav.manageBooking', label: 'Hồ sơ', path: '/profile', requiresAuth: true },
+    { key: 'passenger.nav.promotions', label: 'Khuyến mãi', path: '/admin/promotions', requiresAuth: true, adminOnly: true },
+    { key: 'passenger.nav.revenue', label: 'Doanh thu', path: '/admin/revenue', requiresAuth: true, adminOnly: true },
+    { key: 'passenger.nav.walkIn', label: 'Vé tại quầy', path: '/admin/walkin-tickets', requiresAuth: true, adminOnly: true },
+    { key: 'passenger.nav.compliance', label: 'Tuân thủ', path: '/admin/passenger-compliance', requiresAuth: true, adminOnly: true },
+    { key: 'passenger.nav.analytics', label: 'Phân tích', path: '/admin/analytics/route-efficiency', requiresAuth: true, adminOnly: true },
+    { key: 'passenger.nav.incidents', label: 'Sự cố', path: '/admin/incidents', requiresAuth: true, adminOnly: true },
+    { key: 'passenger.nav.monitoring', label: 'Giám sát', path: '/admin/system-monitoring', requiresAuth: true, adminOnly: true },
+    { key: 'passenger.nav.partner', label: 'Đối tác', href: '/#partners', hideForAdmin: true },
+    { key: 'passenger.nav.routes', label: 'Tuyến xe', path: '/search', hideForAdmin: true },
+    {
+      key: 'passenger.nav.buyTickets',
+      label: 'Mua vé',
+      path: '/tickets/purchase',
+      activePaths: ['/tickets/purchase', '/tickets/checkout', '/payment/success', '/payment/failed'],
+      requiresAuth: true,
+      hideForAdmin: true,
+    },
+    { key: 'passenger.nav.tickets', label: 'Vé của tôi', path: '/my-tickets', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.transactions', label: 'Lịch sử giao dịch', path: '/transactions', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.history', label: 'Lịch sử', path: '/travel-history', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.feedback', label: 'Góp ý', path: '/submit-feedback', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.myFeedback', label: 'Góp ý của tôi', path: '/my-feedback', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.reportLostItem', label: 'Báo mất đồ', path: '/report-lost-item', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.lostItems', label: 'Đồ thất lạc', path: '/lost-item-cases', requiresAuth: true, hideForAdmin: true },
+    { key: 'passenger.nav.help', label: 'Trợ giúp', href: '/#support', hideForAdmin: true }
   ].filter((link) => (!link.adminOnly || isAdmin()) && (!link.hideForAdmin || !isAdmin()));
 
   const isLoginPage = location.pathname === '/auth/login' || location.pathname === '/login';
   const authCta = isLoginPage
-    ? { label: 'Create Account', path: '/auth/register' }
-    : { label: 'Sign In', path: '/auth/login' };
+    ? { label: 'Tạo tài khoản', path: '/auth/register' }
+    : { label: 'Đăng nhập', path: '/auth/login' };
 
-  const displayName = user?.fullName?.trim() || t('passenger.fallbackName');
+  const displayName = user?.fullName?.trim() || 'Hành khách';
   const profileInitial = displayName.charAt(0).toUpperCase();
-  const nextLanguageLabel = t('admin.header.switchLanguage');
   const isOperationsUser = isAuthenticated && (isDriver() || isBusAssistant());
+  const isNotificationUser = isAuthenticated && !isAdmin();
   const unreadNotificationCount = notifications.filter((notification) => !notification.isRead).length;
   const primaryTextClass = effectiveDarkMode ? 'text-surface-bright' : 'text-primary';
   const secondaryTextClass = effectiveDarkMode ? 'text-surface-variant/80' : 'text-on-surface-variant';
   const subtleControlClass = effectiveDarkMode
     ? 'border-white/10 bg-white/10 text-surface-bright hover:bg-white/15'
     : 'border-outline-variant/60 bg-white text-primary hover:bg-surface-container-low';
+  const hiddenPassengerNavKeys = new Set([
+    'passenger.nav.manageBooking',
+    'passenger.nav.partner',
+    'passenger.nav.help',
+  ]);
+  const publicNavKeys = new Set([
+    'passenger.nav.routes',
+    'passenger.nav.buyTickets',
+  ]);
+  const mobileNavLinks = navLinks.filter((link) => {
+    if (hiddenPassengerNavKeys.has(link.key)) {
+      return false;
+    }
+
+    if (!isAuthenticated && !isAdmin()) {
+      return publicNavKeys.has(link.key);
+    }
+
+    return true;
+  });
+  const desktopNavLinks = mobileNavLinks;
 
   useEffect(() => {
     setIsMobileMenuOpen(false);
@@ -81,7 +113,7 @@ const Header = ({ forceDarkMode = false }) => {
   }, [isMobileMenuOpen]);
 
   useEffect(() => {
-    if (!isOperationsUser) {
+    if (!isNotificationUser) {
       setNotifications([]);
       setIsNotificationsOpen(false);
       setSelectedNotification(null);
@@ -92,9 +124,11 @@ const Header = ({ forceDarkMode = false }) => {
 
     const loadNotifications = async () => {
       try {
-        const response = await apiClient.get('/schedule-operations/operation-notifications');
+        const response = isOperationsUser
+          ? await apiClient.get('/schedule-operations/operation-notifications')
+          : await apiClient.get('/notifications/me');
         if (isMounted) {
-          setNotifications(response.data?.notifications || []);
+          setNotifications(response.data?.notifications || response.data || []);
         }
       } catch {
         if (isMounted) {
@@ -110,7 +144,7 @@ const Header = ({ forceDarkMode = false }) => {
       isMounted = false;
       window.clearInterval(intervalId);
     };
-  }, [isOperationsUser]);
+  }, [isNotificationUser, isOperationsUser]);
 
   const formatNotificationTime = (value) => {
     if (!value) return '';
@@ -136,6 +170,15 @@ const Header = ({ forceDarkMode = false }) => {
     navigate(getRoleLandingPath(user));
   };
 
+  const copyPromotionCode = async (code) => {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      // Clipboard support is best-effort; the code is still visible in the notification.
+    }
+  };
+
   const handleNavClick = (event, link) => {
     if (!link.path) {
       return;
@@ -152,6 +195,7 @@ const Header = ({ forceDarkMode = false }) => {
       return;
     }
 
+    setIsMobileMenuOpen(false);
     navigate(link.path);
   };
 
@@ -171,90 +215,55 @@ const Header = ({ forceDarkMode = false }) => {
           )
       }`}
     >
-      <div className="flex justify-between items-center w-full px-6 py-4 max-w-screen-2xl mx-auto">
-        <div className="flex items-center gap-8">
+      <div className={`mx-auto flex h-[72px] w-full items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 ${
+        isAuthenticated ? 'max-w-screen-2xl' : 'max-w-5xl'
+      }`}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-4">
           <button
             onClick={handleBrandClick}
-            className={`text-2xl font-display font-black tracking-tight hover:opacity-80 ${primaryTextClass}`}
+            className={`shrink-0 text-2xl font-display font-black tracking-tight hover:opacity-80 ${primaryTextClass}`}
             type="button"
           >
             BusDN
           </button>
 
           {/* Navigation - Hidden on mobile */}
-          <nav className="hidden lg:flex items-center gap-4">
-            {navLinks.map((link) => {
-              const isActive = link.path && location.pathname.startsWith(link.path);
+          <nav className={`hidden min-w-0 items-center gap-1 overflow-hidden rounded-full border border-outline-variant/30 bg-white/70 p-1 shadow-sm shadow-slate-200/50 backdrop-blur lg:flex ${
+            isAuthenticated
+              ? 'flex-1 justify-center'
+              : 'w-auto justify-center'
+          }`}
+          >
+            {desktopNavLinks.map((link) => {
+              const isActive = link.path && (
+                location.pathname.startsWith(link.path)
+                || link.activePaths?.some((path) => location.pathname.startsWith(path))
+              );
 
               return (
                 <a
                   key={link.key}
                   href={link.path || link.href}
                   onClick={(event) => handleNavClick(event, link)}
-                  className={`text-label-md font-body transition-all ${
+                  className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1.5 text-[12px] font-bold transition-all xl:px-3 ${
                     isActive
-                      ? effectiveDarkMode
-                        ? 'border-b-2 border-tertiary-fixed pb-1 font-bold text-tertiary-fixed'
-                        : 'border-b-2 border-primary pb-1 font-bold text-primary'
-                      : `${secondaryTextClass} rounded-lg px-2 py-1 hover:bg-surface-container-low/80 hover:text-primary`
+                      ? 'bg-primary text-white shadow-sm shadow-primary/20'
+                      : `${secondaryTextClass} hover:bg-white hover:text-primary`
                   }`}
                 >
-                  {link.label || t(link.key)}
+                  {link.label}
                 </a>
               );
             })}
           </nav>
         </div>
 
-        <div className="flex items-center gap-4 text-on-primary">
-          <div className="hidden md:flex items-center gap-4 mr-4">
-            <span className={`text-label-md font-body ${secondaryTextClass}`}>{t('passenger.header.hotline')}</span>
-            <button
-              type="button"
-              onClick={toggleLanguage}
-              title={nextLanguageLabel}
-              aria-label={nextLanguageLabel}
-              className={`inline-flex h-10 min-w-14 items-center justify-center rounded-full border px-3 text-sm font-black ${subtleControlClass}`}
-            >
-              {language === 'en' ? 'EN' : 'VN'}
-            </button>
-            <span className={`material-symbols-outlined ${primaryTextClass}`} aria-hidden="true">
-              help_outline
-            </span>
-          </div>
-
+        <div className="flex shrink-0 items-center gap-2 text-on-primary">
           {isAuthenticated ? (
             <div className="flex items-center gap-3">
               {isAdmin() ? (
                 <>
-                  <button
-                    type="button"
-                    onClick={() => navigate('/admin/routes')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
-                  >
-                    Route Management
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => navigate('/admin/users')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
-                  >
-                    User Accounts
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => navigate('/admin/priority-verification')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
-                  >
-                    Verify Profiles
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => navigate('/admin/customer-support')}
-                    className="hidden rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-surface-bright hover:bg-white/10 xl:inline-flex"
-                  >
-                    Customer Support
-                  </button>
                   <button
                     type="button"
                     onClick={() => navigate('/admin/routes')}
@@ -266,7 +275,7 @@ const Header = ({ forceDarkMode = false }) => {
                           : 'border-slate-200 text-slate-700 hover:bg-slate-100'
                     }`}
                   >
-                    Route Control
+                    Tuyến xe
                   </button>
                   <button
                     type="button"
@@ -279,7 +288,7 @@ const Header = ({ forceDarkMode = false }) => {
                           : 'border-slate-200 text-slate-700 hover:bg-slate-100'
                     }`}
                   >
-                    Accounts
+                    Tài khoản
                   </button>
                 </>
               ) : isDriver() || isBusAssistant() ? (
@@ -290,7 +299,7 @@ const Header = ({ forceDarkMode = false }) => {
                       onClick={() => navigate('/bus-assistant/validate-ticket')}
                       className="hidden rounded-full border border-emerald-300 bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-200 lg:inline-flex"
                     >
-                      Bus Assistant
+                      Phụ xe
                     </button>
                   ) : null}
                   <button
@@ -298,7 +307,7 @@ const Header = ({ forceDarkMode = false }) => {
                     onClick={() => navigate(isBusAssistant() ? '/bus-assistant/shift-revenue' : '/operations/schedule')}
                     className={`hidden rounded-full border px-4 py-2 text-sm font-semibold lg:inline-flex ${subtleControlClass}`}
                   >
-                    {isBusAssistant() ? 'Shift Revenue' : 'Operations Schedule'}
+                    {isBusAssistant() ? 'Doanh thu ca' : 'Lịch vận hành'}
                   </button>
                   <div className="relative">
                     <button
@@ -308,7 +317,7 @@ const Header = ({ forceDarkMode = false }) => {
                         setSelectedNotification(null);
                       }}
                       className={`relative inline-flex h-11 w-11 items-center justify-center rounded-full border ${subtleControlClass}`}
-                      aria-label={t('passenger.header.notifications')}
+                      aria-label="Thông báo"
                     >
                       <span className="material-symbols-outlined text-[22px]">notifications</span>
                       {unreadNotificationCount > 0 ? (
@@ -379,6 +388,24 @@ const Header = ({ forceDarkMode = false }) => {
                             <p className="mt-2 text-sm leading-6 text-slate-700">
                               {selectedNotification.message}
                             </p>
+                            {selectedNotification.promotionCode ? (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => copyPromotionCode(selectedNotification.promotionCode)}
+                                  className="rounded-full bg-white px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100 hover:bg-emerald-50"
+                                >
+                                  Sao chép {selectedNotification.promotionCode}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(selectedNotification.actionUrl || '/tickets/purchase')}
+                                  className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-700"
+                                >
+                                  Dùng mã
+                                </button>
+                              </div>
+                            ) : null}
                           </div>
                         ) : null}
                       </div>
@@ -396,39 +423,130 @@ const Header = ({ forceDarkMode = false }) => {
                         : 'border-slate-200 text-slate-700 hover:bg-slate-100'
                     }`}
                   >
-                    Priority Profile
+                    Hồ sơ ưu tiên
                   </button>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsNotificationsOpen((current) => !current);
+                        setSelectedNotification(null);
+                      }}
+                      className={`relative inline-flex h-11 w-11 items-center justify-center rounded-full border ${subtleControlClass}`}
+                      aria-label="Thông báo"
+                    >
+                      <span className="material-symbols-outlined text-[22px]">notifications</span>
+                      {unreadNotificationCount > 0 ? (
+                        <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-black text-white">
+                          {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
+                        </span>
+                      ) : null}
+                    </button>
+
+                    {isNotificationsOpen ? (
+                      <div className="absolute right-0 top-14 z-[60] w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-white/15 bg-white text-slate-950 shadow-2xl">
+                        <div className="border-b border-slate-100 px-4 py-3">
+                          <p className="text-sm font-black">Thông báo</p>
+                          <p className="text-xs text-slate-500">{notifications.length} thông báo</p>
+                        </div>
+
+                        <div className="max-h-[360px] overflow-y-auto">
+                          {!notifications.length ? (
+                            <div className="px-4 py-8 text-center text-sm text-slate-500">
+                              Chưa có thông báo.
+                            </div>
+                          ) : notifications.map((notification) => (
+                            <button
+                              key={notification.id || notification._id}
+                              type="button"
+                              onClick={() => setSelectedNotification(notification)}
+                              className={`block w-full border-b border-slate-100 px-4 py-3 text-left hover:bg-emerald-50 ${
+                                selectedNotification?.id === notification.id ? 'bg-emerald-50' : 'bg-white'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="line-clamp-1 text-sm font-black text-slate-950">
+                                  {notification.title}
+                                </span>
+                                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                                  {notification.type || notification.priority || 'INFO'}
+                                </span>
+                              </div>
+                              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">
+                                {notification.message}
+                              </p>
+                              <p className="mt-2 text-[11px] font-semibold text-slate-400">
+                                {formatNotificationTime(notification.deliverySummary?.sentAt || notification.createdAt)}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+
+                        {selectedNotification ? (
+                          <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
+                            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">
+                              Chi tiết
+                            </p>
+                            <h4 className="mt-1 text-sm font-black text-slate-950">
+                              {selectedNotification.title}
+                            </h4>
+                            <p className="mt-2 text-sm leading-6 text-slate-700">
+                              {selectedNotification.message}
+                            </p>
+                            {selectedNotification.promotionCode ? (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => copyPromotionCode(selectedNotification.promotionCode)}
+                                  className="rounded-full bg-white px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100 hover:bg-emerald-50"
+                                >
+                                  Sao chép {selectedNotification.promotionCode}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(selectedNotification.actionUrl || '/tickets/purchase')}
+                                  className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-700"
+                                >
+                                  Dùng mã
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                 </>
               )}
 
               <button
                 type="button"
                 onClick={() => navigate('/profile')}
-                className={`flex items-center gap-3 rounded-full border px-3 py-2 text-left backdrop-blur-md ${
+                className={`flex h-12 items-center gap-2 rounded-full border px-2.5 text-left backdrop-blur-md ${
                   effectiveDarkMode
                     ? 'border-white/10 bg-white/10 text-surface-bright hover:bg-white/15'
                     : 'border-slate-200 bg-white/80 text-slate-800 hover:bg-white'
                 }`}
-                aria-label={t('passenger.header.profile')}
+                aria-label="Hồ sơ"
               >
                 {user?.avatar ? (
                   <img
                     src={user.avatar}
                     alt={displayName}
-                    className={`h-10 w-10 rounded-full object-cover ${effectiveDarkMode ? 'border border-white/20' : 'border border-slate-200'}`}
+                    className={`h-9 w-9 rounded-full object-cover ${effectiveDarkMode ? 'border border-white/20' : 'border border-slate-200'}`}
                   />
                 ) : (
-                  <span className={`flex h-10 w-10 items-center justify-center rounded-full font-bold ${
+                  <span className={`flex h-9 w-9 items-center justify-center rounded-full font-bold ${
                     effectiveDarkMode ? 'bg-on-tertiary-container text-primary' : 'bg-emerald-100 text-emerald-800'
                   }`}>
                     {profileInitial}
                   </span>
                 )}
-                <span className="hidden md:flex flex-col">
-                  <span className={`text-xs uppercase tracking-[0.2em] ${effectiveDarkMode ? 'text-surface-variant/70' : 'text-slate-500'}`}>
-                    {t('passenger.header.signedIn')}
+                <span className="hidden max-w-36 flex-col xl:flex">
+                  <span className={`text-[10px] uppercase tracking-[0.16em] ${effectiveDarkMode ? 'text-surface-variant/70' : 'text-slate-500'}`}>
+                    Đã đăng nhập
                   </span>
-                  <span className={`text-sm font-semibold ${effectiveDarkMode ? 'text-surface-bright' : 'text-slate-900'}`}>
+                  <span className={`truncate text-sm font-bold ${effectiveDarkMode ? 'text-surface-bright' : 'text-slate-900'}`}>
                     {displayName}
                   </span>
                 </span>
@@ -437,8 +555,8 @@ const Header = ({ forceDarkMode = false }) => {
               <button
                 type="button"
                 onClick={handleLogout}
-                title={t('passenger.header.signOut')}
-                aria-label={t('passenger.header.signOut')}
+                title="Đăng xuất"
+                aria-label="Đăng xuất"
                 className={`inline-flex h-11 w-11 items-center justify-center rounded-full border ${
                   effectiveDarkMode
                     ? 'border-white/10 text-surface-bright hover:bg-white/10'
@@ -452,9 +570,9 @@ const Header = ({ forceDarkMode = false }) => {
             <button
               type="button"
               onClick={() => navigate(authCta.path)}
-              className="rounded-full bg-on-tertiary-container px-4 py-2 font-bold text-primary hover:shadow-lg sm:px-6"
+              className="rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-black text-white shadow-sm shadow-emerald-900/10 transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-lg hover:shadow-emerald-900/15 sm:px-6"
             >
-              {t(authCta.key)}
+              {authCta.label}
             </button>
           )}
 
@@ -462,7 +580,7 @@ const Header = ({ forceDarkMode = false }) => {
             type="button"
             onClick={() => setIsMobileMenuOpen((current) => !current)}
             className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border lg:hidden ${subtleControlClass}`}
-            aria-label={isMobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            aria-label={isMobileMenuOpen ? 'Đóng menu' : 'Mở menu'}
             aria-expanded={isMobileMenuOpen}
             aria-controls="mobile-primary-navigation"
           >
@@ -482,9 +600,12 @@ const Header = ({ forceDarkMode = false }) => {
               : 'border-outline-variant/40 bg-white/95'
           }`}
         >
-          <nav aria-label="Mobile primary navigation" className="mx-auto grid max-w-screen-2xl gap-1">
-            {navLinks.map((link) => {
-              const isActive = link.path && location.pathname.startsWith(link.path);
+          <nav aria-label="Điều hướng chính trên di động" className="mx-auto grid max-w-screen-2xl gap-1">
+            {mobileNavLinks.map((link) => {
+              const isActive = link.path && (
+                location.pathname.startsWith(link.path)
+                || link.activePaths?.some((path) => location.pathname.startsWith(path))
+              );
               const itemClassName = `flex min-h-11 items-center rounded-xl px-4 text-sm font-semibold ${
                 isActive
                   ? 'bg-on-tertiary-container text-primary'
@@ -500,22 +621,14 @@ const Header = ({ forceDarkMode = false }) => {
                   onClick={(event) => handleNavClick(event, link)}
                   className={`${itemClassName} w-full text-left`}
                 >
-                  {link.label || t(link.key)}
+                  {link.label}
                 </button>
               ) : (
                 <a key={link.key} href={link.href} className={itemClassName}>
-                  {link.label || t(link.key)}
+                  {link.label}
                 </a>
               );
             })}
-            <button
-              type="button"
-              onClick={toggleLanguage}
-              className={`mt-2 flex min-h-11 items-center justify-between rounded-xl border px-4 text-sm font-semibold ${subtleControlClass}`}
-            >
-              <span>{nextLanguageLabel}</span>
-              <span className="font-black">{language === 'en' ? 'EN' : 'VN'}</span>
-            </button>
           </nav>
         </div>
       ) : null}

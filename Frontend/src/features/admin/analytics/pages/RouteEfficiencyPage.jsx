@@ -32,6 +32,12 @@ const defaultFilters = {
 
 const money = (value) => `${Number(value || 0).toLocaleString()} VND`;
 const percent = (value) => `${Number(value || 0).toFixed(2)}%`;
+const performanceStatusLabel = (status) =>
+  ({
+    EFFICIENT: 'Hiệu quả',
+    AVERAGE: 'Trung bình',
+    LOW_PERFORMANCE: 'Hiệu suất thấp',
+  })[status] || status || '—';
 
 const MetricCard = ({ label, value, detail, icon: Icon }) => (
   <div className="rounded-[24px] border border-outline-variant/35 bg-white/85 p-5 shadow-sm">
@@ -401,43 +407,43 @@ const RouteEfficiencyPage = () => {
               <h2 className="text-lg font-bold text-primary">Route performance overview</h2>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-[1300px] divide-y divide-outline-variant/30 text-left text-sm">
+              <table className="w-full min-w-[1380px] table-fixed divide-y divide-outline-variant/30 text-left text-sm">
                 <thead className="bg-surface-container-low text-xs uppercase tracking-[0.12em] text-outline">
                   <tr>
-                    <th className="px-4 py-4">Route</th>
-                    <th className="px-4 py-4">Trips</th>
-                    <th className="px-4 py-4">Passengers</th>
-                    <th className="px-4 py-4">Occupancy</th>
-                    <th className="px-4 py-4">On-time</th>
-                    <th className="px-4 py-4">Delay</th>
-                    <th className="px-4 py-4">Revenue</th>
-                    <th className="px-4 py-4">Revenue/km</th>
-                    <th className="px-4 py-4">Incidents</th>
-                    <th className="px-4 py-4">Score</th>
-                    <th className="px-4 py-4">Status</th>
-                    <th className="px-4 py-4 text-right">Detail</th>
+                    <th className="w-[280px] px-5 py-4">Route</th>
+                    <th className="w-[80px] px-3 py-4 text-center">Trips</th>
+                    <th className="w-[100px] px-3 py-4 text-center">Passengers</th>
+                    <th className="w-[105px] px-3 py-4 text-center">Occupancy</th>
+                    <th className="w-[95px] px-3 py-4 text-center">On-time</th>
+                    <th className="w-[105px] px-3 py-4 text-right">Delay</th>
+                    <th className="w-[120px] px-3 py-4 text-right">Revenue</th>
+                    <th className="w-[125px] px-3 py-4 text-right">Revenue/km</th>
+                    <th className="w-[90px] px-3 py-4 text-center">Incidents</th>
+                    <th className="w-[75px] px-3 py-4 text-center">Score</th>
+                    <th className="w-[155px] px-3 py-4 text-center">Status</th>
+                    <th className="w-[80px] px-3 py-4 text-center">Detail</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant/20">
                   {(analytics?.routePerformanceTable || []).length ? (
                     analytics.routePerformanceTable.map((routeItem) => (
                       <tr key={routeItem.routeId || routeItem.routeName} className="hover:bg-surface-container-low/70">
-                        <td className="px-4 py-4 font-bold text-primary">{routeItem.routeName}</td>
-                        <td className="px-4 py-4">{routeItem.totalTrips}</td>
-                        <td className="px-4 py-4">{routeItem.totalPassengers}</td>
-                        <td className="px-4 py-4">{percent(routeItem.averageOccupancy)}</td>
-                        <td className="px-4 py-4">{percent(routeItem.onTimePerformance)}</td>
-                        <td className="px-4 py-4">{routeItem.averageDelayTime} min</td>
-                        <td className="px-4 py-4">{money(routeItem.totalRevenue)}</td>
-                        <td className="px-4 py-4">{money(routeItem.revenuePerKm)}</td>
-                        <td className="px-4 py-4">{routeItem.incidentCount}</td>
-                        <td className="px-4 py-4 font-bold">{routeItem.efficiencyScore}</td>
-                        <td className="px-4 py-4">
-                          <span className={`rounded-full px-3 py-1 text-xs font-bold ${scoreClassName(routeItem.efficiencyScore)}`}>
-                            {routeItem.status}
+                        <td className="break-words px-5 py-4 font-bold leading-5 text-primary">{routeItem.routeName}</td>
+                        <td className="px-3 py-4 text-center tabular-nums">{routeItem.totalTrips}</td>
+                        <td className="px-3 py-4 text-center tabular-nums">{routeItem.totalPassengers}</td>
+                        <td className="px-3 py-4 text-center tabular-nums">{percent(routeItem.averageOccupancy)}</td>
+                        <td className="px-3 py-4 text-center tabular-nums">{percent(routeItem.onTimePerformance)}</td>
+                        <td className="px-3 py-4 text-right tabular-nums">{routeItem.averageDelayTime} min</td>
+                        <td className="px-3 py-4 text-right tabular-nums">{money(routeItem.totalRevenue)}</td>
+                        <td className="px-3 py-4 text-right tabular-nums">{money(routeItem.revenuePerKm)}</td>
+                        <td className="px-3 py-4 text-center tabular-nums">{routeItem.incidentCount}</td>
+                        <td className="px-3 py-4 text-center font-bold tabular-nums">{routeItem.efficiencyScore}</td>
+                        <td className="px-3 py-4 text-center">
+                          <span className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-bold ${scoreClassName(routeItem.efficiencyScore)}`}>
+                            {performanceStatusLabel(routeItem.status)}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-right">
+                        <td className="px-3 py-4 text-center">
                           <button
                             type="button"
                             title="View route detail"

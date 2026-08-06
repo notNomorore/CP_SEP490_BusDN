@@ -34,6 +34,7 @@ import maintenanceApprovalRoutes from './modules/vehicleIssues/maintenanceApprov
 import vehicleReassignmentRoutes from './modules/vehicleReassignments/vehicleReassignment.routes.js';
 import busAssistantRoutes from './modules/busAssistant/busAssistant.routes.js';
 import scheduleOperationsRoutes from './modules/scheduleOperations/scheduleOperationsRoutes.js';
+import operationChatRoutes from './modules/operationChat/operationChat.routes.js';
 import ticketRoutes from './modules/tickets/ticketRoutes.js';
 import busStopRoutes from './modules/busStops/busStopRoutes.js';
 
@@ -135,6 +136,7 @@ export const createApp = () => {
   app.use('/api/admin', passengerComplianceRoutes);
   app.use('/api/admin/fleet', fleetMonitoringRoutes);
   app.use('/api/admin/notifications', systemNotificationRoutes);
+  app.use('/api/notifications', systemNotificationRoutes);
   app.use('/api/admin/vehicle-issues', vehicleIssueRoutes);
   app.use('/api/admin/maintenance', maintenanceApprovalRoutes);
   app.use('/api/admin', vehicleReassignmentRoutes);
@@ -145,6 +147,7 @@ export const createApp = () => {
   app.use('/api/routes', routeRoutes);
   app.use('/api/schedule-operations', scheduleOperationsRoutes);
   app.use('/api/bus-stops', busStopRoutes);
+  app.use('/api/operation-chat', operationChatRoutes);
   // 404 handler (must be after all routes)
   app.use(notFoundHandler);
 

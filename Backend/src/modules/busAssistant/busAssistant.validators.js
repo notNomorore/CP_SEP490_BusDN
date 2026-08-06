@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-export const BUS_ASSISTANT_PAYMENT_METHODS = ['CASH', 'QR', 'E_WALLET'];
+export const BUS_ASSISTANT_PAYMENT_METHODS = ['CASH', 'BANK_TRANSFER'];
 
 const requiredObjectId = (payload, field, errors) => {
   if (!payload[field]) {

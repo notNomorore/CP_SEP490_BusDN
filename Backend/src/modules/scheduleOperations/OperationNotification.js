@@ -40,7 +40,7 @@ const OperationNotificationSchema = new mongoose.Schema(
     },
     route: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'BusRoute',
+      ref: 'Route',
       default: null,
       index: true,
     },

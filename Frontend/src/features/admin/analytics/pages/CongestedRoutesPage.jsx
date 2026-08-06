@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format, subHours } from 'date-fns';
-import { io } from 'socket.io-client';
 import {
   BellRing,
   BusFront,
@@ -16,6 +15,7 @@ import {
 } from 'lucide-react';
 import toast from '../../../../shared/utils/toast.js';
 import congestedRoutesService from '../services/congestedRoutesService.js';
+import { acquireFleetSocket, releaseFleetSocket } from '../../fleetMonitoring/services/fleetSocket.js';
 
 const POLL_INTERVAL_MS = 30000;
 
@@ -24,12 +24,6 @@ const severityTone = {
   medium: 'bg-amber-100 text-amber-800',
   high: 'bg-orange-100 text-orange-800',
   critical: 'bg-red-100 text-red-700',
-};
-
-const getApiOrigin = () => {
-  const configured = import.meta.env.VITE_API_URL?.trim();
-  if (configured) return configured.replace(/\/$/, '');
-  return 'http://localhost:3000';
 };
 
 const now = new Date();
@@ -208,7 +202,7 @@ const CongestedRoutesPage = () => {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
-  const socketRef = useRef(null);
+  const loadRoutesRef = useRef(null);
 
   const loadRoutes = useCallback(async () => {
     setLoading(true);
@@ -227,27 +221,33 @@ const CongestedRoutesPage = () => {
   }, [loadRoutes]);
 
   useEffect(() => {
-    const token = localStorage.getItem('authToken');
-    const socket = io(getApiOrigin(), {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
-    socketRef.current = socket;
+    loadRoutesRef.current = loadRoutes;
+  }, [loadRoutes]);
 
-    socket.on('connect', () => {
+  useEffect(() => {
+    const socket = acquireFleetSocket();
+    const handleConnect = () => {
       setSocketConnected(true);
       socket.emit('admin:fleet:subscribe');
-    });
-    socket.on('disconnect', () => setSocketConnected(false));
-    socket.on('connect_error', () => setSocketConnected(false));
-    socket.on('server:analytics:congestionUpdated', () => loadRoutes().catch(() => {}));
+    };
+    const handleDisconnect = () => setSocketConnected(false);
+    const reloadRoutes = () => loadRoutesRef.current?.().catch(() => {});
+
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('connect_error', handleDisconnect);
+    socket.on('server:analytics:congestionUpdated', reloadRoutes);
+    if (socket.connected) handleConnect();
 
     return () => {
-      socket.emit('admin:fleet:unsubscribe');
-      socket.disconnect();
-      socketRef.current = null;
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('connect_error', handleDisconnect);
+      socket.off('server:analytics:congestionUpdated', reloadRoutes);
+      setSocketConnected(false);
+      releaseFleetSocket();
     };
-  }, [loadRoutes]);
+  }, []);
 
   useEffect(() => {
     if (socketConnected) return undefined;

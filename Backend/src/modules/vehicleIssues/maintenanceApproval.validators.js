@@ -41,8 +41,23 @@ export const validateRejectMaintenanceTask = (body) => {
   return errors;
 };
 
+export const validateUpdateMaintenanceTaskProgress = (body) => {
+  const errors = {};
+
+  if (body.note !== undefined && String(body.note).trim().length > 2000) {
+    errors.note = 'Maintenance note must not exceed 2000 characters';
+  }
+
+  if (body.completionNote !== undefined && String(body.completionNote).trim().length > 2000) {
+    errors.completionNote = 'Completion note must not exceed 2000 characters';
+  }
+
+  return errors;
+};
+
 export default {
   validateMaintenanceTaskIdParam,
   validateApproveMaintenanceTask,
   validateRejectMaintenanceTask,
+  validateUpdateMaintenanceTaskProgress,
 };

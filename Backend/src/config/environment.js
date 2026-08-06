@@ -79,6 +79,11 @@ export const config = {
     refreshExpire: getEnv('JWT_REFRESH_EXPIRE', '30d'),
   },
 
+  // QR e-ticket signing
+  qr: {
+    secret: getEnv('QR_SECRET', getEnv('JWT_SECRET', 'dev_qr_secret_do_not_use_in_production')),
+  },
+
   // Session
   session: {
     secret: getEnv('SESSION_SECRET', 'dev_session_secret'),
@@ -121,6 +126,17 @@ export const config = {
   stripe: {
     secretKey: getEnv('STRIPE_SECRET_KEY'),
     publicKey: getEnv('STRIPE_PUBLIC_KEY'),
+  },
+
+  payos: {
+    clientId: getEnv('PAYOS_CLIENT_ID'),
+    apiKey: getEnv('PAYOS_API_KEY'),
+    checksumKey: getEnv('PAYOS_CHECKSUM_KEY'),
+    apiBaseUrl: getEnv('PAYOS_API_BASE_URL', 'https://api-merchant.payos.vn'),
+  },
+
+  frontend: {
+    url: getEnv('FRONTEND_URL', 'http://localhost:5173'),
   },
 
   // Redis
