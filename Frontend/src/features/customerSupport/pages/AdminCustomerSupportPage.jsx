@@ -10,6 +10,7 @@ import customerSupportService, {
   PRIORITIES,
   RECOVERY_STATUSES,
 } from '../services/customerSupportService.js';
+import { resolveBackendUrl } from '../../../shared/config/apiConfig.js';
 
 const STATUS_BADGE = {
   PENDING: 'bg-blue-100 text-blue-800',
@@ -59,9 +60,7 @@ const getAttachmentUrl = (attachment) => {
   if (!path) return '';
   if (/^https?:\/\//i.test(path)) return path;
 
-  const apiBase = import.meta.env.VITE_API_BASE_URL || '';
-  const apiOrigin = apiBase.replace(/\/api\/?$/, '') || import.meta.env.VITE_API_URL || 'http://localhost:3000';
-  return `${apiOrigin.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
+  return resolveBackendUrl(path);
 };
 
 const isImageAttachment = (attachment) => String(attachment?.mimeType || '').startsWith('image/');

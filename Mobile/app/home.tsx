@@ -1,13 +1,12 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, type Href } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import {
   Image,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,17 +19,17 @@ import { isDriverAssistantRole } from '@/utils/roleNavigation';
 const destinations = [
   {
     title: 'Hà Nội - Sa Pa',
-    detail: '4.8 rating',
-    price: 'From $24.00',
-    badge: 'Popular',
+    detail: 'Đánh giá 4.8',
+    price: 'Từ 24 USD',
+    badge: 'Phổ biến',
     image:
       'https://lh3.googleusercontent.com/aida-public/AB6AXuBw2QLHKlIhgiQuJsKrfxH0bKnsKD3wUy8AsHHoQWP53W4cXESgJGrBrhXdMKNGYPedg6A6BFVrsEsz6M6vEvwpo6ydAUyayYkohp8SMJyO5wciNIvn6kS98CSXF0pBDmj9EoN9POhCnHx5cT3HAAjRIrxAdoyMKO0tfcPN9mTpYedq70fJ6erX87qooQQxszQveP-lvCW6dTmceYeHkf_ORXasEbGTVUaU1jpHpUMzrAcvmogKloRBb9HK0AJaQv6_4mG0bMAq5do',
   },
   {
     title: 'Đà Nẵng - Hội An',
-    detail: '12 trips/day',
-    price: 'From $12.00',
-    badge: 'Trending',
+    detail: '12 chuyến/ngày',
+    price: 'Từ 12 USD',
+    badge: 'Nổi bật',
     image:
       'https://lh3.googleusercontent.com/aida-public/AB6AXuBTclYWEMmSc9NLTgUwDv9on7AFX-SSpA5gPI1ogZN-TD9umRy6yxhLhY05HSnXwdnhNvtc5WOT_HWHnMvrQMl2CevyJtJwtUnTAWXtWdT3b0nQwKCki3s72wp73yTo9qn2sRdNen8AIa2e9n8CBbLOyU2DCghI_mQ2qJrCuGChKthcFGUc7k2ZJ5R6-NwZczM_XHtBDmCcV9s9rm2D0OrHdW-p-xAe3p1CQ7ZhiFTcC8JsrDLcPXA_mFT0glXrCoHpVvKmhNtQwoE',
   },
@@ -38,29 +37,8 @@ const destinations = [
 
 const priorityPassengerRoute = '/priority-passenger' as Href;
 const driverAssistantRoute = '/driver-assistant' as Href;
-const routeSearchRoute = '/route-search' as Href;
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
-
-function SearchField({
-  label,
-  icon,
-  children,
-}: {
-  label: string;
-  icon: IconName;
-  children: React.ReactNode;
-}) {
-  return (
-    <View style={styles.searchField}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <View style={styles.fieldContent}>
-        <MaterialCommunityIcons color="#237356" name={icon} size={18} />
-        {children}
-      </View>
-    </View>
-  );
-}
 
 function ServiceTile({
   icon,
@@ -80,7 +58,7 @@ function ServiceTile({
       <View style={styles.serviceIcon}>
         <MaterialCommunityIcons color={colors.primary} name={icon} size={21} />
       </View>
-      <Text numberOfLines={2} style={styles.serviceLabel}>{label}</Text>
+      <Text adjustsFontSizeToFit minimumFontScale={0.78} numberOfLines={1} style={styles.serviceLabel}>{label}</Text>
     </Pressable>
   );
 }
@@ -90,8 +68,6 @@ export default function HomeScreen() {
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isHydrated = useAuthStore((state) => state.isHydrated);
-  const [departure, setDeparture] = useState('Hà Nội');
-  const [destination, setDestination] = useState('');
 
   useEffect(() => {
     if (isHydrated && !isAuthenticated) {
@@ -103,16 +79,6 @@ export default function HomeScreen() {
       router.replace(driverAssistantRoute);
     }
   }, [isHydrated, isAuthenticated, user?.role]);
-
-  const searchRoutes = () => {
-    router.push({
-      pathname: routeSearchRoute,
-      params: {
-        from: departure.trim(),
-        to: destination.trim(),
-      },
-    } as unknown as Href);
-  };
 
   if (isHydrated && isAuthenticated && isDriverAssistantRole(user?.role)) {
     return null;
@@ -128,13 +94,13 @@ export default function HomeScreen() {
         >
           <View style={styles.header}>
             <View style={styles.brand}>
-              <Pressable accessibilityLabel="Open menu" hitSlop={10}>
+              <Pressable accessibilityLabel="Mở trình đơn" hitSlop={10}>
                 <MaterialCommunityIcons color={colors.primary} name="menu" size={25} />
               </Pressable>
-              <Text style={styles.brandName}>Veridian Transit</Text>
+              <View><Text style={styles.brandName}>BusDN</Text><Text style={styles.brandSub}>Xe buýt Đà Nẵng</Text></View>
             </View>
             <Pressable
-              accessibilityLabel="Open profile"
+              accessibilityLabel="Mở hồ sơ"
               onPress={() => router.push('/profile')}
               style={styles.avatar}
             >
@@ -149,71 +115,30 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.hero}>
-            <Text style={styles.kicker}>PREMIUM TRAVEL</Text>
-            <Text style={styles.title}>Where shall we lead you today?</Text>
+            <Text style={styles.kicker}>HÀNH TRÌNH TIỆN NGHI</Text>
+            <Text style={styles.title}>Hôm nay bạn muốn đi đâu?</Text>
+            <Text style={styles.heroText}>Tra cứu tuyến, theo dõi xe và mua vé nhanh chóng ngay trên BusDN.</Text>
+            <Pressable onPress={() => router.push('/route-search')} style={styles.heroButton}><Text style={styles.heroButtonText}>Khám phá tuyến xe</Text><MaterialCommunityIcons color={colors.primary} name="arrow-right" size={19} /></Pressable>
           </View>
 
-          <View style={styles.searchCard}>
-            <SearchField icon="map-marker-outline" label="DEPARTURE">
-              <TextInput
-                accessibilityLabel="Departure"
-                onChangeText={setDeparture}
-                style={styles.fieldInput}
-                value={departure}
-              />
-            </SearchField>
-            <SearchField icon="map-outline" label="DESTINATION">
-              <TextInput
-                accessibilityLabel="Destination"
-                onChangeText={setDestination}
-                placeholder="Where to?"
-                placeholderTextColor="#65766f"
-                style={styles.fieldInput}
-                value={destination}
-              />
-            </SearchField>
-
-            <View style={styles.compactFields}>
-              <View style={styles.compactField}>
-                <Text style={styles.fieldLabel}>DATE</Text>
-                <View style={styles.fieldContent}>
-                  <MaterialCommunityIcons color="#237356" name="calendar-blank-outline" size={17} />
-                  <Text style={styles.compactValue}>Oct 24</Text>
-                </View>
-              </View>
-              <View style={styles.compactField}>
-                <Text style={styles.fieldLabel}>PASSENGERS</Text>
-                <View style={styles.fieldContent}>
-                  <MaterialCommunityIcons color="#237356" name="account-outline" size={17} />
-                  <Text style={styles.compactValue}>1 Adult</Text>
-                </View>
-              </View>
-            </View>
-
-            <Pressable
-              accessibilityRole="button"
-              onPress={searchRoutes}
-              style={({ pressed }) => [styles.searchButton, pressed && styles.pressed]}
-            >
-              <Text style={styles.searchButtonText}>Search Routes</Text>
-              <MaterialCommunityIcons color={colors.white} name="arrow-right" size={21} />
-            </Pressable>
-          </View>
-
-          <Text style={[styles.sectionTitle, styles.servicesTitle]}>Quick Actions</Text>
+          <Text style={[styles.sectionTitle, styles.servicesTitle]}>Dịch vụ BusDN</Text>
           <View style={styles.serviceGrid}>
-            <ServiceTile icon="crosshairs-gps" label="Live Track" onPress={() => router.push('/live-tracking')} />
-            <ServiceTile icon="ticket-outline" label="Buy Ticket" onPress={() => router.push('/buy-oneway-ticket')} />
-            <ServiceTile icon="calendar-month-outline" label="Monthly Pass" onPress={() => router.push('/buy-monthly-pass')} />
-            <ServiceTile icon="directions" label="Plan Trip" onPress={() => router.push('/plan-trip')} />
-            <ServiceTile icon="message-plus-outline" label="Send Feedback" onPress={() => router.push('/submit-feedback')} />
-            <ServiceTile icon="bell-ring-outline" label="Alerts" onPress={() => router.push('/notifications')} />
+            <ServiceTile icon="compass-outline" label="Khám phá" onPress={() => router.push('/search-routes')} />
+            <ServiceTile icon="crosshairs-gps" label="Theo dõi xe" onPress={() => router.push('/live-tracking')} />
+            <ServiceTile icon="ticket-outline" label="Mua vé" onPress={() => router.push('/buy-oneway-ticket')} />
+            <ServiceTile icon="package-variant-closed" label="Đồ thất lạc" onPress={() => router.push('/my-lost-items' as Href)} />
+            <ServiceTile icon="ticket-confirmation-outline" label="Vé của tôi" onPress={() => router.push('/my-tickets')} />
+            <ServiceTile icon="bell-ring-outline" label="Thông báo" onPress={() => router.push('/notifications')} />
+            <ServiceTile icon="shield-star-outline" label="Hồ sơ ưu tiên" onPress={() => router.push(priorityPassengerRoute)} />
+            <ServiceTile icon="directions" label="Lập hành trình" onPress={() => router.push('/plan-trip')} />
+            <ServiceTile icon="history" label="Lịch sử" onPress={() => router.push('/travel-history')} />
+            <ServiceTile icon="message-text-outline" label="Góp ý" onPress={() => router.push('/my-feedback' as Href)} />
           </View>
 
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Trending Now</Text>
+            <Text style={styles.sectionTitle}>Đang nổi bật</Text>
             <Pressable onPress={() => router.push('/search-routes')}>
-              <Text style={styles.viewAll}>View all ↗</Text>
+              <Text style={styles.viewAll}>Xem tất cả ↗</Text>
             </Pressable>
           </View>
 
@@ -225,7 +150,7 @@ export default function HomeScreen() {
             {destinations.map((item) => (
               <Pressable
                 key={item.title}
-                onPress={() => setDestination(item.title.split(' - ')[1])}
+                onPress={() => router.push({ pathname: '/route-search', params: { to: item.title.split(' - ')[1] } })}
                 style={styles.destinationCard}
               >
                 <View>
@@ -241,7 +166,7 @@ export default function HomeScreen() {
             ))}
           </ScrollView>
 
-          <Text style={[styles.sectionTitle, styles.flashTitle]}>Flash Sales</Text>
+          <Text style={[styles.sectionTitle, styles.flashTitle]}>Ưu đãi nổi bật</Text>
           <Pressable style={styles.mainSale}>
             <MaterialCommunityIcons
               color="rgba(255,255,255,0.08)"
@@ -250,9 +175,9 @@ export default function HomeScreen() {
               style={styles.saleWatermark}
             />
             <View style={styles.saleCopy}>
-              <Text style={styles.saleKicker}>LIMITED TIME ONLY</Text>
-              <Text style={styles.saleTitle}>50% OFF</Text>
-              <Text style={styles.saleDescription}>All sleeper cabins to Central Highlands</Text>
+              <Text style={styles.saleKicker}>ƯU ĐÃI CÓ HẠN</Text>
+              <Text style={styles.saleTitle}>GIẢM 50%</Text>
+              <Text style={styles.saleDescription}>Áp dụng cho các hành trình đủ điều kiện</Text>
             </View>
           </Pressable>
 
@@ -264,30 +189,30 @@ export default function HomeScreen() {
               >
                 <MaterialCommunityIcons color={colors.white} name="bus-clock" size={30} />
                 <View>
-                  <Text style={[styles.smallSaleTitle, styles.workSaleTitle]}>Work Dashboard</Text>
-                  <Text style={[styles.smallSaleText, styles.workSaleText]}>Trips and shift schedule</Text>
+                  <Text style={[styles.smallSaleTitle, styles.workSaleTitle]}>Trang vận hành</Text>
+                  <Text style={[styles.smallSaleText, styles.workSaleText]}>Chuyến và lịch làm việc</Text>
                 </View>
               </Pressable>
             ) : null}
             <Pressable style={[styles.smallSale, styles.firstRide]}>
               <MaterialCommunityIcons color="#34725a" name="tag-outline" size={30} />
               <View>
-                <Text style={styles.smallSaleTitle}>First Ride</Text>
-                <Text style={styles.smallSaleText}>Use code: VERIDIAN1</Text>
+                <Text style={styles.smallSaleTitle}>Chuyến đầu tiên</Text>
+                <Text style={styles.smallSaleText}>Mã: BUSDN1</Text>
               </View>
             </Pressable>
             <Pressable style={[styles.smallSale, styles.groupSale]}>
               <MaterialCommunityIcons color={colors.primary} name="account-group" size={30} />
               <View>
-                <Text style={styles.smallSaleTitle}>Group Special</Text>
-                <Text style={styles.smallSaleText}>Save 15% on 4+ seats</Text>
+                <Text style={styles.smallSaleTitle}>Ưu đãi nhóm</Text>
+                <Text style={styles.smallSaleText}>Giảm 15% từ 4 vé</Text>
               </View>
             </Pressable>
           </View>
         </ScrollView>
 
         <Pressable
-          accessibilityLabel="Contact support"
+          accessibilityLabel="Liên hệ hỗ trợ"
           onPress={() => router.push(priorityPassengerRoute)}
           style={[styles.supportButton, { bottom: 82 + insets.bottom }]}
         >
@@ -303,7 +228,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.surface },
   screen: { flex: 1, backgroundColor: colors.surface },
-  scrollContent: { paddingHorizontal: 20 },
+  scrollContent: { paddingHorizontal: 16 },
   header: {
     height: 64,
     flexDirection: 'row',
@@ -311,7 +236,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  brandName: { color: colors.primary, fontSize: 15, fontWeight: '900', letterSpacing: -0.5 },
+  brandName: { color: colors.primary, fontSize: 16, fontWeight: '900', letterSpacing: -0.5 },
+  brandSub: { marginTop: 1, color: colors.muted, fontSize: 9, fontWeight: '700' },
   avatar: {
     width: 38,
     height: 38,
@@ -325,17 +251,20 @@ const styles = StyleSheet.create({
   },
   avatarImage: { width: '100%', height: '100%' },
   avatarText: { color: colors.primary, fontSize: 16, fontWeight: '900' },
-  hero: { paddingTop: 24, paddingBottom: 24 },
-  kicker: { color: colors.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1.6 },
+  hero: { overflow: 'hidden', borderRadius: 26, backgroundColor: colors.primary, padding: 22, marginTop: 12 },
+  kicker: { color: '#7fe0ae', fontSize: 9, fontWeight: '900', letterSpacing: 1.5 },
   title: {
     maxWidth: 335,
     marginTop: 8,
-    color: colors.primary,
-    fontSize: 31,
-    lineHeight: 35,
+    color: colors.white,
+    fontSize: 28,
+    lineHeight: 33,
     fontWeight: '900',
     letterSpacing: -1.4,
   },
+  heroText: { maxWidth: 315, marginTop: 10, color: '#c9e9dc', fontSize: 12, lineHeight: 18, fontWeight: '600' },
+  heroButton: { alignSelf: 'flex-start', minHeight: 43, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 22, backgroundColor: '#d7f5e6', paddingHorizontal: 16, marginTop: 18 },
+  heroButtonText: { color: colors.primary, fontSize: 12, fontWeight: '900' },
   searchCard: {
     gap: 11,
     padding: 18,
@@ -357,17 +286,17 @@ const styles = StyleSheet.create({
   searchButton: { height: 49, marginTop: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 25, backgroundColor: colors.primaryContainer },
   searchButtonText: { color: colors.white, fontSize: 14, fontWeight: '900' },
   pressed: { opacity: 0.82, transform: [{ scale: 0.99 }] },
-  servicesTitle: { marginTop: 28, marginBottom: 13 },
-  serviceGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  serviceTile: { width: '31%', minWidth: 72, flexGrow: 1, minHeight: 82, alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 18, backgroundColor: colors.card, padding: 9 },
-  serviceIcon: { width: 39, height: 39, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: '#d8f6e7' },
-  serviceLabel: { color: colors.primary, fontSize: 10, lineHeight: 13, fontWeight: '900', textAlign: 'center' },
+  servicesTitle: { marginTop: 26, marginBottom: 13 },
+  serviceGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10 },
+  serviceTile: { width: '31.5%', minHeight: 96, alignItems: 'center', justifyContent: 'center', gap: 9, borderRadius: 20, borderWidth: 1, borderColor: '#e8efec', backgroundColor: colors.card, padding: 10 },
+  serviceIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: '#d8f6e7' },
+  serviceLabel: { width: '100%', color: colors.primary, fontSize: 10, lineHeight: 14, fontWeight: '900', textAlign: 'center' },
   sectionHeader: { marginTop: 31, marginBottom: 14, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   sectionTitle: { color: colors.primary, fontSize: 20, fontWeight: '900', letterSpacing: -0.6 },
   viewAll: { color: '#16865b', fontSize: 10, fontWeight: '800' },
   cardsRow: { gap: 14, paddingRight: 20, paddingBottom: 3 },
-  destinationCard: { width: 226, overflow: 'hidden', borderRadius: 22, backgroundColor: colors.card },
-  destinationImage: { width: '100%', height: 139 },
+  destinationCard: { width: 255, overflow: 'hidden', borderRadius: 22, borderWidth: 1, borderColor: '#e5eeea', backgroundColor: colors.card },
+  destinationImage: { width: '100%', height: 150 },
   badge: { position: 'absolute', top: 11, right: 11, overflow: 'hidden', borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.92)', paddingHorizontal: 9, paddingVertical: 5, color: '#173b2e', fontSize: 8, fontWeight: '900', textTransform: 'uppercase' },
   destinationBody: { padding: 14 },
   destinationMeta: { color: colors.accent, fontSize: 8, fontWeight: '900', letterSpacing: 0.6 },

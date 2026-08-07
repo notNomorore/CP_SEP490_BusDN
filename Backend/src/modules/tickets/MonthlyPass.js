@@ -29,6 +29,9 @@ const MonthlyPassSchema = new mongoose.Schema(
     validUntil: { type: Date, index: true },
     originalPrice: { type: Number, min: 0, default: 0 },
     discountAmount: { type: Number, min: 0, default: 0 },
+    priorityDiscountAmount: { type: Number, min: 0, default: 0 },
+    promotionDiscountAmount: { type: Number, min: 0, default: 0 },
+    appliedDiscount: { type: mongoose.Schema.Types.Mixed, default: null },
     promotionCode: { type: String, trim: true, uppercase: true, default: '' },
     promotionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Promotion', default: null },
     passPrice: { type: Number, required: true, min: 0 },
@@ -57,6 +60,7 @@ const MonthlyPassSchema = new mongoose.Schema(
       expiresAt: Date,
     },
     validationLogs: { type: [ValidationLogSchema], default: [] },
+    nextScanAllowedAt: { type: Date, default: null, index: true },
     purchasedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }

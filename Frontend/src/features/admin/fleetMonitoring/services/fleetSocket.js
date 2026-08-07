@@ -1,16 +1,11 @@
 import { io } from 'socket.io-client';
+import { SOCKET_URL } from '../../../../shared/config/apiConfig.js';
 
 const DISCONNECT_DELAY_MS = 30000;
 
 let fleetSocket = null;
 let subscriberCount = 0;
 let disconnectTimer = null;
-
-const getApiOrigin = () => {
-  const configured = import.meta.env.VITE_API_URL?.trim();
-  if (configured) return configured.replace(/\/$/, '');
-  return 'http://localhost:3000';
-};
 
 const getToken = () => (
   localStorage.getItem('authToken')
@@ -28,7 +23,7 @@ export const acquireFleetSocket = () => {
 
   const token = getToken();
   if (!fleetSocket) {
-    fleetSocket = io(getApiOrigin(), {
+    fleetSocket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
     });

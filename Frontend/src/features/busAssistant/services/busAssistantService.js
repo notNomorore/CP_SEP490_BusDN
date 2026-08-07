@@ -19,6 +19,15 @@ export const busAssistantService = {
   createWalkInTicket(payload) {
     return apiClient.post('/bus-assistant/walkin-tickets', payload).then((response) => response.data);
   },
+  confirmWalkInPayment(ticketId) {
+    return apiClient.patch(`/bus-assistant/walkin-tickets/${ticketId}/confirm-payment`).then((response) => response.data);
+  },
+  getWalkInTicketHistory(filters = {}) {
+    return apiClient.get('/bus-assistant/walkin-tickets/history', { params: params(filters) }).then((response) => response.data);
+  },
+  resumeWalkInPayment(ticketId) {
+    return apiClient.get(`/bus-assistant/walkin-tickets/${ticketId}/resume-payment`).then((response) => response.data);
+  },
   getShiftRevenue(filters = {}) {
     return apiClient.get('/bus-assistant/shift-revenue', { params: params(filters) }).then((response) => response.data);
   },

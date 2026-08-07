@@ -185,10 +185,38 @@ export type TicketRecord = {
   bookingStatus?: string;
   ticketStatus?: string;
   currentStatus?: string;
+  status?: string;
+  passengerType?: string;
+  paymentMethod?: string;
+  purchasedAt?: string;
   digitalTicket?: {
     qrCode?: string;
     qrCodeImage?: string;
   };
+};
+
+export type TicketDetailRecord = TicketRecord & {
+  status?: string;
+  canCancel?: boolean;
+  qrCode?: {
+    payload?: string;
+    data?: string;
+    image?: string;
+    validFrom?: string;
+    validUntil?: string;
+    expiresAt?: string;
+  };
+  passengerInfo?: { fullName?: string; email?: string; phoneNumber?: string };
+  tripInfo?: {
+    routeName?: string;
+    boardingPoint?: string;
+    destinationPoint?: string;
+    estimatedArrivalTime?: string;
+    estimatedDurationMinutes?: number;
+    progressPercent?: number;
+    stops?: Array<{ stopId?: string; name?: string; order?: number; isBoardingPoint?: boolean; isDestination?: boolean }>;
+  };
+  importantNotes?: string[];
 };
 
 export type MonthlyPassRecord = {
@@ -202,6 +230,36 @@ export type MonthlyPassRecord = {
   passStatus?: string;
   startDate?: string;
   expiryDate?: string;
+  paymentMethod?: string;
+  dailyRideLimit?: number;
+  ridesUsedToday?: number;
+  nextScanAllowedAt?: string;
+  validationLogs?: Array<{
+    validatedAt?: string;
+    result?: string;
+    routeCode?: string;
+  }>;
+  digitalPass?: { qrPayload?: string; qrCodeImage?: string };
+};
+
+export type PurchasableTripSchedule = {
+  id?: string;
+  scheduleId?: string;
+  scheduleCode?: string;
+  routeId?: string;
+  routeCode?: string;
+  routeName?: string;
+  direction?: 'OUTBOUND' | 'INBOUND' | string;
+  serviceDate?: string;
+  departureTime: string;
+  expectedArrivalTime?: string;
+  status?: string;
+  statusLabel?: string;
+  vehicle?: {
+    busId?: string;
+    busCode?: string;
+    plateNumber?: string;
+  } | null;
 };
 
 export type NotificationRecord = {
@@ -278,6 +336,14 @@ export type FeedbackCategory =
   | 'PAYMENT_ISSUE'
   | 'OTHER';
 
+export type LostItemCategory =
+  | 'PERSONAL_BELONGINGS'
+  | 'ELECTRONICS'
+  | 'WALLET_DOCUMENTS'
+  | 'CLOTHING'
+  | 'BAGS_LUGGAGE'
+  | 'OTHER_ITEMS';
+
 export type PassengerFeedbackConversation = {
   id?: string;
   senderRole?: 'PASSENGER' | 'ADMIN' | string;
@@ -322,6 +388,78 @@ export type SubmitFeedbackPayload = {
   routeName?: string;
 };
 
+export type LostItemAttachmentAsset = {
+  uri: string;
+  name?: string;
+  fileName?: string;
+  type?: string;
+  mimeType?: string;
+};
+
+export type LostItemTimelineRecord = {
+  label?: string;
+  status?: string;
+  message?: string;
+  timestamp?: string;
+};
+
+export type LostItemAdminNote = {
+  message?: string;
+  createdAt?: string;
+  responder?: {
+    fullName?: string;
+    email?: string;
+    role?: string;
+  };
+};
+
+export type LostItemCase = {
+  id: string;
+  _id?: string;
+  caseId?: string;
+  referenceNumber?: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  currentCaseStatus?: string;
+  relatedTripId?: string;
+  routeName?: string;
+  tripCode?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  attachments?: Array<{ originalName?: string; fileName?: string; filename?: string; path?: string; url?: string; mimeType?: string; size?: number }>;
+  lostItem?: {
+    itemName?: string;
+    itemCategory?: LostItemCategory | string;
+    itemDescription?: string;
+    lastSeenLocation?: string;
+    lostAt?: string;
+    recoveryStatus?: string;
+    foundAt?: string;
+    returnedAt?: string;
+  };
+  timeline?: LostItemTimelineRecord[];
+  administratorNotes?: LostItemAdminNote[];
+  collectionInstructions?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  lastUpdatedAt?: string;
+};
+
+export type SubmitLostItemPayload = {
+  itemName: string;
+  itemCategory: LostItemCategory;
+  itemDescription: string;
+  lastSeenLocation: string;
+  lostAt: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  relatedTripId?: string;
+  tripCode?: string;
+  routeName?: string;
+  attachments?: LostItemAttachmentAsset[];
+};
+
 export type PaymentOrder = {
   orderCode?: number;
   status?: string;
@@ -335,6 +473,12 @@ export type PaymentOrder = {
   paymentLinkId?: string;
   rawStatus?: string;
   message?: string;
+  originalPrice?: number;
+  priorityDiscountAmount?: number;
+  promotionDiscountAmount?: number;
+  discountAmount?: number;
+  finalPrice?: number;
+  pricing?: TicketPriceQuote;
 };
 
 export type PromotionPreview = {
@@ -346,6 +490,24 @@ export type PromotionPreview = {
   originalAmount?: number;
   discountAmount?: number;
   finalAmount?: number;
+};
+
+export type TicketPriceQuote = PromotionPreview & {
+  originalPrice?: number;
+  priorityDiscountAmount?: number;
+  promotionDiscountAmount?: number;
+  finalPrice?: number;
+  appliedDiscount?: {
+    type?: string;
+    priorityType?: string;
+    label?: string;
+    discountPercent?: number;
+    discountAmount?: number;
+  } | null;
+  appliedPromotion?: PromotionPreview;
+  dailyRideLimit?: number;
+  startDate?: string;
+  expiryDate?: string;
 };
 
 const unwrap = <T>(response: unknown): T => (response as ApiEnvelope<T>).data;
@@ -444,9 +606,50 @@ export const passengerApi = {
     return unwrap<{ tickets: TicketRecord[]; count: number }>(response);
   },
 
+  getTicket: async (ticketId: string) => {
+    const response = await apiClient.get(`/tickets/${encodeURIComponent(ticketId)}`) as unknown;
+    return unwrap<TicketDetailRecord>(response);
+  },
+
+  createPendingTicketPayment: async (ticketId: string) => {
+    const response = await apiClient.post(`/tickets/${encodeURIComponent(ticketId)}/payment`) as unknown;
+    return unwrap<{ status?: string; checkoutUrl?: string; message?: string }>(response);
+  },
+
+  cancelTicket: async (ticketId: string) => {
+    const response = await apiClient.patch(`/tickets/${encodeURIComponent(ticketId)}/cancel`) as unknown;
+    return unwrap<TicketRecord>(response);
+  },
+
   getMonthlyPasses: async () => {
     const response = await apiClient.get('/tickets/monthly-passes/me') as unknown;
     return unwrap<{ passes: MonthlyPassRecord[]; count: number }>(response);
+  },
+
+  createPendingMonthlyPassPayment: async (passId: string) => {
+    const response = await apiClient.post(`/tickets/monthly-passes/${encodeURIComponent(passId)}/payment`) as unknown;
+    return unwrap<PaymentOrder>(response);
+  },
+
+  cancelMonthlyPass: async (passId: string) => {
+    const response = await apiClient.patch(`/tickets/monthly-passes/${encodeURIComponent(passId)}/cancel`) as unknown;
+    return unwrap<MonthlyPassRecord>(response);
+  },
+
+  getPurchasableSchedules: async (params: { routeId: string; direction: string; serviceDate: string }) => {
+    const response = await apiClient.get('/tickets/purchasable-schedules', { params }) as unknown;
+    return unwrap<{
+      schedules: PurchasableTripSchedule[];
+      count: number;
+      serverTime?: string;
+      serverClock?: string;
+      serverDate?: string;
+    }>(response);
+  },
+
+  quoteTicket: async (payload: Record<string, unknown>) => {
+    const response = await apiClient.post('/tickets/quote', payload) as unknown;
+    return unwrap<TicketPriceQuote>(response);
   },
 
   createPayment: async (payload: Record<string, unknown>) => {
@@ -574,6 +777,55 @@ export const passengerApi = {
       ...payload,
     }) as unknown;
     return unwrap<PassengerFeedback>(response);
+  },
+
+  submitLostItem: async (payload: SubmitLostItemPayload) => {
+    const formData = new FormData();
+    formData.append('type', 'LOST_ITEM');
+    formData.append('title', `Đồ thất lạc: ${payload.itemName.trim()}`);
+    formData.append('description', payload.itemDescription.trim());
+    formData.append('category', 'LOST_ITEM');
+    formData.append('priority', 'NORMAL');
+    formData.append('incidentAt', payload.lostAt);
+    formData.append('lostItem', JSON.stringify({
+      itemName: payload.itemName.trim(),
+      itemCategory: payload.itemCategory,
+      itemDescription: payload.itemDescription.trim(),
+      lastSeenLocation: payload.lastSeenLocation.trim(),
+      lostAt: payload.lostAt,
+    }));
+
+    if (payload.relatedTripId) formData.append('relatedTripId', payload.relatedTripId);
+    if (payload.tripCode) formData.append('tripCode', payload.tripCode);
+    if (payload.routeName) formData.append('routeName', payload.routeName);
+    if (payload.contactPhone) formData.append('contactPhone', payload.contactPhone.trim());
+    if (payload.contactEmail) formData.append('contactEmail', payload.contactEmail.trim());
+    (payload.attachments || []).forEach((asset, index) => {
+      formData.append('attachments', {
+        uri: asset.uri,
+        name: asset.fileName || asset.name || `lost-item-${index + 1}.jpg`,
+        type: asset.mimeType || asset.type || 'image/jpeg',
+      } as unknown as Blob);
+    });
+
+    const response = await apiClient.post('/customer-support/cases', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }) as unknown;
+    return unwrap<LostItemCase>(response);
+  },
+
+  getMyLostItems: async () => {
+    const response = await apiClient.get('/customer-support/lost-items/me') as unknown;
+    const envelope = response as ApiEnvelope<LostItemCase[]> & { meta?: { total?: number } };
+    return {
+      items: envelope.data || [],
+      meta: envelope.meta || { total: envelope.data?.length || 0 },
+    };
+  },
+
+  getLostItemDetail: async (caseId: string) => {
+    const response = await apiClient.get(`/customer-support/lost-items/${encodeURIComponent(caseId)}`) as unknown;
+    return unwrap<LostItemCase>(response);
   },
 
   getMyFeedback: async (params: { status?: string; search?: string; page?: number; limit?: number } = {}) => {

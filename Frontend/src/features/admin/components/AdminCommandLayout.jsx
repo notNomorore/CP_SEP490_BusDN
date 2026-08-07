@@ -351,16 +351,6 @@ const AdminCommandLayout = () => {
             </label>
             <button
               type="button"
-              disabled
-              title={t('admin.header.notificationsUnavailable')}
-              aria-label={t('admin.header.notificationsUnavailable')}
-              className="relative cursor-not-allowed rounded-full p-2 text-on-surface-variant opacity-60"
-            >
-              <span className="material-symbols-outlined" aria-hidden="true">notifications</span>
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-error" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
               onClick={toggleLanguage}
               title={t('admin.header.switchLanguage')}
               aria-label={t('admin.header.switchLanguage')}

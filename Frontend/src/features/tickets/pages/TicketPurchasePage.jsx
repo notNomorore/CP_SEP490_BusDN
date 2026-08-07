@@ -12,13 +12,6 @@ const getVietnamDate = () => new Intl.DateTimeFormat('en-CA', {
   day: '2-digit',
 }).format(new Date());
 
-const getVietnamTime = () => new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Asia/Ho_Chi_Minh',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-}).format(new Date());
-
 const formatCurrency = (value) => new Intl.NumberFormat('vi-VN', {
   style: 'currency',
   currency: 'VND',
@@ -31,18 +24,34 @@ const roundFare = (value) => {
   return Math.max(Math.round(amount / 1000) * 1000, 1000);
 };
 
-const passengerTypeLabel = (type) => ({
-  STANDARD: 'Phổ thông',
-  STUDENT: 'Học sinh / Sinh viên',
-  PRIORITY: 'Đối tượng ưu tiên',
-}[type] || 'Phổ thông');
+const formatMonthDate = (date) => [
+  date.getFullYear(),
+  String(date.getMonth() + 1).padStart(2, '0'),
+  String(date.getDate()).padStart(2, '0'),
+].join('-');
 
-const buildMonthBounds = (year, month) => {
-  const start = new Date(Number(year), Number(month) - 1, 1);
-  const end = new Date(Number(year), Number(month), 0);
+const buildStartMonthOptions = () => {
+  const [currentYear, currentMonth] = getVietnamDate().split('-').map(Number);
+  return Array.from({ length: 6 }, (_, offset) => {
+    const monthDate = new Date(currentYear, currentMonth - 1 + offset, 1);
+    const startDate = formatMonthDate(monthDate);
+    const endDate = formatMonthDate(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0));
+    return {
+      value: startDate.slice(0, 7),
+      label: `${String(monthDate.getMonth() + 1).padStart(2, '0')}/${monthDate.getFullYear()}`,
+      startDate,
+      endDate,
+    };
+  });
+};
+
+const buildMonthBounds = (startMonth) => {
+  const [year, month] = String(startMonth || '').split('-').map(Number);
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 0);
   return {
-    startDate: start.toISOString().slice(0, 10),
-    endDate: end.toISOString().slice(0, 10),
+    startDate: formatMonthDate(start),
+    endDate: formatMonthDate(end),
   };
 };
 
@@ -58,17 +67,20 @@ const TicketPurchasePage = () => {
   const [appliedPromotion, setAppliedPromotion] = useState(null);
   const [promotionError, setPromotionError] = useState('');
   const [isApplyingPromotion, setIsApplyingPromotion] = useState(false);
-  const currentMonth = new Date().getMonth() + 1;
-  const currentYear = new Date().getFullYear();
+  const [priceQuote, setPriceQuote] = useState(null);
+  const [isLoadingQuote, setIsLoadingQuote] = useState(false);
+  const [quoteError, setQuoteError] = useState('');
+  const [departureSchedules, setDepartureSchedules] = useState([]);
+  const [isLoadingSchedules, setIsLoadingSchedules] = useState(false);
+  const [scheduleError, setScheduleError] = useState('');
+  const startMonthOptions = useMemo(() => buildStartMonthOptions(), []);
   const [form, setForm] = useState({
     direction: 'OUTBOUND',
     departureLocation: '',
     destinationLocation: '',
     serviceDate: getVietnamDate(),
-    departureTime: '05:30',
-    passengerType: 'STANDARD',
-    month: currentMonth,
-    year: currentYear,
+    departureTime: '',
+    startMonth: startMonthOptions[0]?.value || getVietnamDate().slice(0, 7),
   });
 
   useEffect(() => {
@@ -110,16 +122,11 @@ const TicketPurchasePage = () => {
       ...current,
       departureLocation: stops[0]?.name || selectedRoute.origin || '',
       destinationLocation: stops[stops.length - 1]?.name || selectedRoute.destination || '',
-      departureTime: selectedRoute.operatingHours?.firstDeparture || current.departureTime || '05:30',
+      departureTime: '',
     }));
   }, [form.direction, selectedRoute]);
 
-  const monthlyBounds = useMemo(() => buildMonthBounds(form.year, form.month), [form.year, form.month]);
-  const monthlyPrice = {
-    STANDARD: 250000,
-    STUDENT: 120000,
-    PRIORITY: 0,
-  }[form.passengerType] || 250000;
+  const monthlyBounds = useMemo(() => buildMonthBounds(form.startMonth), [form.startMonth]);
   const outboundStops = selectedRoute?.directions?.OUTBOUND?.stops || selectedRoute?.stops || [];
   const routeStops = selectedRoute?.directions?.[form.direction]?.stops
     || (form.direction === 'INBOUND' ? [...outboundStops].reverse().map((stop, index) => ({ ...stop, order: index + 1 })) : outboundStops);
@@ -136,23 +143,142 @@ const TicketPurchasePage = () => {
     const minimumFare = Number(selectedRoute.fare || 0) * 0.35;
     return roundFare(Math.max(proportionalFare, minimumFare));
   }, [arrivalStop, departureStop, selectedRoute]);
-  const baseEstimatedPrice = mode === 'MONTHLY_PASS' ? monthlyPrice : oneWayEstimatedPrice;
-  const estimatedPrice = appliedPromotion?.finalAmount ?? baseEstimatedPrice;
-  const discountAmount = appliedPromotion?.discountAmount || 0;
+  const selectedDepartureSchedule = departureSchedules.find((schedule) => schedule.departureTime === form.departureTime);
+  const activeQuote = appliedPromotion || priceQuote;
+  const baseEstimatedPrice = activeQuote?.originalPrice ?? activeQuote?.originalAmount ?? (mode === 'MONTHLY_PASS' ? 0 : oneWayEstimatedPrice);
+  const estimatedPrice = activeQuote?.finalPrice ?? activeQuote?.finalAmount ?? baseEstimatedPrice;
+  const automaticDiscountAmount = Number(activeQuote?.priorityDiscountAmount || 0);
+  const promotionDiscountAmount = Number(activeQuote?.promotionDiscountAmount || 0);
+  const discountAmount = Number(activeQuote?.discountAmount || 0);
+  const monthlyDailyLimit = Number(activeQuote?.dailyRideLimit || 0);
+  const hasRequiredSelectionsForQuote = mode === 'MONTHLY_PASS'
+    ? Boolean(monthlyBounds.startDate)
+    : Boolean(selectedRoute && form.departureLocation && form.destinationLocation && selectedDepartureSchedule);
+  const priceUnavailable = hasRequiredSelectionsForQuote && (!activeQuote || Number(baseEstimatedPrice) <= 0 || Boolean(quoteError));
+  const appliedPromotionCode = appliedPromotion?.appliedPromotion?.promotionCode || appliedPromotion?.promotionCode || '';
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSchedules = async () => {
+      if (mode !== 'ONE_WAY' || !selectedRoute || !form.serviceDate || form.serviceDate < getVietnamDate()) {
+        setDepartureSchedules([]);
+        setScheduleError('');
+        setForm((current) => ({ ...current, departureTime: '' }));
+        return;
+      }
+
+      setIsLoadingSchedules(true);
+      setScheduleError('');
+      try {
+        const result = await ticketService.getPurchasableSchedules({
+          routeId: selectedRoute.id || selectedRoute._id,
+          direction: form.direction,
+          serviceDate: form.serviceDate,
+        });
+        if (!isMounted) return;
+        setDepartureSchedules(result.schedules || []);
+        setForm((current) => (
+          (result.schedules || []).some((schedule) => schedule.departureTime === current.departureTime)
+            ? current
+            : { ...current, departureTime: '' }
+        ));
+      } catch (err) {
+        if (!isMounted) return;
+        setDepartureSchedules([]);
+        setForm((current) => ({ ...current, departureTime: '' }));
+        setScheduleError(err?.message || 'Khong the tai lich chuyen hop le.');
+      } finally {
+        if (isMounted) setIsLoadingSchedules(false);
+      }
+    };
+
+    loadSchedules();
+    return () => {
+      isMounted = false;
+    };
+  }, [mode, selectedRoute, form.direction, form.serviceDate]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadQuote = async () => {
+      if (mode === 'ONE_WAY' && !selectedRoute) {
+        setPriceQuote(null);
+        setQuoteError('');
+        return;
+      }
+
+      if (mode === 'ONE_WAY' && (!form.departureLocation || !form.destinationLocation || form.departureLocation === form.destinationLocation || !selectedDepartureSchedule)) {
+        setPriceQuote(null);
+        setQuoteError('');
+        return;
+      }
+
+      if (promotionCode.trim() && !appliedPromotionCode) {
+        setPriceQuote(null);
+        setQuoteError('');
+        return;
+      }
+
+      setIsLoadingQuote(true);
+      setQuoteError('');
+      try {
+        const quote = await ticketService.quotePurchase({
+          ticketType: mode,
+          routeId: mode === 'ONE_WAY' ? selectedRoute?.id || selectedRoute?._id : undefined,
+          routeCode: mode === 'MONTHLY_PASS' ? 'ALL' : undefined,
+          direction: form.direction,
+          departureLocation: form.departureLocation,
+          destinationLocation: form.destinationLocation,
+          serviceDate: form.serviceDate,
+          departureTime: form.departureTime,
+          startDate: monthlyBounds.startDate,
+          promotionCode: appliedPromotionCode,
+        });
+        if (isMounted) setPriceQuote(quote);
+      } catch (err) {
+        if (isMounted) {
+          setPriceQuote(null);
+          setQuoteError(err?.message || 'Không thể tính giá vé từ cấu hình hiện tại.');
+        }
+      } finally {
+        if (isMounted) setIsLoadingQuote(false);
+      }
+    };
+
+    loadQuote();
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    mode,
+    selectedRoute?.id,
+    selectedRoute?._id,
+    form.direction,
+    form.departureLocation,
+    form.destinationLocation,
+    form.serviceDate,
+    form.departureTime,
+    monthlyBounds.startDate,
+    selectedDepartureSchedule,
+    promotionCode,
+    appliedPromotionCode,
+  ]);
 
   useEffect(() => {
     setAppliedPromotion(null);
     setPromotionError('');
+    setQuoteError('');
   }, [
     mode,
     selectedRoute?.id,
     form.direction,
     form.departureLocation,
     form.destinationLocation,
-    form.passengerType,
-    form.month,
-    form.year,
-    baseEstimatedPrice,
+    form.serviceDate,
+    form.departureTime,
+    form.startMonth,
   ]);
 
   const updateForm = (updates) => setForm((current) => ({ ...current, ...updates }));
@@ -173,16 +299,24 @@ const TicketPurchasePage = () => {
     setIsApplyingPromotion(true);
     setPromotionError('');
     try {
-      const promotion = await ticketService.applyPromotion({
-        promotionCode: code,
+      const promotion = await ticketService.quotePurchase({
         ticketType: mode,
-        routeId: selectedRoute?.id || selectedRoute?._id || '',
-        amount: baseEstimatedPrice,
+        routeId: mode === 'ONE_WAY' ? selectedRoute?.id || selectedRoute?._id || '' : undefined,
+        routeCode: mode === 'MONTHLY_PASS' ? 'ALL' : undefined,
+        direction: form.direction,
+        departureLocation: form.departureLocation,
+        destinationLocation: form.destinationLocation,
+        serviceDate: form.serviceDate,
+        departureTime: form.departureTime,
+        startDate: monthlyBounds.startDate,
+        promotionCode: code,
       });
       setAppliedPromotion(promotion);
-      setPromotionCode(promotion.promotionCode || code);
+      setPriceQuote(promotion);
+      setPromotionCode(promotion.appliedPromotion?.promotionCode || promotion.promotionCode || code);
     } catch (err) {
       setAppliedPromotion(null);
+      setPriceQuote(null);
       setPromotionError(err?.message || 'Không thể áp dụng mã khuyến mãi.');
     } finally {
       setIsApplyingPromotion(false);
@@ -218,23 +352,35 @@ const TicketPurchasePage = () => {
         return;
       }
 
-      const today = getVietnamDate();
-      if (form.serviceDate < today || (form.serviceDate === today && form.departureTime <= getVietnamTime())) {
-        setError('Vui long chon ngay va gio khoi hanh trong tuong lai.');
+      if (form.serviceDate < getVietnamDate()) {
+        setError('Vui long chon ngay khoi hanh tu hom nay tro di.');
+        return;
+      }
+
+      if (isLoadingSchedules) {
+        setError('Dang tai lich chuyen hop le. Vui long cho trong giay lat.');
+        return;
+      }
+
+      if (!selectedDepartureSchedule) {
+        setError('Vui long chon mot chuyen khoi hanh dang mo ban.');
         return;
       }
     }
 
     if (mode === 'MONTHLY_PASS') {
-      const selectedYear = Number(form.year);
-      const selectedMonth = Number(form.month);
-      if (!selectedYear || selectedMonth < 1 || selectedMonth > 12) {
-        setError('Thang/nam ap dung khong hop le.');
+      if (!startMonthOptions.some((option) => option.value === form.startMonth)) {
+        setError('Start Month khong hop le. Vui long chon tu thang hien tai den 5 thang toi.');
         return;
       }
 
-      if (selectedYear < currentYear || (selectedYear === currentYear && selectedMonth < currentMonth)) {
-        setError('Khong the dat ve thang cho thang da qua.');
+      if (isLoadingQuote) {
+        setError('Dang tai cau hinh gia ve thang. Vui long cho trong giay lat.');
+        return;
+      }
+
+      if (quoteError || !activeQuote || Number(baseEstimatedPrice) <= 0) {
+        setError(quoteError || 'Khong tim thay cau hinh gia ve thang dang hoat dong.');
         return;
       }
     }
@@ -242,20 +388,22 @@ const TicketPurchasePage = () => {
     const order = {
       ticketType: mode,
       direction: form.direction,
-      route: selectedRoute,
-      routeNumber: selectedRoute?.routeNumber || 'BusDN',
-      routeName: selectedRoute?.name || 'Vé tháng BusDN',
+      route: mode === 'ONE_WAY' ? selectedRoute : null,
+      routeNumber: mode === 'ONE_WAY' ? selectedRoute?.routeNumber || 'BusDN' : 'Tất cả tuyến',
+      routeName: mode === 'ONE_WAY' ? selectedRoute?.name || 'BusDN' : 'Vé tháng toàn mạng',
       departureLocation: mode === 'ONE_WAY' ? form.departureLocation : 'Toàn mạng BusDN',
-      destinationLocation: mode === 'ONE_WAY' ? form.destinationLocation : 'Không giới hạn lượt',
+      destinationLocation: mode === 'ONE_WAY' ? form.destinationLocation : (monthlyDailyLimit ? `${monthlyDailyLimit} lượt/ngày` : 'Theo cấu hình hệ thống'),
       serviceDate: mode === 'ONE_WAY' ? form.serviceDate : monthlyBounds.startDate,
       expiryDate: mode === 'MONTHLY_PASS' ? monthlyBounds.endDate : form.serviceDate,
       departureTime: mode === 'ONE_WAY' ? form.departureTime : '',
-      passengerType: form.passengerType,
-      passengerTypeLabel: passengerTypeLabel(form.passengerType),
       originalPrice: baseEstimatedPrice,
       discountAmount,
-      promotionCode: appliedPromotion?.promotionCode || '',
-      promotionName: appliedPromotion?.promotionName || '',
+      priorityDiscountAmount: automaticDiscountAmount,
+      appliedDiscount: priceQuote?.appliedDiscount || null,
+      dailyRideLimit: priceQuote?.dailyRideLimit,
+      promotionCode: appliedPromotionCode,
+      promotionName: appliedPromotion?.appliedPromotion?.promotionName || appliedPromotion?.promotionName || '',
+      appliedPromotion: appliedPromotion?.appliedPromotion || null,
       price: estimatedPrice,
     };
 
@@ -293,20 +441,27 @@ const TicketPurchasePage = () => {
             </div>
 
             <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
+              {mode === 'ONE_WAY' ? (
               <label className="text-sm font-bold sm:col-span-2">
                 Tuyến xe
                 <select
                   value={selectedRoute?.id || ''}
-                  onChange={(event) => setSelectedRoute(routes.find((route) => String(route.id) === event.target.value) || null)}
+                  onChange={(event) => setSelectedRoute(routes.find((route) => String(route.id || route._id) === event.target.value) || null)}
                   disabled={isLoadingRoutes}
                   className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3"
                 >
                   <option value="">{isLoadingRoutes ? 'Đang tải tuyến xe...' : 'Chọn tuyến xe'}</option>
                   {routes.map((route) => (
-                    <option key={route.id} value={route.id}>{route.routeNumber} - {route.name}</option>
+                    <option key={route.id || route._id} value={route.id || route._id}>{route.routeNumber} - {route.name}</option>
                   ))}
                 </select>
               </label>
+              ) : (
+                <div className="rounded-xl bg-surface-container-low px-4 py-3 text-sm font-bold sm:col-span-2">
+                  Gói vé tháng: Vé tháng toàn mạng BusDN
+                  <p className="mt-1 text-xs font-semibold text-on-surface-variant">Giá và giới hạn lượt đi được lấy từ cấu hình Vận hành giá vé.</p>
+                </div>
+              )}
 
               {mode === 'ONE_WAY' ? (
                 <>
@@ -323,40 +478,41 @@ const TicketPurchasePage = () => {
                   </label>
                   <label className="text-sm font-bold">
                     Giờ khởi hành
-                    <input type="time" value={form.departureTime} onChange={(event) => updateForm({ departureTime: event.target.value })} className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3" />
+                    <select
+                      value={form.departureTime}
+                      onChange={(event) => updateForm({ departureTime: event.target.value })}
+                      disabled={!selectedRoute || isLoadingSchedules || !departureSchedules.length}
+                      className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3"
+                    >
+                      <option value="">{isLoadingSchedules ? 'Đang tải chuyến...' : 'Chọn chuyến khởi hành'}</option>
+                      {departureSchedules.map((schedule) => (
+                        <option key={schedule.scheduleId || schedule.id || `${schedule.departureTime}-${schedule.scheduleCode}`} value={schedule.departureTime}>
+                          {schedule.departureTime}{schedule.expectedArrivalTime ? ` - ${schedule.expectedArrivalTime}` : ''} {schedule.scheduleCode ? `(${schedule.scheduleCode})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {scheduleError ? <p className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{scheduleError}</p> : null}
+                    {!isLoadingSchedules && !scheduleError && selectedRoute && !departureSchedules.length ? (
+                      <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">Không có chuyến hợp lệ trong ngày đã chọn.</p>
+                    ) : null}
                   </label>
                 </>
               ) : (
                 <>
-                  <label className="text-sm font-bold">
-                    Tháng áp dụng
-                    <select value={form.month} onChange={(event) => updateForm({ month: event.target.value })} className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3">
-                      {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={month}>Tháng {month}</option>)}
-                    </select>
-                  </label>
-                  <label className="text-sm font-bold">
-                    Năm áp dụng
-                    <select value={form.year} onChange={(event) => updateForm({ year: event.target.value })} className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3">
-                      {[currentYear, currentYear + 1].map((year) => <option key={year} value={year}>{year}</option>)}
+                  <label className="text-sm font-bold sm:col-span-2">
+                    Start Month
+                    <select value={form.startMonth} onChange={(event) => updateForm({ startMonth: event.target.value })} className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3">
+                      {startMonthOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </select>
                   </label>
                   <div className="rounded-xl bg-surface-container-low px-4 py-3 text-sm font-bold">
                     Hiệu lực từ {monthlyBounds.startDate} đến {monthlyBounds.endDate}
                   </div>
                   <div className="rounded-xl bg-surface-container-low px-4 py-3 text-sm font-bold">
-                    Số lượt đi: Không giới hạn trong tháng
+                    Số lượt đi/ngày: {monthlyDailyLimit ? `${monthlyDailyLimit} lượt` : 'Đang tải cấu hình...'}
                   </div>
                 </>
               )}
-
-              <label className="text-sm font-bold">
-                Loại hình khách
-                <select value={form.passengerType} onChange={(event) => updateForm({ passengerType: event.target.value })} className="mt-2 w-full rounded-xl border border-outline-variant/50 px-4 py-3">
-                  <option value="STANDARD">Phổ thông</option>
-                  <option value="STUDENT">Học sinh / Sinh viên</option>
-                  <option value="PRIORITY">Đối tượng ưu tiên</option>
-                </select>
-              </label>
 
               <div className="rounded-2xl border border-outline-variant/50 bg-surface px-4 py-4 sm:col-span-2">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -386,7 +542,7 @@ const TicketPurchasePage = () => {
                 </div>
                 {appliedPromotion ? (
                   <div className="mt-3 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
-                    Đã áp dụng {appliedPromotion.promotionCode}. Giảm {formatCurrency(appliedPromotion.discountAmount)}.
+                    Đã áp dụng {appliedPromotionCode}. Giảm {formatCurrency(promotionDiscountAmount)}.
                   </div>
                 ) : null}
                 {promotionError ? (
@@ -397,9 +553,10 @@ const TicketPurchasePage = () => {
               </div>
 
               {error ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 sm:col-span-2">{error}</div> : null}
+              {quoteError ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 sm:col-span-2">{quoteError}</div> : null}
 
               <div className="flex flex-col gap-3 pt-2 sm:col-span-2 sm:flex-row">
-                <button type="submit" disabled={isLoadingRoutes || !selectedRoute} className="inline-flex flex-1 items-center justify-center gap-2 rounded-full bg-primary-container px-5 py-4 font-black text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">
+                <button type="submit" disabled={isLoadingRoutes || isLoadingSchedules || isLoadingQuote || priceUnavailable || (mode === 'ONE_WAY' && !selectedRoute)} className="inline-flex flex-1 items-center justify-center gap-2 rounded-full bg-primary-container px-5 py-4 font-black text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">
                   {isLoadingRoutes ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Ticket className="h-5 w-5" />}
                   Tiep tuc thanh toan
                 </button>
@@ -416,9 +573,9 @@ const TicketPurchasePage = () => {
               <div className="bg-primary-container p-6 text-white">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <span className="rounded-full bg-secondary-container px-3 py-1 text-xs font-black text-on-secondary-container">{selectedRoute?.routeNumber || 'BusDN'}</span>
-                    <h2 className="mt-4 text-xl font-black">{selectedRoute?.name || 'Chọn tuyến xe'}</h2>
-                    <p className="mt-2 text-sm text-white/70">{mode === 'ONE_WAY' ? 'Tuyến chất lượng cao' : 'Vé tháng theo tuyến đã đăng ký'}</p>
+                    <span className="rounded-full bg-secondary-container px-3 py-1 text-xs font-black text-on-secondary-container">{mode === 'ONE_WAY' ? selectedRoute?.routeNumber || 'BusDN' : 'ALL'}</span>
+                    <h2 className="mt-4 text-xl font-black">{mode === 'ONE_WAY' ? selectedRoute?.name || 'Chọn tuyến xe' : 'Vé tháng toàn mạng'}</h2>
+                    <p className="mt-2 text-sm text-white/70">{mode === 'ONE_WAY' ? 'Tuyến chất lượng cao' : 'Vé tháng toàn mạng'}</p>
                   </div>
                   <BusFront className="h-7 w-7 text-tertiary-fixed" />
                 </div>
@@ -432,7 +589,7 @@ const TicketPurchasePage = () => {
                   <div className="rounded-2xl bg-surface px-4 py-3">
                     <Clock3 className="h-5 w-5 text-secondary" />
                     <p className="mt-2 text-xs text-on-surface-variant">{mode === 'ONE_WAY' ? 'Giờ đi' : 'Lượt đi'}</p>
-                    <p className="font-black text-primary">{mode === 'ONE_WAY' ? form.departureTime : 'Không giới hạn'}</p>
+                    <p className="font-black text-primary">{mode === 'ONE_WAY' ? form.departureTime : (monthlyDailyLimit ? `${monthlyDailyLimit} lượt/ngày` : 'Đang tải')}</p>
                   </div>
                   <div className="rounded-2xl bg-surface px-4 py-3">
                     <CreditCard className="h-5 w-5 text-secondary" />
@@ -447,7 +604,7 @@ const TicketPurchasePage = () => {
                   </div>
                 </div>
                 <div className="rounded-2xl bg-primary-fixed p-4 text-sm text-on-primary-fixed">
-                  Hành khách thuộc đối tượng ưu tiên vui lòng mang giấy tờ xác minh khi lên xe.
+                  Hệ thống tự áp dụng giảm giá theo hồ sơ hành khách đã được xác minh.
                 </div>
               </div>
             </section>

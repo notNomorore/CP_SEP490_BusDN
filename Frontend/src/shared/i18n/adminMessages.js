@@ -40,6 +40,7 @@ export const adminMessages = {
     'admin.sidebar.staffPerformance': 'Staff Performance',
     'admin.sidebar.priorityVerification': 'Priority Verification',
     'admin.sidebar.customerSupport': 'Customer Support',
+    'admin.sidebar.lostItems': 'Handle Lost Items',
     'admin.sidebar.systemNotifications': 'System Notifications',
     'admin.sidebar.systemMonitoring': 'System Monitoring',
     'admin.common.search': 'Search',
@@ -121,6 +122,7 @@ export const adminMessages = {
     'admin.sidebar.staffPerformance': 'Hiệu suất nhân viên',
     'admin.sidebar.priorityVerification': 'Xác minh ưu tiên',
     'admin.sidebar.customerSupport': 'Hỗ trợ khách hàng',
+    'admin.sidebar.lostItems': 'Xử lý đồ thất lạc',
     'admin.sidebar.systemNotifications': 'Thông báo hệ thống',
     'admin.sidebar.systemMonitoring': 'Giám sát hệ thống',
     'admin.common.search': 'Tìm kiếm',
@@ -225,6 +227,7 @@ export const adminNavGroups = [
       { path: '/admin/users', key: 'admin.sidebar.userManagement', icon: 'manage_accounts' },
       { path: '/admin/priority-verification', key: 'admin.sidebar.priorityVerification', icon: 'verified_user' },
       { path: '/admin/customer-support', key: 'admin.sidebar.customerSupport', icon: 'support_agent' },
+      { path: '/admin/lost-items', key: 'admin.sidebar.lostItems', icon: 'inventory_2' },
     ],
   },
   {

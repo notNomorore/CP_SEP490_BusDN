@@ -67,7 +67,7 @@ function ErrorState({ message, onRetry }: { message: string; onRetry?: () => voi
       <Text style={styles.errorText}>{message}</Text>
       {onRetry ? (
         <Pressable onPress={onRetry} style={styles.inlineButton}>
-          <Text style={styles.inlineButtonText}>Retry</Text>
+          <Text style={styles.inlineButtonText}>Thử lại</Text>
         </Pressable>
       ) : null}
     </View>
@@ -153,7 +153,7 @@ function StopCard({
       </View>
       {onOpenRoute ? (
         <Pressable onPress={onOpenRoute} style={styles.secondaryButton}>
-          <Text style={styles.secondaryButtonText}>Open route detail</Text>
+          <Text style={styles.secondaryButtonText}>Mở chi tiết tuyến</Text>
         </Pressable>
       ) : null}
     </View>
@@ -300,7 +300,7 @@ export default function RouteSearchScreen() {
 
   const requirePassenger = () => {
     if (canUsePassengerFeatures) return true;
-    Alert.alert('Login required', 'Please sign in with a passenger account to use favorites and notification preferences.', [
+    Alert.alert('Yêu cầu đăng nhập', 'Vui lòng đăng nhập bằng tài khoản hành khách để dùng mục yêu thích và tùy chọn thông báo.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Login', onPress: () => router.push('/auth/login') },
     ]);
@@ -525,7 +525,7 @@ export default function RouteSearchScreen() {
           <View style={styles.header}>
             <View>
               <Text style={styles.kicker}>BusDN Mobile</Text>
-              <Text style={styles.title}>Route Discovery</Text>
+              <Text style={styles.title}>Khám phá tuyến xe</Text>
             </View>
             <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/home')} style={styles.iconButton}>
               <MaterialCommunityIcons color={colors.primary} name="close" size={24} />
@@ -661,8 +661,8 @@ export default function RouteSearchScreen() {
                   <View style={styles.card}>
                     <View style={styles.cardHeader}>
                       <View style={styles.cardTitleWrap}>
-                        <Text style={styles.cardTitle}>Global notifications</Text>
-                        <Text style={styles.cardMeta}>Saved to Backend profile preference.</Text>
+                        <Text style={styles.cardTitle}>Thông báo chung</Text>
+                        <Text style={styles.cardMeta}>Được lưu trong tùy chọn hồ sơ của bạn.</Text>
                       </View>
                       <Switch
                         disabled={saving}
@@ -671,7 +671,7 @@ export default function RouteSearchScreen() {
                       />
                     </View>
                   </View>
-                  <Text style={styles.sectionTitle}>Notification list</Text>
+                  <Text style={styles.sectionTitle}>Danh sách thông báo</Text>
                   {notifications.length === 0 ? <EmptyState message="No bus arrival, delay, or route change notifications found." /> : null}
                   {notifications.map((item) => (
                     <View key={item.id || item._id || item.title} style={styles.card}>
@@ -715,18 +715,18 @@ export default function RouteSearchScreen() {
               </View>
 
               <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Notification preferences</Text>
+                <Text style={styles.sectionTitle}>Tùy chọn thông báo</Text>
                 <View style={styles.toggleLine}>
-                  <Text style={styles.bodyText}>Delay alerts</Text>
+                  <Text style={styles.bodyText}>Thông báo chuyến trễ</Text>
                   <Switch disabled={saving} onValueChange={() => void toggleRouteSubscription('delay', selectedRoute)} value={Boolean(routeDelaySub)} />
                 </View>
                 <View style={styles.toggleLine}>
-                  <Text style={styles.bodyText}>Route change alerts</Text>
+                  <Text style={styles.bodyText}>Thông báo thay đổi tuyến</Text>
                   <Switch disabled={saving} onValueChange={() => void toggleRouteSubscription('routeChange', selectedRoute)} value={Boolean(routeChangeSub)} />
                 </View>
               </View>
 
-              <Text style={styles.sectionTitle}>Stops and arrival alerts</Text>
+              <Text style={styles.sectionTitle}>Điểm dừng và thông báo xe đến</Text>
               {(selectedRoute.stops || []).length === 0 ? <EmptyState message="This route has no stop/path data yet." /> : null}
               {(selectedRoute.stops || []).map((stop) => {
                 const stopId = buildStopId(selectedRoute, stop);
@@ -751,7 +751,7 @@ export default function RouteSearchScreen() {
                 );
               })}
 
-              <Text style={styles.sectionTitle}>Live buses, ETA, trip progress</Text>
+              <Text style={styles.sectionTitle}>Xe trực tuyến, giờ đến và tiến trình chuyến</Text>
               {!liveData || liveData.buses.length === 0 ? <EmptyState message="No active buses right now." /> : null}
               {liveData?.buses.map((bus) => (
                 <View key={bus.busId} style={styles.card}>
@@ -762,7 +762,7 @@ export default function RouteSearchScreen() {
                       <Text style={styles.cardMeta}>{bus.status || 'Running'} | Next: {bus.nextStop || 'Unknown'} | ETA {bus.estimatedArrivalTime || 'N/A'}</Text>
                     </View>
                   </View>
-                  {bus.delay ? <Text style={styles.warningText}>Delay {bus.delay.delayDurationMinutes} min: {bus.delay.delayReason}. Updated ETA {bus.delay.updatedEta}</Text> : null}
+                  {bus.delay ? <Text style={styles.warningText}>Trễ {bus.delay.delayDurationMinutes} phút: {bus.delay.delayReason}. Giờ đến mới {bus.delay.updatedEta}</Text> : null}
                   {bus.tripProgress ? (
                     <View style={styles.progressWrap}>
                       <View style={styles.progressBar}>
@@ -778,7 +778,7 @@ export default function RouteSearchScreen() {
 
               {liveData?.routeChange ? (
                 <View style={[styles.card, styles.warningBox]}>
-                  <Text style={styles.cardTitle}>Route change</Text>
+                  <Text style={styles.cardTitle}>Thay đổi tuyến</Text>
                   <Text style={styles.bodyText}>{liveData.routeChange.reasonForChange}</Text>
                   <Text style={styles.cardMeta}>{liveData.routeChange.updatedRoutePath}</Text>
                 </View>

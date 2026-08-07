@@ -10,11 +10,18 @@ const validPromotion = {
   discountType: 'PERCENTAGE',
   discountValue: 20,
   applicableTo: 'ALL_ROUTES',
-  startDate: '2026-08-01',
-  endDate: '2026-08-31',
+  startDate: daysFromNow(7),
+  endDate: daysFromNow(30),
   usageLimit: 100,
   usagePerUser: 1,
 };
+
+function daysFromNow(days, hour = 8) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + days);
+  date.setUTCHours(hour, 0, 0, 0);
+  return date.toISOString();
+}
 
 describe('promotion validators', () => {
   it('accepts a valid percentage promotion', () => {
@@ -43,8 +50,8 @@ describe('promotion validators', () => {
   it('rejects start date after end date', () => {
     expect(validatePromotionCreate({
       ...validPromotion,
-      startDate: '2026-09-01',
-      endDate: '2026-08-31',
+      startDate: daysFromNow(30),
+      endDate: daysFromNow(7),
     })).toHaveProperty('endDate', 'Start date must be before end date');
   });
 
@@ -63,7 +70,7 @@ describe('promotion validators', () => {
     expect(validatePromotionCreate({
       ...validPromotion,
       notifyPassengers: true,
-      notificationScheduledAt: '2026-08-15T08:00:00.000Z',
+      notificationScheduledAt: daysFromNow(14),
     })).toEqual({});
   });
 
@@ -79,7 +86,7 @@ describe('promotion validators', () => {
     expect(validatePromotionCreate({
       ...validPromotion,
       notifyPassengers: true,
-      notificationScheduledAt: '2026-07-31T23:00:00.000Z',
+      notificationScheduledAt: daysFromNow(3),
     })).toHaveProperty(
       'notificationScheduledAt',
       'Notification time must be within promotion validity period'
@@ -90,7 +97,7 @@ describe('promotion validators', () => {
     expect(validatePromotionCreate({
       ...validPromotion,
       notifyPassengers: true,
-      notificationScheduledAt: '2026-09-01T00:00:00.000Z',
+      notificationScheduledAt: daysFromNow(40),
     })).toHaveProperty(
       'notificationScheduledAt',
       'Notification time must be within promotion validity period'

@@ -85,6 +85,26 @@ const parseDate = (value, fallback) => {
   return Number.isNaN(parsed.getTime()) ? fallback : parsed;
 };
 
+const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const VIETNAM_UTC_OFFSET_HOURS = 7;
+
+const parseRangeBoundary = (value, fallback, end = false) => {
+  const match = DATE_ONLY_PATTERN.exec(String(value || ''));
+  if (!match) {
+    const parsed = parseDate(value, fallback);
+    return end ? endOfDay(parsed) : startOfDay(parsed);
+  }
+
+  const [, year, month, day] = match;
+  const vietnamMidnightUtc = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    -VIETNAM_UTC_OFFSET_HOURS
+  );
+  return new Date(vietnamMidnightUtc + (end ? 86400000 - 1 : 0));
+};
+
 const normalizeScheduleStatus = (status) => {
   if (status === 'COMPLETED') return 'COMPLETED';
   if (status === 'CANCELLED') return 'CANCELLED';
@@ -395,8 +415,8 @@ export class ScheduleOperationsService {
   }
 
   static async listAssignedTrips(userId, role, query = {}) {
-    const from = startOfDay(parseDate(query.from, new Date()));
-    const to = endOfDay(parseDate(query.to, addDays(from, 7)));
+    const from = parseRangeBoundary(query.from, new Date());
+    const to = parseRangeBoundary(query.to, addDays(from, 7), true);
 
     const schedules = await TripSchedule.find({
       ...this.buildActorScheduleQuery(userId, role),
@@ -408,22 +428,16 @@ export class ScheduleOperationsService {
     await this.attachInspectionRecords(assignments);
 
     return assignments
-      .filter((assignment) => {
-        const scheduledStart = buildTimeOnServiceDate(assignment.trip?.serviceDate, assignment.trip?.departureTime);
-        return scheduledStart
-          && scheduledStart >= from
-          && scheduledStart <= to
-          && isScheduleAssignedToActor(assignment.trip, userId, role);
-      })
+      .filter((assignment) => isScheduleAssignedToActor(assignment.trip, userId, role))
       .sort((left, right) => (
-        buildTimeOnServiceDate(left.trip.serviceDate, left.trip.departureTime)
-        - buildTimeOnServiceDate(right.trip.serviceDate, right.trip.departureTime)
+        (buildTimeOnServiceDate(left.trip.serviceDate, left.trip.departureTime)?.getTime() || 0)
+        - (buildTimeOnServiceDate(right.trip.serviceDate, right.trip.departureTime)?.getTime() || 0)
       ));
   }
 
   static async listShiftSchedule(userId, role, query = {}) {
-    const from = startOfDay(parseDate(query.from, new Date()));
-    const to = endOfDay(parseDate(query.to, addDays(from, 6)));
+    const from = parseRangeBoundary(query.from, new Date());
+    const to = parseRangeBoundary(query.to, addDays(from, 6), true);
     const isDriver = role === 'DRIVER';
     const isAssistant = role === 'BUS_ASSISTANT' || role === 'CONDUCTOR';
 
@@ -433,28 +447,18 @@ export class ScheduleOperationsService {
 
     const AssignmentModel = isDriver ? DriverShiftAssignment : AssistantShiftAssignment;
     const staffField = isDriver ? 'driverId' : 'assistantId';
-    const [assignments, tripSchedules] = await Promise.all([
-      AssignmentModel.find({
-        [staffField]: userId,
-        workDate: { $gte: from, $lte: to },
-        status: { $ne: 'CANCELLED' },
+    const assignments = await AssignmentModel.find({
+      [staffField]: userId,
+      workDate: { $gte: from, $lte: to },
+      status: { $ne: 'CANCELLED' },
+    })
+      .populate({
+        path: 'shiftId',
+        match: { status: { $in: ['ACTIVE', 'APPROVED', 'DRAFT', 'PUBLISHED', 'IN_PROGRESS', 'COMPLETED'] } },
+        populate: { path: 'routeId', select: 'routeCode routeName' },
       })
-        .populate({
-          path: 'shiftId',
-          match: { status: { $in: ['ACTIVE', 'APPROVED', 'DRAFT', 'PUBLISHED', 'IN_PROGRESS', 'COMPLETED'] } },
-          populate: { path: 'routeId', select: 'routeCode routeName' },
-        })
-        .sort({ workDate: 1, createdAt: 1 })
-        .lean(),
-      TripSchedule.find({
-        ...this.buildActorScheduleQuery(userId, role),
-        serviceDate: { $gte: from, $lte: to },
-        status: { $ne: 'CANCELLED' },
-      })
-        .populate('routeId', 'routeCode routeName')
-        .sort({ serviceDate: 1, departureTime: 1 })
-        .lean(),
-    ]);
+      .sort({ workDate: 1, createdAt: 1 })
+      .lean();
 
     const manualShiftSchedules = assignments
       .filter((assignment) => assignment.shiftId)
@@ -463,11 +467,7 @@ export class ScheduleOperationsService {
         shift: assignment.shiftId,
       }));
 
-    const generatedTripShifts = tripSchedules
-      .filter((schedule) => isScheduleAssignedToActor(schedule, userId, role))
-      .map((schedule) => buildShiftScheduleFromTripSchedule(schedule, role));
-
-    return [...manualShiftSchedules, ...generatedTripShifts].sort((left, right) => {
+    return manualShiftSchedules.sort((left, right) => {
       const leftStart = buildTimeOnServiceDate(left.workDate || left.shift?.workDate, left.shift?.startTime);
       const rightStart = buildTimeOnServiceDate(right.workDate || right.shift?.workDate, right.shift?.startTime);
       return (leftStart?.getTime() || 0) - (rightStart?.getTime() || 0);
@@ -475,8 +475,8 @@ export class ScheduleOperationsService {
   }
 
   static async listOperationNotifications(userId, role, query = {}) {
-    const from = startOfDay(parseDate(query.from, new Date()));
-    const to = endOfDay(parseDate(query.to, addDays(from, 7)));
+    const from = parseRangeBoundary(query.from, new Date());
+    const to = parseRangeBoundary(query.to, addDays(from, 7), true);
     const now = new Date();
 
     const schedules = await TripSchedule.find({

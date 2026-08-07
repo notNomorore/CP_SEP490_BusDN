@@ -33,13 +33,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   restoreSession: async () => {
     const { token, user } = await authApi.getStoredSession();
+    if (!token) {
+      set({ token: null, user: null, isAuthenticated: false, isHydrated: true });
+      return;
+    }
 
-    set({
-      token,
-      user,
-      isAuthenticated: Boolean(token),
-      isHydrated: true,
-    });
+    try {
+      const response = await authApi.getCurrentUser();
+      set({ token, user: response.user || user, isAuthenticated: true, isHydrated: true });
+    } catch {
+      await authApi.logout();
+      set({ token: null, user: null, isAuthenticated: false, isHydrated: true });
+    }
   },
 
   register: async (payload) => {

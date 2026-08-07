@@ -984,6 +984,82 @@ export class CustomerSupportService {
     return query;
   }
 
+  static mapSupportLostItemStatusToAdminStatus(supportCase) {
+    if (supportCase.status === 'RESOLVED' || supportCase.lostItem?.recoveryStatus === 'RETURNED') return 'RESOLVED';
+    if (supportCase.status === 'CLOSED' || supportCase.status === 'REJECTED') return 'CANCELLED';
+    if (['UNDER_REVIEW', 'IN_PROGRESS', 'RESPONDED', 'WAITING_FOR_PASSENGER'].includes(supportCase.status)) {
+      return 'ACKNOWLEDGED';
+    }
+    return 'OPEN';
+  }
+
+  static buildPassengerLostItemQuery({ status, recoveryStatus }) {
+    const query = { type: 'LOST_ITEM' };
+
+    if (status && status !== 'ALL') {
+      const statusMap = {
+        OPEN: ['SUBMITTED', 'OPEN'],
+        ACKNOWLEDGED: ['UNDER_REVIEW', 'IN_PROGRESS', 'RESPONDED', 'WAITING_FOR_PASSENGER'],
+        RESOLVED: ['RESOLVED'],
+        CANCELLED: ['CLOSED', 'REJECTED'],
+      };
+      query.status = { $in: statusMap[status] || [status] };
+    }
+
+    if (recoveryStatus && recoveryStatus !== 'ALL') {
+      query['lostItem.recoveryStatus'] = recoveryStatus;
+    }
+
+    return query;
+  }
+
+  static async listAdminLostItemCases({ status = 'ALL', recoveryStatus = 'ALL', page = 1, limit = 20 }) {
+    const normalizedPage = Math.max(Number.parseInt(page, 10) || 1, 1);
+    const normalizedLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 20, 1), 100);
+    const fetchLimit = normalizedPage * normalizedLimit;
+    const foundItemQuery = this.buildFoundItemQuery({ status, recoveryStatus });
+    const passengerLostItemQuery = this.buildPassengerLostItemQuery({ status, recoveryStatus });
+
+    const [foundItems, passengerLostItems, foundTotal, passengerTotal] = await Promise.all([
+      OperationIncident.find(foundItemQuery)
+        .populate('driver', 'fullName email phone phoneNumber role')
+        .populate('route', 'routeNumber routeName name')
+        .populate('vehicle', 'busCode plateNumber')
+        .populate('trip', 'scheduleCode routeName serviceDate departureTime')
+        .sort({ reportedAt: -1, createdAt: -1 })
+        .limit(fetchLimit),
+      SupportCase.find(passengerLostItemQuery)
+        .populate('passenger', 'fullName email phone phoneNumber role')
+        .populate('responses.responder', 'fullName email role')
+        .sort({ createdAt: -1 })
+        .limit(fetchLimit),
+      OperationIncident.countDocuments(foundItemQuery),
+      SupportCase.countDocuments(passengerLostItemQuery),
+    ]);
+
+    const items = [
+      ...foundItems.map((record) => ({ sourceType: 'FOUND_ITEM', record })),
+      ...passengerLostItems.map((record) => ({ sourceType: 'PASSENGER_LOST_ITEM', record })),
+    ].sort((first, second) => {
+      const firstDate = first.record.reportedAt || first.record.createdAt;
+      const secondDate = second.record.reportedAt || second.record.createdAt;
+      return new Date(secondDate || 0) - new Date(firstDate || 0);
+    });
+
+    const total = foundTotal + passengerTotal;
+    const start = (normalizedPage - 1) * normalizedLimit;
+
+    return {
+      items: items.slice(start, start + normalizedLimit),
+      meta: {
+        page: normalizedPage,
+        limit: normalizedLimit,
+        total,
+        totalPages: Math.ceil(total / normalizedLimit),
+      },
+    };
+  }
+
   static async listFoundItemCases({ status = 'ALL', recoveryStatus = 'ALL', page = 1, limit = 20 }) {
     const normalizedPage = Math.max(Number.parseInt(page, 10) || 1, 1);
     const normalizedLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 20, 1), 100);
@@ -1024,6 +1100,39 @@ export class CustomerSupportService {
     }
 
     return incident;
+  }
+
+  static async getAdminLostItemCaseById(caseId) {
+    if (isObjectId(caseId)) {
+      const incident = await OperationIncident.findOne({ _id: caseId, type: 'FOUND_ITEM' })
+        .populate('driver', 'fullName email phone phoneNumber role')
+        .populate('route', 'routeNumber routeName name')
+        .populate('vehicle', 'busCode plateNumber')
+        .populate('trip', 'scheduleCode routeName serviceDate departureTime');
+
+      if (incident) {
+        return { sourceType: 'FOUND_ITEM', record: incident };
+      }
+    }
+
+    const supportCaseQuery = {
+      type: 'LOST_ITEM',
+      $or: [{ referenceNumber: caseId }],
+    };
+
+    if (isObjectId(caseId)) {
+      supportCaseQuery.$or.push({ _id: caseId });
+    }
+
+    const supportCase = await SupportCase.findOne(supportCaseQuery)
+      .populate('passenger', 'fullName email phone phoneNumber role')
+      .populate('responses.responder', 'fullName email role');
+
+    if (supportCase) {
+      return { sourceType: 'PASSENGER_LOST_ITEM', record: supportCase };
+    }
+
+    throw new Error('Lost item case not found');
   }
 
   static mapFoundItemRecoveryStatus(recoveryStatus) {

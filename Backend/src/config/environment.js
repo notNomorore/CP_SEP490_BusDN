@@ -37,17 +37,35 @@ const toList = (value, fallback = []) => {
   return list.length ? list : fallback;
 };
 
+const nodeEnv = getEnv('NODE_ENV', 'development');
+const isDevelopment = nodeEnv === 'development';
+const isProduction = nodeEnv === 'production';
+const developmentOnly = (value) => (isProduction ? undefined : value);
+
 const createCorsOrigin = () => {
-  const allowedOrigins = toList(getEnv('CORS_ORIGIN'), ['http://localhost:5173']);
-  const isDevelopment = getEnv('NODE_ENV', 'development') === 'development';
+  const configuredOrigins = toList(getEnv('CORS_ORIGIN'), []);
+  const frontendOrigins = toList(getEnv('FRONTEND_URL'), []);
+  const vercelOrigins = toList(getEnv('VERCEL_FRONTEND_URL') || getEnv('VERCEL_URL'), [])
+    .map((origin) => (origin.startsWith('http') ? origin : `https://${origin}`));
+  const allowedOrigins = [
+    ...configuredOrigins,
+    ...frontendOrigins,
+    ...vercelOrigins,
+    ...(isDevelopment ? ['http://localhost:5173'] : []),
+  ];
   const localDevOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
+  const vercelOriginPattern = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i;
 
   return (origin, callback) => {
     if (!origin) {
       return callback(null, true);
     }
 
-    if (allowedOrigins.includes(origin) || (isDevelopment && localDevOriginPattern.test(origin))) {
+    if (
+      allowedOrigins.includes(origin)
+      || (isDevelopment && localDevOriginPattern.test(origin))
+      || vercelOriginPattern.test(origin)
+    ) {
       return callback(null, true);
     }
 
@@ -58,8 +76,8 @@ const createCorsOrigin = () => {
 export const config = {
   // Server
   port: toNumber(getEnv('PORT'), 3000),
-  host: getEnv('HOST', 'localhost'),
-  nodeEnv: getEnv('NODE_ENV', 'development'),
+  host: getEnv('HOST', isProduction ? '0.0.0.0' : 'localhost'),
+  nodeEnv,
 
   // Database
   mongodb: {
@@ -91,7 +109,7 @@ export const config = {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: getEnv('NODE_ENV', 'development') === 'production',
+      secure: isProduction,
       sameSite: 'lax',
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
     },
@@ -99,7 +117,7 @@ export const config = {
 
   // Email
   smtp: {
-    host: getEnv('SMTP_HOST', 'localhost'),
+    host: getEnv('SMTP_HOST', developmentOnly('localhost')),
     port: toNumber(getEnv('SMTP_PORT', '587'), 587),
     user: getEnv('SMTP_USER'),
     password: getEnv('SMTP_PASSWORD'),
@@ -136,12 +154,12 @@ export const config = {
   },
 
   frontend: {
-    url: getEnv('FRONTEND_URL', 'http://localhost:5173'),
+    url: getEnv('FRONTEND_URL', getEnv('VERCEL_FRONTEND_URL')),
   },
 
   // Redis
   redis: {
-    url: getEnv('REDIS_URL', 'redis://localhost:6379'),
+    url: getEnv('REDIS_URL', developmentOnly('redis://localhost:6379')),
   },
 
   // Google Maps Platform
@@ -166,12 +184,12 @@ export const config = {
   rateLimit: {
     windowMs: toNumber(getEnv('RATE_LIMIT_WINDOW_MS', '900000'), 900000),
     apiMax: toNumber(
-      getEnv('RATE_LIMIT_API_MAX', getEnv('NODE_ENV', 'development') === 'development' ? '5000' : '1000'),
-      getEnv('NODE_ENV', 'development') === 'development' ? 5000 : 1000
+      getEnv('RATE_LIMIT_API_MAX', isDevelopment ? '5000' : '1000'),
+      isDevelopment ? 5000 : 1000
     ),
     authMax: toNumber(
-      getEnv('RATE_LIMIT_AUTH_MAX', getEnv('NODE_ENV', 'development') === 'development' ? '100' : '10'),
-      getEnv('NODE_ENV', 'development') === 'development' ? 100 : 10
+      getEnv('RATE_LIMIT_AUTH_MAX', isDevelopment ? '100' : '10'),
+      isDevelopment ? 100 : 10
     ),
   },
 

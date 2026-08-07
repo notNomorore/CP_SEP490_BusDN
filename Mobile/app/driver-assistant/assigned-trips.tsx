@@ -8,14 +8,17 @@ import { AppButton } from '@/components/AppButton';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
+import { formatDriverStatus, useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { AssignedTrip } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
 import { normalizeRole } from '@/utils/roleNavigation';
 import {
-  formatDate,
   formatTime,
   getAssignedTripsRange,
+  getTripArrivalTimeLabel,
+  getTripDepartureTimeLabel,
+  getTripServiceDateLabel,
   getTripVehicleLabel,
   getVehicleLabel,
   hasVehicleReplacement,
@@ -26,7 +29,7 @@ import {
   isTripToday,
   isTripUpcoming,
 } from '@/utils/scheduleOperations';
-import { getErrorMessage } from '@/utils/validation';
+import { getErrorMessage, getErrorStatusCode, isPermissionError } from '@/utils/validation';
 
 type FilterKey = 'ALL' | 'TODAY' | 'HISTORY' | 'UPCOMING' | 'COMPLETED' | 'DELAYED';
 type ActorKind = 'DRIVER' | 'BUS_ASSISTANT';
@@ -47,15 +50,6 @@ type BusAssistantIncidentForm = {
   handedTo: string;
   description: string;
 };
-
-const filters: Array<{ key: FilterKey; label: string }> = [
-  { key: 'ALL', label: 'All' },
-  { key: 'TODAY', label: 'Today' },
-  { key: 'HISTORY', label: 'History' },
-  { key: 'UPCOMING', label: 'Upcoming' },
-  { key: 'COMPLETED', label: 'Completed' },
-  { key: 'DELAYED', label: 'Delayed' },
-];
 
 const matchesFilter = (trip: AssignedTrip, filter: FilterKey) => {
   if (filter === 'ALL') return true;
@@ -102,7 +96,7 @@ const getActorKind = (role?: string | null): ActorKind => (
   normalizeRole(role) === 'DRIVER' ? 'DRIVER' : 'BUS_ASSISTANT'
 );
 
-const actorCopy: Record<ActorKind, {
+type ActorCopy = {
   kicker: string;
   title: string;
   searchPlaceholder: string;
@@ -116,90 +110,7 @@ const actorCopy: Record<ActorKind, {
   rejectPlaceholder: string;
   startAction: string;
   prepareAction: string;
-}> = {
-  DRIVER: {
-    kicker: 'DRIVER OPERATIONS',
-    title: 'Driver Trips',
-    searchPlaceholder: 'Search route, trip ID, bus number',
-    countSuffix: 'driver trips',
-    empty: 'No driver trips match this filter.',
-    roleLabel: 'Driver',
-    acceptSuccessTitle: 'Trip accepted',
-    acceptSuccessMessage: 'The assigned driver trip has been accepted.',
-    rejectReasonTitle: 'Reject driver trip',
-    rejectReasonHint: 'Enter the reason so dispatch can handle or reassign this driver trip.',
-    rejectPlaceholder: 'Rejection reason',
-    startAction: 'Start Trip',
-    prepareAction: 'Inspect Vehicle',
-  },
-  BUS_ASSISTANT: {
-    kicker: 'BUS ASSISTANT OPERATIONS',
-    title: 'Assistant Trips',
-    searchPlaceholder: 'Search route, trip ID, bus number',
-    countSuffix: 'assistant trips',
-    empty: 'No assistant trips match this filter.',
-    roleLabel: 'Bus Assistant',
-    acceptSuccessTitle: 'Trip accepted',
-    acceptSuccessMessage: 'The assigned assistant trip has been accepted.',
-    rejectReasonTitle: 'Reject assistant trip',
-    rejectReasonHint: 'Enter the reason so dispatch can assign another bus assistant.',
-    rejectPlaceholder: 'Rejection reason',
-    startAction: '',
-    prepareAction: '',
-  },
 };
-
-const busAssistantIncidentOptions: Array<{
-  type: BusAssistantIncidentType;
-  code: string;
-  title: string;
-  hint: string;
-}> = [
-  {
-    type: 'PASSENGER_VIOLATION',
-    code: 'UC50',
-    title: 'Passenger Violation',
-    hint: 'Ticket, safety, or bus rule violation.',
-  },
-  {
-    type: 'PASSENGER_CONFLICT',
-    code: 'UC51',
-    title: 'Passenger Conflict',
-    hint: 'Argument, dispute, or unsafe passenger conflict.',
-  },
-  {
-    type: 'FOUND_ITEM',
-    code: 'UC52',
-    title: 'Found Item',
-    hint: 'Item found on the bus after the trip.',
-  },
-];
-
-const severityOptions: Array<{ value: IncidentSeverity; label: string }> = [
-  { value: 'LOW', label: 'Low' },
-  { value: 'MEDIUM', label: 'Medium' },
-  { value: 'HIGH', label: 'High' },
-  { value: 'CRITICAL', label: 'Critical' },
-];
-
-const violationCategories = [
-  { value: 'NO_TICKET', label: 'No ticket' },
-  { value: 'WRONG_TICKET', label: 'Wrong ticket' },
-  { value: 'SMOKING', label: 'Smoking' },
-  { value: 'LITTERING', label: 'Littering' },
-  { value: 'UNSAFE_BEHAVIOR', label: 'Unsafe behavior' },
-  { value: 'DISTURBANCE', label: 'Disturbance' },
-  { value: 'OTHER', label: 'Other' },
-];
-
-const conflictCategories = [
-  { value: 'ARGUMENT', label: 'Argument' },
-  { value: 'FARE_DISPUTE', label: 'Fare dispute' },
-  { value: 'SEAT_DISPUTE', label: 'Seat dispute' },
-  { value: 'HARASSMENT', label: 'Harassment' },
-  { value: 'SAFETY_RISK', label: 'Safety risk' },
-  { value: 'OTHER', label: 'Other' },
-];
 
 const getDefaultIncidentForm = (tripStatus?: string): BusAssistantIncidentForm => ({
   type: tripStatus === 'COMPLETED' ? 'FOUND_ITEM' : 'PASSENGER_VIOLATION',
@@ -252,6 +163,7 @@ function BusAssistantIncidentPanel({
   isProcessing: boolean;
   onSubmit: (trip: AssignedTrip, form: BusAssistantIncidentForm) => Promise<void>;
 }) {
+  const { t } = useDriverI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [form, setForm] = useState<BusAssistantIncidentForm>(() => getDefaultIncidentForm(getTripStatus(trip)));
   const tripStatus = getTripStatus(trip);
@@ -259,9 +171,53 @@ function BusAssistantIncidentPanel({
   const canReportRunning = tripStatus === 'IN_PROGRESS';
   const canReportFoundItem = tripStatus === 'COMPLETED';
   const canUseForm = isAccepted && (canReportRunning || canReportFoundItem);
-  const allowedTypes = busAssistantIncidentOptions.filter((option) => (
+  const incidentOptions = useMemo<Array<{
+    type: BusAssistantIncidentType;
+    title: string;
+    hint: string;
+  }>>(() => [
+    {
+      type: 'PASSENGER_VIOLATION',
+      title: t.assistant.incident.options.passengerViolation,
+      hint: t.assistant.incident.options.passengerViolationHint,
+    },
+    {
+      type: 'PASSENGER_CONFLICT',
+      title: t.assistant.incident.options.passengerConflict,
+      hint: t.assistant.incident.options.passengerConflictHint,
+    },
+    {
+      type: 'FOUND_ITEM',
+      title: t.assistant.incident.options.foundItem,
+      hint: t.assistant.incident.options.foundItemHint,
+    },
+  ], [t]);
+  const severityOptions = useMemo<Array<{ value: IncidentSeverity; label: string }>>(() => [
+    { value: 'LOW', label: t.lifecycle.low },
+    { value: 'MEDIUM', label: t.lifecycle.medium },
+    { value: 'HIGH', label: t.lifecycle.high },
+    { value: 'CRITICAL', label: t.lifecycle.critical },
+  ], [t]);
+  const violationCategories = useMemo(() => [
+    { value: 'NO_TICKET', label: t.assistant.incident.categories.noTicket },
+    { value: 'WRONG_TICKET', label: t.assistant.incident.categories.wrongTicket },
+    { value: 'SMOKING', label: t.assistant.incident.categories.smoking },
+    { value: 'LITTERING', label: t.assistant.incident.categories.littering },
+    { value: 'UNSAFE_BEHAVIOR', label: t.assistant.incident.categories.unsafeBehavior },
+    { value: 'DISTURBANCE', label: t.assistant.incident.categories.disturbance },
+    { value: 'OTHER', label: t.assistant.incident.categories.other },
+  ], [t]);
+  const conflictCategories = useMemo(() => [
+    { value: 'ARGUMENT', label: t.assistant.incident.categories.argument },
+    { value: 'FARE_DISPUTE', label: t.assistant.incident.categories.fareDispute },
+    { value: 'SEAT_DISPUTE', label: t.assistant.incident.categories.seatDispute },
+    { value: 'HARASSMENT', label: t.assistant.incident.categories.harassment },
+    { value: 'SAFETY_RISK', label: t.assistant.incident.categories.safetyRisk },
+    { value: 'OTHER', label: t.assistant.incident.categories.other },
+  ], [t]);
+  const allowedTypes = useMemo(() => incidentOptions.filter((option) => (
     canReportFoundItem ? option.type === 'FOUND_ITEM' : option.type !== 'FOUND_ITEM'
-  ));
+  )), [canReportFoundItem, incidentOptions]);
 
   useEffect(() => {
     setForm((current) => {
@@ -274,7 +230,7 @@ function BusAssistantIncidentPanel({
     if (isAccepted && tripStatus === 'SCHEDULED') {
       return (
         <View style={styles.assistantNotice}>
-          <Text style={styles.assistantNoticeText}>Accepted. Incident reporting opens when the trip is running.</Text>
+          <Text style={styles.assistantNoticeText}>{t.assistant.incident.waitingTripStart}</Text>
         </View>
       );
     }
@@ -287,22 +243,22 @@ function BusAssistantIncidentPanel({
 
   const validate = () => {
     if (form.description.trim().length < 10) {
-      Alert.alert('Missing description', 'Please describe the situation with at least 10 characters.');
+      Alert.alert(t.assistant.incident.missingDescriptionTitle, t.assistant.incident.missingDescriptionMessage);
       return false;
     }
 
     if (form.type === 'PASSENGER_VIOLATION' && form.actionTaken.trim().length < 3) {
-      Alert.alert('Missing action', 'Please enter the action taken.');
+      Alert.alert(t.assistant.incident.missingActionTitle, t.assistant.incident.missingActionMessage);
       return false;
     }
 
     if (form.type === 'PASSENGER_CONFLICT' && form.actionTaken.trim().length < 3) {
-      Alert.alert('Missing action', 'Please enter the action taken.');
+      Alert.alert(t.assistant.incident.missingActionTitle, t.assistant.incident.missingActionMessage);
       return false;
     }
 
     if (form.type === 'FOUND_ITEM' && (form.itemName.trim().length < 2 || form.foundLocation.trim().length < 3)) {
-      Alert.alert('Missing item details', 'Please enter the item name and where it was found.');
+      Alert.alert(t.assistant.incident.missingItemTitle, t.assistant.incident.missingItemMessage);
       return false;
     }
 
@@ -322,8 +278,8 @@ function BusAssistantIncidentPanel({
         <View style={styles.incidentTitleRow}>
           <MaterialCommunityIcons color={colors.error} name="alert-circle-outline" size={20} />
           <View style={styles.incidentTitleWrap}>
-            <Text style={styles.incidentTitle}>Incident Report</Text>
-            <Text style={styles.incidentHint}>UC50/UC51 while running. UC52 after completion.</Text>
+            <Text style={styles.incidentTitle}>{t.assistant.incident.panelTitle}</Text>
+            <Text style={styles.incidentHint}>{t.assistant.incident.panelHint}</Text>
           </View>
         </View>
         <Pressable
@@ -332,7 +288,7 @@ function BusAssistantIncidentPanel({
           onPress={() => setIsOpen((current) => !current)}
           style={[styles.reportToggle, isProcessing && styles.disabledChip]}
         >
-          <Text style={styles.reportToggleText}>{isOpen ? 'Close' : 'Report'}</Text>
+          <Text style={styles.reportToggleText}>{isOpen ? t.assistant.incident.close : t.assistant.incident.open}</Text>
         </Pressable>
       </View>
 
@@ -347,7 +303,6 @@ function BusAssistantIncidentPanel({
                 onPress={() => updateForm('type', option.type)}
                 style={[styles.incidentOption, form.type === option.type && styles.incidentOptionActive]}
               >
-                <Text style={styles.incidentCode}>{option.code}</Text>
                 <Text style={styles.incidentOptionTitle}>{option.title}</Text>
                 <Text style={styles.incidentOptionHint}>{option.hint}</Text>
               </Pressable>
@@ -356,7 +311,7 @@ function BusAssistantIncidentPanel({
 
           {form.type !== 'FOUND_ITEM' ? (
             <View style={styles.fieldBlock}>
-              <FieldLabel>Severity</FieldLabel>
+              <FieldLabel>{t.assistant.incident.severity}</FieldLabel>
               <View style={styles.choiceRow}>
                 {severityOptions.map((severity) => (
                   <ChoiceChip
@@ -374,7 +329,7 @@ function BusAssistantIncidentPanel({
           {form.type === 'PASSENGER_VIOLATION' ? (
             <>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Violation Type</FieldLabel>
+                <FieldLabel>{t.assistant.incident.violationType}</FieldLabel>
                 <View style={styles.choiceRow}>
                   {violationCategories.map((category) => (
                     <ChoiceChip
@@ -388,10 +343,10 @@ function BusAssistantIncidentPanel({
                 </View>
               </View>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Passenger Description</FieldLabel>
+                <FieldLabel>{t.assistant.incident.passengerDescription}</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('passengerDescription', value)}
-                  placeholder="Example: blue shirt near rear door"
+                  placeholder={t.assistant.incident.passengerPlaceholder}
                   placeholderTextColor={colors.muted}
                   style={styles.incidentInput}
                   value={form.passengerDescription}
@@ -403,7 +358,7 @@ function BusAssistantIncidentPanel({
           {form.type === 'PASSENGER_CONFLICT' ? (
             <>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Conflict Type</FieldLabel>
+                <FieldLabel>{t.assistant.incident.conflictType}</FieldLabel>
                 <View style={styles.choiceRow}>
                   {conflictCategories.map((category) => (
                     <ChoiceChip
@@ -417,10 +372,10 @@ function BusAssistantIncidentPanel({
                 </View>
               </View>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Parties Involved</FieldLabel>
+                <FieldLabel>{t.assistant.incident.partiesInvolved}</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('partiesInvolved', value)}
-                  placeholder="Example: two passengers in middle seats"
+                  placeholder={t.assistant.incident.partiesPlaceholder}
                   placeholderTextColor={colors.muted}
                   style={styles.incidentInput}
                   value={form.partiesInvolved}
@@ -432,30 +387,30 @@ function BusAssistantIncidentPanel({
           {form.type === 'FOUND_ITEM' ? (
             <>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Item Name</FieldLabel>
+                <FieldLabel>{t.assistant.incident.itemName}</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('itemName', value)}
-                  placeholder="Example: black wallet"
+                  placeholder={t.assistant.incident.itemPlaceholder}
                   placeholderTextColor={colors.muted}
                   style={styles.incidentInput}
                   value={form.itemName}
                 />
               </View>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Found Location</FieldLabel>
+                <FieldLabel>{t.assistant.incident.foundLocation}</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('foundLocation', value)}
-                  placeholder="Example: seat 12"
+                  placeholder={t.assistant.incident.locationPlaceholder}
                   placeholderTextColor={colors.muted}
                   style={styles.incidentInput}
                   value={form.foundLocation}
                 />
               </View>
               <View style={styles.fieldBlock}>
-                <FieldLabel>Handed To</FieldLabel>
+                <FieldLabel>{t.assistant.incident.handedTo}</FieldLabel>
                 <TextInput
                   onChangeText={(value) => updateForm('handedTo', value)}
-                  placeholder="Example: dispatch desk"
+                  placeholder={t.assistant.incident.handedToPlaceholder}
                   placeholderTextColor={colors.muted}
                   style={styles.incidentInput}
                   value={form.handedTo}
@@ -466,10 +421,10 @@ function BusAssistantIncidentPanel({
 
           {form.type !== 'FOUND_ITEM' ? (
             <View style={styles.fieldBlock}>
-              <FieldLabel>Action Taken</FieldLabel>
+              <FieldLabel>{t.assistant.incident.actionTaken}</FieldLabel>
               <TextInput
                 onChangeText={(value) => updateForm('actionTaken', value)}
-                placeholder="Example: reminded passenger of bus rules"
+                placeholder={t.assistant.incident.actionPlaceholder}
                 placeholderTextColor={colors.muted}
                 style={styles.incidentInput}
                 value={form.actionTaken}
@@ -478,11 +433,11 @@ function BusAssistantIncidentPanel({
           ) : null}
 
           <View style={styles.fieldBlock}>
-            <FieldLabel>Description</FieldLabel>
+            <FieldLabel>{t.assistant.incident.description}</FieldLabel>
             <TextInput
               multiline
               onChangeText={(value) => updateForm('description', value)}
-              placeholder="Describe the situation and what was done."
+              placeholder={t.assistant.incident.descriptionPlaceholder}
               placeholderTextColor={colors.muted}
               style={[styles.incidentInput, styles.incidentTextArea]}
               textAlignVertical="top"
@@ -501,7 +456,7 @@ function BusAssistantIncidentPanel({
             ) : (
               <>
                 <MaterialCommunityIcons color={colors.white} name="send-outline" size={18} />
-                <Text style={styles.reportSubmitText}>Send Incident Report</Text>
+                <Text style={styles.reportSubmitText}>{t.assistant.incident.submit}</Text>
               </>
             )}
           </Pressable>
@@ -512,13 +467,54 @@ function BusAssistantIncidentPanel({
 }
 
 export default function AssignedTripsScreen() {
+  const { t } = useDriverI18n();
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isHydrated = useAuthStore((state) => state.isHydrated);
   const logout = useAuthStore((state) => state.logout);
   const actorKind = getActorKind(user?.role);
-  const copy = actorCopy[actorKind];
   const isDriver = actorKind === 'DRIVER';
+  const driverCopy = useMemo(() => ({
+    kicker: t.trips.kicker,
+    title: t.trips.title,
+    searchPlaceholder: t.trips.search,
+    countSuffix: t.trips.countSuffix,
+    empty: t.trips.empty,
+    roleLabel: t.common.driver,
+    acceptSuccessTitle: t.trips.acceptSuccessTitle,
+    acceptSuccessMessage: t.trips.acceptSuccessMessage,
+    rejectReasonTitle: t.trips.rejectTitle,
+    rejectReasonHint: t.trips.rejectHint,
+    rejectPlaceholder: t.trips.rejectPlaceholder,
+    startAction: t.trips.startTrip,
+    prepareAction: t.trips.inspectVehicle,
+  }), [t]);
+  const assistantCopy = useMemo<ActorCopy>(() => ({
+    kicker: t.assistant.trips.kicker,
+    title: t.assistant.trips.title,
+    searchPlaceholder: t.assistant.trips.search,
+    countSuffix: t.assistant.trips.countSuffix,
+    empty: t.assistant.trips.empty,
+    roleLabel: t.assistant.trips.roleLabel,
+    acceptSuccessTitle: t.home.acceptSuccessTitle,
+    acceptSuccessMessage: t.home.acceptSuccessMessage,
+    rejectReasonTitle: t.trips.rejectTitle,
+    rejectReasonHint: t.assistant.trips.rejectHint,
+    rejectPlaceholder: t.trips.rejectPlaceholder,
+    startAction: '',
+    prepareAction: '',
+  }), [t]);
+  const copy = isDriver ? driverCopy : assistantCopy;
+  const filterOptions = useMemo<Array<{ key: FilterKey; label: string }>>(() => (
+    [
+      { key: 'ALL', label: t.trips.all },
+      { key: 'TODAY', label: t.trips.today },
+      { key: 'HISTORY', label: t.trips.history },
+      { key: 'UPCOMING', label: t.trips.upcoming },
+      { key: 'COMPLETED', label: t.trips.completed },
+      { key: 'DELAYED', label: t.trips.delayed },
+    ]
+  ), [t]);
   const [trips, setTrips] = useState<AssignedTrip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [processingId, setProcessingId] = useState('');
@@ -538,9 +534,8 @@ export default function AssignedTripsScreen() {
       const payload = await scheduleOperationsApi.getAssignedTrips(getAssignedTripsRange());
       setTrips(payload.trips || []);
     } catch (error) {
-      const message = getErrorMessage(error, 'Unable to load assigned trips.');
-      const statusCode = (error as { statusCode?: number; response?: { status?: number } })?.statusCode
-        || (error as { response?: { status?: number } })?.response?.status;
+      const message = getErrorMessage(error, isDriver ? t.trips.empty : t.assistant.trips.loadErrorFallback);
+      const statusCode = getErrorStatusCode(error);
       const isAuthError = statusCode === 401 || message.toLowerCase().includes('no token provided');
 
       if (isAuthError) {
@@ -549,11 +544,16 @@ export default function AssignedTripsScreen() {
         return;
       }
 
-      Alert.alert('Unable to load assigned trips', message);
+      if (isPermissionError(error)) {
+        setTrips([]);
+        return;
+      }
+
+      Alert.alert(isDriver ? t.home.loadErrorTitle : t.assistant.trips.loadErrorTitle, message);
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, isHydrated, logout]);
+  }, [isAuthenticated, isDriver, isHydrated, logout, t.assistant.trips.loadErrorFallback, t.assistant.trips.loadErrorTitle, t.home.loadErrorTitle, t.trips.empty]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -634,7 +634,7 @@ export default function AssignedTripsScreen() {
       Alert.alert(copy.acceptSuccessTitle, copy.acceptSuccessMessage);
       await loadTrips();
     } catch (error) {
-      Alert.alert('Không thể tiếp nhận chuyến', getErrorMessage(error, 'Unable to accept assigned trip.'));
+      Alert.alert(isDriver ? t.home.acceptErrorTitle : t.assistant.trips.acceptErrorTitle, getErrorMessage(error, isDriver ? t.home.acceptErrorFallback : t.assistant.trips.acceptErrorFallback));
     } finally {
       setProcessingId('');
     }
@@ -645,7 +645,7 @@ export default function AssignedTripsScreen() {
 
     const reason = rejectionReason.trim();
     if (reason.length < 5) {
-      Alert.alert('Cần lý do từ chối', 'Vui lòng nhập ít nhất 5 ký tự trước khi từ chối chuyến.');
+      Alert.alert(isDriver ? copy.rejectReasonTitle : t.assistant.trips.rejectNeedReasonTitle, isDriver ? copy.rejectReasonHint : t.assistant.trips.rejectNeedReasonMessage);
       return;
     }
 
@@ -654,10 +654,10 @@ export default function AssignedTripsScreen() {
       await scheduleOperationsApi.rejectAssignedTrip(rejectingTrip.id, { reason });
       setRejectingTrip(null);
       setRejectionReason('');
-      Alert.alert('Đã từ chối chuyến', 'Lý do từ chối đã được gửi về điều hành.');
+      Alert.alert(isDriver ? t.trips.rejectSuccessTitle : t.assistant.trips.rejectSuccessTitle, isDriver ? t.trips.rejectSuccessMessage : t.assistant.trips.rejectSuccessMessage);
       await loadTrips();
     } catch (error) {
-      Alert.alert('Không thể từ chối chuyến', getErrorMessage(error, 'Unable to reject assigned trip.'));
+      Alert.alert(copy.rejectReasonTitle, getErrorMessage(error, copy.rejectReasonHint));
     } finally {
       setProcessingId('');
     }
@@ -668,7 +668,7 @@ export default function AssignedTripsScreen() {
     try {
       const locationText = form.type === 'FOUND_ITEM'
         ? form.foundLocation.trim()
-        : trip.route?.name || trip.route?.origin || trip.tripCode || 'Assigned trip';
+        : trip.route?.name || trip.route?.origin || trip.tripCode || t.assistant.incident.locationFallback;
 
       await scheduleOperationsApi.reportOperationIncident(trip.id, {
         ...form,
@@ -676,10 +676,10 @@ export default function AssignedTripsScreen() {
         locationText,
       });
 
-      Alert.alert('Incident reported', 'The incident report has been sent to dispatch.');
+      Alert.alert(t.assistant.incident.submitSuccessTitle, t.assistant.incident.submitSuccessMessage);
       await loadTrips();
     } catch (error) {
-      Alert.alert('Unable to report incident', getErrorMessage(error, 'Unable to report incident.'));
+      Alert.alert(t.assistant.incident.submitErrorTitle, getErrorMessage(error, t.assistant.incident.submitErrorFallback));
     } finally {
       setProcessingId('');
     }
@@ -689,7 +689,7 @@ export default function AssignedTripsScreen() {
     <View style={styles.screenShell}>
       <Screen>
       <View style={styles.header}>
-        <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+        <Pressable accessibilityLabel={t.common.back} hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
           <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
         </Pressable>
         <View>
@@ -698,42 +698,47 @@ export default function AssignedTripsScreen() {
         </View>
       </View>
 
-      <View style={styles.searchBox}>
-        <MaterialCommunityIcons color={colors.muted} name="magnify" size={22} />
-        <TextInput
-          accessibilityLabel="Search assigned trips"
-          onChangeText={setSearch}
-          placeholder={copy.searchPlaceholder}
-          placeholderTextColor={colors.muted}
-          style={styles.searchInput}
-          value={search}
-        />
-      </View>
+      <View style={styles.toolsCard}>
+        <View style={styles.searchBox}>
+          <MaterialCommunityIcons color={colors.muted} name="magnify" size={21} />
+          <TextInput
+            accessibilityLabel={copy.searchPlaceholder}
+            onChangeText={setSearch}
+            placeholder={copy.searchPlaceholder}
+            placeholderTextColor={colors.muted}
+            style={styles.searchInput}
+            value={search}
+          />
+          {search ? <Pressable hitSlop={8} onPress={() => setSearch('')}><MaterialCommunityIcons color={colors.muted} name="close-circle" size={19} /></Pressable> : null}
+        </View>
 
-      <View style={styles.filterRow}>
-        {filters.map((filter) => (
-          <Pressable
-            key={filter.key}
-            accessibilityRole="button"
-            onPress={() => setActiveFilter(filter.key)}
-            style={[styles.filterChip, activeFilter === filter.key && styles.filterChipActive]}
-          >
-            <Text style={[styles.filterText, activeFilter === filter.key && styles.filterTextActive]}>
-              {filter.label}
+        <View style={styles.filterRow}>
+          {filterOptions.map((filter) => (
+            <Pressable
+              key={filter.key}
+              accessibilityRole="button"
+              onPress={() => setActiveFilter(filter.key)}
+              style={[styles.filterChip, activeFilter === filter.key && styles.filterChipActive]}
+            >
+              <Text numberOfLines={1} style={[styles.filterText, activeFilter === filter.key && styles.filterTextActive]}>{filter.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {!isLoading ? (
+          <View style={styles.resultBar}>
+            <View style={styles.resultIcon}><MaterialCommunityIcons color={colors.accent} name="bus-clock" size={18} /></View>
+            <Text style={styles.resultText}>
+              <Text style={styles.resultStrong}>{filteredTrips.length}</Text> {copy.countSuffix}
             </Text>
-          </Pressable>
-        ))}
+            <Text style={styles.resultTotal}>{isDriver ? t.trips.all : t.assistant.trips.total} {actorTrips.length}</Text>
+          </View>
+        ) : null}
       </View>
-      {!isLoading ? (
-        <Text style={styles.resultText}>
-          Showing {filteredTrips.length} of {actorTrips.length} {copy.countSuffix}
-        </Text>
-      ) : null}
 
       {isLoading ? (
         <View style={styles.loading}>
           <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Loading assigned trips...</Text>
+          <Text style={styles.loadingText}>{isDriver ? t.common.loading : t.assistant.trips.loading}</Text>
         </View>
       ) : (
         <View style={styles.tripList}>
@@ -741,6 +746,13 @@ export default function AssignedTripsScreen() {
             <Text style={styles.emptyText}>{copy.empty}</Text>
           ) : filteredTrips.map((trip) => {
             const status = getTripStatus(trip);
+            const statusLabel = formatDriverStatus(status, t);
+            const routeTitle =
+              trip.route?.name ||
+              [trip.route?.origin, trip.route?.destination].filter(Boolean).join(' - ') ||
+              trip.route?.routeNumber ||
+              (isDriver ? t.common.unknownRoute : t.assistant.trips.routeUnnamed);
+            const routeSubtitle = [trip.route?.origin, trip.route?.destination].filter(Boolean).join(' - ');
             const isCompleted = isTripCompleted(trip);
             const isAccepted = getAcceptanceStatus(trip) === 'ACCEPTED';
             const isVehicleReady = trip.inspection?.status === 'READY';
@@ -750,46 +762,46 @@ export default function AssignedTripsScreen() {
               <View key={trip.id} style={styles.tripCard}>
                 <View style={styles.tripCardHeader}>
                   <View>
-                    <Text style={styles.tripCode}>{trip.tripCode || trip.id}</Text>
-                    <Text style={styles.routeName}>{trip.route?.name || 'Unnamed route'}</Text>
+                    <Text style={styles.tripCode}>{isDriver ? (trip.tripCode || routeTitle) : routeTitle}</Text>
+                    {isDriver || (routeSubtitle && routeSubtitle !== routeTitle) ? (
+                      <Text style={styles.routeName}>{isDriver ? routeTitle : routeSubtitle}</Text>
+                    ) : null}
                   </View>
                   <View style={styles.statusBadge}>
-                    <Text style={styles.statusBadgeText}>{status}</Text>
+                    <Text style={styles.statusBadgeText}>{statusLabel}</Text>
                   </View>
                 </View>
 
                 <View style={styles.infoGrid}>
-                  <InfoLine label="Route ID" value={trip.route?.routeNumber || trip.route?.id} />
-                  <InfoLine label="Direction" value={trip.route?.direction} />
-                  <InfoLine label="Service Date" value={formatDate(trip.scheduledStart)} />
-                  <InfoLine label="Departure" value={formatTime(trip.scheduledStart)} />
-                  <InfoLine label="Arrival" value={formatTime(trip.scheduledEnd)} />
-                  {trip.actualStartAt ? <InfoLine label="Started" value={formatTime(trip.actualStartAt)} /> : null}
-                  {trip.actualEndAt ? <InfoLine label="Ended" value={formatTime(trip.actualEndAt)} /> : null}
-                  <InfoLine label="Bus Number" value={getTripVehicleLabel(trip)} />
-                  <InfoLine label="Driver" value={trip.driver?.fullName} />
-                  <InfoLine label="Bus Assistant" value={trip.busAssistant?.fullName} />
-                  <InfoLine label="Your Role" value={copy.roleLabel} />
+                  <InfoLine label={t.common.direction} value={trip.route?.direction} />
+                  <InfoLine label={t.trips.serviceDate} value={getTripServiceDateLabel(trip)} />
+                  <InfoLine label={t.common.departure} value={getTripDepartureTimeLabel(trip)} />
+                  <InfoLine label={t.common.arrival} value={getTripArrivalTimeLabel(trip)} />
+                  {trip.actualStartAt ? <InfoLine label={t.trips.startedAt} value={formatTime(trip.actualStartAt)} /> : null}
+                  {trip.actualEndAt ? <InfoLine label={t.trips.endedAt} value={formatTime(trip.actualEndAt)} /> : null}
+                  <InfoLine label={t.common.vehicle} value={getTripVehicleLabel(trip)} />
+                  <InfoLine label={t.common.driverName} value={trip.driver?.fullName} />
+                  <InfoLine label={t.common.assistantName} value={trip.busAssistant?.fullName} />
                 </View>
 
                 {hasVehicleReplacement(trip) ? (
                   <View style={styles.replacementNotice}>
                     <MaterialCommunityIcons color={colors.primary} name="swap-horizontal-bold" size={18} />
                     <View style={styles.replacementTextWrap}>
-                      <Text style={styles.replacementTitle}>Xe thay thế đã được phân phối</Text>
+                      <Text style={styles.replacementTitle}>{isDriver ? t.inspection.replacementTitle : t.assistant.trips.replacementTitle}</Text>
                       <Text style={styles.replacementText}>
-                        Xe cũ {getVehicleLabel(trip.vehicleReplacement?.previousVehicle)} đang bảo trì. Chuyến tiếp tục với xe {getVehicleLabel(trip.vehicleReplacement?.currentVehicle || trip.vehicle)}.
+                        {isDriver ? `${t.trips.oldVehicleMaintenance} ${t.trips.replacementPrefix} ${getVehicleLabel(trip.vehicleReplacement?.currentVehicle || trip.vehicle)}.` : `${t.assistant.trips.replacementTextPrefix} ${getVehicleLabel(trip.vehicleReplacement?.previousVehicle)} ${t.assistant.trips.replacementTextMiddle} ${getVehicleLabel(trip.vehicleReplacement?.currentVehicle || trip.vehicle)}.`}
                       </Text>
                     </View>
                   </View>
                 ) : null}
 
                 <View style={styles.actionsRow}>
-                  <AppButton title="Xem chi tiết" variant="secondary" onPress={() => void openFreshDetail(trip)} style={styles.actionButton} />
+                  <AppButton title={t.trips.details} variant="secondary" onPress={() => void openFreshDetail(trip)} style={styles.actionButton} />
                   {showDecisionActions ? (
                     <>
                       <AppButton
-                        title="Từ chối"
+                        title={t.trips.reject}
                         disabled={processingId === trip.id}
                         onPress={() => {
                           setRejectingTrip(trip);
@@ -799,7 +811,7 @@ export default function AssignedTripsScreen() {
                         style={styles.actionButton}
                       />
                       <AppButton
-                        title="Tiếp nhận"
+                        title={t.trips.accept}
                         loading={processingId === trip.id}
                         onPress={() => acceptTrip(trip)}
                         style={styles.actionButton}
@@ -850,13 +862,13 @@ export default function AssignedTripsScreen() {
             />
             <View style={styles.modalActions}>
               <AppButton
-                title="Hủy"
+                title={t.common.cancel}
                 onPress={() => setRejectingTrip(null)}
                 variant="secondary"
                 style={styles.modalButton}
               />
               <AppButton
-                title="Từ chối"
+                title={t.trips.reject}
                 loading={Boolean(rejectingTrip && processingId === rejectingTrip.id)}
                 onPress={rejectTrip}
                 style={styles.modalButton}
@@ -875,17 +887,22 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 },
   kicker: { color: colors.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
   title: { color: colors.primary, fontSize: 25, fontWeight: '900' },
-  searchBox: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 18, backgroundColor: colors.card, paddingHorizontal: 14 },
+  toolsCard: { gap: 12, borderRadius: 22, borderWidth: 1, borderColor: '#e4ede9', backgroundColor: colors.card, padding: 12 },
+  searchBox: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 15, backgroundColor: colors.surfaceLow, paddingHorizontal: 13 },
   searchInput: { flex: 1, color: colors.text, fontSize: 14, fontWeight: '700' },
-  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
-  filterChip: { minHeight: 40, justifyContent: 'center', borderRadius: 20, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.card, paddingHorizontal: 14 },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  filterChip: { width: '31.8%', minHeight: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 13, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.white, paddingHorizontal: 6 },
   filterChipActive: { borderColor: colors.primary, backgroundColor: colors.primary },
   filterText: { color: colors.primary, fontSize: 13, fontWeight: '900' },
   filterTextActive: { color: colors.white },
-  resultText: { marginTop: 10, color: colors.muted, fontSize: 12, fontWeight: '800' },
+  resultBar: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 9, borderRadius: 13, backgroundColor: '#edf9f3', paddingHorizontal: 10 },
+  resultIcon: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 9, backgroundColor: colors.white },
+  resultText: { flex: 1, color: colors.secondary, fontSize: 12, fontWeight: '700' },
+  resultStrong: { color: colors.primary, fontWeight: '900' },
+  resultTotal: { color: colors.muted, fontSize: 11, fontWeight: '700' },
   loading: { minHeight: 230, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: colors.muted, fontWeight: '700' },
-  tripList: { gap: 14, marginTop: 18, paddingBottom: 96 },
+  tripList: { gap: 14, marginTop: 14, paddingBottom: 96 },
   emptyText: { borderRadius: 18, backgroundColor: colors.surfaceLow, padding: 16, color: colors.muted, fontSize: 13, fontWeight: '700' },
   tripCard: { gap: 14, borderRadius: 22, backgroundColor: colors.card, padding: 16 },
   tripCardHeader: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
@@ -951,7 +968,6 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   incidentOptionActive: { borderColor: colors.error, backgroundColor: colors.errorContainer },
-  incidentCode: { color: colors.error, fontSize: 11, fontWeight: '900' },
   incidentOptionTitle: { color: colors.text, fontSize: 14, fontWeight: '900' },
   incidentOptionHint: { color: colors.muted, fontSize: 11, fontWeight: '700' },
   fieldBlock: { gap: 7 },

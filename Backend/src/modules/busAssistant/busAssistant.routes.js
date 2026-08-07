@@ -25,6 +25,18 @@ router.post(
   asyncHandler(BusAssistantController.createWalkInTicket)
 );
 router.get(
+  '/walkin-tickets/history',
+  asyncHandler(BusAssistantController.getWalkInTicketHistory)
+);
+router.get(
+  '/walkin-tickets/:ticketId/resume-payment',
+  asyncHandler(BusAssistantController.resumeWalkInPayment)
+);
+router.patch(
+  '/walkin-tickets/:ticketId/confirm-payment',
+  asyncHandler(BusAssistantController.confirmWalkInPayment)
+);
+router.get(
   '/shift-revenue',
   validateRequest(validateShiftRevenueQuery, 'query'),
   asyncHandler(BusAssistantController.getShiftRevenue)

@@ -75,14 +75,18 @@ export type WalkInTicketPayload = {
   ticketType: string;
   paymentMethod: string;
   amount: number;
+  cashReceived?: number;
+  changeAmount?: number;
 };
 
 export type WalkInTicketResult = {
   ticketData?: {
+    _id?: string;
     ticketCode?: string;
     passengerCount?: number;
     totalAmount?: number;
     paymentMethod?: string;
+    status?: string;
   };
   transactionData?: {
     transactionCode?: string;
@@ -90,7 +94,37 @@ export type WalkInTicketResult = {
     finalAmount?: number;
   };
   totalAmount?: number;
+  qrCodeImage?: string | null;
+  checkoutUrl?: string | null;
+  requiresPaymentConfirmation?: boolean;
+  paymentCompleted?: boolean;
+  confirmed?: boolean;
+  resumed?: boolean;
+  cashReceived?: number | null;
+  changeAmount?: number;
   message?: string;
+};
+
+export type WalkInTicketHistoryItem = {
+  _id: string;
+  ticketCode?: string;
+  issuedAt?: string;
+  routeCode?: string;
+  routeName?: string;
+  tripId?: string;
+  passengerCount?: number;
+  paymentMethod?: string;
+  totalAmount?: number;
+  collectedAmount?: number;
+  status?: string;
+  canResumePayment?: boolean;
+};
+
+export type WalkInTicketHistory = {
+  date: string;
+  count: number;
+  totalRevenue: number;
+  tickets: WalkInTicketHistoryItem[];
 };
 
 export type ShiftRevenue = {

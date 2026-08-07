@@ -427,13 +427,48 @@ const RouteFields = ({ values, errors, updateValue }) => (
   </>
 );
 
+const MonthlyPassSettingsPanel = ({ settings, isSaving, onChange, onSave }) => (
+  <div className="border-b border-outline-variant/30 bg-white p-5">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px_auto] lg:items-end">
+      <div>
+        <p className="text-sm font-black text-primary">Monthly Pass Settings</p>
+        <p className="mt-1 text-sm text-on-surface-variant">
+          Configure the maximum number of successful monthly-pass validations allowed per passenger each server day.
+        </p>
+      </div>
+      <label className="space-y-2">
+        <span className="text-sm font-semibold">Maximum rides per day</span>
+        <input
+          type="number"
+          min="1"
+          max="20"
+          value={settings.maxRidesPerDay}
+          onChange={(event) => onChange(event.target.value)}
+          className={fieldClassName}
+        />
+      </label>
+      <button
+        type="button"
+        disabled={isSaving}
+        onClick={onSave}
+        className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-primary px-5 text-sm font-bold text-white hover:bg-primary-container disabled:opacity-60"
+      >
+        {isSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+        Save
+      </button>
+    </div>
+  </div>
+);
+
 const FareOperationsPage = () => {
   const [activeTab, setActiveTab] = useState('matrix');
   const [items, setItems] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1 });
   const [filters, setFilters] = useState({ search: '', status: '', page: 1, limit: 20 });
+  const [monthlyPassSettings, setMonthlyPassSettings] = useState({ maxRidesPerDay: 6 });
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [modalItem, setModalItem] = useState(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
@@ -477,6 +512,23 @@ const FareOperationsPage = () => {
   useEffect(() => {
     loadItems();
   }, [loadItems]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadSettings = async () => {
+      try {
+        const response = await fareOperationsService.getMonthlyPassSettings();
+        if (isMounted) setMonthlyPassSettings(response.data || { maxRidesPerDay: 6 });
+      } catch (error) {
+        toast.error(error.message || 'Unable to load monthly pass settings');
+      }
+    };
+
+    loadSettings();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const changeTab = (tab) => {
     setActiveTab(tab);
@@ -524,6 +576,25 @@ const FareOperationsPage = () => {
     }
   };
 
+  const saveMonthlyPassSettings = async () => {
+    const maxRidesPerDay = Number(monthlyPassSettings.maxRidesPerDay);
+    if (!Number.isInteger(maxRidesPerDay) || maxRidesPerDay < 1 || maxRidesPerDay > 20) {
+      toast.error('Maximum rides per day must be an integer from 1 to 20');
+      return;
+    }
+
+    setIsSavingSettings(true);
+    try {
+      const response = await fareOperationsService.updateMonthlyPassSettings({ maxRidesPerDay });
+      setMonthlyPassSettings(response.data || { maxRidesPerDay });
+      toast.success('Monthly pass settings updated');
+    } catch (error) {
+      toast.error(error.message || 'Monthly pass settings update failed');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
   return (
     <AdminPromotionShell
       title="Fare Operations"
@@ -548,6 +619,15 @@ const FareOperationsPage = () => {
             );
           })}
         </div>
+
+        {activeTab === 'monthly' ? (
+          <MonthlyPassSettingsPanel
+            settings={monthlyPassSettings}
+            isSaving={isSavingSettings}
+            onChange={(value) => setMonthlyPassSettings((current) => ({ ...current, maxRidesPerDay: value }))}
+            onSave={saveMonthlyPassSettings}
+          />
+        ) : null}
 
         <div className="flex flex-col gap-3 border-b border-outline-variant/30 bg-surface-container-low/40 p-5 lg:flex-row lg:items-center lg:justify-between">
           <label className="relative w-full max-w-md">

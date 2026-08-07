@@ -9,6 +9,7 @@ import {
   validateRestrictionPayload,
   validateRestrictionStatus,
   validateViolationListQuery,
+  validateViolationStatus,
 } from './passengerCompliance.validators.js';
 
 const router = express.Router();
@@ -18,6 +19,12 @@ router.get(
   '/passenger-violations',
   validateRequest(validateViolationListQuery, 'query'),
   asyncHandler(PassengerComplianceController.listViolations)
+);
+router.patch(
+  '/passenger-violations/:id',
+  validateRequest(validateIdParam, 'params'),
+  validateRequest(validateViolationStatus),
+  asyncHandler(PassengerComplianceController.updateViolationStatus)
 );
 router.get(
   '/passenger-violations/:id',

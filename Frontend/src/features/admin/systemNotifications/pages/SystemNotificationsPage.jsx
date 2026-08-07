@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   BellRing,
-  CalendarClock,
   Eye,
   LoaderCircle,
   RefreshCcw,
@@ -57,14 +56,18 @@ const defaultForm = {
 };
 
 const badgeClassName = {
-  draft: 'bg-surface-container text-on-surface-variant',
-  scheduled: 'bg-tertiary-container text-on-tertiary-container',
-  sent: 'bg-secondary-container text-on-secondary-container',
-  cancelled: 'bg-error-container text-on-error-container',
-  urgent: 'bg-error text-on-error',
-  high: 'bg-error-container text-on-error-container',
-  normal: 'bg-primary-container text-primary',
-  low: 'bg-surface-container text-on-surface-variant',
+  urgent: 'border border-red-300 bg-red-100 text-red-800',
+  high: 'border border-orange-300 bg-orange-100 text-orange-800',
+  normal: 'border border-emerald-300 bg-emerald-100 text-emerald-800',
+  low: 'border border-slate-300 bg-slate-100 text-slate-700',
+};
+
+const statusBadgeClassName = {
+  draft: 'border border-slate-300 bg-slate-100 text-slate-700',
+  scheduled: 'border border-amber-300 bg-amber-100 text-amber-800',
+  sent: 'border border-emerald-300 bg-emerald-100 text-emerald-800',
+  cancelled: 'border border-rose-300 bg-rose-100 text-rose-800',
+  failed: 'border border-red-300 bg-red-100 text-red-800',
 };
 
 const formatDateTime = (value) => {
@@ -330,15 +333,6 @@ const SystemNotificationsPage = () => {
 
         <div className="space-y-6">
           <PreviewPanel form={form} />
-          <section className="rounded-2xl border border-outline-variant/35 bg-white/85 p-5 shadow-sm">
-            <div className="flex items-center gap-3">
-              <CalendarClock className="h-5 w-5 text-primary" />
-              <h2 className="text-lg font-bold text-primary">Payload preview</h2>
-            </div>
-            <pre className="mt-4 max-h-[260px] overflow-auto rounded-2xl bg-surface-container-low p-4 text-xs text-on-surface-variant">
-              {JSON.stringify(payloadPreview, null, 2)}
-            </pre>
-          </section>
         </div>
       </div>
 
@@ -394,11 +388,11 @@ const SystemNotificationsPage = () => {
                   </td>
                   <td className="px-5 py-4 text-on-surface">{notification.targetAudience}</td>
                   <td className="px-5 py-4">
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${badgeClassName[notification.priority] || badgeClassName.normal}`}>{notification.priority}</span>
+                    <span className={`inline-flex min-w-[82px] items-center justify-center rounded-full px-3 py-1 text-xs font-extrabold ${badgeClassName[notification.priority] || badgeClassName.normal}`}>{notification.priority}</span>
                   </td>
                   <td className="px-5 py-4 text-on-surface">{notification.deliverySummary?.resolvedCount ?? notification.recipientUserIds?.length ?? 0}</td>
                   <td className="px-5 py-4">
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${badgeClassName[notification.status] || badgeClassName.draft}`}>{notification.status}</span>
+                    <span className={`inline-flex min-w-[76px] items-center justify-center rounded-full px-3 py-1 text-xs font-extrabold ${statusBadgeClassName[notification.status] || statusBadgeClassName.draft}`}>{notification.status}</span>
                   </td>
                   <td className="px-5 py-4 text-on-surface-variant">{formatDateTime(notification.createdAt)}</td>
                   <td className="px-5 py-4">

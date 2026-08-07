@@ -18,12 +18,10 @@ export type PriorityStatus = 'NONE' | 'PENDING' | 'UNDER_REVIEW' | 'DOCUMENT_VER
 export type PriorityRegistrationDraft = {
   fullName: string;
   dateOfBirth: string;
-  gender: string;
-  phoneNumber: string;
-  email: string;
-  residentialAddress: string;
   profileType: PriorityProfileType | '';
   identityNumber: string;
+  cardNumber: string;
+  issuingAuthority: string;
   reason: string;
 };
 

@@ -11,6 +11,9 @@ export const passengerComplianceService = {
   getViolation(id) {
     return apiClient.get(`/admin/passenger-violations/${id}`);
   },
+  updateViolationStatus(id, status) {
+    return apiClient.patch(`/admin/passenger-violations/${id}`, { status });
+  },
   getRestrictions(filters = {}) {
     return apiClient.get('/admin/passenger-restrictions', { params: cleanParams(filters) });
   },

@@ -105,7 +105,6 @@ export default function MyFeedbackScreen() {
             style={styles.card}
           >
             <View style={styles.cardTop}>
-              <Text numberOfLines={1} style={styles.reference}>{item.referenceNumber || item.id}</Text>
               <StatusPill label={statusInfo.label} tone={statusInfo.tone} />
             </View>
             <Text numberOfLines={2} style={styles.title}>{item.title || 'Góp ý dịch vụ'}</Text>
@@ -144,8 +143,7 @@ const styles = StyleSheet.create({
   statusChipText: { color: colors.secondary, fontSize: 12, fontWeight: '900' },
   statusChipTextActive: { color: colors.white },
   card: { gap: 9, borderRadius: 22, backgroundColor: colors.card, padding: 16 },
-  cardTop: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
-  reference: { flex: 1, color: colors.secondary, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  cardTop: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
   title: { color: colors.primary, fontSize: 17, lineHeight: 22, fontWeight: '900' },
   meta: { color: colors.secondary, fontSize: 12, fontWeight: '700' },
   footer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

@@ -3,6 +3,7 @@ import {
   CreateSupportCaseDTO,
   FoundItemCaseResponseDTO,
   FeedbackAdminActionDTO,
+  PassengerLostItemCaseResponseDTO,
   PassengerFeedbackReplyDTO,
   RespondSupportCaseDTO,
   SupportCaseResponseDTO,
@@ -12,6 +13,12 @@ import {
 import logger from '../../utils/logger.js';
 
 export class CustomerSupportController {
+  static formatAdminLostItemCase({ sourceType, record }) {
+    return sourceType === 'PASSENGER_LOST_ITEM'
+      ? PassengerLostItemCaseResponseDTO.format(record)
+      : FoundItemCaseResponseDTO.format(record);
+  }
+
   static async createCase(req, res, next) {
     try {
       let lostItem = req.body.lostItem;
@@ -249,11 +256,11 @@ export class CustomerSupportController {
 
   static async listFoundItemCases(req, res, next) {
     try {
-      const result = await CustomerSupportService.listFoundItemCases(req.query);
+      const result = await CustomerSupportService.listAdminLostItemCases(req.query);
 
       return res.json({
         success: true,
-        data: result.items.map((incident) => FoundItemCaseResponseDTO.format(incident)),
+        data: result.items.map((item) => CustomerSupportController.formatAdminLostItemCase(item)),
         meta: result.meta,
       });
     } catch (error) {
@@ -264,11 +271,11 @@ export class CustomerSupportController {
 
   static async getFoundItemCaseDetail(req, res, next) {
     try {
-      const incident = await CustomerSupportService.getFoundItemCaseById(req.params.caseId);
+      const item = await CustomerSupportService.getAdminLostItemCaseById(req.params.caseId);
 
       return res.json({
         success: true,
-        data: FoundItemCaseResponseDTO.format(incident),
+        data: CustomerSupportController.formatAdminLostItemCase(item),
       });
     } catch (error) {
       logger.error('Get found item case detail error:', error);

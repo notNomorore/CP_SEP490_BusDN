@@ -15,21 +15,18 @@ import scheduleOperationsService from '../../scheduleOperations/services/schedul
 const INCIDENT_TYPES = [
   {
     value: 'PASSENGER_VIOLATION',
-    code: 'UC50',
     title: 'Báo hành khách vi phạm',
     description: 'Ghi nhận hành khách vi phạm nội quy xe buýt để điều hành xử lý.',
     icon: FileWarning,
   },
   {
     value: 'PASSENGER_CONFLICT',
-    code: 'UC51',
     title: 'Báo xung đột hành khách',
     description: 'Ghi nhận tranh chấp, cãi vã hoặc tình huống gây mất trật tự trên xe.',
     icon: UsersRound,
   },
   {
     value: 'FOUND_ITEM',
-    code: 'UC52',
     title: 'Báo đồ tìm thấy',
     description: 'Ghi nhận đồ vật thất lạc tìm thấy trên xe, kể cả sau khi chuyến đã kết thúc.',
     icon: PackageSearch,
@@ -289,7 +286,7 @@ const IncidentReportPage = () => {
         <div className={isDarkMode ? 'border-b border-white/10 p-4' : 'border-b border-slate-200 p-4'}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-400">UC50 - UC52</p>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-400">Passenger incident report</p>
               <h1 className="mt-2 text-xl font-black">Báo cáo sự cố hành khách</h1>
               <p className={`mt-1 text-sm ${mutedText}`}>
                 Phụ xe gửi báo cáo vi phạm, xung đột hành khách hoặc đồ tìm thấy về trung tâm điều hành.
@@ -389,9 +386,8 @@ const IncidentReportPage = () => {
                     >
                       <div className="flex items-center gap-2">
                         <Icon size={18} />
-                        <span className="font-black">{type.code}</span>
+                        <span className="font-black">{type.title}</span>
                       </div>
-                      <p className="mt-2 font-bold">{type.title}</p>
                       <p className={`mt-1 text-xs ${isActive ? 'text-slate-800' : mutedText}`}>{type.description}</p>
                     </button>
                   );
@@ -399,7 +395,7 @@ const IncidentReportPage = () => {
               </div>
               {selectedAssignment && !allowedTypes.length ? (
                 <p className="mt-3 rounded border border-amber-300 bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-900">
-                  Chỉ có thể báo UC50/UC51 khi chuyến đang vận hành. UC52 có thể báo sau khi chuyến hoàn thành.
+                  Passenger violations and conflicts can be reported while the trip is running. Found items can be reported after completion.
                 </p>
               ) : null}
             </div>

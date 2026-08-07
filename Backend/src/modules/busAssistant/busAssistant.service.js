@@ -14,14 +14,14 @@ import BoardingRecord from './BoardingRecord.js';
 import RevenueSummary from './RevenueSummary.js';
 import Ticket from './Ticket.js';
 import Transaction from './Transaction.js';
+import QRCode from 'qrcode';
+import PayOSService from '../tickets/PayOSService.js';
+import { config } from '../../config/environment.js';
 
 const ACTIVE_TICKET_STATUSES = ['ACTIVE', 'VALID', 'PAID', 'CONFIRMED'];
 const USED_TICKET_STATUSES = ['USED', 'BOARDED', 'CONSUMED'];
 const ACTIVE_ROUTE_STATUSES = ['ACTIVE', 'PUBLISHED'];
 const ACTIVE_TRIP_STATUSES = ['scheduled', 'active', 'paused', 'delayed', 'PLANNED', 'ASSIGNED', 'IN_PROGRESS'];
-const COMPLETED_TRANSACTION_STATUSES = ['COMPLETED'];
-const E_PAYMENT_METHODS = ['QR', 'E_WALLET'];
-
 const toObjectId = (value) => new mongoose.Types.ObjectId(value);
 const idText = (value) => value ? String(value._id || value) : '';
 const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -137,6 +137,30 @@ const findAssistantShift = async ({ assistantId, shiftId, tripId, date }) => {
       const shift = await Shift.findOne({ shiftCode: scheduleAssignment.shiftCode }).lean();
       return { shiftId: shift?._id || null, assignment: scheduleAssignment, shift };
     }
+
+    // Các màn vận hành hiện lấy phân công trực tiếp từ TripSchedule. Vì vậy
+    // việc bán/kiểm tra vé phải công nhận cùng nguồn phân công này, thay vì
+    // chỉ dựa vào các bản ghi ShiftAssignment kiểu cũ.
+    const tripSchedule = await TripSchedule.findOne({
+      _id: tripId,
+      'assistant.userId': assistantId,
+      status: { $ne: 'CANCELLED' },
+    }).lean();
+
+    if (tripSchedule) {
+      const { start, end } = todayRange(tripSchedule.serviceDate || date);
+      const assistantShift = await AssistantShiftAssignment.findOne({
+        assistantId,
+        workDate: { $gte: start, $lte: end },
+        status: { $in: ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'] },
+      }).populate('shiftId').sort({ updatedAt: -1 }).lean();
+
+      return {
+        shiftId: assistantShift?.shiftId?._id || assistantShift?.shiftId || null,
+        assignment: assistantShift || tripSchedule,
+        shift: assistantShift?.shiftId || null,
+      };
+    }
   }
 
   const { start, end } = todayRange(date);
@@ -146,7 +170,23 @@ const findAssistantShift = async ({ assistantId, shiftId, tripId, date }) => {
     status: { $in: ['ASSIGNED', 'IN_PROGRESS'] },
   }).populate('shiftId').sort({ updatedAt: -1 }).lean();
 
-  if (!assignment) return null;
+  if (!assignment) {
+    // TripSchedule is the current source of truth for bus-assistant assignments.
+    // Revenue requests only provide a date, so accept a direct trip assignment
+    // for that service date even when no legacy shift record exists.
+    const directTripAssignment = await TripSchedule.findOne({
+      'assistant.userId': assistantId,
+      serviceDate: { $gte: start, $lte: end },
+      status: { $ne: 'CANCELLED' },
+    }).sort({ departureTime: 1 }).lean();
+
+    if (!directTripAssignment) return null;
+    return {
+      shiftId: null,
+      assignment: directTripAssignment,
+      shift: null,
+    };
+  }
   return { shiftId: assignment.shiftId?._id || assignment.shiftId, assignment, shift: assignment.shiftId };
 };
 
@@ -173,59 +213,65 @@ const calculateFare = (route, passengerType, submittedAmount, passengerQuantity)
   };
 };
 
-const transactionFilter = ({ assistantId, shiftId, routeId, date }) => {
+const walkInRevenueFilter = ({ assistantId, shiftId, routeId, date }) => {
+  const { start, end } = todayRange(date || new Date());
   const filter = {
     busAssistantId: assistantId,
-    status: { $in: COMPLETED_TRANSACTION_STATUSES },
+    status: 'COMPLETED',
+    issuedAt: { $gte: start, $lte: end },
   };
   if (shiftId) filter.shiftId = toObjectId(shiftId);
   if (routeId) filter.routeId = toObjectId(routeId);
-  if (date) {
-    const { start, end } = todayRange(date);
-    filter.completedAt = { $gte: start, $lte: end };
-  }
   return filter;
 };
 
 const buildRevenue = async ({ assistantId, shiftId, routeId, date, limit = 10 }) => {
-  const transactions = await Transaction.find(transactionFilter({ assistantId, shiftId, routeId, date }))
-    .sort({ completedAt: -1 })
+  // The sales-history screen is the trusted source for sold walk-in tickets.
+  // Aggregate the same completed WalkInTicket rows here so revenue cannot drift
+  // when a payment provider updates the ticket before/after its transaction.
+  const tickets = await WalkInTicket.find(walkInRevenueFilter({ assistantId, shiftId, routeId, date }))
+    .populate('transactionId', 'transactionCode paymentMethod finalAmount amount discountAmount status completedAt')
+    .sort({ issuedAt: -1 })
     .lean();
+  const boardingDateFilter = todayRange(date || new Date());
   const boardingCount = await BoardingRecord.countDocuments({
     busAssistantId: assistantId,
     validationStatus: 'VALIDATED',
     ...(shiftId ? { shiftId } : {}),
     ...(routeId ? { routeId } : {}),
+    boardedAt: { $gte: boardingDateFilter.start, $lte: boardingDateFilter.end },
   });
 
   const breakdown = new Map();
   const methodBreakdown = new Map();
-  transactions.forEach((item) => {
+  tickets.forEach((item) => {
+    const transaction = item.transactionId || {};
     const ticketType = item.ticketType || 'WALK_IN';
+    const amount = number(item.collectedAmount ?? item.totalAmount);
+    const paymentMethod = ['BANK_TRANSFER', 'QR'].includes(item.paymentMethod) ? 'QR' : item.paymentMethod || transaction.paymentMethod || 'CASH';
     const byType = breakdown.get(ticketType) || { ticketType, tickets: 0, revenue: 0, discountAmount: 0 };
     byType.tickets += 1;
-    byType.revenue += number(item.finalAmount || item.amount);
-    byType.discountAmount += number(item.discountAmount);
+    byType.revenue += amount;
+    byType.discountAmount += number(transaction.discountAmount);
     breakdown.set(ticketType, byType);
 
-    const method = item.paymentMethod || 'CASH';
-    const byMethod = methodBreakdown.get(method) || { paymentMethod: method, transactions: 0, amount: 0 };
+    const byMethod = methodBreakdown.get(paymentMethod) || { paymentMethod, transactions: 0, amount: 0 };
     byMethod.transactions += 1;
-    byMethod.amount += number(item.finalAmount || item.amount);
-    methodBreakdown.set(method, byMethod);
+    byMethod.amount += amount;
+    methodBreakdown.set(paymentMethod, byMethod);
   });
 
-  const totalRevenue = transactions.reduce((total, item) => total + number(item.finalAmount || item.amount), 0);
-  const cashCollected = transactions
+  const totalRevenue = tickets.reduce((total, item) => total + number(item.collectedAmount ?? item.totalAmount), 0);
+  const cashCollected = tickets
     .filter((item) => item.paymentMethod === 'CASH')
-    .reduce((total, item) => total + number(item.finalAmount || item.amount), 0);
-  const ePaymentAmount = transactions
-    .filter((item) => E_PAYMENT_METHODS.includes(item.paymentMethod))
-    .reduce((total, item) => total + number(item.finalAmount || item.amount), 0);
-  const discountAmount = transactions.reduce((total, item) => total + number(item.discountAmount), 0);
+    .reduce((total, item) => total + number(item.collectedAmount ?? item.totalAmount), 0);
+  const ePaymentAmount = tickets
+    .filter((item) => ['BANK_TRANSFER', 'QR', 'E_WALLET', 'WALLET', 'CARD'].includes(item.paymentMethod))
+    .reduce((total, item) => total + number(item.collectedAmount ?? item.totalAmount), 0);
+  const discountAmount = tickets.reduce((total, item) => total + number(item.transactionId?.discountAmount), 0);
 
   return {
-    totalTicketsSold: transactions.length,
+    totalTicketsSold: tickets.length,
     totalRevenue,
     cashCollected,
     ePaymentAmount,
@@ -233,14 +279,14 @@ const buildRevenue = async ({ assistantId, shiftId, routeId, date, limit = 10 })
     validatedETickets: boardingCount,
     revenueBreakdown: [...breakdown.values()],
     paymentMethodBreakdown: [...methodBreakdown.values()],
-    recentTransactions: transactions.slice(0, limit).map((item) => ({
-      _id: item._id,
-      transactionCode: item.transactionCode,
-      ticketType: item.ticketType,
-      paymentMethod: item.paymentMethod,
-      amount: number(item.finalAmount || item.amount),
+    recentTransactions: tickets.slice(0, limit).map((item) => ({
+      _id: item.transactionId?._id || item._id,
+      transactionCode: item.transactionId?.transactionCode || item.ticketCode,
+      ticketType: item.ticketType || 'WALK_IN',
+      paymentMethod: ['BANK_TRANSFER', 'QR'].includes(item.paymentMethod) ? 'QR' : item.paymentMethod || 'CASH',
+      amount: number(item.collectedAmount ?? item.totalAmount),
       status: item.status,
-      completedAt: item.completedAt,
+      completedAt: item.transactionId?.completedAt || item.updatedAt || item.issuedAt,
     })),
   };
 };
@@ -249,10 +295,22 @@ export class BusAssistantService {
   static async validateETicket(payload, actor, req) {
     const trip = await assertActiveTrip(payload.tripId);
     const route = await findRoute(trip.routeId);
-    const shiftContext = await assertAssignedShift({
+    let shiftContext = await findAssistantShift({
       assistantId: actor.userId,
       tripId: payload.tripId,
+      date: trip.serviceDate,
     });
+
+    // TripSchedule là nguồn phân công chính của màn vận hành. Một chuyến có
+    // đúng assistant.userId phải được phép kiểm tra vé kể cả khi dữ liệu ca cũ
+    // chưa được đồng bộ sang AssistantShiftAssignment/ShiftAssignment.
+    if (!shiftContext && isSameId(trip.assistant?.userId, actor.userId)) {
+      shiftContext = { shiftId: null, assignment: trip, shift: null };
+    }
+
+    if (!shiftContext) {
+      throw new CustomError('Trip is not assigned to this bus assistant', HTTP_STATUS.FORBIDDEN);
+    }
 
     const ticket = await Ticket.findOne({
       $or: [
@@ -336,14 +394,33 @@ export class BusAssistantService {
       throw new CustomError('Trip does not belong to this route', HTTP_STATUS.BAD_REQUEST);
     }
 
-    const shiftContext = await assertAssignedShift({
+    let shiftContext = await findAssistantShift({
       assistantId: actor.userId,
       tripId: payload.tripId,
+      date: trip.serviceDate,
     });
-    const fare = calculateFare(route, payload.passengerType, payload.amount, passengerQuantity);
 
+    if (!shiftContext && isSameId(trip.assistant?.userId, actor.userId)) {
+      shiftContext = { shiftId: null, assignment: trip, shift: null };
+    }
+
+    if (!shiftContext) {
+      throw new CustomError('Trip is not assigned to this bus assistant', HTTP_STATUS.FORBIDDEN);
+    }
+    const fare = calculateFare(route, payload.passengerType, payload.amount, passengerQuantity);
+    const cashReceived = number(payload.cashReceived);
+    if (payload.paymentMethod === 'CASH' && cashReceived < fare.totalAmount) {
+      throw new CustomError('Cash received is less than the ticket total', HTTP_STATUS.BAD_REQUEST);
+    }
+    const changeAmount = payload.paymentMethod === 'CASH' ? cashReceived - fare.totalAmount : 0;
+
+    const ticketCode = createCode('WI');
+    const isBankTransfer = payload.paymentMethod === 'BANK_TRANSFER';
+    // Validate PayOS before creating pending ticket/transaction records. This also
+    // prevents crypto.createHmac from receiving an undefined checksum key.
+    if (isBankTransfer) PayOSService.assertConfigured();
     const ticket = await WalkInTicket.create({
-      ticketCode: createCode('WI'),
+      ticketCode,
       busAssistantId: actor.userId,
       routeId: payload.routeId,
       tripId: payload.tripId,
@@ -351,9 +428,9 @@ export class BusAssistantService {
       passengerCount: passengerQuantity,
       farePerPassenger: fare.farePerPassenger,
       totalAmount: fare.totalAmount,
-      collectedAmount: fare.totalAmount,
+      collectedAmount: isBankTransfer ? 0 : fare.totalAmount,
       paymentMethod: payload.paymentMethod,
-      status: 'COMPLETED',
+      status: isBankTransfer ? 'PENDING' : 'COMPLETED',
       notes: `fromStopId=${payload.fromStopId}; toStopId=${payload.toStopId}; passengerType=${payload.passengerType}; ticketType=${payload.ticketType}; nonRefundable=true`,
     });
 
@@ -365,18 +442,36 @@ export class BusAssistantService {
       tripId: payload.tripId,
       shiftId: shiftContext.shiftId || null,
       ticketType: 'WALK_IN',
-      paymentMethod: payload.paymentMethod,
+      paymentMethod: isBankTransfer ? 'QR' : 'CASH',
       amount: fare.totalAmount,
       discountAmount: fare.discountAmount,
       finalAmount: fare.totalAmount,
-      status: 'COMPLETED',
-      completedAt: new Date(),
+      status: isBankTransfer ? 'PENDING' : 'COMPLETED',
+      completedAt: isBankTransfer ? null : new Date(),
       source: 'BUS_ASSISTANT',
       nonRefundable: true,
+      cashReceived: isBankTransfer ? null : cashReceived,
+      changeAmount: isBankTransfer ? 0 : changeAmount,
     });
 
     ticket.transactionId = transaction._id;
     await ticket.save();
+
+    let payment = null;
+    let qrCodeImage = null;
+    if (isBankTransfer) {
+      const orderCode = Number(String(Date.now()).slice(-10));
+      payment = await PayOSService.createPaymentLink({
+        orderCode,
+        amount: Math.round(fare.totalAmount),
+        description: `BusDN ${ticketCode}`,
+        returnUrl: `${config.frontend.url}/bus-assistant/walkin-ticket?payment=success`,
+        cancelUrl: `${config.frontend.url}/bus-assistant/walkin-ticket?payment=cancelled`,
+      });
+      qrCodeImage = payment.qrCode ? await QRCode.toDataURL(payment.qrCode, { width: 360, margin: 2 }) : null;
+      transaction.set({ orderCode, checkoutUrl: payment.checkoutUrl, paymentQrCode: payment.qrCode });
+      await transaction.save();
+    }
 
     await createAuditLog({
       req,
@@ -393,19 +488,139 @@ export class BusAssistantService {
       ticketData: ticket.toObject(),
       transactionData: transaction.toObject(),
       totalAmount: fare.totalAmount,
+      qrCodeImage,
+      checkoutUrl: payment?.checkoutUrl || null,
+      requiresPaymentConfirmation: isBankTransfer,
+      cashReceived: isBankTransfer ? null : cashReceived,
+      changeAmount: isBankTransfer ? 0 : changeAmount,
       message: 'Walk-in ticket created successfully',
     };
   }
 
+  static async confirmWalkInPayment(ticketId, actor, req) {
+    if (!mongoose.isValidObjectId(ticketId)) throw new CustomError('Invalid walk-in ticket identifier', HTTP_STATUS.BAD_REQUEST);
+    const ticket = await WalkInTicket.findOne({ _id: ticketId, busAssistantId: actor.userId });
+    if (!ticket) throw new CustomError('Walk-in ticket not found', HTTP_STATUS.NOT_FOUND);
+    if (ticket.status === 'COMPLETED') {
+      return { ticketData: ticket.toObject(), message: 'Walk-in ticket payment was already confirmed' };
+    }
+    const transaction = await Transaction.findOne({ walkInTicketId: ticket._id, busAssistantId: actor.userId });
+    if (!transaction?.orderCode) {
+      throw new CustomError('Payment order was not found', HTTP_STATUS.NOT_FOUND);
+    }
+    const paymentInfo = await PayOSService.getPaymentLinkInformation(transaction.orderCode);
+    if (String(paymentInfo?.status || '').toUpperCase() !== 'PAID') {
+      throw new CustomError('Bank transfer has not been completed', HTTP_STATUS.CONFLICT);
+    }
+    ticket.status = 'COMPLETED';
+    ticket.collectedAmount = ticket.totalAmount;
+    await ticket.save();
+    if (transaction) {
+      transaction.status = 'COMPLETED';
+      transaction.completedAt = new Date();
+      await transaction.save();
+    }
+    await createAuditLog({
+      req,
+      user: actor,
+      action: 'CONFIRM_WALKIN_PAYMENT',
+      module: 'BUS_ASSISTANT',
+      description: 'Bus assistant confirmed a walk-in bank transfer payment.',
+      resourceType: 'WalkInTicket',
+      resourceId: ticket._id,
+      metadata: { transactionId: transaction?._id, totalAmount: ticket.totalAmount },
+    });
+    return { ticketData: ticket.toObject(), transactionData: transaction?.toObject(), message: 'Walk-in payment confirmed successfully' };
+  }
+
+  static async getWalkInTicketHistory(query, actor) {
+    const selectedDate = query.date ? new Date(`${query.date}T00:00:00`) : new Date();
+    if (Number.isNaN(selectedDate.getTime())) {
+      throw new CustomError('Invalid history date', HTTP_STATUS.BAD_REQUEST);
+    }
+    const { start, end } = todayRange(selectedDate);
+    const tickets = await WalkInTicket.find({
+      busAssistantId: actor.userId,
+      issuedAt: { $gte: start, $lte: end },
+    })
+      .populate('routeId', 'routeCode routeName name')
+      .populate('transactionId', 'checkoutUrl paymentQrCode orderCode status')
+      .sort({ issuedAt: -1 })
+      .limit(200)
+      .lean();
+
+    return {
+      date: start.toISOString().slice(0, 10),
+      count: tickets.length,
+      totalRevenue: tickets.filter((ticket) => ticket.status === 'COMPLETED').reduce((sum, ticket) => sum + number(ticket.collectedAmount), 0),
+      tickets: tickets.map((ticket) => ({
+        _id: ticket._id,
+        ticketCode: ticket.ticketCode,
+        issuedAt: ticket.issuedAt,
+        routeCode: ticket.routeId?.routeCode || '',
+        routeName: ticket.routeId?.routeName || ticket.routeId?.name || '',
+        tripId: ticket.tripId,
+        passengerCount: ticket.passengerCount,
+        paymentMethod: ticket.paymentMethod,
+        totalAmount: ticket.totalAmount,
+        collectedAmount: ticket.collectedAmount,
+        status: ticket.status,
+        canResumePayment: ticket.status === 'PENDING' && ticket.paymentMethod === 'BANK_TRANSFER' && Boolean(ticket.transactionId?.checkoutUrl),
+      })),
+    };
+  }
+
+  static async resumeWalkInPayment(ticketId, actor) {
+    if (!mongoose.isValidObjectId(ticketId)) throw new CustomError('Invalid walk-in ticket identifier', HTTP_STATUS.BAD_REQUEST);
+    const ticket = await WalkInTicket.findOne({ _id: ticketId, busAssistantId: actor.userId });
+    if (!ticket) throw new CustomError('Walk-in ticket not found', HTTP_STATUS.NOT_FOUND);
+    const transaction = await Transaction.findOne({ walkInTicketId: ticket._id, busAssistantId: actor.userId });
+    if (!transaction?.orderCode || !transaction?.checkoutUrl || !transaction?.paymentQrCode) {
+      throw new CustomError('Payment QR is no longer available', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const paymentInfo = await PayOSService.getPaymentLinkInformation(transaction.orderCode);
+    if (String(paymentInfo?.status || '').toUpperCase() === 'PAID') {
+      ticket.status = 'COMPLETED';
+      ticket.collectedAmount = ticket.totalAmount;
+      transaction.status = 'COMPLETED';
+      transaction.completedAt = new Date();
+      await Promise.all([ticket.save(), transaction.save()]);
+      return {
+        ticketData: ticket.toObject(),
+        totalAmount: ticket.totalAmount,
+        requiresPaymentConfirmation: false,
+        paymentCompleted: true,
+        message: 'Walk-in payment completed successfully',
+      };
+    }
+
+    return {
+      ticketData: ticket.toObject(),
+      totalAmount: ticket.totalAmount,
+      qrCodeImage: await QRCode.toDataURL(transaction.paymentQrCode, { width: 360, margin: 2 }),
+      checkoutUrl: transaction.checkoutUrl,
+      requiresPaymentConfirmation: true,
+      resumed: true,
+      message: 'Walk-in payment resumed successfully',
+    };
+  }
+
   static async getShiftRevenue(query, actor, req) {
-    const shiftContext = await assertAssignedShift({
+    // Revenue belongs to the authenticated assistant and can be safely queried
+    // by date. Do not reject the request when legacy shift records are missing:
+    // current assignments are stored on TripSchedule and completed transactions
+    // remain valid even after the assigned trip/shift has ended.
+    const shiftContext = await findAssistantShift({
       assistantId: actor.userId,
       shiftId: query.shiftId,
       date: query.date,
     });
     const revenue = await buildRevenue({
       assistantId: actor.userId,
-      shiftId: shiftContext.shiftId,
+      // Match sales history: only apply a shift filter when the caller selected
+      // one explicitly. Legacy/current assignments may store a null shiftId.
+      shiftId: query.shiftId || null,
       routeId: query.routeId,
       date: query.date,
     });
@@ -416,16 +631,16 @@ export class BusAssistantService {
       action: 'VIEW_SHIFT_REVENUE',
       module: 'BUS_ASSISTANT',
       description: 'Bus assistant viewed shift revenue.',
-      metadata: { shiftId: shiftContext.shiftId, routeId: query.routeId || null, date: query.date || null },
+      metadata: { shiftId: query.shiftId || shiftContext?.shiftId || null, routeId: query.routeId || null, date: query.date || null },
     });
 
     return {
       shiftInfo: {
-        _id: shiftContext.shiftId,
-        shiftCode: shiftContext.shift?.shiftCode || shiftContext.assignment?.shiftCode || '',
-        shiftName: shiftContext.shift?.shiftName || '',
-        status: shiftContext.shift?.status || shiftContext.assignment?.status || shiftContext.assignment?.shiftStatus || '',
-        workDate: shiftContext.shift?.workDate || shiftContext.assignment?.workDate || null,
+        _id: query.shiftId || shiftContext?.shiftId || null,
+        shiftCode: shiftContext?.shift?.shiftCode || shiftContext?.assignment?.shiftCode || '',
+        shiftName: shiftContext?.shift?.shiftName || '',
+        status: shiftContext?.shift?.status || shiftContext?.assignment?.status || shiftContext?.assignment?.shiftStatus || '',
+        workDate: shiftContext?.shift?.workDate || shiftContext?.assignment?.workDate || query.date || null,
       },
       ...revenue,
     };

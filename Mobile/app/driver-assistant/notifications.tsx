@@ -7,6 +7,7 @@ import scheduleOperationsApi from '@/api/scheduleOperations.api';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { Screen } from '@/components/Screen';
 import { colors } from '@/constants/colors';
+import { useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { OperationNotification } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
@@ -21,6 +22,7 @@ const priorityColor = (priority?: string) => {
 };
 
 export default function DriverNotificationsScreen() {
+  const { t } = useDriverI18n();
   const user = useAuthStore((state) => state.user);
   const [notifications, setNotifications] = useState<OperationNotification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -32,11 +34,11 @@ export default function DriverNotificationsScreen() {
       const payload = await scheduleOperationsApi.getOperationNotifications(getWeekRange());
       setNotifications(payload.notifications || []);
     } catch (error) {
-      Alert.alert('Unable to load notifications', getErrorMessage(error, 'Unable to load operation notifications.'));
+      Alert.alert(t.notifications.loadErrorTitle, getErrorMessage(error, t.notifications.loadErrorFallback));
     } finally {
       refresh ? setIsRefreshing(false) : setIsLoading(false);
     }
-  }, []);
+  }, [t.notifications.loadErrorFallback, t.notifications.loadErrorTitle]);
 
   useEffect(() => {
     void loadNotifications();
@@ -51,15 +53,15 @@ export default function DriverNotificationsScreen() {
     <View style={styles.screenShell}>
       <Screen>
         <View style={styles.header}>
-          <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
+          <Pressable accessibilityLabel={t.common.back} hitSlop={10} onPress={() => goBackOrReplace('/driver-assistant')}>
             <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
           </Pressable>
           <View style={styles.headerText}>
-            <Text style={styles.kicker}>SCHEDULE & ASSIGNMENT</Text>
-            <Text style={styles.title}>Driver Notifications</Text>
+            <Text style={styles.kicker}>{t.schedule.kicker}</Text>
+            <Text style={styles.title}>{t.notifications.title}</Text>
           </View>
           <Pressable
-            accessibilityLabel="Refresh notifications"
+            accessibilityLabel={t.common.refresh}
             disabled={isRefreshing}
             hitSlop={8}
             onPress={() => void loadNotifications(true)}
@@ -75,7 +77,7 @@ export default function DriverNotificationsScreen() {
 
         <View style={styles.summaryCard}>
           <View>
-            <Text style={styles.summaryLabel}>Unread alerts</Text>
+            <Text style={styles.summaryLabel}>{t.notifications.unread}</Text>
             <Text style={styles.summaryValue}>{unreadCount}</Text>
           </View>
           <MaterialCommunityIcons color="rgba(43,164,113,0.14)" name="bell-badge-outline" size={64} />
@@ -84,12 +86,12 @@ export default function DriverNotificationsScreen() {
         {isLoading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.primary} />
-            <Text style={styles.loadingText}>Loading operation notifications...</Text>
+            <Text style={styles.loadingText}>{t.notifications.loading}</Text>
           </View>
         ) : (
           <View style={styles.notificationList}>
             {notifications.length === 0 ? (
-              <Text style={styles.emptyText}>No operation notifications in this period.</Text>
+              <Text style={styles.emptyText}>{t.notifications.emptyRange}</Text>
             ) : notifications.map((notification) => {
               const tone = priorityColor(notification.priority);
               return (
@@ -97,15 +99,10 @@ export default function DriverNotificationsScreen() {
                   <View style={[styles.priorityRail, { backgroundColor: tone }]} />
                   <View style={styles.notificationBody}>
                     <View style={styles.notificationHeader}>
-                      <View style={styles.categoryPill}>
-                        <Text style={[styles.categoryText, { color: tone }]}>
-                          {(notification.category || 'Operation').toUpperCase()}
-                        </Text>
-                      </View>
                       {!notification.isRead ? <View style={styles.unreadDot} /> : null}
                     </View>
-                    <Text style={styles.notificationTitle}>{notification.title || 'Operation notification'}</Text>
-                    <Text style={styles.notificationMessage}>{notification.message || 'No message provided.'}</Text>
+                    <Text style={styles.notificationTitle}>{notification.title || t.notifications.fallbackTitle}</Text>
+                    <Text style={styles.notificationMessage}>{notification.message || t.notifications.fallbackMessage}</Text>
                     <View style={styles.metaRow}>
                       <MaterialCommunityIcons color={colors.muted} name="clock-outline" size={15} />
                       <Text style={styles.metaText}>
@@ -119,7 +116,7 @@ export default function DriverNotificationsScreen() {
           </View>
         )}
       </Screen>
-      <RoleBottomNav active="home" role={user?.role} />
+      <RoleBottomNav active="notifications" role={user?.role} />
     </View>
   );
 }
@@ -142,8 +139,6 @@ const styles = StyleSheet.create({
   priorityRail: { width: 5 },
   notificationBody: { flex: 1, gap: 8, padding: 15 },
   notificationHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  categoryPill: { alignSelf: 'flex-start', borderRadius: 14, backgroundColor: colors.surfaceHigh, paddingHorizontal: 9, paddingVertical: 4 },
-  categoryText: { fontSize: 10, fontWeight: '900' },
   unreadDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },
   notificationTitle: { color: colors.text, fontSize: 16, fontWeight: '900' },
   notificationMessage: { color: colors.muted, fontSize: 13, lineHeight: 19, fontWeight: '600' },
