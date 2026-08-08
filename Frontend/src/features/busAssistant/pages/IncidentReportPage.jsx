@@ -59,6 +59,15 @@ const SEVERITIES = [
   { value: 'CRITICAL', label: 'Khẩn cấp' },
 ];
 
+const FOUND_ITEM_CATEGORIES = [
+  { value: 'PERSONAL_BELONGINGS', label: 'Vat dung ca nhan' },
+  { value: 'ELECTRONICS', label: 'Thiet bi dien tu' },
+  { value: 'WALLET_DOCUMENTS', label: 'Vi / Giay to' },
+  { value: 'CLOTHING', label: 'Quan ao' },
+  { value: 'BAGS_LUGGAGE', label: 'Tui xach / Hanh ly' },
+  { value: 'OTHER_ITEMS', label: 'Vat dung khac' },
+];
+
 const initialForm = {
   type: 'PASSENGER_VIOLATION',
   severity: 'MEDIUM',
@@ -69,9 +78,15 @@ const initialForm = {
   conflictCategory: 'ARGUMENT',
   partiesInvolved: '',
   actionTaken: '',
+  itemCategory: 'PERSONAL_BELONGINGS',
   itemName: '',
   itemDescription: '',
+  color: '',
+  brand: '',
+  identifyingDetails: '',
   foundLocation: '',
+  storageLocation: '',
+  storageReference: '',
   handedTo: '',
   evidenceFiles: [],
 };
@@ -231,6 +246,9 @@ const IncidentReportPage = () => {
     }
     if (form.type === 'FOUND_ITEM' && form.foundLocation.trim().length < 3) {
       return 'Vui lòng nhập vị trí tìm thấy đồ vật.';
+    }
+    if (form.type === 'FOUND_ITEM' && form.storageLocation.trim().length < 3) {
+      return 'Vui long nhap noi luu giu do vat.';
     }
     return '';
   };
@@ -452,6 +470,12 @@ const IncidentReportPage = () => {
             {form.type === 'FOUND_ITEM' ? (
               <div className="grid gap-4 lg:grid-cols-3">
                 <label>
+                  <span className={`mb-1 block text-xs font-bold uppercase ${mutedText}`}>Loại đồ vật</span>
+                  <select className={inputClass} value={form.itemCategory} onChange={updateForm('itemCategory')}>
+                    {FOUND_ITEM_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}
+                  </select>
+                </label>
+                <label>
                   <span className={`mb-1 block text-xs font-bold uppercase ${mutedText}`}>Tên đồ vật</span>
                   <input className={inputClass} value={form.itemName} onChange={updateForm('itemName')} placeholder="Ví dụ: ví da màu đen" />
                 </label>
@@ -463,8 +487,28 @@ const IncidentReportPage = () => {
                   }} placeholder="Ví dụ: ghế số 12" />
                 </label>
                 <label>
+                  <span className={`mb-1 block text-xs font-bold uppercase ${mutedText}`}>Màu sắc</span>
+                  <input className={inputClass} value={form.color} onChange={updateForm('color')} placeholder="Ví dụ: đen" />
+                </label>
+                <label>
+                  <span className={`mb-1 block text-xs font-bold uppercase ${mutedText}`}>Thương hiệu</span>
+                  <input className={inputClass} value={form.brand} onChange={updateForm('brand')} placeholder="Ví dụ: Nike, Apple" />
+                </label>
+                <label>
+                  <span className={`mb-1 block text-xs font-bold uppercase ${mutedText}`}>Nơi lưu giữ</span>
+                  <input className={inputClass} value={form.storageLocation} onChange={updateForm('storageLocation')} placeholder="Ví dụ: quầy điều hành bến" />
+                </label>
+                <label>
+                  <span className={`mb-1 block text-xs font-bold uppercase ${mutedText}`}>Mã lưu giữ</span>
+                  <input className={inputClass} value={form.storageReference} onChange={updateForm('storageReference')} placeholder="Ví dụ: LF-B12-008" />
+                </label>
+                <label>
                   <span className={`mb-1 block text-xs font-bold uppercase ${mutedText}`}>Bàn giao cho</span>
                   <input className={inputClass} value={form.handedTo} onChange={updateForm('handedTo')} placeholder="Ví dụ: quầy điều hành bến" />
+                </label>
+                <label className="lg:col-span-3">
+                  <span className={`mb-1 block text-xs font-bold uppercase ${mutedText}`}>Dấu hiệu riêng</span>
+                  <input className={inputClass} value={form.identifyingDetails} onChange={updateForm('identifyingDetails')} placeholder="Ví dụ: có ảnh thẻ, móc khóa, vết xước đặc biệt" />
                 </label>
               </div>
             ) : null}

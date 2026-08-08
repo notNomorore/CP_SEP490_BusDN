@@ -95,7 +95,7 @@ function RouteCard({
         </View>
         <View style={styles.cardTitleWrap}>
           <Text numberOfLines={2} style={styles.cardTitle}>{route.name || 'Unnamed route'}</Text>
-          <Text style={styles.cardMeta}>{route.origin || 'Unknown'} {'->'} {route.destination || 'Unknown'}</Text>
+          <Text style={styles.cardMeta}>{route.origin || 'Chưa rõ'} {'->'} {route.destination || 'Chưa rõ'}</Text>
         </View>
         <Pressable
           disabled={disabled}
@@ -143,7 +143,7 @@ function StopCard({
         <View style={styles.cardTitleWrap}>
           <Text style={styles.cardTitle}>{stopName}</Text>
           <Text style={styles.cardMeta}>
-            {routeNumber ? `Route ${routeNumber}` : 'Saved stop'}
+            {routeNumber ? `Tuyến ${routeNumber}` : 'Trạm đã lưu'}
             {'distanceKm' in stop && typeof stop.distanceKm === 'number' ? ` | ${stop.distanceKm} km` : ''}
           </Text>
         </View>
@@ -525,7 +525,7 @@ export default function RouteSearchScreen() {
           <View style={styles.header}>
             <View>
               <Text style={styles.kicker}>BusDN Mobile</Text>
-              <Text style={styles.title}>Khám phá tuyến xe</Text>
+              <Text style={styles.title}>Tìm tuyến nâng cao</Text>
             </View>
             <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/home')} style={styles.iconButton}>
               <MaterialCommunityIcons color={colors.primary} name="close" size={24} />
@@ -534,11 +534,11 @@ export default function RouteSearchScreen() {
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
             {[
-              ['search', 'Search'],
-              ['nearby', 'Nearby'],
-              ['best', 'Best Route'],
-              ['saved', 'Saved'],
-              ['notifications', 'Alerts'],
+              ['search', 'Tìm kiếm'],
+              ['nearby', 'Gần đây'],
+              ['best', 'Tuyến tốt nhất'],
+              ['saved', 'Đã lưu'],
+              ['notifications', 'Cảnh báo'],
             ].map(([key, label]) => (
               <Pressable key={key} onPress={() => setTab(key as TabKey)} style={[styles.tab, tab === key && styles.tabActive]}>
                 <Text style={[styles.tabText, tab === key && styles.tabTextActive]}>{label}</Text>
@@ -554,7 +554,7 @@ export default function RouteSearchScreen() {
                 <MaterialCommunityIcons color={colors.secondary} name="magnify" size={21} />
                 <TextInput
                   onChangeText={setKeyword}
-                  placeholder="Route number, route name, stop, destination"
+                  placeholder="Số tuyến, tên tuyến, trạm, điểm đến"
                   placeholderTextColor="#64736c"
                   style={styles.searchInput}
                   value={keyword}
@@ -562,10 +562,10 @@ export default function RouteSearchScreen() {
               </View>
               <Pressable disabled={loading} onPress={useCurrentLocation} style={styles.primaryButton}>
                 <MaterialCommunityIcons color={colors.white} name="crosshairs-gps" size={19} />
-                <Text style={styles.primaryButtonText}>{loading ? 'Loading...' : 'Use current location'}</Text>
+                <Text style={styles.primaryButtonText}>{loading ? 'Đang tải...' : 'Dùng vị trí hiện tại'}</Text>
               </Pressable>
               {loading ? <ActivityIndicator color={colors.primary} /> : null}
-              {!loading && keyword.trim() && routes.length === 0 ? <EmptyState message="No matching routes found." /> : null}
+              {!loading && keyword.trim() && routes.length === 0 ? <EmptyState message="Không tìm thấy tuyến phù hợp." /> : null}
               {routes.map((route) => (
                 <RouteCard
                   disabled={saving}
@@ -583,10 +583,10 @@ export default function RouteSearchScreen() {
             <View style={styles.section}>
               <Pressable disabled={loading} onPress={useCurrentLocation} style={styles.primaryButton}>
                 <MaterialCommunityIcons color={colors.white} name="map-marker-radius-outline" size={19} />
-                <Text style={styles.primaryButtonText}>{loading ? 'Checking GPS...' : 'Refresh nearby stops'}</Text>
+                <Text style={styles.primaryButtonText}>{loading ? 'Đang kiểm tra GPS...' : 'Làm mới trạm gần đây'}</Text>
               </Pressable>
               {loading ? <ActivityIndicator color={colors.primary} /> : null}
-              {!loading && nearbyStops.length === 0 ? <EmptyState message="Use current location to find nearby stops and suggested routes." /> : null}
+              {!loading && nearbyStops.length === 0 ? <EmptyState message="Dùng vị trí hiện tại để tìm trạm gần bạn và tuyến gợi ý." /> : null}
               {nearbyStops.map((stop) => (
                 <StopCard
                   favorite={stop.route ? isFavoriteStop(stop.route, stop) : false}
@@ -601,23 +601,28 @@ export default function RouteSearchScreen() {
 
           {tab === 'best' ? (
             <View style={styles.section}>
-              <TextInput onChangeText={setBestFrom} placeholder="Origin stop or address" placeholderTextColor="#64736c" style={styles.input} value={bestFrom} />
-              <TextInput onChangeText={setBestTo} placeholder="Destination stop or address" placeholderTextColor="#64736c" style={styles.input} value={bestTo} />
+              <TextInput onChangeText={setBestFrom} placeholder="Trạm hoặc địa chỉ điểm đi" placeholderTextColor="#64736c" style={styles.input} value={bestFrom} />
+              <TextInput onChangeText={setBestTo} placeholder="Trạm hoặc địa chỉ điểm đến" placeholderTextColor="#64736c" style={styles.input} value={bestTo} />
               <View style={styles.rowWrap}>
-                {['fastest', 'shortest', 'lowest-cost', 'least-traffic'].map((item) => (
-                  <Pressable key={item} onPress={() => setPreference(item)} style={[styles.choice, preference === item && styles.choiceActive]}>
-                    <Text style={[styles.choiceText, preference === item && styles.choiceTextActive]}>{item}</Text>
+                {[
+                  ['fastest', 'Nhanh nhất'],
+                  ['shortest', 'Ngắn nhất'],
+                  ['lowest-cost', 'Rẻ nhất'],
+                  ['least-traffic', 'Ít kẹt xe'],
+                ].map(([value, label]) => (
+                  <Pressable key={value} onPress={() => setPreference(value)} style={[styles.choice, preference === value && styles.choiceActive]}>
+                    <Text style={[styles.choiceText, preference === value && styles.choiceTextActive]}>{label}</Text>
                   </Pressable>
                 ))}
               </View>
               <Pressable disabled={loading} onPress={findBestRoute} style={styles.primaryButton}>
                 <MaterialCommunityIcons color={colors.white} name="routes" size={19} />
-                <Text style={styles.primaryButtonText}>{loading ? 'Calculating...' : 'Find best route'}</Text>
+                <Text style={styles.primaryButtonText}>{loading ? 'Đang tính toán...' : 'Tìm tuyến tốt nhất'}</Text>
               </Pressable>
-              {!loading && suggestions.length === 0 ? <EmptyState message="No route option selected yet." /> : null}
+              {!loading && suggestions.length === 0 ? <EmptyState message="Chưa có phương án tuyến nào." /> : null}
               {suggestions.map((item, index) => (
                 <Pressable key={`${item.route?.id}-${index}`} onPress={() => void openRoute(item.route)} style={styles.card}>
-                  <Text style={styles.cardTitle}>{item.isRecommended || index === 0 ? 'Recommended: ' : ''}{item.route.routeNumber} - {item.route.name}</Text>
+                  <Text style={styles.cardTitle}>{item.isRecommended || index === 0 ? 'Đề xuất: ' : ''}{item.route.routeNumber} - {item.route.name}</Text>
                   <Text style={styles.cardMeta}>{item.startStop?.name || item.route.origin} {'->'} {item.endStop?.name || item.route.destination}</Text>
                   <View style={styles.rowWrap}>
                     <Text style={styles.pill}>{item.estimatedDurationMinutes || item.route.estimatedDurationMinutes || '?'} min</Text>
@@ -631,8 +636,8 @@ export default function RouteSearchScreen() {
 
           {tab === 'saved' ? (
             <View style={styles.section}>
-              {!canUsePassengerFeatures ? <EmptyState message="Login as passenger to view favorite routes and stops." /> : null}
-              {canUsePassengerFeatures && favoriteRoutes.length === 0 && favoriteStops.length === 0 ? <EmptyState message="No saved routes or stops yet." /> : null}
+              {!canUsePassengerFeatures ? <EmptyState message="Vui lòng đăng nhập tài khoản hành khách để xem tuyến và trạm đã lưu." /> : null}
+              {canUsePassengerFeatures && favoriteRoutes.length === 0 && favoriteStops.length === 0 ? <EmptyState message="Bạn chưa lưu tuyến hoặc trạm nào." /> : null}
               {favoriteRoutes.map((item) => (
                 <Pressable
                   key={item.routeId || item.routeNumber}
@@ -640,7 +645,7 @@ export default function RouteSearchScreen() {
                   style={styles.card}
                 >
                   <Text style={styles.cardTitle}>{item.routeNumber}</Text>
-                  <Text style={styles.cardMeta}>{item.destination || 'Favorite route'}</Text>
+                  <Text style={styles.cardMeta}>{item.destination || 'Tuyến yêu thích'}</Text>
                 </Pressable>
               ))}
               {favoriteStops.map((item) => (
@@ -656,7 +661,7 @@ export default function RouteSearchScreen() {
 
           {tab === 'notifications' ? (
             <View style={styles.section}>
-              {!canUsePassengerFeatures ? <EmptyState message="Login as passenger to manage notifications." /> : (
+              {!canUsePassengerFeatures ? <EmptyState message="Vui lòng đăng nhập tài khoản hành khách để quản lý thông báo." /> : (
                 <>
                   <View style={styles.card}>
                     <View style={styles.cardHeader}>
@@ -672,7 +677,7 @@ export default function RouteSearchScreen() {
                     </View>
                   </View>
                   <Text style={styles.sectionTitle}>Danh sách thông báo</Text>
-                  {notifications.length === 0 ? <EmptyState message="No bus arrival, delay, or route change notifications found." /> : null}
+                  {notifications.length === 0 ? <EmptyState message="Chưa có thông báo xe đến, chậm chuyến hoặc thay đổi tuyến." /> : null}
                   {notifications.map((item) => (
                     <View key={item.id || item._id || item.title} style={styles.card}>
                       <Text style={styles.cardTitle}>{item.title}</Text>
@@ -707,10 +712,10 @@ export default function RouteSearchScreen() {
 
               <View style={styles.actionRow}>
                 <Pressable disabled={saving} onPress={() => void toggleFavoriteRoute(selectedRoute)} style={styles.secondaryButton}>
-                  <Text style={styles.secondaryButtonText}>{isFavoriteRoute(selectedRoute) ? 'Unsave route' : 'Save route'}</Text>
+                  <Text style={styles.secondaryButtonText}>{isFavoriteRoute(selectedRoute) ? 'Bỏ lưu tuyến' : 'Lưu tuyến'}</Text>
                 </Pressable>
                 <Pressable disabled={liveLoading} onPress={() => void refreshLive(selectedRoute)} style={styles.secondaryButton}>
-                  <Text style={styles.secondaryButtonText}>{liveLoading ? 'Refreshing...' : 'Refresh live'}</Text>
+                  <Text style={styles.secondaryButtonText}>{liveLoading ? 'Đang làm mới...' : 'Làm mới xe'}</Text>
                 </Pressable>
               </View>
 
@@ -727,7 +732,7 @@ export default function RouteSearchScreen() {
               </View>
 
               <Text style={styles.sectionTitle}>Điểm dừng và thông báo xe đến</Text>
-              {(selectedRoute.stops || []).length === 0 ? <EmptyState message="This route has no stop/path data yet." /> : null}
+              {(selectedRoute.stops || []).length === 0 ? <EmptyState message="Tuyến này chưa có dữ liệu trạm hoặc lộ trình." /> : null}
               {(selectedRoute.stops || []).map((stop) => {
                 const stopId = buildStopId(selectedRoute, stop);
                 const arrivalEnabled = arrivalSubs.some((item) => item.stopId === stopId);
@@ -739,7 +744,7 @@ export default function RouteSearchScreen() {
                     </View>
                     <View style={styles.cardTitleWrap}>
                       <Text style={styles.bodyStrong}>{stop.name || stop.stopName}</Text>
-                      <Text style={styles.cardMeta}>{eta?.estimatedArrivalTime || 'ETA not available'}</Text>
+                      <Text style={styles.cardMeta}>{eta?.estimatedArrivalTime || 'Chưa có giờ đến dự kiến'}</Text>
                     </View>
                     <Pressable disabled={saving} onPress={() => void toggleFavoriteStop(selectedRoute, stop)} hitSlop={8}>
                       <MaterialCommunityIcons color={isFavoriteStop(selectedRoute, stop) ? '#d59600' : colors.secondary} name="star-outline" size={20} />
@@ -752,14 +757,14 @@ export default function RouteSearchScreen() {
               })}
 
               <Text style={styles.sectionTitle}>Xe trực tuyến, giờ đến và tiến trình chuyến</Text>
-              {!liveData || liveData.buses.length === 0 ? <EmptyState message="No active buses right now." /> : null}
+              {!liveData || liveData.buses.length === 0 ? <EmptyState message="Hiện chưa có xe đang hoạt động." /> : null}
               {liveData?.buses.map((bus) => (
                 <View key={bus.busId} style={styles.card}>
                   <View style={styles.cardHeader}>
                     <MaterialCommunityIcons color={colors.accent} name="bus-clock" size={23} />
                     <View style={styles.cardTitleWrap}>
                       <Text style={styles.cardTitle}>{bus.busId}</Text>
-                      <Text style={styles.cardMeta}>{bus.status || 'Running'} | Next: {bus.nextStop || 'Unknown'} | ETA {bus.estimatedArrivalTime || 'N/A'}</Text>
+                      <Text style={styles.cardMeta}>{bus.status || 'Đang chạy'} | Trạm kế: {bus.nextStop || 'Chưa rõ'} | ETA {bus.estimatedArrivalTime || 'N/A'}</Text>
                     </View>
                   </View>
                   {bus.delay ? <Text style={styles.warningText}>Trễ {bus.delay.delayDurationMinutes} phút: {bus.delay.delayReason}. Giờ đến mới {bus.delay.updatedEta}</Text> : null}
@@ -769,7 +774,7 @@ export default function RouteSearchScreen() {
                         <View style={[styles.progressFill, { width: `${bus.tripProgress.progressPercent || 0}%` }]} />
                       </View>
                       <Text style={styles.cardMeta}>
-                        {bus.tripProgress.currentStop || 'Current'} {'->'} {bus.tripProgress.nextStop || 'Next'} | {bus.tripProgress.estimatedRemainingTime || 'calculating'}
+                        {bus.tripProgress.currentStop || 'Trạm hiện tại'} {'->'} {bus.tripProgress.nextStop || 'Trạm kế tiếp'} | {bus.tripProgress.estimatedRemainingTime || 'đang tính'}
                       </Text>
                     </View>
                   ) : null}

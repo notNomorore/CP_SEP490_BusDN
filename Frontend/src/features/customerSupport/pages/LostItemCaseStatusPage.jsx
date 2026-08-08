@@ -30,6 +30,9 @@ const CASE_STATUS_LABELS = {
   SUBMITTED: 'Đã gửi',
   UNDER_REVIEW: 'Đang xem xét',
   SEARCHING: 'Đang tìm kiếm',
+  POTENTIAL_MATCH: 'Có khả năng trùng khớp',
+  MATCH_CONFIRMED: 'Đã xác nhận trùng khớp',
+  RETURN_IN_PROGRESS: 'Đang sắp xếp hoàn trả',
   ITEM_FOUND: 'Đã tìm thấy',
   RESOLVED: 'Đã giải quyết',
   CLOSED: 'Đã đóng',
@@ -59,6 +62,9 @@ const statusClassName = (status) => {
   if (status === 'SUBMITTED') return 'bg-blue-50 text-blue-700';
   if (status === 'UNDER_REVIEW') return 'bg-amber-50 text-amber-700';
   if (status === 'SEARCHING') return 'bg-purple-50 text-purple-700';
+  if (status === 'POTENTIAL_MATCH') return 'bg-cyan-50 text-cyan-700';
+  if (status === 'MATCH_CONFIRMED') return 'bg-emerald-50 text-emerald-700';
+  if (status === 'RETURN_IN_PROGRESS') return 'bg-orange-50 text-orange-700';
   if (status === 'ITEM_FOUND') return 'bg-emerald-50 text-emerald-700';
   if (status === 'RESOLVED') return 'bg-green-50 text-green-700';
   if (status === 'CLOSED') return 'bg-slate-200 text-slate-700';
@@ -96,6 +102,9 @@ const CaseDetailModal = ({ supportCase, onClose }) => {
               <DetailRow label="Mã hồ sơ thất lạc" value={formatCaseCode(supportCase.caseId)} />
               <DetailRow label="Tên đồ vật" value={supportCase.lostItem?.itemName} />
               <DetailRow label="Loại đồ vật" value={getCategoryLabel(supportCase.lostItem?.itemCategory)} />
+              <DetailRow label="Màu sắc" value={supportCase.lostItem?.color} />
+              <DetailRow label="Thương hiệu" value={supportCase.lostItem?.brand} />
+              <DetailRow label="Dấu hiệu riêng" value={supportCase.lostItem?.identifyingDetails} />
               <DetailRow label="Ngày gửi báo cáo" value={formatDate(supportCase.createdAt, 'dd/MM/yyyy HH:mm')} />
               <DetailRow label="Thời gian dự kiến bị mất" value={formatDate(supportCase.lostItem?.lostAt, 'dd/MM/yyyy HH:mm')} />
               <DetailRow label="Thông tin tuyến" value={supportCase.routeName} />
@@ -139,6 +148,20 @@ const CaseDetailModal = ({ supportCase, onClose }) => {
                 {supportCase.collectionInstructions || 'Chưa có hướng dẫn nhận lại đồ.'}
               </p>
             </div>
+
+            {(supportCase.potentialMatches || []).length ? (
+              <div className="rounded-[24px] border border-outline-variant/40 bg-surface p-5">
+                <h3 className="text-lg font-black text-primary">Trạng thái đối chiếu</h3>
+                <div className="mt-4 space-y-3">
+                  {supportCase.potentialMatches.map((match) => (
+                    <div key={match.id} className="rounded-2xl bg-white px-4 py-3 text-sm">
+                      <p className="font-semibold text-primary">{statusLabel(match.status)}</p>
+                      <p className="mt-1 text-xs text-outline">{formatDate(match.updatedAt || match.createdAt, 'dd/MM/yyyy HH:mm')}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             <div className="rounded-[24px] border border-outline-variant/40 bg-surface p-5">
               <h3 className="text-lg font-black text-primary">Ghi chú của quản trị viên</h3>
