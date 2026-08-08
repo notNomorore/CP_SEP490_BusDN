@@ -63,7 +63,7 @@ import {
   PromotionStatisticsPage,
 } from './features/admin/promotions';
 import { RevenueReportsPage } from './features/admin/revenue';
-import { CongestedRoutesPage, FeedbackAnalyticsPage, RouteEfficiencyPage } from './features/admin/analytics';
+import { CongestedRoutesPage, RouteEfficiencyPage } from './features/admin/analytics';
 import { IncidentReportsPage } from './features/admin/incidents';
 import { VehicleIssuesPage } from './features/admin/vehicleIssues';
 import { MaintenanceApprovalPage } from './features/admin/maintenanceApproval';
@@ -207,7 +207,6 @@ function App() {
             <Route path="passenger-compliance" element={<PassengerCompliancePage />} />
             <Route path="analytics/route-efficiency" element={<RouteEfficiencyPage />} />
             <Route path="analytics/congested-routes" element={<CongestedRoutesPage />} />
-            <Route path="analytics/feedback" element={<FeedbackAnalyticsPage />} />
             <Route path="incidents" element={<IncidentReportsPage />} />
             <Route path="vehicle-issues" element={<VehicleIssuesPage />} />
             <Route path="maintenance-approval" element={<MaintenanceApprovalPage />} />

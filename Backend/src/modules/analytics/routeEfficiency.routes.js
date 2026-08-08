@@ -4,7 +4,6 @@ import { asyncHandler } from '../../middleware/errorHandler.js';
 import validateRequest from '../../middleware/validateRequest.js';
 import RouteEfficiencyController from './routeEfficiency.controller.js';
 import CongestedRoutesController from './congestedRoutes.controller.js';
-import FeedbackAnalyticsController from './feedbackAnalytics.controller.js';
 import {
   validateRouteEfficiencyQuery,
   validateRouteIdParam,
@@ -13,22 +12,11 @@ import {
   validateCongestedRouteIdParam,
   validateCongestedRoutesQuery,
 } from './congestedRoutes.validators.js';
-import { validateFeedbackAnalyticsQuery } from './feedbackAnalytics.validators.js';
 
 const router = express.Router();
 
 router.use(authMiddleware, authorizeRole('ADMIN'));
 
-router.get(
-  '/feedback',
-  validateRequest(validateFeedbackAnalyticsQuery, 'query'),
-  asyncHandler(FeedbackAnalyticsController.getFeedbackAnalytics)
-);
-router.get(
-  '/feedback/detail',
-  validateRequest(validateFeedbackAnalyticsQuery, 'query'),
-  asyncHandler(FeedbackAnalyticsController.getFeedbackDetail)
-);
 router.get(
   '/congested-routes',
   validateRequest(validateCongestedRoutesQuery, 'query'),
