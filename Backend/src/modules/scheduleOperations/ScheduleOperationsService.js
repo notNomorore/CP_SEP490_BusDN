@@ -10,6 +10,9 @@ import VehicleIssueService from '../vehicleIssues/vehicleIssue.service.js';
 import Shift from '../shifts/Shift.js';
 import DriverShiftAssignment from '../shifts/DriverShiftAssignment.js';
 import AssistantShiftAssignment from '../shifts/AssistantShiftAssignment.js';
+import Vehicle from '../fleetOperations/Vehicle.js';
+import LiveTrip from '../fleetOperations/Trip.js';
+import VehicleLocationLog from '../fleetOperations/VehicleLocationLog.js';
 
 const TRAFFIC_CATEGORIES = [
   'HEAVY_TRAFFIC',
@@ -225,6 +228,124 @@ const normalizeStartGpsPayload = (payload = {}, startedAt = new Date()) => {
       lastAttemptAt: startedAt,
     },
   };
+};
+
+const scheduleDateTime = (serviceDate, clock, fallback) => {
+  const date = new Date(serviceDate || fallback || Date.now());
+  const [hours, minutes] = String(clock || '').split(':').map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return new Date(fallback || date);
+  date.setHours(hours, minutes, 0, 0);
+  return date;
+};
+
+const syncLiveFleetGps = async ({ schedule, gpsPayload, driverId, io, incidentType = '' }) => {
+  const location = gpsPayload?.startLocation;
+  if (!schedule || !location || !isValidLatitude(location.latitude) || !isValidLongitude(location.longitude)) return null;
+  const authoritativeSchedule = await TripSchedule.findById(schedule._id)
+    .select('status driver vehicle routeId')
+    .lean();
+  if (
+    !authoritativeSchedule
+    || authoritativeSchedule.status !== 'IN_PROGRESS'
+    || String(authoritativeSchedule.driver?.userId || '') !== String(driverId || '')
+  ) {
+    const error = new Error('GPS source is not the currently assigned driver of this running trip');
+    error.statusCode = 403;
+    throw error;
+  }
+  const fleetBusId = getScheduleVehicleId(schedule);
+  const routeId = getScheduleRouteId(schedule);
+  if (!fleetBusId || !routeId) return null;
+
+  const fleetBus = await FleetBus.findById(fleetBusId).lean();
+  if (!fleetBus) return null;
+  const recordedAt = location.capturedAt || new Date();
+  const isBreakdown = incidentType === 'VEHICLE_BREAKDOWN';
+  const hasIncident = ['TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN'].includes(incidentType);
+  const vehicle = await Vehicle.findOneAndUpdate(
+    { vehicleCode: fleetBus.busCode },
+    {
+      $set: {
+        plateNumber: fleetBus.plateNumber,
+        vehicleCode: fleetBus.busCode,
+        capacity: fleetBus.capacity,
+        assignedRouteId: routeId,
+        status: isBreakdown ? 'idle' : 'active',
+        currentLocation: {
+          lat: location.latitude,
+          lng: location.longitude,
+          speed: 0,
+          heading: Number(fleetBus.heading || 0),
+          updatedAt: recordedAt,
+        },
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  ).lean();
+
+  await FleetBus.updateOne(
+    { _id: fleetBusId },
+    { $set: {
+      currentLatitude: location.latitude,
+      currentLongitude: location.longitude,
+      lastTelemetryAt: recordedAt,
+      assignedDriverId: driverId,
+      status: hasIncident ? 'ISSUE' : 'ACTIVE',
+    } }
+  );
+
+  const liveTrip = await LiveTrip.findOneAndUpdate(
+    { scheduleId: schedule._id },
+    {
+      $set: {
+        routeId,
+        scheduleId: schedule._id,
+        vehicleId: vehicle._id,
+        driverId,
+        assistantId: schedule.assistant?.userId || null,
+        plannedStartTime: scheduleDateTime(schedule.serviceDate, schedule.departureTime, schedule.actualStartAt),
+        plannedEndTime: scheduleDateTime(schedule.serviceDate, schedule.expectedArrivalTime, schedule.actualStartAt),
+        actualStartTime: schedule.actualStartAt || new Date(),
+        status: hasIncident ? 'incident' : 'active',
+        lastGpsAt: recordedAt,
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  ).lean();
+
+  await VehicleLocationLog.create({
+    vehicleId: vehicle._id,
+    tripId: liveTrip._id,
+    driverId,
+    lat: location.latitude,
+    lng: location.longitude,
+    speed: 0,
+    heading: Number(fleetBus.heading || 0),
+    recordedAt,
+  });
+
+  const dto = {
+    id: `${vehicle._id}:${liveTrip._id}`,
+    vehicleId: vehicle._id.toString(),
+    vehicleCode: vehicle.vehicleCode,
+    plateNumber: vehicle.plateNumber,
+    routeId: routeId.toString(),
+    tripId: liveTrip._id.toString(),
+    tripCode: schedule.scheduleCode,
+    driver: { id: String(driverId), fullName: schedule.driver?.fullName || '' },
+    route: { id: routeId.toString(), routeCode: schedule.routeCode || '', routeName: schedule.routeName || '' },
+    currentLocation: { lat: location.latitude, lng: location.longitude, speed: 0, heading: Number(fleetBus.heading || 0), updatedAt: recordedAt },
+    speed: 0,
+    heading: Number(fleetBus.heading || 0),
+    lastGpsAt: recordedAt,
+    tripStatus: liveTrip.status,
+    operationalStatus: isBreakdown ? 'maintenance' : hasIncident ? 'incident' : 'active',
+    delayMinutes: incidentType === 'TRAFFIC_CONGESTION' ? 1 : 0,
+    openIncidentCount: hasIncident ? 1 : 0,
+  };
+  io?.to('fleet:operations').emit('server:fleet:locationUpdated', dto);
+  if (hasIncident) io?.to('fleet:operations').emit('server:incident:new', { incidentType, fleet: dto });
+  return { vehicle, liveTrip, dto };
 };
 
 const buildTripScheduleAssignment = (schedule, role) => {
@@ -1079,14 +1200,14 @@ export class ScheduleOperationsService {
     await Promise.all([
       FleetBus.updateOne(
         { _id: getScheduleVehicleId(assignment.trip) },
-        { $set: { status: 'ACTIVE' } }
+        { $set: { status: 'AVAILABLE' } }
       ),
     ]);
 
     return inspection;
   }
 
-  static async reportVehicleIssue(userId, role, assignmentId, payload = {}) {
+  static async reportVehicleIssue(userId, role, assignmentId, payload = {}, io = null) {
     if (role !== 'DRIVER') {
       const error = new Error('Only drivers can report vehicle issues');
       error.statusCode = 403;
@@ -1166,9 +1287,15 @@ export class ScheduleOperationsService {
       TripSchedule.updateOne({ _id: assignment.trip._id }, { $set: { status: 'ASSIGNED' } }),
       FleetBus.updateOne(
         { _id: getScheduleVehicleId(assignment.trip) },
-        { $set: { status: 'MAINTENANCE' } }
+        { $set: { status: 'ISSUE' } }
       ),
     ]);
+    io?.to('fleet:operations').emit('server:vehicleIssue:reported', {
+      vehicleId: String(getScheduleVehicleId(assignment.trip)),
+      tripId: String(assignment.trip._id),
+      issueType: issueCategory,
+      status: 'ISSUE',
+    });
 
     await this.syncToAdminIncidentReport({
       sourceType: 'OPERATION_VEHICLE_ISSUE',
@@ -1221,7 +1348,7 @@ export class ScheduleOperationsService {
     }
   }
 
-  static async startTrip(userId, role, assignmentId, payload = {}) {
+  static async startTrip(userId, role, assignmentId, payload = {}, io = null) {
     if (role !== 'DRIVER') {
       const error = new Error('Only drivers can start assigned trips');
       error.statusCode = 403;
@@ -1272,6 +1399,7 @@ export class ScheduleOperationsService {
     ]);
 
     const updatedSchedule = await TripSchedule.findById(trip._id).populate('routeId');
+    await syncLiveFleetGps({ schedule: updatedSchedule, gpsPayload, driverId: userId, io });
     return buildTripScheduleAssignment(updatedSchedule, 'DRIVER');
   }
 
@@ -1346,18 +1474,27 @@ export class ScheduleOperationsService {
       updates.push(
         FleetBus.updateOne(
           { _id: vehicleId },
-          { $set: { status: 'ACTIVE' } }
+          { $set: { status: 'AVAILABLE' } }
         )
       );
     }
 
     await Promise.all(updates);
 
+    const completedLiveTrip = await LiveTrip.findOneAndUpdate(
+      { scheduleId: trip._id },
+      { $set: { status: 'completed', actualEndTime: completedAt } },
+      { new: true }
+    ).lean();
+    if (completedLiveTrip?.vehicleId) {
+      await Vehicle.updateOne({ _id: completedLiveTrip.vehicleId }, { $set: { status: 'available' } });
+    }
+
     const updatedSchedule = await TripSchedule.findById(trip._id).populate('routeId');
     return buildTripScheduleAssignment(updatedSchedule, 'DRIVER');
   }
 
-  static async syncTripGps(userId, role, assignmentId, payload = {}) {
+  static async syncTripGps(userId, role, assignmentId, payload = {}, io = null) {
     if (role !== 'DRIVER') {
       const error = new Error('Only drivers can sync trip GPS');
       error.statusCode = 403;
@@ -1388,6 +1525,7 @@ export class ScheduleOperationsService {
     );
 
     const updatedSchedule = await TripSchedule.findById(trip._id).populate('routeId');
+    await syncLiveFleetGps({ schedule: updatedSchedule, gpsPayload, driverId: userId, io });
     return buildTripScheduleAssignment(updatedSchedule, 'DRIVER');
   }
 
@@ -1592,7 +1730,7 @@ export class ScheduleOperationsService {
     return 'PENDING';
   }
 
-  static async reportOperationIncident(userId, role, assignmentId, payload = {}, files = []) {
+  static async reportOperationIncident(userId, role, assignmentId, payload = {}, files = [], io = null) {
     if (!['DRIVER', 'BUS_ASSISTANT'].includes(role)) {
       const error = new Error('Only drivers or bus assistants can report operation incidents');
       error.statusCode = 403;
@@ -1696,6 +1834,15 @@ export class ScheduleOperationsService {
       reportedAt: new Date(),
     });
 
+    if (role === 'DRIVER' && ['TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN'].includes(type)) {
+      const incidentGpsPayload = normalizeStartGpsPayload({
+        latitude: Number.isFinite(Number(payload.latitude)) ? Number(payload.latitude) : assignment.trip.startLocation?.latitude,
+        longitude: Number.isFinite(Number(payload.longitude)) ? Number(payload.longitude) : assignment.trip.startLocation?.longitude,
+        capturedAt: new Date(),
+      }, new Date());
+      await syncLiveFleetGps({ schedule: assignment.trip, gpsPayload: incidentGpsPayload, driverId: userId, io, incidentType: type });
+    }
+
     if (type === 'VEHICLE_BREAKDOWN') {
       await VehicleIssueService.createEmergencyBreakdownFromOperationIncident({
         assignment,
@@ -1708,7 +1855,7 @@ export class ScheduleOperationsService {
     if (type === 'VEHICLE_BREAKDOWN') {
       await FleetBus.updateOne(
         { _id: getScheduleVehicleId(assignment.trip) },
-        { $set: { status: 'MAINTENANCE' } }
+        { $set: { status: 'ISSUE' } }
       );
     }
 

@@ -10,6 +10,7 @@ import ConfigureScheduleStep from './ConfigureScheduleStep.jsx';
 import CreateRouteStep from './CreateRouteStep.jsx';
 import DefinePathStep from './DefinePathStep.jsx';
 import ReviewRouteStep from './ReviewRouteStep.jsx';
+import TripAllocationPanel from './TripAllocationPanel.jsx';
 import { DA_NANG_BOUNDS, DA_NANG_CENTER, FIRST_BUS_DEPARTURE_TIME, LAST_BUS_DEPARTURE_TIME, computeDirection, isInsideDaNang, normalizeRouteFromApi, routeStatusLabels, validateRouteDraft } from './routeWorkflowUtils.js';
 import { useRouteWorkflowStore } from './routeWorkflowStore.js';
 
@@ -23,30 +24,35 @@ const steps = [
 const operationSections = [
   { key: 'routes', label: 'Vận hành tuyến', hint: 'Tạo, cập nhật, tạm dừng và dựng lộ trình' },
   { key: 'stops', label: 'Quản lý trạm dừng', hint: 'Tạo, cập nhật và gán trạm vào tuyến' },
-  { key: 'fleet', label: 'Quản lý đội xe', hint: 'Thêm và cập nhật trạng thái đội xe' },
+  { key: 'trip-planning', label: 'Phân chuyến', hint: 'Quyết định số chuyến sáng, trưa và chiều' },
+    { key: 'trip-assignment', label: 'Phân bổ chuyến', hint: 'Gán ca nhân sự và xe vào các chuyến đã lập' },
 ];
 
-operationSections.push({ key: 'scheduling', label: 'Điều phối lịch chuyến', hint: 'Tạo lịch, gán xe và nhân sự theo chuyến' });
-
 const busStatusLabels = {
+  AVAILABLE: 'Sẵn sàng',
   ACTIVE: 'Đang hoạt động',
-  RESERVE: 'Dự phòng',
+  ISSUE: 'Gặp sự cố',
   MAINTENANCE: 'Đang bảo trì',
 };
 const BUS_CAPACITY_MIN = 15;
 const BUS_CAPACITY_MAX = 25;
-const ASSIGNABLE_BUS_STATUSES = new Set(['ACTIVE', 'RESERVE']);
+const ASSIGNABLE_BUS_STATUSES = new Set(['AVAILABLE', 'ACTIVE', 'RESERVE']);
 
 const busStatusOverview = {
+  AVAILABLE: {
+    icon: 'check_circle',
+    accentClassName: 'bg-cyan-100 text-cyan-700',
+    barClassName: 'bg-cyan-400',
+  },
   ACTIVE: {
     icon: 'directions_bus',
     accentClassName: 'bg-emerald-100 text-emerald-700',
     barClassName: 'bg-emerald-400',
   },
-  RESERVE: {
-    icon: 'backup',
-    accentClassName: 'bg-sky-100 text-sky-700',
-    barClassName: 'bg-sky-400',
+  ISSUE: {
+    icon: 'warning',
+    accentClassName: 'bg-rose-100 text-rose-700',
+    barClassName: 'bg-rose-400',
   },
   MAINTENANCE: {
     icon: 'build',
@@ -72,7 +78,7 @@ const emptyBusForm = {
   plateNumber: '',
   busType: 'Standard City Bus',
   capacity: BUS_CAPACITY_MIN,
-  status: 'ACTIVE',
+  status: 'AVAILABLE',
 };
 
 const WarningModal = ({ open, message, onClose }) => {
@@ -145,6 +151,7 @@ const scheduleDirectionLabels = {
 
 const scheduleShiftLabels = {
   MORNING: 'Ca sáng',
+  MIDDAY: 'Ca trưa',
   AFTERNOON: 'Ca chiều',
 };
 
@@ -155,6 +162,17 @@ const parseClockToMinutes = (value = '') => {
   const minutes = Number(match[2]);
   if (hours > 23 || minutes > 59) return null;
   return (hours * 60) + minutes;
+};
+
+const toMinutes = (value = '') => parseClockToMinutes(value);
+
+const addMinutesToClock = (clock, minutesToAdd = 0) => {
+  const base = parseClockToMinutes(clock);
+  if (base === null) return '';
+  const total = Math.max(0, Math.min(1439, base + Number(minutesToAdd || 0)));
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 };
 
 const routeScheduleWeekdayTokens = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -1121,6 +1139,200 @@ const FrequencyScheduleModal = ({ onClose, onSaved, routes }) => {
   );
 };
 
+const TRIP_DEMAND_PERIODS = [
+  { key: 'MORNING', label: 'Sáng', start: '05:30', end: '12:00', tone: 'border-amber-200 bg-amber-50' },
+  { key: 'AFTERNOON', label: 'Chiều', start: '12:00', end: '18:30', tone: 'border-violet-200 bg-violet-50' },
+];
+
+const TripDemandPlanningPanel = ({ onSaved, routes, schedules = [] }) => {
+  const [form, setForm] = useState({
+    serviceDate: toDateInputValue(),
+    routeId: '',
+    direction: 'BOTH',
+    counts: { MORNING: 0, AFTERNOON: 0 },
+  });
+  const [rows, setRows] = useState([]);
+  const [message, setMessage] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [expandedPlanKey, setExpandedPlanKey] = useState('');
+  const [deletingPlanKey, setDeletingPlanKey] = useState('');
+  const selectedRoute = routes.find((route) => String(route._id || route.id) === String(form.routeId));
+  const confirmedPlans = useMemo(() => {
+    const groups = new Map();
+    schedules.filter((schedule) => schedule.status !== 'CANCELLED').forEach((schedule) => {
+      const routeId = String(schedule.routeId?._id || schedule.routeId || '');
+      const serviceDate = toDateInputValue(schedule.serviceDate);
+      if (!routeId || !serviceDate) return;
+      const key = `${routeId}-${serviceDate}`;
+      if (!groups.has(key)) groups.set(key, { key, routeId, serviceDate, routeCode: schedule.routeCode, routeName: schedule.routeName, trips: [] });
+      groups.get(key).trips.push(schedule);
+    });
+    return [...groups.values()].map((plan) => ({
+      ...plan,
+      trips: [...plan.trips].sort((left, right) => String(left.departureTime).localeCompare(String(right.departureTime))),
+    })).sort((left, right) => right.serviceDate.localeCompare(left.serviceDate) || left.routeCode.localeCompare(right.routeCode));
+  }, [schedules]);
+
+  const buildPreview = () => {
+    if (!selectedRoute || !form.serviceDate) {
+      setMessage('Vui lòng chọn ngày phục vụ và tuyến đã công bố.');
+      return;
+    }
+    const nextRows = [];
+    const planningErrors = [];
+    const routeId = selectedRoute._id || selectedRoute.id;
+    const routeCode = selectedRoute.routeCode || selectedRoute.routeNumber;
+    const routeName = selectedRoute.routeName || selectedRoute.name;
+    const dateCode = form.serviceDate.replace(/-/g, '').slice(2);
+    const getDuration = (direction) => {
+      const routeDirection = direction === 'INBOUND' ? selectedRoute.inboundRoute : selectedRoute.outboundRoute;
+      return Math.max(10, Number(routeDirection?.estimatedDurationMinutes || selectedRoute.scheduleConfig?.estimatedTripDurationMinutes || 60));
+    };
+    const appendRow = ({ period, direction, index, departure, duration, pairCode = '' }) => {
+      const departureTime = addMinutesToClock('00:00', departure);
+      const expectedArrivalTime = addMinutesToClock(departureTime, duration);
+      const directionCode = direction === 'OUTBOUND' ? 'D' : 'V';
+      nextRows.push({
+        previewId: `${period.key}-${direction}-${index}`,
+        scheduleCode: `${routeCode}-${dateCode}-${departureTime.replace(':', '')}-${directionCode}`,
+        serviceDate: form.serviceDate,
+        routeId,
+        routeCode,
+        routeName,
+        direction,
+        departureTime,
+        expectedArrivalTime,
+        turnaroundEndTime: addMinutesToClock(expectedArrivalTime, MIN_RESOURCE_BUFFER_MINUTES),
+        shiftLabel: period.key,
+        vehicle: {},
+        driver: {},
+        assistant: {},
+        status: 'PLANNED',
+        operationCycleCode: pairCode,
+        warnings: ['Chờ phân ca, xe và nhân sự.'],
+      });
+      return { departureTime, expectedArrivalTime };
+    };
+    TRIP_DEMAND_PERIODS.forEach((period) => {
+      const count = Math.max(0, Math.min(50, Number(form.counts[period.key]) || 0));
+      if (!count) return;
+      const start = toMinutes(period.start);
+      const end = toMinutes(period.end);
+      const outboundDuration = getDuration('OUTBOUND');
+      const inboundDuration = getDuration('INBOUND');
+      const cycleDuration = form.direction === 'BOTH'
+        ? outboundDuration + MIN_RESOURCE_BUFFER_MINUTES + inboundDuration
+        : getDuration(form.direction);
+      const latestDeparture = end - cycleDuration;
+      if (latestDeparture < start) {
+        planningErrors.push(`${period.label} không đủ thời gian cho một ${form.direction === 'BOTH' ? 'vòng đi-về' : 'chuyến'} hoàn chỉnh.`);
+        return;
+      }
+      const interval = count > 1 ? (latestDeparture - start) / (count - 1) : 0;
+      if (count > 1 && interval < 1) {
+        planningErrors.push(`${period.label} có quá nhiều chuyến so với khung giờ.`);
+        return;
+      }
+      for (let index = 0; index < count; index += 1) {
+        const departure = Math.round(start + (interval * index));
+        if (form.direction === 'BOTH') {
+          const pairCode = `${routeCode}-${dateCode}-${period.key}-${index + 1}`;
+          appendRow({ period, direction: 'OUTBOUND', index, departure, duration: outboundDuration, pairCode });
+          const inboundDeparture = departure + outboundDuration + MIN_RESOURCE_BUFFER_MINUTES;
+          appendRow({ period, direction: 'INBOUND', index, departure: inboundDeparture, duration: inboundDuration, pairCode });
+        } else {
+          appendRow({ period, direction: form.direction, index, departure, duration: getDuration(form.direction) });
+        }
+      }
+    });
+    // Rows are appended as an atomic D -> V pair inside each period. Keep that
+    // insertion order; sorting globally by departure time would interleave
+    // another cycle's D between the current cycle's D and V.
+    setRows(nextRows);
+    setPreviewExpanded(false);
+    setMessage(planningErrors.join(' ') || (nextRows.length ? '' : 'Cần ít nhất một chuyến trong ngày.'));
+  };
+
+  const confirmPlan = async () => {
+    if (!rows.length) return;
+    setIsSaving(true);
+    setMessage('');
+    try {
+      const response = await adminService.confirmGeneratedTripSchedules(rows, false, true);
+      await onSaved?.();
+      const savedSchedules = response.schedules || [];
+      setRows([]);
+      toast.success(`Đã tạo ${savedSchedules.length} chuyến. Kế hoạch đã được thu gọn ở danh sách bên dưới.`);
+    } catch (error) {
+      setMessage(error?.message || 'Không thể lưu kế hoạch phân chuyến.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const totalPerDirection = Object.values(form.counts).reduce((sum, value) => sum + (Number(value) || 0), 0);
+  const totalTrips = totalPerDirection * (form.direction === 'BOTH' ? 2 : 1);
+  const deleteConfirmedPlan = async (plan) => {
+    if (!window.confirm(`Xóa toàn bộ ${plan.trips.length} chuyến của ${plan.routeCode || 'tuyến này'} ngày ${plan.serviceDate}?`)) return;
+    setDeletingPlanKey(plan.key);
+    try {
+      const response = await adminService.deleteTripSchedules({ scheduleIds: plan.trips.map((trip) => trip._id).filter(Boolean) });
+      if (expandedPlanKey === plan.key) setExpandedPlanKey('');
+      await onSaved?.();
+      toast.success(`Đã xóa ${response.deletedCount || 0} chuyến.`);
+      if (response.protectedCount) toast(`Có ${response.protectedCount} chuyến đang chạy/đã hoàn thành nên được giữ lại.`);
+    } catch (error) {
+      toast.error(error?.message || 'Không thể xóa kế hoạch chuyến.');
+    } finally {
+      setDeletingPlanKey('');
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 text-slate-900 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.22em] text-emerald-600">Kế hoạch nhu cầu vận hành</p>
+          <h2 className="mt-2 text-2xl font-black">Phân chuyến theo ngày và khung giờ</h2>
+          <p className="mt-2 text-sm text-slate-500">Chỉ xác định chuyến cần chạy. Xe và nhân sự sẽ được phân ở bước tiếp theo.</p>
+        </div>
+        <div className="rounded-xl bg-emerald-50 px-5 py-3 text-right">
+          <span className="block text-xs font-bold uppercase text-emerald-700">Tổng dự kiến</span>
+          <strong className="text-2xl text-emerald-900">{totalTrips} chuyến</strong>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-3">
+        <label><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Ngày phục vụ</span><input type="date" className="h-11 w-full rounded-xl border border-slate-200 px-3" value={form.serviceDate} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, serviceDate: event.target.value })); }} /></label>
+        <label><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Tuyến</span><select className="h-11 w-full rounded-xl border border-slate-200 px-3" value={form.routeId} onChange={(event) => { setRows([]); setMessage(''); setForm((current) => ({ ...current, routeId: event.target.value })); }}><option value="">Chọn tuyến đã công bố</option>{routes.filter((route) => route.status === 'PUBLISHED').map((route) => { const routeId = route._id || route.id; return <option key={routeId} value={routeId}>{route.routeCode || route.routeNumber} - {route.routeName || route.name}</option>; })}</select></label>
+        <label><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Chiều chạy bắt buộc</span><div className="flex h-11 items-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-sm font-black text-emerald-800">Đủ cặp Chiều đi (D) → Chiều về (V)</div></label>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        {TRIP_DEMAND_PERIODS.map((period) => (
+          <label key={period.key} className={`rounded-xl border p-4 ${period.tone}`}>
+            <span className="text-sm font-black">{period.label}</span>
+            <span className="ml-2 text-xs text-slate-500">{period.start}–{period.end}</span>
+            <input type="number" min="0" max="50" className="mt-3 h-11 w-full rounded-lg border border-white bg-white px-3 text-lg font-black" value={form.counts[period.key]} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, counts: { ...current.counts, [period.key]: event.target.value } })); }} />
+            <span className="mt-2 block text-xs font-semibold text-slate-500">Số chuyến {form.direction === 'BOTH' ? 'cho mỗi chiều' : 'trong khung giờ'}</span>
+          </label>
+        ))}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button type="button" onClick={buildPreview} className="rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white">Tạo bản xem trước</button>
+        {rows.length ? <button type="button" disabled={isSaving} onClick={confirmPlan} className="rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-emerald-950 disabled:opacity-60">{isSaving ? 'Đang lưu...' : `Xác nhận ${rows.length} chuyến`}</button> : null}
+      </div>
+      {message ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">{message}</div> : null}
+
+      {rows.length ? <div className="mt-5 overflow-hidden rounded-xl border border-violet-200 bg-violet-50/40"><button type="button" onClick={() => setPreviewExpanded((value) => !value)} className="flex w-full items-center justify-between gap-4 p-4 text-left"><span><b className="block">Bản nháp · {selectedRoute?.routeCode || selectedRoute?.routeNumber}</b><small className="text-slate-500">{form.serviceDate} · {rows.length} chuyến · {rows[0]?.departureTime}–{rows.at(-1)?.expectedArrivalTime}</small></span><span className="font-black text-violet-700">{previewExpanded ? 'Thu gọn ▲' : 'Xem chi tiết ▼'}</span></button>{previewExpanded ? <div className="max-h-96 overflow-auto border-t border-violet-200 bg-white"><table className="w-full min-w-[850px] text-left text-sm"><thead className="sticky top-0 bg-slate-100"><tr>{['Ca', 'Mã chuyến', 'Chiều', 'Xuất bến', 'Đến dự kiến', 'Trạng thái'].map((item) => <th key={item} className="px-4 py-3 text-xs font-black uppercase text-slate-500">{item}</th>)}</tr></thead><tbody>{rows.map((row, index) => { const isFirstInCycle = index === 0 || rows[index - 1]?.operationCycleCode !== row.operationCycleCode; const isLastInCycle = index === rows.length - 1 || rows[index + 1]?.operationCycleCode !== row.operationCycleCode; return <tr key={row.previewId} className={`${isFirstInCycle ? 'border-t-2 border-emerald-300 bg-emerald-50/50' : 'border-t border-emerald-100 bg-white'} ${isLastInCycle ? 'border-b-2 border-b-emerald-300' : ''}`}><td className="px-4 py-3 font-bold">{scheduleShiftLabels[row.shiftLabel] || 'Ca trưa'}</td><td className="px-4 py-3 font-black">{row.scheduleCode}</td><td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-black ${row.direction === 'OUTBOUND' ? 'bg-emerald-100 text-emerald-800' : 'bg-sky-100 text-sky-800'}`}>{row.direction === 'OUTBOUND' ? 'D · Chiều đi' : 'V · Chiều về'}</span></td><td className="px-4 py-3">{row.departureTime}</td><td className="px-4 py-3">{row.expectedArrivalTime}</td><td className="px-4 py-3 text-amber-700">Chờ xác nhận</td></tr>; })}</tbody></table></div> : null}</div> : null}
+
+      <section className="mt-6 border-t border-slate-200 pt-5"><div className="mb-3"><h3 className="text-lg font-black">Kế hoạch chuyến đã tạo</h3><p className="text-sm text-slate-500">Bấm vào từng tuyến để xem đầy đủ giờ chạy và các chuyến D–V.</p></div><div className="space-y-3">{confirmedPlans.length ? confirmedPlans.map((plan) => { const expanded = expandedPlanKey === plan.key; const firstTrip = plan.trips[0]; const lastTrip = plan.trips.at(-1); return <article key={plan.key} className="overflow-hidden rounded-xl border border-emerald-200"><div className="flex items-center gap-2 bg-emerald-50 p-3"><button type="button" onClick={() => setExpandedPlanKey(expanded ? '' : plan.key)} className="flex flex-1 items-center justify-between gap-4 p-1 text-left"><span><b className="block">{plan.routeCode || routes.find((route) => String(route._id || route.id) === plan.routeId)?.routeCode || 'Tuyến'} · {plan.routeName || routes.find((route) => String(route._id || route.id) === plan.routeId)?.routeName || ''}</b><small className="text-slate-600">{plan.serviceDate} · {plan.trips.length} chuyến · {firstTrip?.departureTime}–{lastTrip?.expectedArrivalTime}</small></span><span className="shrink-0 text-sm font-black text-emerald-700">{expanded ? 'Thu gọn ▲' : 'Mở chi tiết ▼'}</span></button><button type="button" disabled={deletingPlanKey === plan.key} onClick={() => deleteConfirmedPlan(plan)} className="shrink-0 rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-black text-rose-600 disabled:opacity-50">{deletingPlanKey === plan.key ? 'Đang xóa...' : 'Xóa chuyến'}</button></div>{expanded ? <div className="max-h-80 overflow-auto border-t border-emerald-200"><table className="w-full min-w-[760px] text-left text-sm"><thead className="sticky top-0 bg-slate-100"><tr>{['Mã chuyến', 'Ca', 'Chiều', 'Xuất bến', 'Đến dự kiến', 'Trạng thái'].map((item) => <th key={item} className="px-4 py-3 text-xs font-black uppercase text-slate-500">{item}</th>)}</tr></thead><tbody>{plan.trips.map((trip) => <tr key={trip._id || trip.scheduleCode} className="border-t border-slate-100"><td className="px-4 py-3 font-black">{trip.scheduleCode}</td><td className="px-4 py-3">{trip.shiftLabel === 'MORNING' ? 'Sáng' : 'Chiều'}</td><td className="px-4 py-3">{trip.direction === 'OUTBOUND' ? 'D · Chiều đi' : 'V · Chiều về'}</td><td className="px-4 py-3">{trip.departureTime}</td><td className="px-4 py-3">{trip.expectedArrivalTime}</td><td className="px-4 py-3">{trip.status === 'PLANNED' ? 'Chờ phân bổ' : trip.status}</td></tr>)}</tbody></table></div> : null}</article>; }) : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Chưa có kế hoạch chuyến nào được xác nhận.</p>}</div></section>
+    </div>
+  );
+};
+
 const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, buses, driverShiftAssignments, drivers, editingSchedule, onSaved, routes, schedules }) => {
   const [editingScheduleId, setEditingScheduleId] = useState('');
   const [form, setForm] = useState(() => createEmptyScheduleForm());
@@ -1494,7 +1706,7 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
   );
 };
 
-const FleetOperationsPanel = ({ buses, onSaved }) => {
+export const FleetOperationsPanel = ({ buses, onSaved }) => {
   const [query, setQuery] = useState('');
   const [editingBusId, setEditingBusId] = useState('');
   const [form, setForm] = useState(emptyBusForm);
@@ -1504,8 +1716,7 @@ const FleetOperationsPanel = ({ buses, onSaved }) => {
   const filteredBuses = useMemo(() => {
     const normalizedQuery = normalizeStationSearch(query);
     return buses
-      .filter((bus) => !normalizedQuery || [bus.busCode, bus.plateNumber, bus.busType, bus.status].some((value) => normalizeStationSearch(value).includes(normalizedQuery)))
-      .slice(0, 5);
+      .filter((bus) => !normalizedQuery || [bus.busCode, bus.plateNumber, bus.busType, bus.status].some((value) => normalizeStationSearch(value).includes(normalizedQuery)));
   }, [buses, query]);
   const resetForm = () => {
     setEditingBusId('');
@@ -1569,9 +1780,10 @@ const FleetOperationsPanel = ({ buses, onSaved }) => {
           <input className={inputClassName} placeholder="Loại xe" value={form.busType} onChange={(event) => setForm((current) => ({ ...current, busType: event.target.value }))} />
           <div className="grid gap-2 sm:grid-cols-2">
             <input type="number" min={BUS_CAPACITY_MIN} max={BUS_CAPACITY_MAX} className={inputClassName} placeholder={`Sức chứa ${BUS_CAPACITY_MIN}-${BUS_CAPACITY_MAX} chỗ`} value={form.capacity} onChange={(event) => setForm((current) => ({ ...current, capacity: event.target.value }))} />
-            <select className={inputClassName} value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
+            <select disabled className={`${inputClassName} disabled:cursor-not-allowed disabled:bg-slate-100`} value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
+              <option value="AVAILABLE">{busStatusLabels.AVAILABLE}</option>
               <option value="ACTIVE">{busStatusLabels.ACTIVE}</option>
-              <option value="RESERVE">{busStatusLabels.RESERVE}</option>
+              <option value="ISSUE">{busStatusLabels.ISSUE}</option>
               <option value="MAINTENANCE">{busStatusLabels.MAINTENANCE}</option>
             </select>
           </div>
@@ -2043,7 +2255,9 @@ const RouteWorkflowPage = () => {
   const [assistantStaff, setAssistantStaff] = useState([]);
   const [driverShiftAssignments, setDriverShiftAssignments] = useState([]);
   const [assistantShiftAssignments, setAssistantShiftAssignments] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const hasLoadedCoreData = useRef(false);
   const [error, setError] = useState('');
   const [activeOperationSection, setActiveOperationSection] = useState('routes');
   const activeStep = useRouteWorkflowStore((state) => state.activeStep);
@@ -2061,20 +2275,36 @@ const RouteWorkflowPage = () => {
     isDarkMode ? 'border-white/10 bg-white/[0.04] text-white placeholder:text-slate-500' : 'border-slate-200 bg-white text-slate-900 placeholder:text-slate-400'
   }`;
 
-  const loadData = async () => {
-    setIsLoading(true);
+  const loadData = useCallback(async () => {
+    const isInitialRequest = !hasLoadedCoreData.current;
+    if (isInitialRequest) setIsInitialLoading(true);
+    else setIsRefreshing(true);
     setError('');
     try {
-      const [stationsResponse, routesResponse, busesResponse, staffResponse, schedulesResponse, shiftAssignmentsResponse] = await Promise.all([
-        adminService.getStations({ limit: 1000 }),
-        adminService.getRoutes({ limit: 100 }),
-        adminService.getBuses(),
-        adminService.getDrivers(),
-        loadAllTripSchedules(),
-        adminService.getShiftAssignments(),
-      ]);
+      const stationsRequest = adminService.getStations({ limit: 1000 });
+      const routesRequest = adminService.getRoutes({ limit: 100 });
+      const busesRequest = adminService.getBuses();
+      const staffRequest = adminService.getDrivers();
+      const schedulesRequest = loadAllTripSchedules();
+      const shiftAssignmentsRequest = adminService.getShiftAssignments();
+      const operationsRequest = Promise.all([
+        busesRequest,
+        staffRequest,
+        schedulesRequest,
+        shiftAssignmentsRequest,
+      ]).then((value) => ({ value }), (requestError) => ({ requestError }));
+
+      // Route and station data are enough to render the main workflow. The
+      // heavier operations datasets continue loading without blocking the UI.
+      const [stationsResponse, routesResponse] = await Promise.all([stationsRequest, routesRequest]);
       setStations(stationsResponse.stations || []);
       setRoutes(routesResponse.routes || []);
+      hasLoadedCoreData.current = true;
+      setIsInitialLoading(false);
+
+      const operationsResult = await operationsRequest;
+      if (operationsResult.requestError) throw operationsResult.requestError;
+      const [busesResponse, staffResponse, schedulesResponse, shiftAssignmentsResponse] = operationsResult.value;
       setBuses(busesResponse.buses || []);
       setDrivers(staffResponse.drivers || []);
       setAssistantStaff(staffResponse.assistantStaff || []);
@@ -2089,13 +2319,14 @@ const RouteWorkflowPage = () => {
     } catch (loadError) {
       setError(loadError?.message || 'Không thể tải dữ liệu quản lý tuyến.');
     } finally {
-      setIsLoading(false);
+      setIsInitialLoading(false);
+      setIsRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   const deleteSchedule = async (schedule) => {
     const confirmed = window.confirm(`Xóa ca ${schedule.scheduleCode}? Thao tác này không thể hoàn tác.`);
@@ -2155,7 +2386,7 @@ const RouteWorkflowPage = () => {
     <ReviewRouteStep key="review" panelClassName={panelClassName} isDarkMode={isDarkMode} onSaved={loadData} routes={routes} />,
   ];
 
-  if (isLoading) {
+  if (isInitialLoading) {
     return (
       <div className="min-h-screen bg-slate-950 text-white">
         <Header forceDarkMode={isDarkMode} />
@@ -2201,14 +2432,15 @@ const RouteWorkflowPage = () => {
               <button type="button" onClick={resetDraft} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700">
                 Tạo bản nháp mới
               </button>
-              <button type="button" onClick={loadData} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700">
-                Tải lại
+              <button type="button" disabled={isRefreshing} onClick={loadData} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 disabled:opacity-60">
+                <span className={`material-symbols-outlined text-base ${isRefreshing ? 'animate-spin' : ''}`}>refresh</span>
+                {isRefreshing ? 'Đang đồng bộ' : 'Tải lại'}
               </button>
             </div>
           </div>
 
           <div className={`mb-5 rounded-2xl border p-3 ${panelClassName}`}>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               {operationSections.map((section) => (
                 <button
                   key={section.key}
@@ -2313,21 +2545,18 @@ const RouteWorkflowPage = () => {
                 </div>
               </aside>
               </div>
-              <ScheduleListPanel
-                onDeleteSchedule={deleteSchedule}
-                onEditSchedule={(schedule) => {
-                  setScheduleForEditing(schedule);
-                  setSelectedSchedule(schedule);
-                }}
-                onEmergencyReassign={(schedule) => {
-                  setEmergencySchedule(schedule);
-                  setSelectedSchedule(schedule);
-                }}
-                onSelectSchedule={setSelectedSchedule}
-                routes={routes}
-                schedules={schedules}
-                selectedScheduleId={selectedSchedule?._id}
-              />
+            </section>
+          ) : null}
+
+          {activeOperationSection === 'trip-planning' ? (
+            <section className="mb-5 grid gap-5">
+              <TripDemandPlanningPanel onSaved={loadData} routes={routes} schedules={schedules} />
+            </section>
+          ) : null}
+
+          {activeOperationSection === 'trip-assignment' ? (
+            <section className="mb-5">
+              <TripAllocationPanel onSaved={loadData} routes={routes} />
             </section>
           ) : null}
 
@@ -2343,7 +2572,7 @@ const RouteWorkflowPage = () => {
                     </div>
                   </div>
                   <div className="grid flex-1 gap-3 md:grid-cols-3">
-                    {['ACTIVE', 'RESERVE', 'MAINTENANCE'].map((status) => {
+                    {['AVAILABLE', 'ACTIVE', 'ISSUE', 'MAINTENANCE'].map((status) => {
                       const count = buses.filter((bus) => bus.status === status).length;
                       const percent = buses.length ? Math.round((count / buses.length) * 100) : 0;
                       const tone = busStatusOverview[status];

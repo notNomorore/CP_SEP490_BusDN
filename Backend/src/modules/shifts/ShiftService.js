@@ -2,12 +2,14 @@
 import User from '../auth/User.js';
 import FleetBus from '../admin/FleetBus.js';
 import TripSchedule from '../admin/TripSchedule.js';
+import Route from '../routes/Route.js';
 import Shift from './Shift.js';
 import DriverShiftAssignment from './DriverShiftAssignment.js';
 import AssistantShiftAssignment from './AssistantShiftAssignment.js';
 import VehicleShiftAssignment from './VehicleShiftAssignment.js';
 import TripShiftAssignment from './TripShiftAssignment.js';
 import ShiftAuditLog from './ShiftAuditLog.js';
+import RouteOperatingConfig from './RouteOperatingConfig.js';
 import { SHIFT_CLOSED_STATUSES, SHIFT_STATUS_VALUES } from './shift.constants.js';
 
 const SHIFT_STATUSES = new Set(SHIFT_STATUS_VALUES);
@@ -17,6 +19,7 @@ const BLOCKING_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'];
 const ACTIVE_TRIP_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS'];
 const CLOSED_SHIFT_STATUSES = SHIFT_CLOSED_STATUSES;
 const MAX_DRIVER_MINUTES_PER_DAY = 8 * 60;
+const MIN_DRIVER_REST_MINUTES = 60;
 const OPERATING_START_MINUTES = (5 * 60) + 30;
 const OPERATING_END_MINUTES = (18 * 60) + 30;
 const AUTO_SHIFT_TEMPLATES = [
@@ -149,6 +152,7 @@ const validateShiftPayload = (payload) => {
   if (!payload.shiftCode) errors.push('Ma ca la bat buoc.');
   if (!payload.workDate) errors.push('Ngay lam viec la bat buoc.');
   if (!payload.shiftName) errors.push('Tên ca là bắt buộc.');
+  if (!payload.routeId) errors.push('Ca làm phải gắn với một tuyến vận hành.');
   if (startMinutes === null) errors.push('Giờ bắt đầu là bắt buộc.');
   if (endMinutes === null) errors.push('Giờ kết thúc là bắt buộc.');
   if (!SHIFT_TYPES.has(payload.shiftType)) errors.push('Hệ thống chỉ hỗ trợ ca sáng và ca chiều.');
@@ -213,6 +217,31 @@ const findOverlappingAssignment = async ({ model, resourceField, resourceId, wor
   return assignments.find((assignment) => {
     const assignedShift = shiftById.get(String(assignment.shiftId));
     return assignedShift && timesOverlap(shift, assignedShift);
+  }) || null;
+};
+
+const findInsufficientRestAssignment = async ({ model, resourceField, resourceId, workDate, shift, excludeShiftId }) => {
+  const targetRange = getShiftRange(shift);
+  if (!targetRange) return null;
+  const assignments = await model.find({
+    [resourceField]: resourceId,
+    workDate,
+    status: { $in: BLOCKING_ASSIGNMENT_STATUSES },
+    ...(excludeShiftId ? { shiftId: { $ne: excludeShiftId } } : {}),
+  }).lean();
+  if (!assignments.length) return null;
+  const shifts = await Shift.find({
+    _id: { $in: assignments.map((assignment) => assignment.shiftId) },
+    status: { $ne: 'ARCHIVED' },
+  }).lean();
+  const shiftById = new Map(shifts.map((item) => [String(item._id), item]));
+  return assignments.find((assignment) => {
+    const assignedRange = getShiftRange(shiftById.get(String(assignment.shiftId)));
+    if (!assignedRange || rangesOverlap(targetRange, assignedRange)) return false;
+    const restMinutes = targetRange.start >= assignedRange.end
+      ? targetRange.start - assignedRange.end
+      : assignedRange.start - targetRange.end;
+    return restMinutes < MIN_DRIVER_REST_MINUTES;
   }) || null;
 };
 
@@ -349,6 +378,51 @@ const hasLeaveConflict = (driver, workDate) => {
   });
 };
 
+const assertFutureDriverCoverage = async ({ driverId, workDate, shift }) => {
+  const shiftRange = getShiftRange(shift);
+  if (!shiftRange) return;
+  const nextDate = addDays(workDate, 1);
+  const configs = await RouteOperatingConfig.find({
+    isActive: true,
+    $or: [
+      { effectiveDate: { $gte: workDate, $lt: nextDate } },
+      { effectiveDate: null, dayOfWeek: workDate.getDay() },
+    ],
+    startTime: { $gte: shift.endTime },
+  }).lean();
+  if (!configs.length) return;
+  const grouped = [...configs.reduce((map, config) => {
+    const key = `${config.startTime}-${config.endTime}`;
+    const current = map.get(key) || { startTime: config.startTime, endTime: config.endTime, requiredDrivers: 0 };
+    current.requiredDrivers += Number(config.requiredDrivers || 0);
+    map.set(key, current);
+    return map;
+  }, new Map()).values()];
+  const drivers = await User.find({ role: 'DRIVER', status: 'ACTIVE' }).select('staffAvailability').lean();
+  const assignments = await DriverShiftAssignment.find({
+    workDate,
+    status: { $in: BLOCKING_ASSIGNMENT_STATUSES },
+    shiftId: { $ne: shift._id },
+  }).lean();
+  const relatedShifts = await Shift.find({ _id: { $in: assignments.map((item) => item.shiftId) }, status: { $ne: 'ARCHIVED' } }).lean();
+  const shiftMap = new Map(relatedShifts.map((item) => [String(item._id), item]));
+  for (const slot of grouped) {
+    const slotRange = getShiftRange(slot);
+    const available = drivers.filter((candidate) => {
+      if (hasLeaveConflict(candidate, workDate)) return false;
+      const own = assignments.filter((item) => String(item.driverId) === String(candidate._id));
+      const minutes = own.reduce((sum, item) => sum + getShiftDurationMinutes(shiftMap.get(String(item.shiftId))), 0)
+        + (String(candidate._id) === String(driverId) ? getShiftDurationMinutes(shift) : 0);
+      const futureDuration = slotRange.end - slotRange.start;
+      const conflict = own.some((item) => timesOverlap(shiftMap.get(String(item.shiftId)), slot));
+      return !conflict && minutes + futureDuration <= MAX_DRIVER_MINUTES_PER_DAY;
+    }).length;
+    if (available < slot.requiredDrivers) {
+      throw Object.assign(new Error(`Không thể phân tài xế: khung ${slot.startTime}-${slot.endTime} sẽ thiếu ${slot.requiredDrivers - available} tài xế.`), { statusCode: 409 });
+    }
+  }
+};
+
 const buildAutoShiftPayload = ({ template, workDate, actorId, sequence = null }) => ({
   shiftCode: `AUTO-${toDateToken(workDate)}-${template.key}${sequence ? `-${String(sequence).padStart(3, '0')}` : ''}`,
   shiftName: sequence ? `${template.name} ${String(sequence).padStart(3, '0')}` : template.name,
@@ -443,6 +517,14 @@ export default class ShiftService {
       workDate: payload.workDate || originalShift.workDate,
     };
     await assertAssignedResourcesStillFitShift(nextShift);
+    const assignedDriver = await getAssignedDriver(shiftId);
+    if (assignedDriver) {
+      await assertFutureDriverCoverage({
+        driverId: assignedDriver.driverId?._id || assignedDriver.driverId,
+        workDate: normalizeDateOnly(nextShift.workDate),
+        shift: nextShift,
+      });
+    }
 
     const updated = await Shift.findByIdAndUpdate(shiftId, { $set: payload }, { new: true, runValidators: true }).lean();
     if (updated) {
@@ -591,6 +673,7 @@ export default class ShiftService {
       ensureShift(shiftId),
     ]);
     if (!driver) throw Object.assign(new Error('Không tìm thấy tài xế.'), { statusCode: 404 });
+    if (driver.status !== 'ACTIVE') throw Object.assign(new Error('Tài xế không hoạt động.'), { statusCode: 409 });
     if (!shift || CLOSED_SHIFT_STATUSES.includes(shift.status)) throw Object.assign(new Error('Không tìm thấy ca làm việc.'), { statusCode: 404 });
     if (hasLeaveConflict(driver, dateOnly)) {
       throw Object.assign(new Error('Tài xế đang nghỉ phép.'), { statusCode: 409 });
@@ -606,6 +689,18 @@ export default class ShiftService {
     });
     if (conflict) {
       throw Object.assign(new Error('Tài xế đã có ca khác trong khoảng thời gian này.'), { statusCode: 409 });
+    }
+
+    const insufficientRest = await findInsufficientRestAssignment({
+      model: DriverShiftAssignment,
+      resourceField: 'driverId',
+      resourceId: driverId,
+      workDate: dateOnly,
+      shift,
+      excludeShiftId: shiftId,
+    });
+    if (insufficientRest) {
+      throw Object.assign(new Error('Tài xế phải có ít nhất 60 phút nghỉ giữa hai ca.'), { statusCode: 409 });
     }
 
     const assignedMinutes = await getTotalAssignedMinutesForDriver({ driverId, workDate: dateOnly, excludeShiftId: shiftId });
@@ -744,6 +839,20 @@ export default class ShiftService {
     });
     if (conflict) throw Object.assign(new Error('Tai xe da co ca khac trung thoi gian.'), { statusCode: 409 });
 
+    const insufficientRest = await findInsufficientRestAssignment({
+      model: DriverShiftAssignment,
+      resourceField: 'driverId',
+      resourceId: driverId,
+      workDate,
+      shift,
+      excludeShiftId: shiftId,
+    });
+    if (insufficientRest) {
+      throw Object.assign(new Error('Tài xế phải có ít nhất 60 phút nghỉ giữa hai ca.'), { statusCode: 409 });
+    }
+
+    await assertFutureDriverCoverage({ driverId, workDate, shift });
+
     const assignedMinutes = await getTotalAssignedMinutesForDriver({ driverId, workDate, excludeShiftId: shiftId });
     if (assignedMinutes + getShiftDurationMinutes(shift) > MAX_DRIVER_MINUTES_PER_DAY) {
       throw Object.assign(new Error('Tai xe vuot qua so gio lam toi da trong ngay.'), { statusCode: 409 });
@@ -796,6 +905,16 @@ export default class ShiftService {
     });
     if (conflict) throw Object.assign(new Error('Phu xe da co ca khac trung thoi gian.'), { statusCode: 409 });
 
+    const insufficientRest = await findInsufficientRestAssignment({
+      model: AssistantShiftAssignment,
+      resourceField: 'assistantId',
+      resourceId: assistantId,
+      workDate,
+      shift,
+      excludeShiftId: shiftId,
+    });
+    if (insufficientRest) throw Object.assign(new Error('Phụ xe phải có ít nhất 60 phút nghỉ giữa hai ca.'), { statusCode: 409 });
+
     const assignedMinutes = await getTotalAssignedMinutesForAssistant({ assistantId, workDate, excludeShiftId: shiftId });
     if (assignedMinutes + getShiftDurationMinutes(shift) > MAX_DRIVER_MINUTES_PER_DAY) {
       throw Object.assign(new Error('Phu xe vuot qua so gio lam toi da trong ngay.'), { statusCode: 409 });
@@ -829,13 +948,27 @@ export default class ShiftService {
     if (!workDate) throw Object.assign(new Error('Ngay lam viec cua ca khong hop le.'), { statusCode: 400 });
     if (!isValidObjectId(vehicleId)) throw Object.assign(new Error('Khong tim thay xe.'), { statusCode: 404 });
 
-    const vehicle = await FleetBus.findById(vehicleId).lean();
+    const [vehicle, route] = await Promise.all([
+      FleetBus.findById(vehicleId).lean(),
+      shift.routeId ? Route.findById(shift.routeId).lean() : null,
+    ]);
     if (!vehicle) throw Object.assign(new Error('Khong tim thay xe.'), { statusCode: 404 });
     if (vehicle.status === 'MAINTENANCE') throw Object.assign(new Error('Xe dang bao tri.'), { statusCode: 409 });
     if (vehicle.status === 'INACTIVE') throw Object.assign(new Error('Xe khong hoat dong.'), { statusCode: 409 });
+    if (vehicle.status === 'ISSUE') throw Object.assign(new Error('Xe đang gặp sự cố.'), { statusCode: 409 });
+    if (route?.vehicleAssignment?.capacity && Number(vehicle.capacity || 0) < Number(route.vehicleAssignment.capacity)) {
+      throw Object.assign(new Error('Sức chứa xe không đáp ứng yêu cầu tuyến.'), { statusCode: 409 });
+    }
+    const assignedBusIds = new Set((route?.vehicleAssignment?.assignedBuses || []).map((item) => String(item.busId || item._id)));
+    const requiredType = String(route?.vehicleAssignment?.busType || '').trim().toLowerCase();
+    if (route && !assignedBusIds.has(String(vehicleId)) && requiredType && !String(vehicle.busType || '').toLowerCase().includes(requiredType) && !requiredType.includes(String(vehicle.busType || '').toLowerCase())) {
+      throw Object.assign(new Error('Loại xe không phù hợp với tuyến.'), { statusCode: 409 });
+    }
 
     const existingForShift = await getAssignedVehicle(shiftId);
-    if (existingForShift) throw Object.assign(new Error('Ca da co xe.'), { statusCode: 409 });
+    const sameVehicleAlreadyAssigned = existingForShift
+      && String(existingForShift.vehicleId?._id || existingForShift.vehicleId) === String(vehicleId);
+    if (sameVehicleAlreadyAssigned) return existingForShift;
 
     const conflict = await findOverlappingAssignment({
       model: VehicleShiftAssignment,
@@ -855,6 +988,9 @@ export default class ShiftService {
       createdBy: actorId,
       updatedBy: actorId,
     });
+    if (existingForShift) {
+      await VehicleShiftAssignment.updateOne({ _id: existingForShift._id }, { $set: { status: 'CANCELLED', updatedBy: actorId } });
+    }
     await assignment.save();
     return assignment.populate([{ path: 'vehicleId', select: 'busCode plateNumber busType status capacity' }, { path: 'shiftId' }]);
   }

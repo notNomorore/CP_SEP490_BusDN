@@ -89,8 +89,8 @@ export const adminService = {
   generateTripSchedulePreview: async (data) => {
     return apiClient.post('/admin/trip-schedules/generate-preview', data);
   },
-  confirmGeneratedTripSchedules: async (rows, replaceScheduled = false) => {
-    return apiClient.post('/admin/trip-schedules/confirm-generated', { rows, replaceScheduled });
+  confirmGeneratedTripSchedules: async (rows, replaceScheduled = false, planningOnly = false) => {
+    return apiClient.post('/admin/trip-schedules/confirm-generated', { rows, replaceScheduled, planningOnly });
   },
   updateTripSchedule: async (scheduleId, data) => {
     return apiClient.put(`/admin/trip-schedules/${scheduleId}`, data);
@@ -104,6 +104,33 @@ export const adminService = {
   getShifts: async (params = {}) => {
     return apiClient.get('/admin/shifts', { params });
   },
+  getSchedulingOverview: async (date) => {
+    return apiClient.get('/admin/scheduling/overview', { params: { date } });
+  },
+  getRouteOperatingConfigs: async (params = {}) => {
+    return apiClient.get('/admin/scheduling/route-configs', { params });
+  },
+  saveRouteOperatingConfigs: async (data) => {
+    return apiClient.put('/admin/scheduling/route-configs', data);
+  },
+  getEligibleSchedulingDrivers: async (params) => {
+    return apiClient.get('/admin/scheduling/eligible-drivers', { params });
+  },
+  generateSchedulingPlan: async (data) => {
+    return apiClient.post('/admin/scheduling/generate', data);
+  },
+  getSchedulingPlans: async (params = {}) => {
+    return apiClient.get('/admin/scheduling/plans', { params });
+  },
+  cancelSchedulingPlan: async (planId) => {
+    return apiClient.delete(`/admin/scheduling/plans/${planId}`);
+  },
+  validateSchedulingPlan: async (data) => {
+    return apiClient.post('/admin/scheduling/validate', data);
+  },
+  confirmSchedulingPlan: async (data) => {
+    return apiClient.post('/admin/scheduling/confirm', data);
+  },
   createShift: async (data) => {
     return apiClient.post('/admin/shifts', data);
   },
@@ -112,6 +139,12 @@ export const adminService = {
   },
   confirmGeneratedShifts: async (rows) => {
     return apiClient.post('/admin/shifts/confirm-generated', { rows });
+  },
+  previewTripAllocation: async (params) => {
+    return apiClient.get('/admin/shifts/trip-allocation/preview', { params });
+  },
+  confirmTripAllocation: async (rows) => {
+    return apiClient.post('/admin/shifts/trip-allocation/confirm', { rows });
   },
   getAvailableShiftDrivers: async (params) => {
     return apiClient.get('/admin/shifts/available-drivers', { params });

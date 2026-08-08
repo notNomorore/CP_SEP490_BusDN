@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CalendarRange, Check, RefreshCw, Save, Sparkles, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import Header from '../../../shared/components/navigation/Header.jsx';
 import useTheme from '../../../shared/hooks/useTheme.js';
@@ -80,10 +80,30 @@ const AssignmentToggle = ({ checked, label, onChange }) => (
   </label>
 );
 
-const AutoGenerateShiftPage = () => {
+const AutoGenerateShiftPage = ({ embedded = false, onConfirmed }) => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { isDarkMode } = useTheme();
-  const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState(() => {
+    const routeId = searchParams.get('routeId') || '';
+    const startDate = searchParams.get('startDate') || dateInput();
+    const endDate = searchParams.get('endDate') || startDate;
+    const tripIds = (searchParams.get('tripIds') || '').split(',').filter(Boolean);
+    return routeId && tripIds.length
+      ? {
+        ...initialForm,
+        routeId,
+        startDate,
+        endDate,
+        shiftType: 'FULL_DAY',
+        startTime: '05:30',
+        endTime: '18:30',
+        tripSelectionMode: 'TRIPS',
+        tripIds,
+      }
+      : initialForm;
+  });
+  const [assignmentMode, setAssignmentMode] = useState('AUTO');
   const [routes, setRoutes] = useState([]);
   const [trips, setTrips] = useState([]);
   const [previewRows, setPreviewRows] = useState([]);
@@ -158,7 +178,7 @@ const AutoGenerateShiftPage = () => {
     if (!form.startDate || !form.endDate) return 'Ngày hoặc khoảng ngày là bắt buộc.';
     if (form.startDate > form.endDate) return 'Ngày bắt đầu phải trước ngày kết thúc.';
     if (!form.startTime || !form.endTime || form.startTime >= form.endTime) return 'Giờ bắt đầu phải nhỏ hơn giờ kết thúc.';
-    if (form.tripSelectionMode === 'NUMBER' && Number(form.numberOfTrips) < 1) return 'Số chuyến phải lớn hơn 0.';
+    if (form.tripSelectionMode === 'NUMBER' && (Number(form.numberOfTrips) < 2 || Number(form.numberOfTrips) % 2 !== 0)) return 'Số lượt phải là số chẵn và ít nhất là 2 để tạo đủ cặp D-V.';
     if (form.tripSelectionMode === 'TRIPS' && !form.tripIds.length) return 'Hãy chọn ít nhất một chuyến.';
     return '';
   };
@@ -204,9 +224,31 @@ const AutoGenerateShiftPage = () => {
   };
 
   const selectTrip = (row, tripId) => {
-    const exists = row.tripIds.some((id) => getId(id) === String(tripId));
+    const selectedTrip = (row.availableTrips || []).find((trip) => getId(trip) === String(tripId));
+    const cycleCode = selectedTrip?.operationCycleCode;
+    const cycleTripIds = (row.availableTrips || [])
+      .filter((trip) => cycleCode && trip.operationCycleCode === cycleCode)
+      .map((trip) => getId(trip));
+    const targetIds = cycleTripIds.length ? cycleTripIds : [String(tripId)];
+    const exists = targetIds.every((id) => row.tripIds.some((selectedId) => getId(selectedId) === id));
     updateRow(row.previewId, {
-      tripIds: exists ? row.tripIds.filter((id) => getId(id) !== String(tripId)) : [...row.tripIds, tripId],
+      tripIds: exists
+        ? row.tripIds.filter((id) => !targetIds.includes(getId(id)))
+        : [...new Set([...row.tripIds.map(getId), ...targetIds])],
+    });
+  };
+
+  const selectFormTrip = (tripId) => {
+    const selectedTrip = trips.find((trip) => getId(trip) === String(tripId));
+    const cycleTripIds = trips
+      .filter((trip) => selectedTrip?.operationCycleCode && trip.operationCycleCode === selectedTrip.operationCycleCode)
+      .map((trip) => getId(trip));
+    const targetIds = cycleTripIds.length ? cycleTripIds : [String(tripId)];
+    const exists = targetIds.every((id) => form.tripIds.some((selectedId) => getId(selectedId) === id));
+    updateForm({
+      tripIds: exists
+        ? form.tripIds.filter((id) => !targetIds.includes(getId(id)))
+        : [...new Set([...form.tripIds.map(getId), ...targetIds])],
     });
   };
 
@@ -234,8 +276,13 @@ const AutoGenerateShiftPage = () => {
         assistantId: row.assistantId,
         tripIds: row.tripIds,
       })));
-      toast.success(`Đã lưu ${response.shifts?.length || 0} ca chính thức.`);
-      navigate('/admin/shifts');
+      toast.success(`Đã phân công thành công ${response.shifts?.length || 0} tổ vận hành.`);
+      if (embedded) {
+        setPreviewRows([]);
+        onConfirmed?.(response);
+      } else {
+        navigate('/admin/shifts');
+      }
     } catch (confirmError) {
       toast.error(getErrorMessage(confirmError, 'Không thể xác nhận lưu ca.'));
     } finally {
@@ -244,22 +291,48 @@ const AutoGenerateShiftPage = () => {
   };
 
   return (
-    <div className={`min-h-screen ${shellClass}`}>
-      <Header />
-      <main className="mx-auto max-w-[1680px] px-4 pb-12 pt-28 sm:px-6 lg:px-8">
+    <div className={embedded ? '' : `min-h-screen ${shellClass}`}>
+      {!embedded ? <Header /> : null}
+      <main className={embedded ? 'space-y-5' : 'mx-auto max-w-[1680px] px-4 pb-12 pt-28 sm:px-6 lg:px-8'}>
         <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <button type="button" onClick={() => navigate('/admin/shifts')} className={`mb-3 inline-flex items-center gap-2 text-sm font-bold ${mutedClass}`}>
+            {!embedded ? <button type="button" onClick={() => navigate('/admin/shifts')} className={`mb-3 inline-flex items-center gap-2 text-sm font-bold ${mutedClass}`}>
               <ArrowLeft size={16} /> Quản lý ca làm
-            </button>
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-cyan-500">Điều phối nhân sự và chuyến</p>
-            <h1 className="mt-2 text-3xl font-black">Sinh ca làm việc tự động</h1>
-            <p className={`mt-2 text-sm ${mutedClass}`}>Hệ thống chỉ tạo bản xem trước. Dữ liệu được lưu khi quản trị viên bấm Xác nhận lưu.</p>
+            </button> : null}
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-cyan-500">Phân công chuyến</p>
+            <h1 className="mt-2 text-3xl font-black">Gán tổ vận hành vào chuyến đã lập</h1>
+            <p className={`mt-2 text-sm ${mutedClass}`}>Chọn các cặp D–V đã có, sau đó gán xe, tài xế và phụ xe đủ điều kiện cho từng vòng.</p>
           </div>
           <CalendarRange className="text-cyan-500" size={32} />
         </div>
 
         <section className={`border p-5 ${panelClass}`}>
+          <div className="mb-5 grid gap-3 rounded-xl border border-slate-200 p-2 md:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => {
+                setAssignmentMode('AUTO');
+                updateForm({ autoAssignVehicle: true, autoAssignDriver: true, autoAssignAssistant: true });
+                setPreviewRows([]);
+              }}
+              className={`rounded-lg px-4 py-3 text-left ${assignmentMode === 'AUTO' ? 'bg-emerald-500 text-emerald-950' : 'bg-slate-50 text-slate-600'}`}
+            >
+              <strong className="block">Phân công tự động</strong>
+              <span className="mt-1 block text-xs">Hệ thống đề xuất nguồn lực phù hợp và không trùng lịch.</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAssignmentMode('MANUAL');
+                updateForm({ autoAssignVehicle: false, autoAssignDriver: false, autoAssignAssistant: false });
+                setPreviewRows([]);
+              }}
+              className={`rounded-lg px-4 py-3 text-left ${assignmentMode === 'MANUAL' ? 'bg-cyan-400 text-cyan-950' : 'bg-slate-50 text-slate-600'}`}
+            >
+              <strong className="block">Phân công thủ công</strong>
+              <span className="mt-1 block text-xs">Admin tự chọn xe, tài xế và phụ xe cho từng vòng D–V.</span>
+            </button>
+          </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             <label className="xl:col-span-2">
               <span className={`mb-2 block text-xs font-bold uppercase ${mutedClass}`}>Tuyến xe *</span>
@@ -304,7 +377,7 @@ const AutoGenerateShiftPage = () => {
                 <label className="flex items-center gap-2 text-sm font-bold"><input type="radio" checked={form.tripSelectionMode === 'ALL'} onChange={() => updateForm({ tripSelectionMode: 'ALL', numberOfTrips: 0, tripIds: [] })} /> Toàn bộ chuyến trong ca</label>
                 <label className="flex items-center gap-2 text-sm font-bold"><input type="radio" checked={form.tripSelectionMode === 'NUMBER'} onChange={() => updateForm({ tripSelectionMode: 'NUMBER', tripIds: [] })} /> Theo số chuyến</label>
                 <label className="flex items-center gap-2 text-sm font-bold"><input type="radio" checked={form.tripSelectionMode === 'TRIPS'} onChange={() => updateForm({ tripSelectionMode: 'TRIPS' })} /> Chọn chuyến cụ thể</label>
-                {form.tripSelectionMode === 'NUMBER' ? <input type="number" min="1" className={`${inputClass} max-w-28`} value={form.numberOfTrips} onChange={(event) => updateForm({ numberOfTrips: event.target.value })} /> : null}
+                {form.tripSelectionMode === 'NUMBER' ? <input type="number" min="2" step="2" title="Số lượt phải chẵn để tạo đủ cặp D-V" className={`${inputClass} max-w-28`} value={form.numberOfTrips} onChange={(event) => updateForm({ numberOfTrips: event.target.value })} /> : null}
               </div>
             </div>
           </div>
@@ -313,7 +386,7 @@ const AutoGenerateShiftPage = () => {
             <div className="mt-4 grid max-h-44 gap-2 overflow-y-auto border-t border-slate-200 pt-4 md:grid-cols-2 xl:grid-cols-4">
               {trips.map((trip) => (
                 <label key={trip._id} className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-800">
-                  <input type="checkbox" checked={form.tripIds.includes(trip._id)} onChange={() => updateForm({ tripIds: form.tripIds.includes(trip._id) ? form.tripIds.filter((id) => id !== trip._id) : [...form.tripIds, trip._id] })} />
+                  <input type="checkbox" checked={form.tripIds.some((id) => getId(id) === getId(trip))} onChange={() => selectFormTrip(trip._id)} />
                   <span><strong className="block">{trip.scheduleCode}</strong>{dateInput(new Date(trip.serviceDate))} · {trip.departureTime}-{trip.expectedArrivalTime}</span>
                 </label>
               ))}
@@ -321,17 +394,21 @@ const AutoGenerateShiftPage = () => {
             </div>
           ) : null}
 
-          <div className="mt-5 grid gap-3 md:grid-cols-3">
+          {assignmentMode === 'AUTO' ? <div className="mt-5 grid gap-3 md:grid-cols-3">
             <AssignmentToggle label="Tự động phân công xe" checked={form.autoAssignVehicle} onChange={(event) => updateForm({ autoAssignVehicle: event.target.checked })} />
             <AssignmentToggle label="Tự động phân công tài xế" checked={form.autoAssignDriver} onChange={(event) => updateForm({ autoAssignDriver: event.target.checked })} />
             <AssignmentToggle label="Tự động phân công phụ xe" checked={form.autoAssignAssistant} onChange={(event) => updateForm({ autoAssignAssistant: event.target.checked })} />
-          </div>
+          </div> : (
+            <div className="mt-5 rounded-xl border border-cyan-200 bg-cyan-50 p-4 text-sm text-cyan-900">
+              <strong>Chế độ thủ công:</strong> tạo bảng chuyến trước, sau đó chọn xe, tài xế và phụ xe trong từng dòng. Danh sách chỉ hiển thị nguồn lực đạt điều kiện về trạng thái, giờ làm và xung đột lịch.
+            </div>
+          )}
 
           <div className="mt-5 flex flex-wrap gap-3 border-t border-slate-200 pt-5">
             <button type="button" onClick={generate} disabled={isGenerating} className="inline-flex h-11 items-center gap-2 rounded-lg bg-emerald-500 px-5 text-sm font-black text-emerald-950 disabled:opacity-50">
-              {previewRows.length ? <RefreshCw size={18} /> : <Sparkles size={18} />} {isGenerating ? 'Đang sinh ca...' : previewRows.length ? 'Sinh lại' : 'Sinh ca'}
+              {previewRows.length ? <RefreshCw size={18} /> : <Sparkles size={18} />} {isGenerating ? 'Đang tạo bảng...' : previewRows.length ? 'Tạo lại bảng' : assignmentMode === 'MANUAL' ? 'Tạo bảng phân công thủ công' : 'Đề xuất tổ vận hành'}
             </button>
-            <button type="button" onClick={() => navigate('/admin/shifts')} className={`inline-flex h-11 items-center gap-2 rounded-lg border px-5 text-sm font-black ${panelClass}`}><X size={18} /> Hủy</button>
+            <button type="button" onClick={() => embedded ? setPreviewRows([]) : navigate('/admin/shifts')} className={`inline-flex h-11 items-center gap-2 rounded-lg border px-5 text-sm font-black ${panelClass}`}><X size={18} /> Hủy</button>
           </div>
         </section>
 
@@ -339,7 +416,7 @@ const AutoGenerateShiftPage = () => {
           <section className={`mt-5 border ${panelClass}`}>
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
               <div>
-                <h2 className="text-lg font-black">Danh sách ca xem trước</h2>
+                <h2 className="text-lg font-black">Danh sách phân công xem trước</h2>
                 <p className={`mt-1 text-xs ${mutedClass}`}>Chỉnh trực tiếp từng dòng trước khi lưu.</p>
               </div>
               <div className="flex flex-wrap gap-2 text-xs font-bold">
@@ -352,7 +429,7 @@ const AutoGenerateShiftPage = () => {
             <div className="overflow-x-auto">
               <table className="min-w-[1600px] w-full border-collapse text-left text-xs">
                 <thead className={isDarkMode ? 'bg-white/[0.05]' : 'bg-slate-50'}>
-                  <tr>{['Mã ca', 'Tuyến', 'Ngày', 'Bắt đầu', 'Kết thúc', 'Xe', 'Tài xế', 'Phụ xe', 'Chuyến', 'Trạng thái', 'Cảnh báo', 'Thao tác'].map((label) => <th key={label} className="border-b border-slate-200 px-3 py-3 font-black uppercase text-slate-500">{label}</th>)}</tr>
+                  <tr>{['Mã tổ', 'Tuyến', 'Ngày', 'Bắt đầu', 'Kết thúc', 'Xe', 'Tài xế', 'Phụ xe', 'Cặp D–V', 'Trạng thái', 'Cảnh báo', 'Thao tác'].map((label) => <th key={label} className="border-b border-slate-200 px-3 py-3 font-black uppercase text-slate-500">{label}</th>)}</tr>
                 </thead>
                 <tbody>
                   {previewRows.map((row) => (
@@ -363,8 +440,8 @@ const AutoGenerateShiftPage = () => {
                       <td className="px-3 py-3"><input type="time" className={`${inputClass} min-w-28`} value={row.startTime} onChange={(event) => updateRow(row.previewId, { startTime: event.target.value })} /></td>
                       <td className="px-3 py-3"><input type="time" className={`${inputClass} min-w-28`} value={row.endTime} onChange={(event) => updateRow(row.previewId, { endTime: event.target.value })} /></td>
                       <td className="px-3 py-3"><select className={`${inputClass} min-w-44`} value={getId(row.vehicleId)} onChange={(event) => updateRow(row.previewId, { vehicleId: event.target.value })}><option value="">Chọn xe</option>{(row.availableVehicles || []).map((item) => <option key={item._id} value={item._id}>{item.busCode} · {item.plateNumber}</option>)}</select></td>
-                      <td className="px-3 py-3"><select className={`${inputClass} min-w-44`} value={getId(row.driverId)} onChange={(event) => updateRow(row.previewId, { driverId: event.target.value })}><option value="">Chọn tài xế</option>{(row.availableDrivers || []).map((item) => <option key={item._id} value={item._id}>{item.fullName}</option>)}</select></td>
-                      <td className="px-3 py-3"><select className={`${inputClass} min-w-44`} value={getId(row.assistantId)} onChange={(event) => updateRow(row.previewId, { assistantId: event.target.value })}><option value="">Chọn phụ xe</option>{(row.availableAssistants || []).map((item) => <option key={item._id} value={item._id}>{item.fullName}</option>)}</select></td>
+                      <td className="px-3 py-3"><select className={`${inputClass} min-w-72`} value={getId(row.driverId)} onChange={(event) => updateRow(row.previewId, { driverId: event.target.value })}><option value="">Chọn tài xế đủ điều kiện</option>{(row.availableDrivers || []).map((item) => <option key={item._id} value={item._id}>{item.fullName} · {item.score || 0}% · {Math.round((item.assignedMinutes || 0) / 60 * 10) / 10}/8h ngày · {Math.round((item.assignedWeeklyMinutes || 0) / 60 * 10) / 10}/40h tuần</option>)}</select>{row.driverId ? <small className={`mt-2 block max-w-72 ${mutedClass}`}>{(row.availableDrivers || []).find((item) => getId(item) === getId(row.driverId))?.reasons?.join(' · ') || 'Đã kiểm tra lịch và giờ làm'}</small> : null}</td>
+                      <td className="px-3 py-3"><select className={`${inputClass} min-w-56`} value={getId(row.assistantId)} onChange={(event) => updateRow(row.previewId, { assistantId: event.target.value })}><option value="">Chọn phụ xe</option>{(row.availableAssistants || []).map((item) => <option key={item._id} value={item._id}>{item.fullName} · {item.score || 0}% phù hợp · {Math.round((item.assignedWeeklyMinutes || 0) / 60 * 10) / 10}/40h</option>)}</select></td>
                       <td className="min-w-56 px-3 py-3"><div className="max-h-32 space-y-2 overflow-y-auto">{(row.availableTrips || []).map((trip) => <label key={trip._id} className="flex items-start gap-2"><input type="checkbox" checked={row.tripIds.some((id) => getId(id) === getId(trip))} onChange={() => selectTrip(row, trip._id)} /><span>{trip.scheduleCode}<small className={`block ${mutedClass}`}>{trip.departureTime}-{trip.expectedArrivalTime}</small></span></label>)}</div></td>
                       <td className="px-3 py-4"><span className={`inline-block rounded-md px-2 py-1 font-black ${statusClasses[row.status]}`}>{statusLabels[row.status]}</span></td>
                       <td className="min-w-56 px-3 py-4 text-rose-500">{row.warningMessage || (row.status === 'VALID' ? 'Không có cảnh báo.' : 'Cần hoàn tất phân công.')}</td>

@@ -555,7 +555,21 @@ export default class AdminModel {
   }
 
   static async findBuses() {
-    return FleetBus.find({}).sort({ busCode: 1 }).lean();
+    const [buses, activeSchedules] = await Promise.all([
+      FleetBus.find({ busCode: { $not: /^(DN-AUTO-|DN-DEMO-)/i } }).sort({ busCode: 1 }).lean(),
+      TripSchedule.find({ status: 'IN_PROGRESS', 'vehicle.busId': { $ne: null } })
+        .select('vehicle.busId')
+        .lean(),
+    ]);
+    const runningBusIds = new Set(activeSchedules.map((schedule) => String(schedule.vehicle?.busId || '')).filter(Boolean));
+    return buses.map((bus) => ({
+      ...bus,
+      status: ['ISSUE', 'MAINTENANCE'].includes(bus.status)
+        ? bus.status
+        : runningBusIds.has(String(bus._id))
+          ? 'ACTIVE'
+          : 'AVAILABLE',
+    }));
   }
 
   static async findBusById(busId) {

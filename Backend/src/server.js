@@ -22,11 +22,9 @@ const connectDatabaseWithRetry = async () => {
     await connectDatabase();
   } catch (error) {
     logger.warn('MongoDB unavailable during startup. Retrying in 15 seconds...');
-    setTimeout(() => {
-      isConnectingDatabase = false;
-      connectDatabaseWithRetry();
-    }, 15000);
-    return;
+    isConnectingDatabase = false;
+    await new Promise((resolve) => setTimeout(resolve, 15000));
+    return connectDatabaseWithRetry();
   }
 
   isConnectingDatabase = false;

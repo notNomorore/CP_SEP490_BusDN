@@ -138,7 +138,8 @@ export class ScheduleOperationsController {
         req.user.userId,
         req.user.role,
         req.params.assignmentId,
-        req.body
+        req.body,
+        req.app.io
       );
 
       return res.success(
@@ -198,7 +199,8 @@ export class ScheduleOperationsController {
         req.user.userId,
         req.user.role,
         req.params.assignmentId,
-        req.body
+        req.body,
+        req.app.io
       );
 
       await ScheduleOperationsService.attachInspectionRecords([assignment]);
@@ -239,7 +241,8 @@ export class ScheduleOperationsController {
         req.user.userId,
         req.user.role,
         req.params.assignmentId,
-        req.body
+        req.body,
+        req.app.io
       );
 
       await ScheduleOperationsService.attachInspectionRecords([assignment]);
@@ -261,7 +264,8 @@ export class ScheduleOperationsController {
         req.user.role,
         req.params.assignmentId,
         req.body,
-        req.files || []
+        req.files || [],
+        req.app.io
       );
 
       return res.success(

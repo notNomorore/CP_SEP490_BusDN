@@ -1,8 +1,18 @@
 import ShiftService from './ShiftService.js';
 import AutoGenerateShiftService from './AutoGenerateShiftService.js';
+import TripAllocationService from './TripAllocationService.js';
 import logger from '../../utils/logger.js';
 
 export default class ShiftController {
+  static async previewTripAllocation(req, res, _next) {
+    try { return res.json({ success: true, ...(await TripAllocationService.preview(req.query)) }); }
+    catch (error) { return res.status(error.statusCode || 500).json({ success: false, message: error.message }); }
+  }
+
+  static async confirmTripAllocation(req, res, _next) {
+    try { return res.status(201).json({ success: true, ...(await TripAllocationService.confirm({ rows: req.body?.rows, actorId: req.user?.userId })) }); }
+    catch (error) { return res.status(error.statusCode || 500).json({ success: false, message: error.message }); }
+  }
   static async listShifts(req, res, next) {
     try {
       const shifts = await ShiftService.listShifts(req.query);

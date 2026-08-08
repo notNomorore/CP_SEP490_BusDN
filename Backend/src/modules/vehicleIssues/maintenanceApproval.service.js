@@ -3,6 +3,7 @@ import { HTTP_STATUS, PAGINATION } from '../../constants/index.js';
 import { CustomError } from '../../middleware/errorHandler.js';
 import FleetBus from '../admin/FleetBus.js';
 import Vehicle from '../fleetOperations/Vehicle.js';
+import Trip from '../fleetOperations/Trip.js';
 import MaintenanceTask from './MaintenanceTask.js';
 import VehicleIssue from './VehicleIssue.js';
 
@@ -89,6 +90,17 @@ const combineNotes = (...notes) => notes
   .filter(Boolean)
   .join('\n\n');
 
+const syncVehicleMaintenanceStatus = async (vehicleId, fleetBusStatus, liveVehicleStatus) => {
+  const bus = await FleetBus.findById(vehicleId).select('busCode plateNumber').lean();
+  await FleetBus.updateOne({ _id: vehicleId }, { $set: { status: fleetBusStatus } });
+  if (!bus) return null;
+  return Vehicle.findOneAndUpdate(
+    { $or: [{ vehicleCode: bus.busCode }, { plateNumber: bus.plateNumber }] },
+    { $set: { status: liveVehicleStatus } },
+    { new: true }
+  ).lean();
+};
+
 export class MaintenanceApprovalService {
   static async getPendingApprovalTasks(query = {}) {
     const page = toPositiveInteger(query.page, PAGINATION.DEFAULT_PAGE);
@@ -173,8 +185,7 @@ export class MaintenanceApprovalService {
     await task.save();
 
     await Promise.all([
-      FleetBus.updateOne({ _id: task.vehicleId }, { $set: { status: 'MAINTENANCE' } }),
-      Vehicle.updateOne({ _id: task.vehicleId }, { $set: { status: 'maintenance' } }),
+      syncVehicleMaintenanceStatus(task.vehicleId, 'MAINTENANCE', 'maintenance'),
       task.vehicleIssueId ? VehicleIssue.updateOne(
         { _id: task.vehicleIssueId },
         { $set: { status: 'maintenance_required' } }
@@ -216,8 +227,7 @@ export class MaintenanceApprovalService {
     await task.save();
 
     await Promise.all([
-      FleetBus.updateOne({ _id: task.vehicleId }, { $set: { status: 'MAINTENANCE' } }),
-      Vehicle.updateOne({ _id: task.vehicleId }, { $set: { status: 'maintenance' } }),
+      syncVehicleMaintenanceStatus(task.vehicleId, 'MAINTENANCE', 'maintenance'),
       task.vehicleIssueId ? VehicleIssue.updateOne(
         { _id: task.vehicleIssueId },
         { $set: { status: 'maintenance_required' } }
@@ -321,10 +331,13 @@ export class MaintenanceApprovalService {
       );
     }
 
-    await Promise.all([
-      FleetBus.updateOne({ _id: task.vehicleId }, { $set: { status: 'ACTIVE' } }),
-      Vehicle.updateOne({ _id: task.vehicleId }, { $set: { status: 'available' } }),
-    ]);
+    const liveVehicle = await syncVehicleMaintenanceStatus(task.vehicleId, 'AVAILABLE', 'available');
+    if (liveVehicle) {
+      await Trip.updateMany(
+        { vehicleId: liveVehicle._id, status: { $in: ['active', 'paused', 'delayed', 'incident'] } },
+        { $set: { status: 'cancelled', actualEndTime: approvedAt } }
+      );
+    }
 
     await logAudit({
       action: 'MAINTENANCE_TASK_APPROVED',
@@ -378,10 +391,7 @@ export class MaintenanceApprovalService {
 
     await task.save();
 
-    await Promise.all([
-      FleetBus.updateOne({ _id: task.vehicleId }, { $set: { status: 'MAINTENANCE' } }),
-      Vehicle.updateOne({ _id: task.vehicleId }, { $set: { status: 'maintenance' } }),
-    ]);
+    await syncVehicleMaintenanceStatus(task.vehicleId, 'MAINTENANCE', 'maintenance');
 
     await logAudit({
       action: 'MAINTENANCE_TASK_REJECTED',

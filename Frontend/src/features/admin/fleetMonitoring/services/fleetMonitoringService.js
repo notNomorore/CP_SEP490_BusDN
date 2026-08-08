@@ -31,10 +31,6 @@ export const fleetMonitoringService = {
     return response.data;
   },
 
-  seedDemoFleet: async () => {
-    const response = await apiClient.post('/admin/fleet/mock-data');
-    return response.data;
-  },
 };
 
 export default fleetMonitoringService;

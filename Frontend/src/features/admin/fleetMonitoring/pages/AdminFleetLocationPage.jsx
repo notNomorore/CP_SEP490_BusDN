@@ -3,25 +3,30 @@ import 'leaflet/dist/leaflet.css';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
+  CircleMarker,
   MapContainer,
   Marker,
+  Polyline,
   Popup,
   TileLayer,
+  Tooltip,
+  useMap,
   ZoomControl,
 } from 'react-leaflet';
 import fleetMonitoringService from '../services/fleetMonitoringService.js';
 import { acquireFleetSocket, releaseFleetSocket } from '../services/fleetSocket.js';
 import toast from '../../../../shared/utils/toast.js';
+import adminService from '../../services/adminService.js';
+import { FleetOperationsPanel } from '../../pages/routes/RouteWorkflowPage.jsx';
 
 const DA_NANG_CENTER = [16.0544, 108.2022];
 const POLL_INTERVAL_MS = 20000;
 
 const STATUS_META = {
-  active: { label: 'Active', color: '#059669', icon: 'directions_bus' },
-  idle: { label: 'Idle', color: '#64748b', icon: 'pause_circle' },
-  delayed: { label: 'Delayed', color: '#d97706', icon: 'schedule' },
-  incident: { label: 'Incident', color: '#dc2626', icon: 'warning' },
-  lost_signal: { label: 'Lost signal', color: '#4b5563', icon: 'signal_disconnected' },
+  available: { label: 'Sẵn sàng', color: '#0891b2', icon: 'check_circle' },
+  active: { label: 'Đang hoạt động', color: '#059669', icon: 'directions_bus' },
+  incident: { label: 'Gặp sự cố', color: '#dc2626', icon: 'warning' },
+  maintenance: { label: 'Đang bảo trì', color: '#7c3aed', icon: 'build' },
 };
 
 const formatTime = (value) => {
@@ -78,6 +83,14 @@ const normalizeFleetItem = (item) => ({
   driver: item.driver || null,
 });
 
+const isDemoFleetItem = (item) => [
+  item?.vehicleCode,
+  item?.plateNumber,
+  item?.route?.routeCode,
+  item?.route?.routeName,
+  item?.driver?.fullName,
+].some((value) => /DEMO|^DN-AUTO-/i.test(String(value || '')));
+
 const StatusPill = ({ status }) => {
   const meta = STATUS_META[status] || STATUS_META.active;
   return (
@@ -123,7 +136,63 @@ const FleetPopup = ({ bus }) => (
   </div>
 );
 
-const FleetMap = ({ fleet, selectedId, onSelect }) => (
+const SelectedRoute = ({ bus }) => {
+  const map = useMap();
+  const positions = useMemo(() => (bus?.routePath || [])
+    .map((point) => [Number(point.lat), Number(point.lng)])
+    .filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng)), [bus]);
+
+  useEffect(() => {
+    if (positions.length < 2) return;
+    map.fitBounds(L.latLngBounds(positions), { padding: [36, 36], maxZoom: 15 });
+  }, [map, positions]);
+
+  if (positions.length < 2) return null;
+  return (
+    <>
+      <Polyline positions={positions} pathOptions={{ color: '#ffffff', weight: 8, opacity: 0.9 }} />
+      <Polyline positions={positions} pathOptions={{ color: '#059669', weight: 5, opacity: 0.95 }} />
+      {(bus?.routeStops || []).map((stop, index, stops) => {
+        const lat = Number(stop.lat);
+        const lng = Number(stop.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        const isStart = stop.isStart || index === 0;
+        const isEnd = stop.isEnd || index === stops.length - 1;
+        const color = isStart ? '#16a34a' : isEnd ? '#dc2626' : '#0284c7';
+        return (
+          <CircleMarker
+            key={`${stop.id || stop.name}-${index}`}
+            center={[lat, lng]}
+            radius={isStart || isEnd ? 8 : 6}
+            pathOptions={{ color: '#ffffff', weight: 3, fillColor: color, fillOpacity: 1 }}
+          >
+            <Tooltip direction="top" offset={[0, -8]} opacity={1}>
+              <div className="min-w-40">
+                <strong>{isStart ? 'Điểm đầu' : isEnd ? 'Điểm cuối' : `Trạm ${stop.order || index + 1}`}</strong>
+                <div>{stop.name}</div>
+                {stop.address ? <small>{stop.address}</small> : null}
+              </div>
+            </Tooltip>
+            <Popup>
+              <div className="min-w-48 space-y-1">
+                <strong>{stop.name}</strong>
+                <div>{isStart ? 'Điểm xuất phát' : isEnd ? 'Điểm kết thúc' : `Thứ tự trạm: ${stop.order || index + 1}`}</div>
+                {stop.address ? <div>{stop.address}</div> : null}
+                {stop.arrivalOffsetMinutes !== null && stop.arrivalOffsetMinutes !== undefined
+                  ? <div>Dự kiến sau {stop.arrivalOffsetMinutes} phút</div>
+                  : null}
+              </div>
+            </Popup>
+          </CircleMarker>
+        );
+      })}
+    </>
+  );
+};
+
+const FleetMap = ({ fleet, selectedId, onSelect }) => {
+  const selectedBus = fleet.find((bus) => bus.id === selectedId) || null;
+  return (
   <div className="h-[620px] overflow-hidden rounded-2xl border border-outline-variant/10 bg-surface-container-lowest shadow-sm">
     <MapContainer
       center={DA_NANG_CENTER}
@@ -136,7 +205,9 @@ const FleetMap = ({ fleet, selectedId, onSelect }) => (
         attribution="&copy; OpenStreetMap"
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      <SelectedRoute bus={selectedBus} />
       {fleet.map((bus) => {
+        if (!['active', 'incident'].includes(bus.operationalStatus)) return null;
         const lat = Number(bus.currentLocation?.lat);
         const lng = Number(bus.currentLocation?.lng);
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
@@ -159,23 +230,24 @@ const FleetMap = ({ fleet, selectedId, onSelect }) => (
       <ZoomControl position="bottomright" />
     </MapContainer>
   </div>
-);
+  );
+};
 
 const AdminFleetLocationPage = () => {
   const [searchParams] = useSearchParams();
   const focusedVehicleId = searchParams.get('vehicleId') || '';
   const [fleet, setFleet] = useState([]);
-  const [kpis, setKpis] = useState({
-    activeBuses: 0,
-    delayedBuses: 0,
-    lostSignalBuses: 0,
-    incidentBuses: 0,
-  });
   const [routes, setRoutes] = useState([]);
   const [filters, setFilters] = useState({ routeId: '', status: '', keyword: '', vehicleId: focusedVehicleId });
   const [socketConnected, setSocketConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState('');
+  const [managedBuses, setManagedBuses] = useState([]);
+
+  const loadManagedBuses = useCallback(async () => {
+    const response = await adminService.getBuses();
+    setManagedBuses(response.buses || []);
+  }, []);
 
   const loadLocations = useCallback(async () => {
     const params = {
@@ -184,8 +256,7 @@ const AdminFleetLocationPage = () => {
       keyword: filters.keyword || undefined,
     };
     const result = await fleetMonitoringService.getLocations(params);
-    setFleet((result.fleet || []).map(normalizeFleetItem));
-    setKpis(result.kpis || {});
+    setFleet((result.fleet || []).filter((item) => !isDemoFleetItem(item)).map(normalizeFleetItem));
     setRoutes(result.filters?.routes || []);
     setLoading(false);
   }, [filters.keyword, filters.routeId, filters.status]);
@@ -205,6 +276,7 @@ const AdminFleetLocationPage = () => {
     };
     const handleDisconnect = () => setSocketConnected(false);
     const handleLocationUpdated = (payload) => {
+      if (isDemoFleetItem(payload)) return;
       const next = normalizeFleetItem(payload);
       setFleet((current) => {
         const exists = current.some((item) => item.id === next.id);
@@ -218,6 +290,11 @@ const AdminFleetLocationPage = () => {
     socket.on('disconnect', handleDisconnect);
     socket.on('connect_error', handleDisconnect);
     socket.on('server:fleet:locationUpdated', handleLocationUpdated);
+    socket.on('server:incident:new', loadLocations);
+    socket.on('server:vehicleIssue:emergencyReported', loadLocations);
+    socket.on('server:vehicleIssue:reported', loadLocations);
+    socket.on('server:maintenance:taskUpdated', loadLocations);
+    socket.on('server:maintenance:approvalUpdated', loadLocations);
     if (socket.connected) handleConnect();
 
     return () => {
@@ -225,10 +302,19 @@ const AdminFleetLocationPage = () => {
       socket.off('disconnect', handleDisconnect);
       socket.off('connect_error', handleDisconnect);
       socket.off('server:fleet:locationUpdated', handleLocationUpdated);
+      socket.off('server:incident:new', loadLocations);
+      socket.off('server:vehicleIssue:emergencyReported', loadLocations);
+      socket.off('server:vehicleIssue:reported', loadLocations);
+      socket.off('server:maintenance:taskUpdated', loadLocations);
+      socket.off('server:maintenance:approvalUpdated', loadLocations);
       setSocketConnected(false);
       releaseFleetSocket();
     };
-  }, []);
+  }, [loadLocations]);
+
+  useEffect(() => {
+    loadManagedBuses().catch(() => toast.error('Không thể tải danh sách xe quản lý.'));
+  }, [loadManagedBuses]);
 
   useEffect(() => {
     if (socketConnected) return undefined;
@@ -241,6 +327,7 @@ const AdminFleetLocationPage = () => {
   const visibleFleet = useMemo(() => {
     const keyword = filters.keyword.trim().toLowerCase();
     return fleet.filter((bus) => {
+      if (isDemoFleetItem(bus)) return false;
       const matchesVehicle = !filters.vehicleId || bus.vehicleId === filters.vehicleId;
       const matchesRoute = !filters.routeId || bus.routeId === filters.routeId;
       const matchesStatus = !filters.status || bus.operationalStatus === filters.status;
@@ -255,12 +342,26 @@ const AdminFleetLocationPage = () => {
     });
   }, [filters, fleet]);
 
+  const displayManagedBuses = useMemo(() => {
+    const activeVehicleKeys = new Set(fleet
+      .filter((item) => item.operationalStatus === 'active')
+      .flatMap((item) => [item.vehicleCode, item.plateNumber])
+      .map((value) => String(value || '').trim().toUpperCase())
+      .filter(Boolean));
+    return managedBuses.map((bus) => {
+      if (['ISSUE', 'MAINTENANCE'].includes(bus.status)) return bus;
+      const isRunning = [bus.busCode, bus.plateNumber]
+        .some((value) => activeVehicleKeys.has(String(value || '').trim().toUpperCase()));
+      return { ...bus, status: isRunning ? 'ACTIVE' : 'AVAILABLE' };
+    });
+  }, [fleet, managedBuses]);
+
   const liveKpis = useMemo(() => ({
-    activeBuses: fleet.filter((bus) => bus.operationalStatus === 'active').length || kpis.activeBuses || 0,
-    delayedBuses: fleet.filter((bus) => bus.operationalStatus === 'delayed').length || kpis.delayedBuses || 0,
-    lostSignalBuses: fleet.filter((bus) => bus.operationalStatus === 'lost_signal').length || kpis.lostSignalBuses || 0,
-    incidentBuses: fleet.filter((bus) => bus.operationalStatus === 'incident').length || kpis.incidentBuses || 0,
-  }), [fleet, kpis]);
+    activeBuses: displayManagedBuses.filter((bus) => bus.status === 'ACTIVE').length,
+    availableBuses: displayManagedBuses.filter((bus) => bus.status === 'AVAILABLE').length,
+    maintenanceBuses: displayManagedBuses.filter((bus) => bus.status === 'MAINTENANCE').length,
+    incidentBuses: displayManagedBuses.filter((bus) => bus.status === 'ISSUE').length,
+  }), [displayManagedBuses]);
 
   const selectedBus = visibleFleet.find((bus) => bus.id === selectedId) || visibleFleet[0] || null;
 
@@ -274,16 +375,6 @@ const AdminFleetLocationPage = () => {
     const match = fleet.find((bus) => bus.vehicleId === focusedVehicleId);
     if (match) setSelectedId(match.id);
   }, [fleet, focusedVehicleId, selectedId]);
-
-  const handleSeedDemo = async () => {
-    try {
-      await fleetMonitoringService.seedDemoFleet();
-      await loadLocations();
-      toast.success('Demo fleet data is ready');
-    } catch (error) {
-      toast.error(error?.message || 'Unable to seed demo fleet');
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -304,22 +395,23 @@ const AdminFleetLocationPage = () => {
             <span className="material-symbols-outlined text-base">{socketConnected ? 'sensors' : 'sync'}</span>
             {socketConnected ? 'Live socket' : 'Polling fallback'}
           </span>
-          <button
-            type="button"
-            onClick={handleSeedDemo}
-            className="inline-flex h-10 items-center gap-2 rounded-full bg-primary px-4 text-sm font-bold text-on-primary"
-          >
-            <span className="material-symbols-outlined text-base">add_location_alt</span>
-            Demo Data
-          </button>
         </div>
       </section>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard icon="directions_bus" label="Active buses" value={liveKpis.activeBuses} tone="bg-on-tertiary-container/10 text-on-tertiary-container" />
-        <KpiCard icon="schedule" label="Delayed buses" value={liveKpis.delayedBuses} tone="bg-secondary-container text-secondary" />
-        <KpiCard icon="signal_disconnected" label="Lost signal" value={liveKpis.lostSignalBuses} tone="bg-surface-container-high text-on-surface-variant" />
-        <KpiCard icon="warning" label="Incidents" value={liveKpis.incidentBuses} tone="bg-error-container text-on-error-container" />
+        <KpiCard icon="check_circle" label="Xe sẵn sàng" value={liveKpis.availableBuses} tone="bg-cyan-100 text-cyan-700" />
+        <KpiCard icon="directions_bus" label="Xe đang hoạt động" value={liveKpis.activeBuses} tone="bg-on-tertiary-container/10 text-on-tertiary-container" />
+        <KpiCard icon="warning" label="Xe gặp sự cố" value={liveKpis.incidentBuses} tone="bg-error-container text-on-error-container" />
+        <KpiCard icon="build" label="Xe đang bảo trì" value={liveKpis.maintenanceBuses} tone="bg-violet-100 text-violet-700" />
+      </section>
+
+      <section>
+        <FleetOperationsPanel
+          buses={displayManagedBuses}
+          onSaved={async () => {
+            await Promise.all([loadManagedBuses(), loadLocations()]);
+          }}
+        />
       </section>
 
       <section className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 shadow-sm">
@@ -373,7 +465,7 @@ const AdminFleetLocationPage = () => {
               value={filters.keyword}
               onChange={(event) => setFilters((current) => ({ ...current, keyword: event.target.value }))}
               className="h-11 w-full rounded-xl border-outline-variant/60 bg-white text-sm text-primary focus:ring-on-tertiary-container"
-              placeholder="43A, DN-DEMO, driver..."
+              placeholder="Biển số, mã xe, tài xế..."
             />
           </label>
         </div>

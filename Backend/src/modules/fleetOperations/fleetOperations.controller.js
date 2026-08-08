@@ -27,7 +27,7 @@ export class FleetOperationsController {
   }
 
   static async updateGps(req, res) {
-    const result = await FleetOperationsService.updateGps(req.body, req.app.io);
+    const result = await FleetOperationsService.updateGps(req.body, req.user, req.app.io);
     return res.success(result, 'Vehicle location updated successfully');
   }
 

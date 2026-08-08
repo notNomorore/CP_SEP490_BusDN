@@ -8,8 +8,14 @@ import DriverShiftAssignment from './DriverShiftAssignment.js';
 import AssistantShiftAssignment from './AssistantShiftAssignment.js';
 import VehicleShiftAssignment from './VehicleShiftAssignment.js';
 import TripShiftAssignment from './TripShiftAssignment.js';
+import AssignmentLock from './AssignmentLock.js';
+import RouteOperatingConfig from './RouteOperatingConfig.js';
+import { scoreDriver, validateOperatingWindow } from './schedulingEngine.js';
+import { splitRowsIntoCycleDuties, validateAtomicCycleDuties } from './shiftDutyPlanning.js';
 
 const MAX_WORK_MINUTES = 8 * 60;
+const MAX_WEEKLY_WORK_MINUTES = 40 * 60;
+const MIN_REST_MINUTES = 60;
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'];
 const SHIFT_TYPES = new Set(['MORNING', 'AFTERNOON', 'EVENING', 'FULL_DAY', 'CUSTOM']);
 
@@ -61,15 +67,22 @@ const normalizeVehicleType = (value) => String(value || '')
   .normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '')
   .toLowerCase()
+  .replace(/đ/g, 'd')
   .replace(/[^a-z0-9]+/g, ' ')
   .trim();
 
-const vehicleTypeGroup = (value) => {
+export const vehicleTypeGroup = (value) => {
   const normalized = normalizeVehicleType(value);
   if (!normalized) return '';
-  if (normalized.includes('standard city bus') || normalized.includes('xe buyt tieu chuan do thi')) return 'STANDARD_CITY_BUS';
-  if (normalized.includes('mini') || normalized.includes('minibus')) return 'MINIBUS';
   if (normalized.includes('electric') || normalized.includes('dien')) return 'ELECTRIC_BUS';
+  if (normalized.includes('mini') || normalized.includes('minibus')) return 'MINIBUS';
+  if (
+    normalized.includes('standard city bus')
+    || normalized.includes('xe buyt tieu chuan do thi')
+    || normalized.includes('xe buyt thanh pho tieu chuan')
+    || normalized.includes('xe buyt do thi')
+    || normalized === 'city bus'
+  ) return 'STANDARD_CITY_BUS';
   return normalized;
 };
 
@@ -104,7 +117,7 @@ const hasSuitableLicense = (driver, requiredBusType, workDate) => {
 };
 
 const isVehicleOperational = (vehicle, workDate) => {
-  if (!['ACTIVE', 'RESERVE', 'ASSIGNED'].includes(vehicle.status)) return false;
+  if (!['AVAILABLE', 'ACTIVE', 'RESERVE', 'ASSIGNED'].includes(vehicle.status)) return false;
   const maintenanceStart = normalizeDate(vehicle.maintenance?.startDate);
   const maintenanceEnd = normalizeDate(vehicle.maintenance?.endDate);
   return !(maintenanceStart && maintenanceEnd && workDate >= maintenanceStart && workDate <= maintenanceEnd);
@@ -120,6 +133,22 @@ const loadAssignmentsForDate = async (workDate) => {
   return { drivers, assistants, vehicles };
 };
 
+const weekBounds = (workDate) => {
+  const start = normalizeDate(workDate);
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  return { start, end: addDays(start, 7) };
+};
+
+const loadStaffAssignmentsForWeek = async (workDate) => {
+  const { start, end } = weekBounds(workDate);
+  const filter = { workDate: { $gte: start, $lt: end }, status: { $in: ACTIVE_ASSIGNMENT_STATUSES } };
+  const [drivers, assistants] = await Promise.all([
+    DriverShiftAssignment.find(filter).populate('shiftId').lean(),
+    AssistantShiftAssignment.find(filter).populate('shiftId').lean(),
+  ]);
+  return { drivers, assistants };
+};
+
 const assignmentConflicts = (assignments, resourceField, resourceId, range) => assignments.some((assignment) => {
   if (getId(assignment[resourceField]) !== String(resourceId)) return false;
   const assignedRange = rangeOf(assignment.shiftId || {});
@@ -132,6 +161,14 @@ const assignedMinutes = (assignments, resourceField, resourceId) => assignments.
   return total + (range ? range.end - range.start : 0);
 }, 0);
 
+const minimumRestMinutes = (assignments, resourceField, resourceId, range) => assignments.reduce((minimum, assignment) => {
+  if (getId(assignment[resourceField]) !== String(resourceId)) return minimum;
+  const assignedRange = rangeOf(assignment.shiftId || {});
+  if (!assignedRange || overlaps(range, assignedRange)) return minimum;
+  const rest = assignedRange.end <= range.start ? range.start - assignedRange.end : assignedRange.start - range.end;
+  return Math.min(minimum, rest);
+}, 24 * 60);
+
 const publicDriver = (driver) => ({
   _id: driver._id,
   fullName: driver.fullName,
@@ -139,6 +176,40 @@ const publicDriver = (driver) => ({
   phoneNumber: driver.phoneNumber,
   driverLicense: driver.driverLicense,
 });
+
+const hasInsufficientRest = (assignments, resourceField, resourceId, range) => assignments.some((assignment) => {
+  if (getId(assignment[resourceField]) !== String(resourceId)) return false;
+  const assignedRange = rangeOf(assignment.shiftId || {});
+  if (!assignedRange || overlaps(range, assignedRange)) return false;
+  const rest = assignedRange.end <= range.start ? range.start - assignedRange.end : assignedRange.start - range.end;
+  return rest < MIN_REST_MINUTES;
+});
+
+const clockValue = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+
+const preservesFutureDriverCoverage = async ({ driverId, workDate, currentRange, assignments }) => {
+  const configs = await RouteOperatingConfig.find({
+    isActive: true,
+    $or: [
+      { effectiveDate: { $gte: workDate, $lt: addDays(workDate, 1) } },
+      { effectiveDate: null, dayOfWeek: workDate.getDay() },
+    ],
+    startTime: { $gte: clockValue(currentRange.end) },
+  }).lean();
+  if (!configs.length) return true;
+  const allDrivers = await User.find({ role: 'DRIVER', status: 'ACTIVE' }).select('staffAvailability').lean();
+  return configs.every((config) => {
+    const slotRange = rangeOf(config);
+    const available = allDrivers.filter((driver) => (
+      !isOnLeave(driver, workDate)
+      && !assignmentConflicts(assignments.drivers, 'driverId', driver._id, slotRange)
+      && assignedMinutes(assignments.drivers, 'driverId', driver._id)
+        + (getId(driver) === getId(driverId) ? currentRange.end - currentRange.start : 0)
+        + slotRange.end - slotRange.start <= MAX_WORK_MINUTES
+    )).length;
+    return available >= Number(config.requiredDrivers || 0);
+  });
+};
 
 const publicAssistant = (assistant) => ({
   _id: assistant._id,
@@ -160,10 +231,13 @@ const validateBaseRequest = (body) => {
   const startDate = normalizeDate(body.startDate || body.date || body.workDate);
   const endDate = normalizeDate(body.endDate || body.date || body.workDate);
   const range = rangeOf(body);
+  errors.push(...validateOperatingWindow(body));
   if (!mongoose.Types.ObjectId.isValid(body.routeId)) errors.push('Tuyến xe là bắt buộc.');
   if (!startDate || !endDate) errors.push('Ngày hoặc khoảng ngày là bắt buộc.');
   if (startDate && endDate && startDate > endDate) errors.push('Ngày bắt đầu phải trước ngày kết thúc.');
   if (!range) errors.push('Giờ bắt đầu phải nhỏ hơn giờ kết thúc.');
+  const requestedTrips = Number(body.numberOfTrips || 0);
+  if (requestedTrips > 0 && (requestedTrips < 2 || requestedTrips % 2 !== 0)) errors.push('Số lượt phải là số chẵn và ít nhất là 2 để giữ đủ cặp D-V.');
   if (startDate && endDate && ((endDate - startDate) / 86400000) > 31) errors.push('Chỉ được sinh tối đa 31 ngày mỗi lần.');
   return { errors, startDate, endDate, range };
 };
@@ -172,6 +246,48 @@ const buildStatus = ({ warnings, driverId, assistantId, vehicleId, tripIds }) =>
   if (warnings.some((warning) => warning.level === 'ERROR')) return 'CONFLICT';
   if (!driverId || !assistantId || !vehicleId || !tripIds.length) return 'NEED_MANUAL_ASSIGNMENT';
   return 'VALID';
+};
+
+const allocateDutyResources = (rows, body) => {
+  const totals = new Map();
+  const reservations = new Map();
+  rows.forEach((row) => {
+    const rowRange = rangeOf(row);
+    [
+      ['driver', 'driverId', 'availableDrivers', body.autoAssignDriver !== false],
+      ['assistant', 'assistantId', 'availableAssistants', body.autoAssignAssistant !== false],
+      ['vehicle', 'vehicleId', 'availableVehicles', body.autoAssignVehicle !== false],
+    ].forEach(([kind, idField, optionsField, autoAssign]) => {
+      if (!autoAssign) {
+        row[idField] = '';
+        row[kind] = null;
+        return;
+      }
+      const duration = rowRange.end - rowRange.start;
+      const candidate = (row[optionsField] || []).find((option) => {
+        const key = `${kind}:${row.workDate}:${getId(option)}`;
+        const requiredGap = kind === 'vehicle' ? 10 : MIN_REST_MINUTES;
+        const conflicts = (reservations.get(key) || []).some((reserved) => {
+          if (overlaps(rowRange, reserved)) return true;
+          const gap = rowRange.start >= reserved.end
+            ? rowRange.start - reserved.end
+            : reserved.start - rowRange.end;
+          return gap < requiredGap;
+        });
+        return !conflicts
+          && (kind === 'vehicle' || (totals.get(key) || 0) + duration <= MAX_WORK_MINUTES);
+      });
+      row[idField] = candidate?._id || '';
+      row[kind] = candidate || null;
+      if (candidate) {
+        const key = `${kind}:${row.workDate}:${getId(candidate)}`;
+        totals.set(key, (totals.get(key) || 0) + duration);
+        reservations.set(key, [...(reservations.get(key) || []), rowRange]);
+      }
+    });
+    row.status = buildStatus(row);
+  });
+  return rows;
 };
 
 const shiftNameFor = (shiftType) => ({
@@ -183,32 +299,70 @@ const shiftNameFor = (shiftType) => ({
 }[shiftType] || 'Ca tùy chỉnh');
 
 export default class AutoGenerateShiftService {
-  static async listAvailableResources({ kind, workDate, startTime, endTime, routeId }) {
+  static async populateDutyResources(rows, routeId) {
+    return Promise.all(rows.map(async (row) => {
+      const [availableDrivers, availableAssistants, availableVehicles] = await Promise.all([
+        this.listAvailableResources({ kind: 'drivers', workDate: row.workDate, startTime: row.startTime, endTime: row.endTime, routeId, shiftType: row.shiftType }),
+        this.listAvailableResources({ kind: 'assistants', workDate: row.workDate, startTime: row.startTime, endTime: row.endTime, routeId, shiftType: row.shiftType }),
+        this.listAvailableResources({ kind: 'vehicles', workDate: row.workDate, startTime: row.startTime, endTime: row.endTime, routeId }),
+      ]);
+      return { ...row, availableDrivers, availableAssistants, availableVehicles };
+    }));
+  }
+
+  static async listAvailableResources({ kind, workDate, startTime, endTime, routeId, shiftType }) {
     const date = normalizeDate(workDate);
     const range = rangeOf({ startTime, endTime });
     if (!date || !range) throw Object.assign(new Error('Ngày và khung giờ hợp lệ là bắt buộc.'), { statusCode: 400 });
     const route = mongoose.Types.ObjectId.isValid(routeId) ? await Route.findById(routeId).lean() : null;
     const assignments = await loadAssignmentsForDate(date);
+    const weeklyAssignments = await loadStaffAssignmentsForWeek(date);
     const duration = range.end - range.start;
 
     if (kind === 'drivers') {
-      const rows = await User.find({ role: 'DRIVER', status: 'ACTIVE' }).sort({ fullName: 1 }).lean();
+      const rows = await User.find({ role: 'DRIVER', status: 'ACTIVE', 'accountLock.isLocked': { $ne: true } }).sort({ fullName: 1 }).lean();
       return rows.filter((row) => (
         !isOnLeave(row, date)
         && hasSuitableLicense(row, route?.vehicleAssignment?.busType, date)
         && !assignmentConflicts(assignments.drivers, 'driverId', row._id, range)
+        && !hasInsufficientRest(assignments.drivers, 'driverId', row._id, range)
         && assignedMinutes(assignments.drivers, 'driverId', row._id) + duration <= MAX_WORK_MINUTES
-      )).map(publicDriver);
+        && assignedMinutes(weeklyAssignments.drivers, 'driverId', row._id) + duration <= MAX_WEEKLY_WORK_MINUTES
+      )).map((row) => {
+        const minutes = assignedMinutes(assignments.drivers, 'driverId', row._id);
+        const weeklyMinutes = assignedMinutes(weeklyAssignments.drivers, 'driverId', row._id);
+        const ownWeekly = weeklyAssignments.drivers.filter((item) => getId(item.driverId) === getId(row));
+        return { ...publicDriver(row), assignedMinutes: minutes, assignedWeeklyMinutes: weeklyMinutes, ...scoreDriver({
+          driverId: row._id,
+          assignedMinutes: weeklyMinutes,
+          targetMinutes: MAX_WEEKLY_WORK_MINUTES,
+          morningShiftCount: ownWeekly.filter((item) => item.shiftId?.shiftType === 'MORNING').length,
+          afternoonShiftCount: ownWeekly.filter((item) => item.shiftId?.shiftType === 'AFTERNOON').length,
+          peakShiftCount: ownWeekly.filter((item) => item.shiftId?.startTime < '09:00' || item.shiftId?.endTime > '16:00').length,
+          routeExperience: ownWeekly.some((item) => getId(item.shiftId?.routeId) === getId(route)),
+          restMinutes: minimumRestMinutes(assignments.drivers, 'driverId', row._id, range),
+          shiftType,
+        }) };
+      }).sort((left, right) => right.score - left.score || left.fullName.localeCompare(right.fullName, 'vi'));
     }
     if (kind === 'assistants') {
-      const rows = await User.find({ role: { $in: ['CONDUCTOR', 'BUS_ASSISTANT'] }, status: 'ACTIVE' }).sort({ fullName: 1 }).lean();
+      const rows = await User.find({ role: { $in: ['CONDUCTOR', 'BUS_ASSISTANT'] }, status: 'ACTIVE', 'accountLock.isLocked': { $ne: true } }).sort({ fullName: 1 }).lean();
       return rows.filter((row) => (
         !isOnLeave(row, date)
         && !assignmentConflicts(assignments.assistants, 'assistantId', row._id, range)
+        && !hasInsufficientRest(assignments.assistants, 'assistantId', row._id, range)
         && assignedMinutes(assignments.assistants, 'assistantId', row._id) + duration <= MAX_WORK_MINUTES
-      )).map(publicAssistant);
+        && assignedMinutes(weeklyAssignments.assistants, 'assistantId', row._id) + duration <= MAX_WEEKLY_WORK_MINUTES
+      )).map((row) => {
+        const weeklyMinutes = assignedMinutes(weeklyAssignments.assistants, 'assistantId', row._id);
+        const score = scoreDriver({ driverId: row._id, assignedMinutes: weeklyMinutes, targetMinutes: MAX_WEEKLY_WORK_MINUTES, restMinutes: minimumRestMinutes(assignments.assistants, 'assistantId', row._id, range), shiftType });
+        return { ...publicAssistant(row), assignedWeeklyMinutes: weeklyMinutes, score: score.score, reasons: score.reasons, warnings: score.warnings };
+      }).sort((left, right) => right.score - left.score || left.fullName.localeCompare(right.fullName, 'vi'));
     }
-    const rows = await FleetBus.find({ status: { $in: ['ACTIVE', 'RESERVE', 'ASSIGNED'] } }).sort({ busCode: 1 }).lean();
+    const rows = await FleetBus.find({
+      status: { $in: ['AVAILABLE', 'ACTIVE', 'RESERVE', 'ASSIGNED'] },
+      busCode: { $not: /^(DN-AUTO-|DN-DEMO-)/i },
+    }).sort({ busCode: 1 }).lean();
     return rows.filter((row) => (
       isVehicleOperational(row, date)
       && vehicleMatchesRoute(row, route)
@@ -242,40 +396,15 @@ export default class AutoGenerateShiftService {
           numberOfTrips: 0,
         }));
       }
-      const rows = previews.flatMap((preview) => preview.rows).sort((left, right) => (
-        left.workDate.localeCompare(right.workDate) || left.startTime.localeCompare(right.startTime)
-      ));
-      const totals = new Map();
+      let rows = splitRowsIntoCycleDuties(previews.flatMap((preview) => preview.rows));
+      const dutyErrors = validateAtomicCycleDuties(rows, rows.flatMap((row) => row.trips || []));
+      if (dutyErrors.length) throw Object.assign(new Error('Dữ liệu chuyến không tạo thành các cặp D-V hợp lệ.'), { statusCode: 409, conflicts: dutyErrors });
+      rows = await this.populateDutyResources(rows, body.routeId);
       rows.forEach((row, index) => {
         row.previewId = `${dateToken(row.workDate)}-${index + 1}`;
         row.shiftCode = `AUTO-${row.route.routeCode}-${dateToken(row.workDate)}-${String(index + 1).padStart(2, '0')}`;
-        [['driver', 'driverId', 'availableDrivers'], ['assistant', 'assistantId', 'availableAssistants']].forEach(([kind, idField, optionsField]) => {
-          if (!row[idField]) return;
-          const duration = rangeOf(row).end - rangeOf(row).start;
-          const candidate = (row[optionsField] || []).find((option) => {
-            const key = `${kind}:${row.workDate}:${getId(option)}`;
-            return (totals.get(key) || 0) + duration <= MAX_WORK_MINUTES;
-          });
-          row[idField] = candidate?._id || '';
-          row[kind] = candidate || null;
-          if (candidate) {
-            const key = `${kind}:${row.workDate}:${getId(candidate)}`;
-            totals.set(key, (totals.get(key) || 0) + duration);
-          }
-          row.status = buildStatus(row);
-        });
       });
-      const requestedTrips = Math.max(0, Number(body.numberOfTrips || 0));
-      if (requestedTrips && !(body.tripIds || []).length) {
-        let remaining = requestedTrips;
-        rows.forEach((row) => {
-          const selected = row.trips.slice(0, remaining);
-          row.trips = selected;
-          row.tripIds = selected.map((trip) => trip._id);
-          remaining -= selected.length;
-          row.status = buildStatus(row);
-        });
-      }
+      rows = allocateDutyResources(rows, body);
       return {
         previewToken: new mongoose.Types.ObjectId().toString(),
         generatedAt: new Date(),
@@ -325,19 +454,38 @@ export default class AutoGenerateShiftService {
       let trips = await TripSchedule.find(tripFilter).sort({ departureTime: 1 }).lean();
       trips = trips.filter((trip) => insideRange(trip.departureTime, range) && insideRange(trip.expectedArrivalTime, range));
       const availableTrips = trips;
-      if (!selectedTripIds.length && numberOfTrips > 0) trips = trips.slice(0, numberOfTrips);
+      if (!selectedTripIds.length && numberOfTrips > 0) {
+        const completeCycleCodes = [...new Set(trips.map((trip) => trip.operationCycleCode).filter(Boolean))]
+          .filter((cycleCode) => {
+            const cycleTrips = trips.filter((trip) => trip.operationCycleCode === cycleCode);
+            return cycleTrips.length === 2
+              && cycleTrips.some((trip) => trip.direction === 'OUTBOUND')
+              && cycleTrips.some((trip) => trip.direction === 'INBOUND');
+          })
+          .slice(0, Math.floor(numberOfTrips / 2));
+        trips = trips.filter((trip) => completeCycleCodes.includes(trip.operationCycleCode));
+      }
       if (!trips.length) warnings.push({ level: 'WARNING', message: 'Chưa có chuyến phù hợp trong khung giờ.' });
 
       const [drivers, assistants, vehicles] = await Promise.all([
-        this.listAvailableResources({ kind: 'drivers', workDate: date, startTime: body.startTime, endTime: body.endTime, routeId: route._id }),
-        this.listAvailableResources({ kind: 'assistants', workDate: date, startTime: body.startTime, endTime: body.endTime, routeId: route._id }),
+        this.listAvailableResources({ kind: 'drivers', workDate: date, startTime: body.startTime, endTime: body.endTime, routeId: route._id, shiftType }),
+        this.listAvailableResources({ kind: 'assistants', workDate: date, startTime: body.startTime, endTime: body.endTime, routeId: route._id, shiftType }),
         this.listAvailableResources({ kind: 'vehicles', workDate: date, startTime: body.startTime, endTime: body.endTime, routeId: route._id }),
       ]);
 
-      const driver = modes.driver === 'AUTO' ? drivers[0] : null;
+      let driver = null;
+      if (modes.driver === 'AUTO') {
+        const dayAssignments = await loadAssignmentsForDate(date);
+        for (const candidate of drivers) {
+          if (await preservesFutureDriverCoverage({ driverId: candidate._id, workDate: date, currentRange: range, assignments: dayAssignments })) {
+            driver = candidate;
+            break;
+          }
+        }
+      }
       const assistant = modes.assistant === 'AUTO' ? assistants[0] : null;
       const vehicle = modes.vehicle === 'AUTO' ? vehicles[0] : null;
-      if (modes.driver === 'AUTO' && !driver) warnings.push({ level: 'WARNING', message: 'Không tìm được tài xế phù hợp.' });
+      if (modes.driver === 'AUTO' && !driver) warnings.push({ level: 'WARNING', message: 'Không tìm được tài xế phù hợp mà vẫn bảo toàn đủ nhân lực cho các khung giờ sau.' });
       if (modes.assistant === 'AUTO' && !assistant) warnings.push({ level: 'WARNING', message: 'Không tìm được phụ xe phù hợp.' });
       if (modes.vehicle === 'AUTO' && !vehicle) warnings.push({ level: 'WARNING', message: 'Không tìm được xe phù hợp.' });
 
@@ -362,12 +510,16 @@ export default class AutoGenerateShiftService {
         trips: trips.map((trip) => ({
           _id: trip._id,
           scheduleCode: trip.scheduleCode,
+          operationCycleCode: trip.operationCycleCode,
+          direction: trip.direction,
           departureTime: trip.departureTime,
           expectedArrivalTime: trip.expectedArrivalTime,
         })),
         availableTrips: availableTrips.map((trip) => ({
           _id: trip._id,
           scheduleCode: trip.scheduleCode,
+          operationCycleCode: trip.operationCycleCode,
+          direction: trip.direction,
           departureTime: trip.departureTime,
           expectedArrivalTime: trip.expectedArrivalTime,
         })),
@@ -381,24 +533,32 @@ export default class AutoGenerateShiftService {
       rows.push(row);
     }
 
+    let dutyRows = splitRowsIntoCycleDuties(rows);
+    const dutyErrors = validateAtomicCycleDuties(dutyRows, dutyRows.flatMap((row) => row.trips || []));
+    if (dutyErrors.length) throw Object.assign(new Error('Dữ liệu chuyến không tạo thành các cặp D-V hợp lệ.'), { statusCode: 409, conflicts: dutyErrors });
+    dutyRows = await this.populateDutyResources(dutyRows, route._id);
+    dutyRows = allocateDutyResources(dutyRows, body);
     return {
       previewToken: new mongoose.Types.ObjectId().toString(),
       generatedAt: new Date(),
       route: { _id: route._id, routeCode: route.routeCode, routeName: route.routeName },
-      rows,
+      rows: dutyRows,
       summary: {
-        total: rows.length,
-        valid: rows.filter((row) => row.status === 'VALID').length,
-        needManualAssignment: rows.filter((row) => row.status === 'NEED_MANUAL_ASSIGNMENT').length,
-        conflicts: rows.filter((row) => row.status === 'CONFLICT').length,
+        total: dutyRows.length,
+        valid: dutyRows.filter((row) => row.status === 'VALID').length,
+        needManualAssignment: dutyRows.filter((row) => row.status === 'NEED_MANUAL_ASSIGNMENT').length,
+        conflicts: dutyRows.filter((row) => row.status === 'CONFLICT').length,
       },
     };
   }
 
   static async validateConfirmRow(row) {
     const warnings = [];
+    let existingWeeklyDriverMinutes = 0;
+    let existingWeeklyAssistantMinutes = 0;
     const workDate = normalizeDate(row.workDate);
     const range = rangeOf(row);
+    warnings.push(...validateOperatingWindow(row));
     if (!workDate || !range) warnings.push('Ngày hoặc khung giờ không hợp lệ.');
     if (!mongoose.Types.ObjectId.isValid(row.routeId)) warnings.push('Tuyến không hợp lệ.');
     const [route, driver, assistant, vehicle] = await Promise.all([
@@ -419,11 +579,18 @@ export default class AutoGenerateShiftService {
 
     if (workDate && range) {
       const assignments = await loadAssignmentsForDate(workDate);
+      const weeklyAssignments = await loadStaffAssignmentsForWeek(workDate);
+      existingWeeklyDriverMinutes = driver ? assignedMinutes(weeklyAssignments.drivers, 'driverId', driver._id) : 0;
+      existingWeeklyAssistantMinutes = assistant ? assignedMinutes(weeklyAssignments.assistants, 'assistantId', assistant._id) : 0;
       if (driver && assignmentConflicts(assignments.drivers, 'driverId', driver._id, range)) warnings.push('Tài xế bị trùng ca.');
+      if (driver && hasInsufficientRest(assignments.drivers, 'driverId', driver._id, range)) warnings.push('Tài xế không đủ 60 phút nghỉ giữa hai ca.');
       if (assistant && assignmentConflicts(assignments.assistants, 'assistantId', assistant._id, range)) warnings.push('Phụ xe bị trùng ca.');
+      if (assistant && hasInsufficientRest(assignments.assistants, 'assistantId', assistant._id, range)) warnings.push('Phụ xe không đủ 60 phút nghỉ giữa hai ca.');
       if (vehicle && assignmentConflicts(assignments.vehicles, 'vehicleId', vehicle._id, range)) warnings.push('Xe bị trùng lịch.');
       if (driver && assignedMinutes(assignments.drivers, 'driverId', driver._id) + range.end - range.start > MAX_WORK_MINUTES) warnings.push('Tài xế vượt quá 8 giờ làm trong ngày.');
       if (assistant && assignedMinutes(assignments.assistants, 'assistantId', assistant._id) + range.end - range.start > MAX_WORK_MINUTES) warnings.push('Phụ xe vượt quá 8 giờ làm trong ngày.');
+      if (driver && assignedMinutes(weeklyAssignments.drivers, 'driverId', driver._id) + range.end - range.start > MAX_WEEKLY_WORK_MINUTES) warnings.push('Tài xế vượt quá 40 giờ làm trong tuần.');
+      if (assistant && assignedMinutes(weeklyAssignments.assistants, 'assistantId', assistant._id) + range.end - range.start > MAX_WEEKLY_WORK_MINUTES) warnings.push('Phụ xe vượt quá 40 giờ làm trong tuần.');
     }
 
     const tripIds = (row.tripIds || []).filter((id) => mongoose.Types.ObjectId.isValid(id));
@@ -445,13 +612,25 @@ export default class AutoGenerateShiftService {
       endTime: { $gt: row.startTime },
     }).lean() : null;
     if (duplicate) warnings.push(`Trùng với ca ${duplicate.shiftCode}.`);
-    return { warnings, workDate, route, driver, assistant, vehicle, trips };
+    return { warnings, workDate, route, driver, assistant, vehicle, trips, existingWeeklyDriverMinutes, existingWeeklyAssistantMinutes };
   }
 
   static async confirmGenerated({ rows, actorId }) {
+    const submittedTripIds = Array.isArray(rows)
+      ? rows.flatMap((row) => row.tripIds || []).filter((tripId) => mongoose.Types.ObjectId.isValid(tripId))
+      : [];
+    const submittedTrips = submittedTripIds.length
+      ? await TripSchedule.find({ _id: { $in: submittedTripIds } }).lean()
+      : [];
+    const atomicCycleErrors = Array.isArray(rows) ? validateAtomicCycleDuties(rows, submittedTrips) : [];
+    if (submittedTrips.length !== new Set(submittedTripIds.map(getId)).size) atomicCycleErrors.push('Danh sách có chuyến không tồn tại hoặc không hợp lệ.');
+    if (atomicCycleErrors.length) {
+      throw Object.assign(new Error('Phân ca phải giữ nguyên từng vòng D-V và không được lặp chuyến.'), { statusCode: 409, conflicts: atomicCycleErrors });
+    }
     if (!Array.isArray(rows) || !rows.length) throw Object.assign(new Error('Danh sách ca xác nhận là bắt buộc.'), { statusCode: 400 });
     const previewConflicts = [];
     const workTotals = new Map();
+    const weeklyWorkTotals = new Map();
     const shiftCodes = new Set();
     rows.forEach((row, index) => {
       const code = String(row.shiftCode || '').trim().toUpperCase();
@@ -466,29 +645,74 @@ export default class AutoGenerateShiftService {
         const total = (workTotals.get(key) || 0) + range.end - range.start;
         workTotals.set(key, total);
         if (total > MAX_WORK_MINUTES) previewConflicts.push({ index, shiftCode: code, message: `${kind === 'driver' ? 'Tài xế' : 'Phụ xe'} vượt quá 8 giờ trong ngày.` });
+        const bounds = weekBounds(row.workDate);
+        const weekKey = `${kind}:${dateKey(bounds.start)}:${resourceId}`;
+        const weeklyTotal = (weeklyWorkTotals.get(weekKey) || 0) + range.end - range.start;
+        weeklyWorkTotals.set(weekKey, weeklyTotal);
+        if (weeklyTotal > MAX_WEEKLY_WORK_MINUTES) previewConflicts.push({ index, shiftCode: code, message: `${kind === 'driver' ? 'Tài xế' : 'Phụ xe'} vượt quá 40 giờ trong tuần.` });
       });
       rows.slice(0, index).forEach((other, otherIndex) => {
         if (dateKey(other.workDate) !== dateKey(row.workDate)) return;
         const otherRange = rangeOf(other);
-        if (!otherRange || !overlaps(range, otherRange)) return;
-        if (row.driverId && getId(row.driverId) === getId(other.driverId)) previewConflicts.push({ index, shiftCode: code, message: `Tài xế trùng giờ với dòng ${otherIndex + 1}.` });
-        if (row.assistantId && getId(row.assistantId) === getId(other.assistantId)) previewConflicts.push({ index, shiftCode: code, message: `Phụ xe trùng giờ với dòng ${otherIndex + 1}.` });
-        if (row.vehicleId && getId(row.vehicleId) === getId(other.vehicleId)) previewConflicts.push({ index, shiftCode: code, message: `Xe trùng giờ với dòng ${otherIndex + 1}.` });
+        if (!otherRange) return;
+        const isOverlap = overlaps(range, otherRange);
+        const gap = isOverlap ? -1 : (range.start >= otherRange.end
+          ? range.start - otherRange.end
+          : otherRange.start - range.end);
+        if (row.driverId && getId(row.driverId) === getId(other.driverId) && (isOverlap || gap < MIN_REST_MINUTES)) {
+          previewConflicts.push({ index, shiftCode: code, message: `Tài xế trùng giờ hoặc nghỉ dưới 60 phút so với dòng ${otherIndex + 1}.` });
+        }
+        if (row.assistantId && getId(row.assistantId) === getId(other.assistantId) && (isOverlap || gap < MIN_REST_MINUTES)) {
+          previewConflicts.push({ index, shiftCode: code, message: `Phụ xe trùng giờ hoặc nghỉ dưới 60 phút so với dòng ${otherIndex + 1}.` });
+        }
+        if (row.vehicleId && getId(row.vehicleId) === getId(other.vehicleId) && (isOverlap || gap < 10)) {
+          previewConflicts.push({ index, shiftCode: code, message: `Xe trùng giờ hoặc không đủ 10 phút quay đầu so với dòng ${otherIndex + 1}.` });
+        }
       });
     });
     if (previewConflicts.length) throw Object.assign(new Error('Danh sách xem trước còn xung đột nội bộ.'), { statusCode: 409, conflicts: previewConflicts });
     const validationResults = [];
     for (const row of rows) validationResults.push(await this.validateConfirmRow(row));
     const conflicts = validationResults.flatMap((result, index) => result.warnings.map((message) => ({ index, shiftCode: rows[index].shiftCode, message })));
+    const previewWeeklyTotals = new Map();
+    rows.forEach((row, index) => {
+      const range = rangeOf(row);
+      if (!range) return;
+      const result = validationResults[index];
+      [['driver', row.driverId, result.existingWeeklyDriverMinutes], ['assistant', row.assistantId, result.existingWeeklyAssistantMinutes]].forEach(([kind, resourceId, existingMinutes]) => {
+        if (!resourceId) return;
+        const key = `${kind}:${dateKey(weekBounds(row.workDate).start)}:${resourceId}`;
+        const previewMinutes = (previewWeeklyTotals.get(key) || 0) + range.end - range.start;
+        previewWeeklyTotals.set(key, previewMinutes);
+        if (Number(existingMinutes || 0) + previewMinutes > MAX_WEEKLY_WORK_MINUTES) {
+          conflicts.push({ index, shiftCode: row.shiftCode, message: `${kind === 'driver' ? 'Tài xế' : 'Phụ xe'} vượt quá 40 giờ trong tuần khi cộng các ca đang xác nhận.` });
+        }
+      });
+    });
     if (conflicts.length) throw Object.assign(new Error('Không thể lưu khi danh sách còn xung đột hoặc thiếu phân công.'), { statusCode: 409, conflicts });
 
     const created = { shifts: [], assignments: { drivers: 0, assistants: 0, vehicles: 0, trips: 0 } };
     const rollback = { shiftIds: [], driverIds: [], assistantIds: [], vehicleIds: [], tripIds: [] };
+    const session = await mongoose.startSession();
     try {
+      session.startTransaction();
+      const lockKeys = [...new Set(rows.flatMap((row) => [
+        `driver:${dateKey(row.workDate)}:${getId(row.driverId)}`,
+        `assistant:${dateKey(row.workDate)}:${getId(row.assistantId)}`,
+        `vehicle:${dateKey(row.workDate)}:${getId(row.vehicleId)}`,
+        ...(row.tripIds || []).map((tripId) => `trip:${getId(tripId)}`),
+      ]))];
+      for (const lockKey of lockKeys) {
+        await AssignmentLock.updateOne({ lockKey }, { $inc: { version: 1 } }, { upsert: true, session });
+      }
+      const lockedValidationResults = [];
+      for (const row of rows) lockedValidationResults.push(await this.validateConfirmRow(row));
+      const lockedConflicts = lockedValidationResults.flatMap((result, index) => result.warnings.map((message) => ({ index, shiftCode: rows[index].shiftCode, message })));
+      if (lockedConflicts.length) throw Object.assign(new Error('Dữ liệu phân công đã thay đổi. Vui lòng tạo lại bản xem trước.'), { statusCode: 409, conflicts: lockedConflicts });
       for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index];
-        const result = validationResults[index];
-        const shift = await Shift.create({
+        const result = lockedValidationResults[index];
+        const [shift] = await Shift.create([{
           shiftCode: String(row.shiftCode).trim().toUpperCase(),
           shiftName: String(row.shiftName || shiftNameFor(row.shiftType)).trim(),
           routeId: row.routeId,
@@ -501,26 +725,26 @@ export default class AutoGenerateShiftService {
           description: 'Ca được xác nhận từ chức năng sinh ca tự động.',
           createdBy: actorId,
           updatedBy: actorId,
-        });
+        }], { session });
         rollback.shiftIds.push(shift._id);
         created.shifts.push(shift.toObject());
         const base = { shiftId: shift._id, workDate: result.workDate, status: 'ASSIGNED', createdBy: actorId, updatedBy: actorId };
-        const driverAssignment = await DriverShiftAssignment.create({ ...base, driverId: result.driver._id });
+        const [driverAssignment] = await DriverShiftAssignment.create([{ ...base, driverId: result.driver._id }], { session });
         rollback.driverIds.push(driverAssignment._id);
-        const assistantAssignment = await AssistantShiftAssignment.create({ ...base, assistantId: result.assistant._id });
+        const [assistantAssignment] = await AssistantShiftAssignment.create([{ ...base, assistantId: result.assistant._id }], { session });
         rollback.assistantIds.push(assistantAssignment._id);
-        const vehicleAssignment = await VehicleShiftAssignment.create({ ...base, vehicleId: result.vehicle._id });
+        const [vehicleAssignment] = await VehicleShiftAssignment.create([{ ...base, vehicleId: result.vehicle._id }], { session });
         rollback.vehicleIds.push(vehicleAssignment._id);
         created.assignments.drivers += 1;
         created.assignments.assistants += 1;
         created.assignments.vehicles += 1;
         for (const trip of result.trips) {
-          const tripAssignment = await TripShiftAssignment.create({
+          const [tripAssignment] = await TripShiftAssignment.create([{
             ...base,
             tripId: trip._id,
             driverId: result.driver._id,
             vehicleId: result.vehicle._id,
-          });
+          }], { session });
           rollback.tripIds.push(tripAssignment._id);
           created.assignments.trips += 1;
           await TripSchedule.findByIdAndUpdate(trip._id, {
@@ -532,19 +756,16 @@ export default class AutoGenerateShiftService {
               vehicle: { busId: result.vehicle._id, busCode: result.vehicle.busCode, plateNumber: result.vehicle.plateNumber, busType: result.vehicle.busType, capacity: result.vehicle.capacity },
               updatedBy: actorId,
             },
-          });
+          }, { session });
         }
       }
+      await session.commitTransaction();
       return created;
     } catch (error) {
-      await Promise.all([
-        TripShiftAssignment.deleteMany({ _id: { $in: rollback.tripIds } }),
-        VehicleShiftAssignment.deleteMany({ _id: { $in: rollback.vehicleIds } }),
-        AssistantShiftAssignment.deleteMany({ _id: { $in: rollback.assistantIds } }),
-        DriverShiftAssignment.deleteMany({ _id: { $in: rollback.driverIds } }),
-        Shift.deleteMany({ _id: { $in: rollback.shiftIds } }),
-      ]);
+      await session.abortTransaction();
       throw error;
+    } finally {
+      await session.endSession();
     }
   }
 }

@@ -5,9 +5,10 @@ import TripSchedule from './TripSchedule.js';
 import User from '../auth/User.js';
 import DriverShiftAssignment from '../shifts/DriverShiftAssignment.js';
 import AssistantShiftAssignment from '../shifts/AssistantShiftAssignment.js';
+import { isTripOutsideOperatingWindow } from './scheduleOperatingWindow.js';
 
 const ACTIVE_TRIP_STATUSES = ['PLANNED', 'ASSIGNED', 'IN_PROGRESS'];
-const ASSIGNABLE_BUS_STATUSES = ['ACTIVE', 'RESERVE'];
+const ASSIGNABLE_BUS_STATUSES = ['AVAILABLE', 'ACTIVE', 'RESERVE'];
 const ASSIGNABLE_SHIFT_STATUSES = ['ACTIVE', 'APPROVED', 'PUBLISHED'];
 const MAX_DAILY_STAFF_WORK_MINUTES = 8 * 60;
 const MIN_RESOURCE_BUFFER_MINUTES = 10;
@@ -274,7 +275,10 @@ export default class ScheduleGenerationService {
     }
 
     const [vehicles, drivers, assistants] = await Promise.all([
-      FleetBus.find({ status: { $in: ASSIGNABLE_BUS_STATUSES } }).sort({ busCode: 1 }).lean(),
+      FleetBus.find({
+        status: { $in: ASSIGNABLE_BUS_STATUSES },
+        busCode: { $not: /^(DN-AUTO-|DN-DEMO-)/i },
+      }).sort({ busCode: 1 }).lean(),
       User.find({ role: 'DRIVER', status: 'ACTIVE', isFirstLogin: { $ne: true }, 'accountLock.isLocked': { $ne: true } }).sort({ fullName: 1 }).lean(),
       User.find({ role: { $in: ['CONDUCTOR', 'BUS_ASSISTANT'] }, status: 'ACTIVE', isFirstLogin: { $ne: true }, 'accountLock.isLocked': { $ne: true } }).sort({ fullName: 1 }).lean(),
     ]);
@@ -317,7 +321,8 @@ export default class ScheduleGenerationService {
           if (direction === 'INBOUND') departure = inboundDepartures[departureIndex];
           const frequency = direction === 'OUTBOUND' ? (isPeakDeparture(departure) ? peakFrequency : offPeakFrequency) : 0;
           const arrival = departure + duration;
-          if (arrival > last || arrival > 1439 || arrival + layover > 1439) {
+          // lastDepartureTime limits departures; trips may arrive after that route-specific value.
+          if (arrival > LAST_BUS_DEPARTURE_MINUTES || arrival > 1439 || arrival + layover > 1439) {
             if (direction === 'OUTBOUND') {
               departure += frequency;
             } else {
@@ -387,7 +392,7 @@ export default class ScheduleGenerationService {
     };
   }
 
-  static async confirm(rows, actorId, replaceScheduled = false) {
+  static async confirm(rows, actorId, replaceScheduled = false, planningOnly = false) {
     if (!Array.isArray(rows) || !rows.length) throw Object.assign(new Error('Không có lịch để lưu.'), { statusCode: 400 });
     const scheduleCodes = rows.map((row) => String(row.scheduleCode || '').trim().toUpperCase());
     if (scheduleCodes.some((code) => !code)) {
@@ -417,6 +422,36 @@ export default class ScheduleGenerationService {
       };
     });
 
+    if (planningOnly) {
+      const cycles = new Map();
+      normalizedRows.forEach((row) => {
+        const cycleCode = String(row.operationCycleCode || '').trim().toUpperCase();
+        if (!cycleCode) {
+          throw Object.assign(new Error(`Lịch ${row.scheduleCode} chưa có mã vòng vận hành D-V.`), { statusCode: 400 });
+        }
+        cycles.set(cycleCode, [...(cycles.get(cycleCode) || []), row]);
+      });
+      for (const [cycleCode, cycleRows] of cycles.entries()) {
+        const outboundRows = cycleRows.filter((row) => row.direction === 'OUTBOUND');
+        const inboundRows = cycleRows.filter((row) => row.direction === 'INBOUND');
+        if (cycleRows.length !== 2 || outboundRows.length !== 1 || inboundRows.length !== 1) {
+          throw Object.assign(new Error(`Vòng ${cycleCode} phải có đúng một lượt D và một lượt V.`), { statusCode: 409 });
+        }
+        const outbound = outboundRows[0];
+        const inbound = inboundRows[0];
+        if (
+          getId(outbound.routeId) !== getId(inbound.routeId)
+          || dateKey(outbound.serviceDate) !== dateKey(inbound.serviceDate)
+        ) {
+          throw Object.assign(new Error(`Hai lượt của vòng ${cycleCode} phải cùng tuyến và cùng ngày.`), { statusCode: 409 });
+        }
+        const earliestInbound = toMinutes(outbound.expectedArrivalTime) + MIN_RESOURCE_BUFFER_MINUTES;
+        if (toMinutes(inbound.departureTime) < earliestInbound) {
+          throw Object.assign(new Error(`Lượt V của vòng ${cycleCode} phải bắt đầu sau lượt D và thời gian quay đầu.`), { statusCode: 409 });
+        }
+      }
+    }
+
     const routeIds = [...new Set(normalizedRows.map((row) => getId(row.routeId)).filter(Boolean))];
     const routes = await Route.find({ _id: { $in: routeIds } }).select('scheduleConfig routeCode').lean();
     const routesById = new Map(routes.map((route) => [getId(route), route]));
@@ -430,19 +465,31 @@ export default class ScheduleGenerationService {
       if (operatingDays.length && !operatingDays.includes(weekdayToken(row.serviceDate))) {
         throw Object.assign(new Error(`Lịch ${row.scheduleCode} không thuộc ngày hoạt động của tuyến.`), { statusCode: 400 });
       }
-      if (first === null || last === null || row.range.start < first || row.range.start > last || toMinutes(row.expectedArrivalTime) > last) {
+      const isOutsideOperatingWindow = isTripOutsideOperatingWindow({
+        direction: row.direction,
+        departure: row.range.start,
+        arrival: toMinutes(row.expectedArrivalTime),
+        routeFirst: first,
+        routeLast: last,
+        enforceRouteDepartureWindow: !planningOnly,
+      });
+      if (first === null || last === null || isOutsideOperatingWindow) {
         throw Object.assign(new Error(`Lịch ${row.scheduleCode} nằm ngoài khung giờ cấu hình tuyến.`), { statusCode: 400 });
       }
     }
     const incompleteRow = normalizedRows.find((row) => !row.vehicle?.busId || !row.driver?.userId || !row.assistant?.userId);
-    if (incompleteRow) {
+    if (incompleteRow && !planningOnly) {
       throw Object.assign(new Error(`Lịch ${incompleteRow.scheduleCode} chưa đủ xe, tài xế hoặc phụ xe nên không thể lưu thành lịch chạy.`), { statusCode: 409 });
     }
     for (const row of normalizedRows) {
       const bounds = dateBounds(row.serviceDate);
       const workDateFilter = bounds ? { $gte: bounds.start, $lt: bounds.end } : row.serviceDate;
       if (row.vehicle?.busId) {
-        const bus = await FleetBus.findOne({ _id: row.vehicle.busId, status: { $in: ASSIGNABLE_BUS_STATUSES } }).lean();
+        const bus = await FleetBus.findOne({
+          _id: row.vehicle.busId,
+          status: { $in: ASSIGNABLE_BUS_STATUSES },
+          busCode: { $not: /^(DN-AUTO-|DN-DEMO-)/i },
+        }).lean();
         if (!bus) {
           throw Object.assign(new Error(`Xe của lịch ${row.scheduleCode} không khả dụng để khai thác.`), { statusCode: 409 });
         }
@@ -591,6 +638,7 @@ export default class ScheduleGenerationService {
       for (const row of normalizedRows) {
         const schedule = await TripSchedule.create({
           scheduleCode: row.scheduleCode,
+          operationCycleCode: row.operationCycleCode || '',
           serviceDate: row.serviceDate,
           routeId: row.routeId,
           routeCode: row.routeCode,
@@ -604,7 +652,9 @@ export default class ScheduleGenerationService {
           vehicle: row.vehicle || {},
           driver: row.driver || {},
           assistant: row.assistant || {},
-          notes: 'Sinh tự động theo tần suất tuyến.',
+          notes: planningOnly
+            ? 'Kế hoạch phân chuyến theo nhu cầu ngày; chờ phân xe và nhân sự.'
+            : 'Sinh tự động theo tần suất tuyến.',
           createdBy: actorId,
           updatedBy: actorId,
         });

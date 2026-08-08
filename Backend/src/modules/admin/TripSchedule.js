@@ -62,6 +62,7 @@ const DriverAcceptanceSchema = new mongoose.Schema(
 const TripScheduleSchema = new mongoose.Schema(
   {
     scheduleCode: { type: String, required: true, unique: true, trim: true, uppercase: true },
+    operationCycleCode: { type: String, trim: true, uppercase: true, default: '', index: true },
     serviceDate: { type: Date, required: true },
     routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
     routeCode: { type: String, trim: true, default: '' },
