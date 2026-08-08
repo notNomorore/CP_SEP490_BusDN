@@ -118,12 +118,11 @@ export default function HomeScreen() {
             <Text style={styles.kicker}>HÀNH TRÌNH TIỆN NGHI</Text>
             <Text style={styles.title}>Hôm nay bạn muốn đi đâu?</Text>
             <Text style={styles.heroText}>Tra cứu tuyến, theo dõi xe và mua vé nhanh chóng ngay trên BusDN.</Text>
-            <Pressable onPress={() => router.push('/route-search')} style={styles.heroButton}><Text style={styles.heroButtonText}>Khám phá tuyến xe</Text><MaterialCommunityIcons color={colors.primary} name="arrow-right" size={19} /></Pressable>
+            <Pressable onPress={() => router.push('/route-search')} style={styles.heroButton}><Text style={styles.heroButtonText}>Tìm tuyến nâng cao</Text><MaterialCommunityIcons color={colors.primary} name="arrow-right" size={19} /></Pressable>
           </View>
 
           <Text style={[styles.sectionTitle, styles.servicesTitle]}>Dịch vụ BusDN</Text>
           <View style={styles.serviceGrid}>
-            <ServiceTile icon="compass-outline" label="Khám phá" onPress={() => router.push('/search-routes')} />
             <ServiceTile icon="crosshairs-gps" label="Theo dõi xe" onPress={() => router.push('/live-tracking')} />
             <ServiceTile icon="ticket-outline" label="Mua vé" onPress={() => router.push('/buy-oneway-ticket')} />
             <ServiceTile icon="package-variant-closed" label="Đồ thất lạc" onPress={() => router.push('/my-lost-items' as Href)} />

@@ -21,6 +21,9 @@ const initialForm = {
   itemName: '',
   itemCategory: 'PERSONAL_BELONGINGS',
   itemDescription: '',
+  color: '',
+  brand: '',
+  identifyingDetails: '',
   relatedTripId: '',
   routeName: '',
   lostAt: '',
@@ -190,8 +193,12 @@ const ReportLostItemPage = () => {
           itemName: form.itemName.trim(),
           itemCategory: form.itemCategory,
           itemDescription: form.itemDescription.trim(),
+          color: form.color.trim(),
+          brand: form.brand.trim(),
+          identifyingDetails: form.identifyingDetails.trim(),
           lastSeenLocation: form.lastSeenLocation.trim(),
           lostAt: form.lostAt,
+          contactPreference: form.contactEmail.trim() ? 'EMAIL' : 'PHONE',
         },
         attachments,
       });
@@ -286,6 +293,36 @@ const ReportLostItemPage = () => {
                 />
                 {errors.itemDescription ? <p className="text-sm font-semibold text-red-700">{errors.itemDescription}</p> : null}
               </label>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <label className="space-y-2">
+                  <span className="text-sm font-black text-primary">Màu sắc</span>
+                  <input
+                    value={form.color}
+                    onChange={(event) => setForm((current) => ({ ...current, color: event.target.value }))}
+                    className={fieldClassName}
+                    placeholder="Ví dụ: đen, xanh navy"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm font-black text-primary">Thương hiệu</span>
+                  <input
+                    value={form.brand}
+                    onChange={(event) => setForm((current) => ({ ...current, brand: event.target.value }))}
+                    className={fieldClassName}
+                    placeholder="Ví dụ: Samsung, Adidas"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm font-black text-primary">Dấu hiệu riêng</span>
+                  <input
+                    value={form.identifyingDetails}
+                    onChange={(event) => setForm((current) => ({ ...current, identifyingDetails: event.target.value }))}
+                    className={fieldClassName}
+                    placeholder="Ví dụ: móc khóa, vết xước"
+                  />
+                </label>
+              </div>
 
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-2">

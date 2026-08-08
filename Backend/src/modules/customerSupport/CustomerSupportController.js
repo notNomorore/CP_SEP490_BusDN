@@ -1,8 +1,14 @@
 import CustomerSupportService from './CustomerSupportService.js';
+import LostAndFoundMatchingService from './LostAndFoundMatchingService.js';
 import {
   CreateSupportCaseDTO,
+  AssignFeedbackDTO,
+  CorrectiveActionDTO,
   FoundItemCaseResponseDTO,
   FeedbackAdminActionDTO,
+  InternalNoteDTO,
+  LostFoundMatchResponseDTO,
+  MatchReviewDTO,
   PassengerLostItemCaseResponseDTO,
   PassengerFeedbackReplyDTO,
   RespondSupportCaseDTO,
@@ -100,7 +106,7 @@ export class CustomerSupportController {
 
       return res.json({
         success: true,
-        data: SupportCaseResponseDTO.format(supportCase, { includeInternal: true }),
+        data: SupportCaseResponseDTO.format(supportCase),
       });
     } catch (error) {
       logger.error('Get passenger feedback error:', error);
@@ -328,6 +334,151 @@ export class CustomerSupportController {
     }
   }
 
+  static async listPotentialMatches(req, res, next) {
+    try {
+      const result = await LostAndFoundMatchingService.listMatches(req.query);
+
+      return res.json({
+        success: true,
+        data: result.items.map((match) => LostFoundMatchResponseDTO.format(match)),
+        meta: result.meta,
+      });
+    } catch (error) {
+      logger.error('List lost-found matches error:', error);
+      next(error);
+    }
+  }
+
+  static async getPotentialMatch(req, res, next) {
+    try {
+      const match = await LostAndFoundMatchingService.getMatchById(req.params.matchId);
+
+      return res.json({
+        success: true,
+        data: LostFoundMatchResponseDTO.format(match),
+      });
+    } catch (error) {
+      logger.error('Get lost-found match error:', error);
+      next(error);
+    }
+  }
+
+  static async confirmPotentialMatch(req, res, next) {
+    try {
+      const validationErrors = MatchReviewDTO.validateConfirm(req.body);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const match = await LostAndFoundMatchingService.confirmMatch(
+        req.params.matchId,
+        req.user.userId,
+        req.body
+      );
+
+      return res.json({
+        success: true,
+        message: 'Potential match confirmed successfully',
+        data: LostFoundMatchResponseDTO.format(match),
+      });
+    } catch (error) {
+      logger.error('Confirm lost-found match error:', error);
+      next(error);
+    }
+  }
+
+  static async rejectPotentialMatch(req, res, next) {
+    try {
+      const validationErrors = MatchReviewDTO.validateReject(req.body);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const match = await LostAndFoundMatchingService.rejectMatch(
+        req.params.matchId,
+        req.user.userId,
+        req.body
+      );
+
+      return res.json({
+        success: true,
+        message: 'Potential match rejected successfully',
+        data: LostFoundMatchResponseDTO.format(match),
+      });
+    } catch (error) {
+      logger.error('Reject lost-found match error:', error);
+      next(error);
+    }
+  }
+
+  static async startReturnProcess(req, res, next) {
+    try {
+      const validationErrors = MatchReviewDTO.validateStartReturn(req.body);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const match = await LostAndFoundMatchingService.startReturn(
+        req.params.matchId,
+        req.user.userId,
+        req.body
+      );
+
+      return res.json({
+        success: true,
+        message: 'Return process started successfully',
+        data: LostFoundMatchResponseDTO.format(match),
+      });
+    } catch (error) {
+      logger.error('Start lost-found return error:', error);
+      next(error);
+    }
+  }
+
+  static async completeReturnProcess(req, res, next) {
+    try {
+      const validationErrors = MatchReviewDTO.validateCompleteReturn(req.body);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const match = await LostAndFoundMatchingService.completeReturn(
+        req.params.matchId,
+        req.user.userId,
+        req.body
+      );
+
+      return res.json({
+        success: true,
+        message: 'Item return completed successfully',
+        data: LostFoundMatchResponseDTO.format(match),
+      });
+    } catch (error) {
+      logger.error('Complete lost-found return error:', error);
+      next(error);
+    }
+  }
+
   static async updateLostItemCase(req, res, next) {
     try {
       const validationErrors = UpdateLostItemCaseDTO.validate(req.body);
@@ -367,6 +518,16 @@ export class CustomerSupportController {
 
   static async assignFeedback(req, res, next) {
     try {
+      const validationErrors = AssignFeedbackDTO.validate(req.body);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
       const supportCase = await CustomerSupportService.assignFeedback(
         req.params.caseId,
         req.user.userId,
@@ -417,6 +578,106 @@ export class CustomerSupportController {
       });
     } catch (error) {
       logger.error('Update feedback error:', error);
+
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async previewCaseNotification(req, res, next) {
+    try {
+      const preview = await CustomerSupportService.previewFeedbackNotification(
+        req.params.caseId,
+        req.user.userId,
+        req.method === 'GET' ? req.query : req.body
+      );
+
+      return res.json({
+        success: true,
+        data: preview,
+      });
+    } catch (error) {
+      logger.error('Preview case notification error:', error);
+
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async addInternalNote(req, res, next) {
+    try {
+      const validationErrors = InternalNoteDTO.validate(req.body);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const supportCase = await CustomerSupportService.addInternalNote(
+        req.params.caseId,
+        req.user.userId,
+        req.body
+      );
+
+      return res.status(201).json({
+        success: true,
+        message: 'Internal note added successfully',
+        data: SupportCaseResponseDTO.format(supportCase, { includeInternal: true }),
+      });
+    } catch (error) {
+      logger.error('Add internal note error:', error);
+
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  static async addCorrectiveAction(req, res, next) {
+    try {
+      const validationErrors = CorrectiveActionDTO.validate(req.body);
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const supportCase = await CustomerSupportService.addCorrectiveAction(
+        req.params.caseId,
+        req.user.userId,
+        req.body
+      );
+
+      return res.status(201).json({
+        success: true,
+        message: 'Corrective action recorded successfully',
+        data: SupportCaseResponseDTO.format(supportCase, { includeInternal: true }),
+      });
+    } catch (error) {
+      logger.error('Add corrective action error:', error);
 
       if (error.statusCode) {
         return res.status(error.statusCode).json({

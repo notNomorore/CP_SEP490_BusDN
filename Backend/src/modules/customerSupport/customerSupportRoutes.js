@@ -26,7 +26,17 @@ router.post('/admin/cases/:caseId/respond', authorizeRole('ADMIN'), CustomerSupp
 router.patch('/admin/cases/:caseId/lost-item', authorizeRole('ADMIN'), CustomerSupportController.updateLostItemCase);
 router.patch('/admin/cases/:caseId/assign', authorizeRole('ADMIN'), CustomerSupportController.assignFeedback);
 router.patch('/admin/cases/:caseId/feedback', authorizeRole('ADMIN'), CustomerSupportController.updateFeedback);
+router.get('/admin/cases/:caseId/notifications/preview', authorizeRole('ADMIN'), CustomerSupportController.previewCaseNotification);
+router.post('/admin/cases/:caseId/notifications/preview', authorizeRole('ADMIN'), CustomerSupportController.previewCaseNotification);
+router.post('/admin/cases/:caseId/notes', authorizeRole('ADMIN'), CustomerSupportController.addInternalNote);
+router.post('/admin/cases/:caseId/actions', authorizeRole('ADMIN'), CustomerSupportController.addCorrectiveAction);
 router.get('/admin/lost-items', authorizeRole('ADMIN'), CustomerSupportController.listFoundItemCases);
+router.get('/admin/lost-items/matches', authorizeRole('ADMIN'), CustomerSupportController.listPotentialMatches);
+router.get('/admin/lost-items/matches/:matchId', authorizeRole('ADMIN'), CustomerSupportController.getPotentialMatch);
+router.post('/admin/lost-items/matches/:matchId/confirm', authorizeRole('ADMIN'), CustomerSupportController.confirmPotentialMatch);
+router.post('/admin/lost-items/matches/:matchId/reject', authorizeRole('ADMIN'), CustomerSupportController.rejectPotentialMatch);
+router.post('/admin/lost-items/matches/:matchId/return/start', authorizeRole('ADMIN'), CustomerSupportController.startReturnProcess);
+router.post('/admin/lost-items/matches/:matchId/return/complete', authorizeRole('ADMIN'), CustomerSupportController.completeReturnProcess);
 router.get('/admin/lost-items/:caseId', authorizeRole('ADMIN'), CustomerSupportController.getFoundItemCaseDetail);
 router.patch('/admin/lost-items/:caseId', authorizeRole('ADMIN'), CustomerSupportController.updateFoundItemCase);
 

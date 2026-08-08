@@ -2,6 +2,13 @@ import nodemailer from 'nodemailer';
 import { config } from '../config/environment.js';
 import logger from './logger.js';
 
+const escapeHtml = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
 /**
  * Email Service - Handles sending emails via SMTP
  */
@@ -27,7 +34,7 @@ class EmailService {
       });
 
       // Test connection
-      this.transporter.verify((error, success) => {
+      this.transporter.verify((error, _success) => {
         if (error) {
           logger.error('Email transporter verification failed:', error);
         } else {
@@ -281,6 +288,84 @@ class EmailService {
       return true;
     } catch (error) {
       logger.error(`Failed to send welcome email to ${email}:`, error);
+      throw error;
+    }
+  }
+
+  async sendComplaintUpdateEmail({
+    email,
+    passengerName = 'Passenger',
+    complaintCode,
+    status,
+    message,
+  }) {
+    try {
+      const safeName = escapeHtml(passengerName);
+      const safeCode = escapeHtml(complaintCode);
+      const safeStatus = escapeHtml(status);
+      const safeMessage = escapeHtml(message).replace(/\n/g, '<br />');
+      const html = `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937; }
+            .container { max-width: 640px; margin: 0 auto; padding: 20px; }
+            .header { background: #0f766e; color: white; padding: 24px; border-radius: 8px 8px 0 0; }
+            .content { background: #f8fafc; padding: 24px; border: 1px solid #dbe4ea; border-top: 0; border-radius: 0 0 8px 8px; }
+            .label { color: #64748b; font-size: 13px; font-weight: bold; text-transform: uppercase; }
+            .box { background: white; border-left: 4px solid #0f766e; padding: 16px; margin: 16px 0; }
+            .footer { color: #64748b; font-size: 12px; margin-top: 24px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1 style="margin:0;font-size:24px;">BusDN - Complaint Update</h1>
+            </div>
+            <div class="content">
+              <p>Hello ${safeName},</p>
+              <p>Your complaint <strong>${safeCode}</strong> has been updated.</p>
+              <p class="label">Status</p>
+              <p><strong>${safeStatus}</strong></p>
+              <div class="box">${safeMessage}</div>
+              <p>You can open the BusDN application to view more details.</p>
+              <p>Thank you,<br />BusDN Support Team</p>
+              <div class="footer">This is an automated message. Please do not reply to this email.</div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const mailOptions = {
+        from: `"${config.emailFrom.name || 'BusDN'}" <${config.smtp.user}>`,
+        to: email,
+        subject: `BusDN - Complaint ${complaintCode} Update`,
+        html,
+        text: [
+          `Hello ${passengerName},`,
+          '',
+          `Your complaint ${complaintCode} has been updated.`,
+          '',
+          `Status: ${status}`,
+          '',
+          `Message: ${message}`,
+          '',
+          'You can open the BusDN application to view more details.',
+          '',
+          'Thank you,',
+          'BusDN Support Team',
+        ].join('\n'),
+      };
+
+      const info = await this.transporter.sendMail(mailOptions);
+      logger.info(`Complaint update email sent to ${email}:`, info.messageId);
+      return true;
+    } catch (error) {
+      logger.error(`Failed to send complaint update email to ${email}:`, error);
       throw error;
     }
   }

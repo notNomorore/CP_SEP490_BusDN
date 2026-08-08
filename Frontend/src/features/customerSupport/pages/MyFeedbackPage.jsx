@@ -18,6 +18,12 @@ import customerSupportService, {
 import { resolveBackendUrl } from '../../../shared/config/apiConfig.js';
 
 const STATUS_BADGE = {
+  NEW: 'bg-blue-100 text-blue-800',
+  IN_REVIEW: 'bg-cyan-100 text-cyan-800',
+  INVESTIGATING: 'bg-amber-100 text-amber-900',
+  WAITING_FOR_INFORMATION: 'bg-purple-100 text-purple-800',
+  ACTION_REQUIRED: 'bg-orange-100 text-orange-900',
+  REOPENED: 'bg-indigo-100 text-indigo-800',
   PENDING: 'bg-blue-100 text-blue-800',
   IN_PROGRESS: 'bg-amber-100 text-amber-900',
   WAITING_FOR_PASSENGER: 'bg-purple-100 text-purple-800',
@@ -334,7 +340,7 @@ const MyFeedbackPage = () => {
                 </div>
               </section>
 
-              {selectedFeedback.status === 'WAITING_FOR_PASSENGER' ? (
+              {['WAITING_FOR_INFORMATION', 'WAITING_FOR_PASSENGER'].includes(selectedFeedback.status) ? (
                 <form onSubmit={handleReply} className="rounded-xl border border-outline-variant/50 bg-surface-container-low p-4">
                   <label className="block space-y-2">
                     <span className="text-sm font-black text-primary">Add follow-up information</span>

@@ -10,6 +10,7 @@ import VehicleIssueService from '../vehicleIssues/vehicleIssue.service.js';
 import Shift from '../shifts/Shift.js';
 import DriverShiftAssignment from '../shifts/DriverShiftAssignment.js';
 import AssistantShiftAssignment from '../shifts/AssistantShiftAssignment.js';
+import LostAndFoundMatchingService from '../customerSupport/LostAndFoundMatchingService.js';
 
 const TRAFFIC_CATEGORIES = [
   'HEAVY_TRAFFIC',
@@ -211,6 +212,7 @@ const BUS_ASSISTANT_INCIDENT_TYPES = [
 ];
 const INCIDENT_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 const BREAKDOWN_TYPES = ['ENGINE_FAILURE', 'BRAKE_FAILURE', 'FLAT_TIRE', 'ACCIDENT', 'OTHER'];
+const FOUND_ITEM_CATEGORIES = ['PERSONAL_BELONGINGS', 'ELECTRONICS', 'WALLET_DOCUMENTS', 'CLOTHING', 'BAGS_LUGGAGE', 'OTHER_ITEMS'];
 
 const normalizeStartGpsPayload = (payload = {}, startedAt = new Date()) => {
   const latitude = Number(payload.latitude);
@@ -1513,6 +1515,18 @@ export class ScheduleOperationsService {
         error.statusCode = 400;
         throw error;
       }
+
+      if (String(payload.storageLocation || payload.handedTo || '').trim().length < 3) {
+        const error = new Error('Storage location is required for found item reports');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      if (payload.itemCategory && !FOUND_ITEM_CATEGORIES.includes(payload.itemCategory)) {
+        const error = new Error('Found item category is invalid');
+        error.statusCode = 400;
+        throw error;
+      }
     }
 
     return {
@@ -1700,10 +1714,16 @@ export class ScheduleOperationsService {
       foundItem: type === 'FOUND_ITEM'
         ? {
           itemName: String(payload.itemName || '').trim(),
+          itemCategory: String(payload.itemCategory || '').trim(),
           itemDescription: String(payload.itemDescription || description).trim(),
+          color: String(payload.color || '').trim(),
+          brand: String(payload.brand || '').trim(),
+          identifyingDetails: String(payload.identifyingDetails || '').trim(),
           foundLocation: String(payload.foundLocation || locationText).trim(),
+          storageLocation: String(payload.storageLocation || payload.handedTo || '').trim(),
+          storageReference: String(payload.storageReference || '').trim(),
           handedTo: String(payload.handedTo || '').trim(),
-          recoveryStatus: 'REPORTED',
+          recoveryStatus: String(payload.storageLocation || payload.handedTo || '').trim() ? 'STORED' : 'REPORTED',
         }
         : undefined,
       evidenceFiles: this.buildIncidentEvidence(files),
@@ -1806,6 +1826,18 @@ export class ScheduleOperationsService {
         longitude: Number.isFinite(Number(payload.longitude)) ? Number(payload.longitude) : null,
         severity,
         attachments: (incident.evidenceFiles || []).map((file) => file.url).filter(Boolean),
+      });
+    }
+
+    if (type === 'FOUND_ITEM') {
+      await LostAndFoundMatchingService.notifyReportCreated({
+        type: 'FOUND_ITEM',
+        report: incident,
+        actorId: userId,
+      });
+      await LostAndFoundMatchingService.runForFoundItem(incident._id, {
+        userId,
+        role,
       });
     }
 
