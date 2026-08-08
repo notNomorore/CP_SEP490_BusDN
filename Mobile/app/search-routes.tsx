@@ -61,9 +61,9 @@ const searchTypes: Array<{
   label: string;
   icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 }> = [
-  { key: 'route', label: 'Route', icon: 'bus' },
-  { key: 'stop', label: 'Stop', icon: 'map-marker-outline' },
-  { key: 'destination', label: 'Destination', icon: 'flag-outline' },
+  { key: 'route', label: 'Tuyến', icon: 'bus' },
+  { key: 'stop', label: 'Trạm', icon: 'map-marker-outline' },
+  { key: 'destination', label: 'Điểm đến', icon: 'flag-outline' },
 ];
 
 const markerPositions = [
@@ -304,20 +304,37 @@ export default function SearchRoutesScreen() {
         }));
     }
 
+    if (activeType === 'destination') {
+      const destinationMap = new Map<string, SearchResult>();
+      routeList.forEach((route) => {
+        const destination = route.destination || route.name || '';
+        if (normalizedQuery && !matchesText(destination) && !matchesText(route.name) && !matchesText(route.routeNumber)) return;
+        const key = normalize(destination || route.routeNumber);
+        if (!destinationMap.has(key)) {
+          destinationMap.set(key, {
+            type: 'destination',
+            id: `destination-${route.routeNumber}-${destination}`,
+            routeId: String(route.id || route._id || route.routeNumber),
+            routeNumber: route.routeNumber,
+            title: destination,
+            subtitle: `${route.routeNumber} - ${route.origin || 'Điểm đi'} đến ${destination || 'Điểm đến'}`,
+          });
+        }
+      });
+      return Array.from(destinationMap.values()).slice(0, 12);
+    }
+
     const stopMap = new Map<string, SearchResult>();
     routeList.forEach((route) => {
       (route.stops || []).forEach((stop: BusRouteStop) => {
         const stopName = stop.name || '';
-        const destinationMatched = activeType === 'destination' && (
-          matchesText(stopName) || matchesText(route.destination)
-        );
-        const stopMatched = activeType === 'stop' && matchesText(stopName);
+        const stopMatched = matchesText(stopName) || matchesText(route.name) || matchesText(route.routeNumber);
 
-        if (normalizedQuery && !destinationMatched && !stopMatched) return;
+        if (normalizedQuery && !stopMatched) return;
         const key = `${activeType}-${stopName.toLowerCase()}-${route.routeNumber}`;
         if (!stopMap.has(key)) {
           stopMap.set(key, {
-            type: activeType,
+            type: 'stop',
             id: `${route.routeNumber}-${stop.order}-${stopName}`,
             routeId: String(route.id || route._id || route.routeNumber),
             routeNumber: route.routeNumber,
@@ -437,6 +454,14 @@ export default function SearchRoutesScreen() {
     setSearchResults(buildResults(routes, searchType, ''));
   };
 
+  const chooseSearchType = (type: PassengerSearchType) => {
+    setSearchType(type);
+    setSearchError('');
+    if (!query.trim()) {
+      setSearchResults(buildResults(routes, type, ''));
+    }
+  };
+
   const clearHistory = () => {
     Alert.alert('Clear recent searches', 'Remove all recent searches from this device?', [
       { text: 'Cancel', style: 'cancel' },
@@ -553,6 +578,17 @@ export default function SearchRoutesScreen() {
 
   const hasMapData = typeof location?.latitude === 'number' && typeof location?.longitude === 'number';
   const visibleRecentSearches = useMemo(() => recentSearches.slice(0, 4), [recentSearches]);
+  const browseResults = useMemo(() => buildResults(routes, searchType, ''), [buildResults, routes, searchType]);
+  const browseTitle = searchType === 'route'
+    ? 'Tuyến hiện có'
+    : searchType === 'stop'
+      ? 'Trạm trong hệ thống'
+      : 'Điểm đến phổ biến';
+  const browseCountLabel = searchType === 'route'
+    ? `${routes.length} tuyến`
+    : searchType === 'stop'
+      ? `${browseResults.length} trạm`
+      : `${browseResults.length} điểm đến`;
   const previewStops = useMemo<MapMarker[]>(() => {
     const stops = routes.flatMap((route) => (
       (route.stops || [])
@@ -633,7 +669,7 @@ export default function SearchRoutesScreen() {
                   accessibilityRole="button"
                   accessibilityState={{ selected: active }}
                   key={item.key}
-                  onPress={() => setSearchType(item.key)}
+                  onPress={() => chooseSearchType(item.key)}
                   style={[styles.chip, active && styles.chipActive]}
                 >
                   <MaterialCommunityIcons color={active ? colors.white : colors.secondary} name={item.icon} size={18} />
@@ -672,11 +708,11 @@ export default function SearchRoutesScreen() {
             </View>
           ) : null}
 
-          {!query.trim() && routes.length ? (
+          {!query.trim() && searchType === 'route' && routes.length ? (
             <>
               <View style={styles.sectionRow}>
-                <Text style={styles.sectionTitle}>Available Routes</Text>
-                <Text style={styles.mutedLink}>{routes.length} routes</Text>
+                <Text style={styles.sectionTitle}>{browseTitle}</Text>
+                <Text style={styles.mutedLink}>{browseCountLabel}</Text>
               </View>
               {favoriteMessage ? <Text style={styles.favoriteMessage}>{favoriteMessage}</Text> : null}
               <ScrollView contentContainerStyle={styles.routeStrip} horizontal showsHorizontalScrollIndicator={false}>
@@ -713,6 +749,34 @@ export default function SearchRoutesScreen() {
                 })}
               </ScrollView>
             </>
+          ) : null}
+
+          {!query.trim() && searchType !== 'route' ? (
+            <View style={styles.panel}>
+              <View style={styles.sectionRow}>
+                <Text style={styles.sectionTitle}>{browseTitle}</Text>
+                <Text style={styles.mutedLink}>{browseCountLabel}</Text>
+              </View>
+              {searchLoading ? <LoadingRows /> : null}
+              {!searchLoading && !browseResults.length ? (
+                <StateText
+                  icon={searchType === 'stop' ? 'bus-stop' : 'flag-outline'}
+                  text={searchType === 'stop' ? 'Chưa có dữ liệu trạm trong các tuyến.' : 'Chưa có dữ liệu điểm đến.'}
+                />
+              ) : null}
+              {!searchLoading && browseResults.map((result) => (
+                <Pressable key={`${result.type}-${result.id}`} onPress={() => openResult(result)} style={styles.resultRow}>
+                  <View style={styles.resultIcon}>
+                    <MaterialCommunityIcons color={colors.primary} name={result.type === 'stop' ? 'map-marker-outline' : 'flag-outline'} size={19} />
+                  </View>
+                  <View style={styles.resultCopy}>
+                    <Text numberOfLines={1} style={styles.resultTitle}>{result.title}</Text>
+                    <Text numberOfLines={1} style={styles.resultSubtitle}>{result.subtitle}</Text>
+                  </View>
+                  <MaterialCommunityIcons color={colors.outline} name="chevron-right" size={21} />
+                </Pressable>
+              ))}
+            </View>
           ) : null}
 
           <View style={styles.sectionRow}>

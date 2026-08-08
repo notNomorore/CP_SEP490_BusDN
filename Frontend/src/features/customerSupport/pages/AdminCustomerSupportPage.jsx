@@ -160,7 +160,7 @@ const getReplyStatus = (supportCase) => (
 
 const AdminCustomerSupportPage = () => {
   const [filters, setFilters] = useState({
-    type: 'ALL',
+    type: 'SERVICE_FEEDBACK',
     status: 'ALL',
     priority: 'ALL',
     category: 'ALL',
@@ -211,7 +211,7 @@ const AdminCustomerSupportPage = () => {
   const resetFilters = () => {
     setSelectedCase(null);
     setFilters({
-      type: 'ALL',
+      type: 'SERVICE_FEEDBACK',
       status: 'ALL',
       priority: 'ALL',
       category: 'ALL',
@@ -227,6 +227,7 @@ const AdminCustomerSupportPage = () => {
     try {
       const response = await customerSupportService.listAdminCases({
         ...filters,
+        type: 'SERVICE_FEEDBACK',
         assignedOnly: String(filters.assignedOnly),
       });
       setCases(response.data || []);
@@ -540,7 +541,7 @@ const AdminCustomerSupportPage = () => {
           <aside className="min-w-0 rounded-2xl border border-outline-variant/30 bg-white p-4 shadow-[0_4px_12px_rgba(51,65,85,0.08)]">
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-3 rounded-2xl border border-outline-variant/25 bg-surface-container-low/70 p-3">
-                <div className="grid gap-2 md:grid-cols-[minmax(220px,1fr)_repeat(3,minmax(120px,0.38fr))]">
+                <div className="grid gap-2 md:grid-cols-[minmax(220px,1fr)_repeat(2,minmax(120px,0.38fr))]">
                   <label className="relative min-w-0">
                     <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-on-surface-variant">search</span>
                     <input
@@ -550,7 +551,6 @@ const AdminCustomerSupportPage = () => {
                       placeholder="Tìm kiếm tiêu đề, nội dung, mã ticket"
                     />
                   </label>
-                  <FilterSelect value={filters.type} onChange={(value) => updateFilter('type', value)} label="All types" items={CASE_TYPES} />
                   <FilterSelect value={filters.status} onChange={(value) => updateFilter('status', value)} items={CASE_STATUSES} />
                   <FilterSelect value={filters.priority} onChange={(value) => updateFilter('priority', value)} items={PRIORITIES} />
                 </div>

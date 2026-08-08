@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import profileApi from '@/api/profile.api';
 import routeDiscoveryApi, { buildStopId } from '@/api/routeDiscovery.api';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
@@ -51,6 +52,54 @@ const routeIdOf = (route: BusRoute | FavoriteRoute | NotificationSubscription) =
 );
 
 const isPassenger = (role?: string | null) => String(role || '').toUpperCase() === 'PASSENGER';
+
+const translateNotificationTitle = (title?: string) => {
+  const raw = String(title || '').trim();
+  const normalized = raw.toLowerCase();
+  if (!normalized) return 'Thông báo BusDN';
+  if (normalized === 'feedback response received') return 'Đã nhận phản hồi góp ý';
+  if (normalized.includes('promotion')) return 'Khuyến mãi';
+  if (normalized.includes('bus approaching')) return 'Xe buýt sắp đến';
+  if (normalized.includes('route change')) return 'Thay đổi tuyến';
+  if (normalized.includes('delay')) return 'Chuyến bị trễ';
+  return raw;
+};
+
+const translateNotificationMessage = (message?: string) => {
+  let next = String(message || '').trim();
+  if (!next) return '';
+
+  next = next.replace(
+    /Your feedback has received a response from the administrator\.?/gi,
+    'Góp ý của bạn đã có phản hồi từ quản trị viên.'
+  );
+  next = next.replace(
+    /Use code ([A-Z0-9_-]+) to get ([0-9.,]+)\s*VND off your next BusDN ticket\. Valid until ([0-9/.-]+)\.?/gi,
+    'Dùng mã $1 để giảm $2 VND cho vé BusDN tiếp theo. Có hiệu lực đến $3.'
+  );
+  next = next.replace(/Valid until/gi, 'Có hiệu lực đến');
+  next = next.replace(/BusDN ticket/gi, 'vé BusDN');
+  return next;
+};
+
+const translateNotificationType = (value?: string) => {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized.includes('promotion')) return 'khuyến mãi';
+  if (normalized.includes('arrival') || normalized.includes('eta')) return 'xe đến';
+  if (normalized.includes('delay')) return 'trễ chuyến';
+  if (normalized.includes('route')) return 'đổi tuyến';
+  if (normalized.includes('general')) return 'chung';
+  if (normalized.includes('system')) return 'hệ thống';
+  return value || 'hệ thống';
+};
+
+const translatePriority = (value?: string) => {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'high') return 'cao';
+  if (normalized === 'low') return 'thấp';
+  if (normalized === 'normal') return 'thường';
+  return value || 'thường';
+};
 
 function EmptyState({ message }: { message: string }) {
   return (
@@ -492,13 +541,46 @@ export default function RouteSearchScreen() {
     setSaving(true);
     setError('');
     try {
-      await routeDiscoveryApi.updateNotificationEnabled(user, enabled);
+      const profile = await profileApi.getMyProfile();
+      const phoneNumber = profile.phoneNumber || profile.phone;
+
+      if (!profile.email || !phoneNumber) {
+        setError('Hồ sơ của bạn thiếu email hoặc số điện thoại. Vui lòng cập nhật hồ sơ trước khi đổi cài đặt thông báo.');
+        return;
+      }
+
+      await routeDiscoveryApi.updateNotificationEnabled({ ...profile, phoneNumber }, enabled);
       await refreshUser();
       await loadPassengerData();
     } catch (err) {
-      setError(getErrorMessage(err, 'Unable to save notification preference.'));
+      setError(getErrorMessage(err, 'Không thể lưu cài đặt thông báo.'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openFavoriteRoute = async (favorite: FavoriteRoute) => {
+    const routeKey = favorite.routeId || favorite.routeNumber;
+    if (!routeKey) {
+      setError('Không đủ thông tin để mở tuyến đã lưu.');
+      return;
+    }
+
+    setDetailLoading(true);
+    setError('');
+    try {
+      const detail = await routeDiscoveryApi.getRouteDetail(routeKey);
+      if (detail) {
+        setSelectedRoute(detail);
+        setTab('search');
+        setLiveData(null);
+        return;
+      }
+      setError('Không tìm thấy thông tin tuyến đã lưu.');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Không thể mở tuyến đã lưu.'));
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -641,11 +723,16 @@ export default function RouteSearchScreen() {
               {favoriteRoutes.map((item) => (
                 <Pressable
                   key={item.routeId || item.routeNumber}
-                  onPress={() => void searchRoutes(item.routeNumber)}
+                  onPress={() => void openFavoriteRoute(item)}
                   style={styles.card}
                 >
-                  <Text style={styles.cardTitle}>{item.routeNumber}</Text>
-                  <Text style={styles.cardMeta}>{item.destination || 'Tuyến yêu thích'}</Text>
+                  <View style={styles.cardHeader}>
+                    <View style={styles.cardTitleWrap}>
+                      <Text style={styles.cardTitle}>{item.routeNumber}</Text>
+                      <Text style={styles.cardMeta}>{item.destination || 'Tuyến yêu thích'}</Text>
+                    </View>
+                    <MaterialCommunityIcons color={colors.secondary} name="chevron-right" size={22} />
+                  </View>
                 </Pressable>
               ))}
               {favoriteStops.map((item) => (
@@ -680,9 +767,9 @@ export default function RouteSearchScreen() {
                   {notifications.length === 0 ? <EmptyState message="Chưa có thông báo xe đến, chậm chuyến hoặc thay đổi tuyến." /> : null}
                   {notifications.map((item) => (
                     <View key={item.id || item._id || item.title} style={styles.card}>
-                      <Text style={styles.cardTitle}>{item.title}</Text>
-                      <Text style={styles.cardMeta}>{item.type || 'system'} | {item.priority || 'normal'}</Text>
-                      <Text style={styles.bodyText}>{item.message}</Text>
+                      <Text style={styles.cardTitle}>{translateNotificationTitle(item.title)}</Text>
+                      <Text style={styles.cardMeta}>{translateNotificationType(item.type)} | {translatePriority(item.priority)}</Text>
+                      <Text style={styles.bodyText}>{translateNotificationMessage(item.message)}</Text>
                     </View>
                   ))}
                 </>
