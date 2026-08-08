@@ -20,12 +20,18 @@ export const FEEDBACK_CATEGORIES = [
 
 export const FEEDBACK_STATUSES = [
   { value: 'ALL', label: 'Tat ca' },
+  { value: 'NEW', label: 'Moi' },
+  { value: 'IN_REVIEW', label: 'Dang tiep nhan' },
+  { value: 'INVESTIGATING', label: 'Dang dieu tra' },
+  { value: 'WAITING_FOR_INFORMATION', label: 'Cho bo sung thong tin' },
+  { value: 'ACTION_REQUIRED', label: 'Can hanh dong' },
+  { value: 'RESOLVED', label: 'Da giai quyet' },
+  { value: 'CLOSED', label: 'Da dong' },
+  { value: 'REOPENED', label: 'Mo lai' },
   { value: 'PENDING', label: 'Cho xu ly' },
   { value: 'IN_PROGRESS', label: 'Dang xu ly' },
   { value: 'WAITING_FOR_PASSENGER', label: 'Cho hanh khach' },
-  { value: 'RESOLVED', label: 'Da giai quyet' },
   { value: 'REJECTED', label: 'Da tu choi' },
-  { value: 'CLOSED', label: 'Da dong' },
 ];
 
 export const LOST_ITEM_CATEGORIES = [
@@ -41,6 +47,11 @@ export const CASE_STATUSES = [
   ...FEEDBACK_STATUSES,
   { value: 'OPEN', label: 'Dang mo' },
   { value: 'SUBMITTED', label: 'Da gui' },
+  { value: 'WAITING_FOR_MATCH', label: 'Dang doi doi chieu' },
+  { value: 'POTENTIAL_MATCH', label: 'Co kha nang trung khop' },
+  { value: 'MATCH_CONFIRMED', label: 'Da xac nhan trung khop' },
+  { value: 'RETURN_IN_PROGRESS', label: 'Dang sap xep hoan tra' },
+  { value: 'RETURNED', label: 'Da hoan tra' },
   { value: 'UNDER_REVIEW', label: 'Dang xem xet' },
   { value: 'RESPONDED', label: 'Da phan hoi' },
 ];
@@ -48,16 +59,37 @@ export const CASE_STATUSES = [
 export const PRIORITIES = [
   { value: 'ALL', label: 'Tat ca muc do' },
   { value: 'LOW', label: 'Thap' },
-  { value: 'MEDIUM', label: 'Trung binh' },
+  { value: 'NORMAL', label: 'Binh thuong' },
   { value: 'HIGH', label: 'Cao' },
   { value: 'CRITICAL', label: 'Khan cap' },
-  { value: 'NORMAL', label: 'Binh thuong' },
+  { value: 'MEDIUM', label: 'Trung binh' },
   { value: 'URGENT', label: 'Rat khan cap' },
+];
+
+export const ASSIGNED_TEAMS = [
+  { value: 'ADMIN', label: 'Admin' },
+  { value: 'OPERATION_TEAM', label: 'Operation team' },
+  { value: 'SUPPORT_TEAM', label: 'Support team' },
+  { value: 'MAINTENANCE_TEAM', label: 'Maintenance team' },
+  { value: 'UNASSIGNED', label: 'Unassigned' },
+];
+
+export const CORRECTIVE_ACTION_TYPES = [
+  { value: 'DRIVER_WARNING', label: 'Driver warning' },
+  { value: 'DRIVER_TRAINING', label: 'Driver training' },
+  { value: 'SUPERVISOR_REVIEW', label: 'Supervisor review' },
+  { value: 'SCHEDULE_ADJUSTMENT', label: 'Schedule adjustment' },
+  { value: 'MAINTENANCE_ACTION', label: 'Maintenance action' },
+  { value: 'NO_VIOLATION_FOUND', label: 'No violation found' },
+  { value: 'OTHER', label: 'Other' },
 ];
 
 export const RECOVERY_STATUSES = [
   { value: 'REPORTED', label: 'Da bao cao' },
   { value: 'SEARCHING', label: 'Dang tim kiem' },
+  { value: 'POTENTIAL_MATCH', label: 'Co kha nang trung khop' },
+  { value: 'MATCH_CONFIRMED', label: 'Da xac nhan trung khop' },
+  { value: 'RETURN_IN_PROGRESS', label: 'Dang sap xep hoan tra' },
   { value: 'FOUND', label: 'Da tim thay' },
   { value: 'RETURNED', label: 'Da hoan tra' },
   { value: 'UNRECOVERED', label: 'Khong tim thay' },
@@ -67,6 +99,9 @@ export const LOST_ITEM_RECOVERY_STATUSES = [
   { value: 'ALL', label: 'Tat ca' },
   { value: 'REPORTED', label: 'Da bao cao' },
   { value: 'STORED', label: 'Da luu giu' },
+  { value: 'POTENTIAL_MATCH', label: 'Co kha nang trung khop' },
+  { value: 'MATCHED', label: 'Da ghep voi ho so mat' },
+  { value: 'RETURN_IN_PROGRESS', label: 'Dang sap xep hoan tra' },
   { value: 'RETURNED', label: 'Da hoan tra' },
   { value: 'CANCELLED', label: 'Da huy' },
 ];
@@ -151,8 +186,20 @@ export const customerSupportService = {
     apiClient.patch(`/customer-support/admin/cases/${caseId}/assign`, payload)
   ),
 
+  previewCaseNotification: async (caseId, payload = {}) => (
+    apiClient.post(`/customer-support/admin/cases/${caseId}/notifications/preview`, payload)
+  ),
+
   updateFeedback: async (caseId, payload) => (
     apiClient.patch(`/customer-support/admin/cases/${caseId}/feedback`, payload)
+  ),
+
+  addInternalNote: async (caseId, payload) => (
+    apiClient.post(`/customer-support/admin/cases/${caseId}/notes`, payload)
+  ),
+
+  addCorrectiveAction: async (caseId, payload) => (
+    apiClient.post(`/customer-support/admin/cases/${caseId}/actions`, payload)
   ),
 
   respondToComplaint: async (caseId, payload) => (
@@ -173,6 +220,32 @@ export const customerSupportService = {
 
   updateAdminLostItem: async (caseId, payload) => (
     apiClient.patch(`/customer-support/admin/lost-items/${caseId}`, payload)
+  ),
+
+  listLostFoundMatches: async ({ status = 'PENDING_REVIEW', page = 1, limit = 20 } = {}) => (
+    apiClient.get('/customer-support/admin/lost-items/matches', {
+      params: { status, page, limit },
+    })
+  ),
+
+  getLostFoundMatch: async (matchId) => (
+    apiClient.get(`/customer-support/admin/lost-items/matches/${matchId}`)
+  ),
+
+  confirmLostFoundMatch: async (matchId, payload = {}) => (
+    apiClient.post(`/customer-support/admin/lost-items/matches/${matchId}/confirm`, payload)
+  ),
+
+  rejectLostFoundMatch: async (matchId, payload = {}) => (
+    apiClient.post(`/customer-support/admin/lost-items/matches/${matchId}/reject`, payload)
+  ),
+
+  startLostFoundReturn: async (matchId, payload = {}) => (
+    apiClient.post(`/customer-support/admin/lost-items/matches/${matchId}/return/start`, payload)
+  ),
+
+  completeLostFoundReturn: async (matchId, payload = {}) => (
+    apiClient.post(`/customer-support/admin/lost-items/matches/${matchId}/return/complete`, payload)
   ),
 };
 

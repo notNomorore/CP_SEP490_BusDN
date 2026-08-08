@@ -169,12 +169,42 @@ const OperationIncidentSchema = new mongoose.Schema(
         trim: true,
         default: '',
       },
+      itemCategory: {
+        type: String,
+        enum: ['PERSONAL_BELONGINGS', 'ELECTRONICS', 'WALLET_DOCUMENTS', 'CLOTHING', 'BAGS_LUGGAGE', 'OTHER_ITEMS', ''],
+        default: '',
+      },
       itemDescription: {
         type: String,
         trim: true,
         default: '',
       },
+      color: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      brand: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      identifyingDetails: {
+        type: String,
+        trim: true,
+        default: '',
+      },
       foundLocation: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      storageLocation: {
+        type: String,
+        trim: true,
+        default: '',
+      },
+      storageReference: {
         type: String,
         trim: true,
         default: '',
@@ -186,8 +216,12 @@ const OperationIncidentSchema = new mongoose.Schema(
       },
       recoveryStatus: {
         type: String,
-        enum: ['REPORTED', 'STORED', 'RETURNED', 'CANCELLED'],
+        enum: ['REPORTED', 'STORED', 'POTENTIAL_MATCH', 'MATCHED', 'RETURN_IN_PROGRESS', 'RETURNED', 'CANCELLED'],
         default: 'REPORTED',
+      },
+      handedOverAt: {
+        type: Date,
+        default: null,
       },
     },
     evidenceFiles: {

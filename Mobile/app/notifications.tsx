@@ -30,22 +30,22 @@ type SubscriptionKey = 'arrival' | 'delay' | 'routeChange';
 const POLL_INTERVAL_MS = 30000;
 
 const FILTERS: Array<{ key: FilterKey; label: string }> = [
-  { key: 'all', label: 'All' },
-  { key: 'arrival', label: 'Arrivals' },
-  { key: 'delay', label: 'Delays' },
-  { key: 'routeChange', label: 'Changes' },
-  { key: 'system', label: 'System' },
+  { key: 'all', label: 'Tất cả' },
+  { key: 'arrival', label: 'Xe đến' },
+  { key: 'delay', label: 'Trễ' },
+  { key: 'routeChange', label: 'Đổi tuyến' },
+  { key: 'system', label: 'Hệ thống' },
 ];
 
 const typeConfig = {
   arrival: {
-    label: 'Arrival alert',
-    title: 'Bus approaching',
+    label: 'Xe sắp đến',
+    title: 'Xe buýt sắp đến',
     icon: 'bus',
     tone: 'success',
   },
   delay: {
-    label: 'Delay alert',
+    label: 'Trễ chuyến',
     title: 'Chuyến bị trễ',
     icon: 'clock-alert-outline',
     tone: 'danger',
@@ -57,14 +57,14 @@ const typeConfig = {
     tone: 'info',
   },
   promotion: {
-    label: 'Promotion',
-    title: 'Promotion',
+    label: 'Khuyến mãi',
+    title: 'Khuyến mãi',
     icon: 'ticket-percent-outline',
     tone: 'neutral',
   },
   system: {
-    label: 'System',
-    title: 'BusDN notice',
+    label: 'Hệ thống',
+    title: 'Thông báo BusDN',
     icon: 'bell-outline',
     tone: 'neutral',
   },
@@ -98,16 +98,16 @@ const notificationTime = (item: NotificationRecord) => (
 );
 
 const formatRelativeTime = (value?: string) => {
-  if (!value) return 'Recently';
+  if (!value) return 'Gần đây';
   const time = new Date(value).getTime();
-  if (Number.isNaN(time)) return 'Recently';
+  if (Number.isNaN(time)) return 'Gần đây';
   const diffMinutes = Math.max(Math.floor((Date.now() - time) / 60000), 0);
-  if (diffMinutes < 1) return 'Just now';
-  if (diffMinutes < 60) return `${diffMinutes} min ago`;
+  if (diffMinutes < 1) return 'Vừa xong';
+  if (diffMinutes < 60) return `${diffMinutes} phút trước`;
   const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours} hr ago`;
+  if (diffHours < 24) return `${diffHours} giờ trước`;
   const diffDays = Math.floor(diffHours / 24);
-  if (diffDays === 1) return 'Yesterday';
+  if (diffDays === 1) return 'Hôm qua';
   return new Date(value).toLocaleDateString('vi-VN');
 };
 
@@ -116,22 +116,56 @@ const buildEtaLine = (item: NotificationRecord) => {
   if (!etaRaw) return '';
   const eta = Number(etaRaw);
   if (Number.isNaN(eta)) return '';
-  if (eta < 1) return 'Bus is arriving at the stop.';
-  return `Bus will arrive in about ${eta} minutes.`;
+  if (eta < 1) return 'Xe buýt đang đến trạm.';
+  return `Xe buýt sẽ đến trong khoảng ${eta} phút.`;
 };
 
 const buildDelayLine = (item: NotificationRecord) => {
   const delayRaw = metadataValue(item, ['delayMinutes', 'delayDurationMinutes']);
   const delay = Number(delayRaw);
   if (!delayRaw || Number.isNaN(delay) || delay < 0) return '';
-  return `Delayed by ${delay} minutes.`;
+  return `Chuyến bị trễ ${delay} phút.`;
+};
+
+const translateNotificationTitle = (title: string) => {
+  const normalized = title.trim().toLowerCase();
+  if (!normalized) return '';
+  if (normalized === 'feedback response received') return 'Đã nhận phản hồi góp ý';
+  if (normalized.includes('promotion')) return 'Khuyến mãi';
+  if (normalized.includes('bus approaching')) return 'Xe buýt sắp đến';
+  if (normalized.includes('route change')) return 'Thay đổi tuyến';
+  if (normalized.includes('delay')) return 'Chuyến bị trễ';
+  return title;
+};
+
+const translateNotificationMessage = (message: string) => {
+  let next = message.trim();
+  if (!next) return '';
+
+  next = next.replace(
+    /Your feedback has received a response from the administrator\.?/gi,
+    'Góp ý của bạn đã có phản hồi từ quản trị viên.'
+  );
+  next = next.replace(
+    /Use code ([A-Z0-9_-]+) to get ([0-9.,]+)\s*VND off your next BusDN ticket\. Valid until ([0-9/.-]+)\.?/gi,
+    'Dùng mã $1 để giảm $2 VND cho vé BusDN tiếp theo. Có hiệu lực đến $3.'
+  );
+  next = next.replace(/Valid until/gi, 'Có hiệu lực đến');
+  next = next.replace(/BusDN ticket/gi, 'vé BusDN');
+  next = next.replace(/your next/gi, 'tiếp theo của bạn');
+  return next;
+};
+
+const displayTitle = (item: NotificationRecord) => {
+  const kind = classifyNotification(item);
+  return translateNotificationTitle(item.title || typeConfig[kind].title);
 };
 
 const displayMessage = (item: NotificationRecord) => {
   const kind = classifyNotification(item);
-  if (kind === 'arrival') return buildEtaLine(item) || item.message || item.body || '';
-  if (kind === 'delay') return buildDelayLine(item) || item.message || item.body || '';
-  return item.message || item.body || '';
+  if (kind === 'arrival') return buildEtaLine(item) || translateNotificationMessage(item.message || item.body || '');
+  if (kind === 'delay') return buildDelayLine(item) || translateNotificationMessage(item.message || item.body || '');
+  return translateNotificationMessage(item.message || item.body || '');
 };
 
 const permissionStatus = (): PermissionStatus => {
@@ -221,7 +255,7 @@ export default function NotificationsScreen() {
       setRealtimeHealthy(true);
     } catch (err) {
       setRealtimeHealthy(false);
-      if (mode !== 'poll') setError(getErrorMessage(err, 'Unable to load notifications.'));
+      if (mode !== 'poll') setError(getErrorMessage(err, 'Không thể tải thông báo.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -366,9 +400,9 @@ export default function NotificationsScreen() {
   };
 
   const renderPermissionText = () => {
-    if (permission === 'granted') return 'Device permission granted.';
-    if (permission === 'prompt') return 'Permission not decided. BusDN asks only after you turn notifications on.';
-    if (permission === 'denied') return 'Permission is blocked in browser or device settings.';
+    if (permission === 'granted') return 'Thiết bị đã cho phép nhận thông báo.';
+    if (permission === 'prompt') return 'Chưa chọn quyền thông báo. BusDN chỉ hỏi quyền sau khi bạn bật thông báo.';
+    if (permission === 'denied') return 'Quyền thông báo đang bị chặn trong trình duyệt hoặc cài đặt thiết bị.';
     return 'Phiên bản Mobile này chưa hỗ trợ quyền thông báo đẩy; tùy chọn tài khoản vẫn được lưu trên hệ thống.';
   };
 
@@ -388,7 +422,7 @@ export default function NotificationsScreen() {
       <View style={styles.summary}>
         <View>
           <Text style={styles.summaryLabel}>Trung tâm thông báo</Text>
-          <Text style={styles.summaryTitle}>{unreadCount ? `${unreadCount} unread` : 'All caught up'}</Text>
+          <Text style={styles.summaryTitle}>{unreadCount ? `${unreadCount} chưa đọc` : 'Đã đọc hết'}</Text>
         </View>
         <Pressable accessibilityRole="button" disabled={!unreadCount} onPress={markAllRead} style={[styles.markAllButton, !unreadCount && styles.disabledButton]}>
           <MaterialCommunityIcons color={unreadCount ? colors.white : colors.muted} name="check-all" size={18} />
@@ -453,7 +487,7 @@ export default function NotificationsScreen() {
               value={Boolean(user?.notificationEnabled)}
             />
             <SettingRow
-              detail={`${arrivalSubs.length} stop alert${arrivalSubs.length === 1 ? '' : 's'} enabled`}
+              detail={`${arrivalSubs.length} cảnh báo trạm đang bật`}
               disabled={savingType !== ''}
               icon="bus-clock"
               label="Xe sắp đến"
@@ -462,7 +496,7 @@ export default function NotificationsScreen() {
               value={arrivalSubs.length > 0}
             />
             <SettingRow
-              detail={`${delaySubs.length} route delay alert${delaySubs.length === 1 ? '' : 's'} enabled`}
+              detail={`${delaySubs.length} cảnh báo trễ chuyến đang bật`}
               disabled={savingType !== ''}
               icon="clock-alert-outline"
               label="Chuyến bị trễ"
@@ -471,7 +505,7 @@ export default function NotificationsScreen() {
               value={delaySubs.length > 0}
             />
             <SettingRow
-              detail={`${routeChangeSubs.length} route change alert${routeChangeSubs.length === 1 ? '' : 's'} enabled`}
+              detail={`${routeChangeSubs.length} cảnh báo thay đổi tuyến đang bật`}
               disabled={savingType !== ''}
               icon="routes"
               label="Thay đổi tuyến"
@@ -501,7 +535,7 @@ function NotificationCard({ item, onOpen, onMarkRead }: { item: NotificationReco
 
   return (
     <Pressable
-      accessibilityLabel={`${config.label}: ${item.title || config.title}`}
+      accessibilityLabel={`${config.label}: ${displayTitle(item)}`}
       accessibilityRole="button"
       onPress={onOpen}
       style={[styles.card, styles[`${config.tone}Card`], isRead && styles.readCard]}
@@ -516,13 +550,13 @@ function NotificationCard({ item, onOpen, onMarkRead }: { item: NotificationReco
           </View>
           <Text style={styles.timeText}>{formatRelativeTime(notificationTime(item))}</Text>
         </View>
-        <Text style={styles.cardTitle}>{item.title || config.title}</Text>
+        <Text style={styles.cardTitle}>{displayTitle(item)}</Text>
         <Text style={styles.cardMessage}>{displayMessage(item)}</Text>
         <View style={styles.metaRow}>
-          {routeNumber ? <MetaItem icon="map-marker-path" text={`Route ${routeNumber}`} /> : null}
+          {routeNumber ? <MetaItem icon="map-marker-path" text={`Tuyến ${routeNumber}`} /> : null}
           {stopName ? <MetaItem icon="bus-stop" text={stopName} /> : null}
           {vehicle ? <MetaItem icon="identifier" text={vehicle} /> : null}
-          <MetaItem icon={isRead ? 'check-circle-outline' : 'circle-medium'} text={isRead ? 'Read' : 'Unread'} />
+          <MetaItem icon={isRead ? 'check-circle-outline' : 'circle-medium'} text={isRead ? 'Đã đọc' : 'Chưa đọc'} />
         </View>
       </View>
       {!isRead ? (

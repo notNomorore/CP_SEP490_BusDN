@@ -1,8 +1,11 @@
 import crypto from 'crypto';
 import SupportCase from './SupportCase.js';
+import LostFoundMatch from './LostFoundMatch.js';
+import LostAndFoundMatchingService from './LostAndFoundMatchingService.js';
 import OperationIncident from '../scheduleOperations/OperationIncident.js';
 import User from '../auth/User.js';
 import { createBroadcastNotification } from '../systemNotifications/systemNotification.service.js';
+import emailService from '../../utils/emailService.js';
 import {
   FEEDBACK_ACTION,
   FEEDBACK_REPLY_STATUS,
@@ -19,8 +22,38 @@ import {
 const FEEDBACK_STATUS_ALIASES = SUPPORT_CASE_STATUS_ALIASES;
 
 const FEEDBACK_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'ratingScore', 'priority', 'status']);
+const FEEDBACK_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'CRITICAL'];
+const SLA_HOURS_BY_PRIORITY = {
+  LOW: 48,
+  NORMAL: 24,
+  MEDIUM: 24,
+  HIGH: 8,
+  CRITICAL: 2,
+  URGENT: 2,
+};
+const IMPORTANT_FEEDBACK_STATUSES = new Set([
+  FEEDBACK_STATUS.IN_REVIEW,
+  FEEDBACK_STATUS.INVESTIGATING,
+  FEEDBACK_STATUS.WAITING_FOR_INFORMATION,
+  FEEDBACK_STATUS.ACTION_REQUIRED,
+  FEEDBACK_STATUS.RESOLVED,
+  FEEDBACK_STATUS.CLOSED,
+  FEEDBACK_STATUS.REOPENED,
+]);
+const CUSTOMER_VISIBLE_LOST_ITEM_STATUSES = new Set(['FOUND', 'RETURNED', 'SEARCHING']);
+const VALID_ASSIGNED_TEAMS = new Set(['UNASSIGNED', 'ADMIN', 'OPERATION_TEAM', 'SUPPORT_TEAM', 'MAINTENANCE_TEAM']);
+const CORRECTIVE_ACTION_TYPES = new Set([
+  'DRIVER_WARNING',
+  'DRIVER_TRAINING',
+  'SUPERVISOR_REVIEW',
+  'SCHEDULE_ADJUSTMENT',
+  'MAINTENANCE_ACTION',
+  'NO_VIOLATION_FOUND',
+  'OTHER',
+]);
 const escapeRegex = (value) => String(value).replace(/[|\\{}()[\]^$+*?.]/g, '\\$&');
 const isObjectId = (value) => /^[a-f\d]{24}$/i.test(String(value || ''));
+const hasValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 const DUPLICATE_SUBMIT_WINDOW_MS = 15000;
 const DUPLICATE_REPLY_WINDOW_MS = 10000;
 
@@ -102,16 +135,52 @@ export class CustomerSupportService {
     return query;
   }
 
-  static determineFeedbackPriority({ category, ratingScore }) {
+  static determineFeedbackPriority({ category, ratingScore, title = '', description = '' }) {
     const rating = Number(ratingScore);
+    const content = `${title} ${description}`.toLowerCase();
+    const safetyKeywords = [
+      'safety',
+      'unsafe',
+      'harassment',
+      'accident',
+      'crash',
+      'injury',
+      'assault',
+      'threat',
+      'danger',
+      'serious incident',
+    ];
 
-    if (category === 'SAFETY' && rating <= 2) return rating === 1 ? 'CRITICAL' : 'HIGH';
-    if (['DRIVER_BEHAVIOR', 'BUS_ASSISTANT_BEHAVIOR'].includes(category) && rating <= 2) return 'HIGH';
-    if (['PAYMENT_ISSUE', 'APP_ISSUE'].includes(category) && rating <= 2) return 'MEDIUM';
-    if (category === 'ROUTE_DELAY' && rating <= 2) return 'MEDIUM';
-    if (rating <= 1) return 'HIGH';
-    if (rating <= 3) return 'MEDIUM';
-    return 'LOW';
+    if (category === 'SAFETY' || safetyKeywords.some((keyword) => content.includes(keyword))) {
+      return {
+        priority: 'CRITICAL',
+        reason: 'Safety-related complaint or serious incident keyword detected',
+      };
+    }
+
+    if (rating <= 1 && ['DRIVER_BEHAVIOR', 'BUS_ASSISTANT_BEHAVIOR', 'SERVICE_QUALITY', 'OTHER'].includes(category)) {
+      return {
+        priority: 'HIGH',
+        reason: 'One-star complaint requires high-priority review',
+      };
+    }
+
+    if (rating <= 3) {
+      return {
+        priority: 'NORMAL',
+        reason: 'Two- or three-star passenger feedback requires normal follow-up',
+      };
+    }
+
+    return {
+      priority: 'LOW',
+      reason: 'Positive or general feedback with no safety indicators',
+    };
+  }
+
+  static calculateSlaDueAt(priority, fromDate = new Date()) {
+    const hours = SLA_HOURS_BY_PRIORITY[priority] || SLA_HOURS_BY_PRIORITY.NORMAL;
+    return new Date(new Date(fromDate).getTime() + hours * 60 * 60 * 1000);
   }
 
   static appendConversation(supportCase, { senderId, senderRole, message }) {
@@ -292,6 +361,17 @@ export class CustomerSupportService {
 
     const relatedTrip = await this.validateRelatedTrip(userId, data.relatedTripId);
     await this.assertNoRecentDuplicate(userId, data);
+    const priorityClassification = data.type === 'SERVICE_FEEDBACK'
+      ? this.determineFeedbackPriority({
+        category: data.category,
+        ratingScore: data.ratingScore,
+        title: data.title,
+        description: data.description,
+      })
+      : {
+        priority: FEEDBACK_PRIORITIES.includes(data.priority) ? data.priority : 'NORMAL',
+        reason: data.priority ? 'Priority selected by submitter' : 'Default normal priority',
+      };
 
     const supportCase = new SupportCase({
       type: data.type,
@@ -300,11 +380,11 @@ export class CustomerSupportService {
       title: data.title.trim(),
       description: data.description.trim(),
       category: data.category || (data.type === 'LOST_ITEM' ? 'LOST_ITEM' : 'OTHER'),
-      priority: data.type === 'SERVICE_FEEDBACK'
-        ? this.determineFeedbackPriority({ category: data.category, ratingScore: data.ratingScore })
-        : data.priority || 'NORMAL',
-      status: data.type === 'SERVICE_FEEDBACK' ? FEEDBACK_STATUS.PENDING : data.type === 'LOST_ITEM' ? 'SUBMITTED' : 'OPEN',
+      priority: priorityClassification.priority,
+      priorityReason: priorityClassification.reason,
+      status: data.type === 'SERVICE_FEEDBACK' ? FEEDBACK_STATUS.NEW : data.type === 'LOST_ITEM' ? 'WAITING_FOR_MATCH' : 'OPEN',
       replyStatus: data.type === 'SERVICE_FEEDBACK' ? FEEDBACK_REPLY_STATUS.UNREPLIED : undefined,
+      slaDueAt: data.type === 'SERVICE_FEEDBACK' ? this.calculateSlaDueAt(priorityClassification.priority) : undefined,
       ratingScore: data.ratingScore ? Number(data.ratingScore) : undefined,
       routeId: isObjectId(data.routeId) ? data.routeId : undefined,
       tripId: data.tripId?.trim() || data.relatedTripId?.trim() || '',
@@ -322,9 +402,13 @@ export class CustomerSupportService {
           itemName: data.lostItem.itemName.trim(),
           itemCategory: data.lostItem.itemCategory,
           itemDescription: data.lostItem.itemDescription.trim(),
+          color: data.lostItem.color?.trim() || '',
+          brand: data.lostItem.brand?.trim() || '',
+          identifyingDetails: data.lostItem.identifyingDetails?.trim() || '',
           lastSeenLocation: data.lostItem.lastSeenLocation.trim(),
           lostAt: new Date(data.lostItem.lostAt),
-          recoveryStatus: 'REPORTED',
+          recoveryStatus: 'SEARCHING',
+          contactPreference: data.lostItem.contactPreference || data.contactPreference || 'ANY',
         }
         : undefined,
     });
@@ -344,6 +428,16 @@ export class CustomerSupportService {
         message: 'Feedback submitted',
       });
     }
+    if (data.type === 'LOST_ITEM') {
+      this.appendAudit(supportCase, {
+        actorId: userId,
+        actorRole: 'PASSENGER',
+        action: 'LOST_REPORT_CREATED',
+        previousStatus: null,
+        newStatus: supportCase.status,
+        message: 'Lost item report submitted',
+      });
+    }
 
     await supportCase.save();
     if (data.type === 'SERVICE_FEEDBACK') {
@@ -351,6 +445,18 @@ export class CustomerSupportService {
         this.recordUserNotification(userId, `Feedback ${supportCase.referenceNumber} was submitted.`),
         this.notifyAdmins(`New passenger feedback ${supportCase.referenceNumber}: ${supportCase.title}`),
       ]);
+    }
+    if (data.type === 'LOST_ITEM') {
+      await LostAndFoundMatchingService.notifyReportCreated({
+        type: 'LOST_ITEM',
+        report: supportCase,
+        actorId: userId,
+      });
+      await LostAndFoundMatchingService.runForLostItem(supportCase._id, {
+        userId,
+        role: 'PASSENGER',
+      });
+      return SupportCase.findById(supportCase._id).populate('passenger', 'fullName email phone');
     }
     return supportCase.populate('passenger', 'fullName email phone');
   }
@@ -451,7 +557,7 @@ export class CustomerSupportService {
   static async addPassengerFeedbackReply(userId, caseId, data) {
     const feedback = await this.getMyFeedback(userId, caseId);
 
-    if (normalizeFeedbackStatus(feedback.status) !== FEEDBACK_STATUS.WAITING_FOR_PASSENGER) {
+    if (normalizeFeedbackStatus(feedback.status) !== FEEDBACK_STATUS.WAITING_FOR_INFORMATION) {
       const error = new Error('Passenger follow-up is only allowed while feedback is waiting for passenger input');
       error.statusCode = 400;
       throw error;
@@ -468,7 +574,7 @@ export class CustomerSupportService {
       senderRole: 'PASSENGER',
       message: data.message,
     });
-    feedback.status = FEEDBACK_STATUS.IN_PROGRESS;
+    feedback.status = FEEDBACK_STATUS.INVESTIGATING;
     feedback.replyStatus = FEEDBACK_REPLY_STATUS.CUSTOMER_REPLIED;
     this.appendAudit(feedback, {
       actorId: userId,
@@ -489,9 +595,13 @@ export class CustomerSupportService {
 
     if (supportCase.status === 'CLOSED') return 'CLOSED';
     if (supportCase.status === 'RESOLVED') return 'RESOLVED';
+    if (supportCase.status === 'RETURN_IN_PROGRESS' || recoveryStatus === 'RETURN_IN_PROGRESS') return 'RETURN_IN_PROGRESS';
+    if (supportCase.status === 'MATCH_CONFIRMED' || recoveryStatus === 'MATCH_CONFIRMED') return 'MATCH_CONFIRMED';
+    if (supportCase.status === 'POTENTIAL_MATCH' || recoveryStatus === 'POTENTIAL_MATCH') return 'POTENTIAL_MATCH';
     if (recoveryStatus === 'RETURNED') return 'RESOLVED';
     if (recoveryStatus === 'FOUND') return 'ITEM_FOUND';
     if (recoveryStatus === 'SEARCHING') return 'SEARCHING';
+    if (supportCase.status === 'WAITING_FOR_MATCH') return 'SEARCHING';
     if (supportCase.status === 'UNDER_REVIEW' || supportCase.status === 'IN_PROGRESS') return 'UNDER_REVIEW';
     return 'SUBMITTED';
   }
@@ -520,6 +630,33 @@ export class CustomerSupportService {
         label: 'Searching',
         status: 'SEARCHING',
         message: 'The recovery team is searching for the reported item.',
+        timestamp: supportCase.updatedAt,
+      });
+    }
+
+    if (supportCase.status === 'POTENTIAL_MATCH' || supportCase.lostItem?.recoveryStatus === 'POTENTIAL_MATCH') {
+      timeline.push({
+        label: 'Potential Match',
+        status: 'POTENTIAL_MATCH',
+        message: 'A possible matching found item is being reviewed by an administrator.',
+        timestamp: supportCase.updatedAt,
+      });
+    }
+
+    if (supportCase.status === 'MATCH_CONFIRMED' || supportCase.lostItem?.recoveryStatus === 'MATCH_CONFIRMED') {
+      timeline.push({
+        label: 'Match Confirmed',
+        status: 'MATCH_CONFIRMED',
+        message: 'An administrator confirmed that a matching item was found.',
+        timestamp: supportCase.lostItem?.foundAt || supportCase.updatedAt,
+      });
+    }
+
+    if (supportCase.status === 'RETURN_IN_PROGRESS' || supportCase.lostItem?.recoveryStatus === 'RETURN_IN_PROGRESS') {
+      timeline.push({
+        label: 'Return In Progress',
+        status: 'RETURN_IN_PROGRESS',
+        message: 'The return handover is being arranged.',
         timestamp: supportCase.updatedAt,
       });
     }
@@ -577,6 +714,31 @@ export class CustomerSupportService {
     };
   }
 
+  static async attachPassengerMatchSummaries(formattedCases = []) {
+    if (!formattedCases.length) return formattedCases;
+    const matches = await LostFoundMatch.find({
+      lostItemReport: { $in: formattedCases.map((supportCase) => supportCase.id) },
+      status: { $in: ['PENDING_REVIEW', 'CONFIRMED', 'RETURN_IN_PROGRESS', 'COMPLETED'] },
+    }).select('lostItemReport status matchScore returnProcess createdAt updatedAt').lean();
+    const matchesByLostCase = matches.reduce((map, match) => {
+      const key = String(match.lostItemReport);
+      map.set(key, [...(map.get(key) || []), {
+        id: String(match._id),
+        status: match.status,
+        matchScore: match.status === 'PENDING_REVIEW' ? undefined : match.matchScore,
+        returnProcess: ['RETURN_IN_PROGRESS', 'COMPLETED'].includes(match.status) ? match.returnProcess : undefined,
+        createdAt: match.createdAt,
+        updatedAt: match.updatedAt,
+      }]);
+      return map;
+    }, new Map());
+
+    return formattedCases.map((supportCase) => ({
+      ...supportCase,
+      potentialMatches: matchesByLostCase.get(String(supportCase.id)) || [],
+    }));
+  }
+
   static async listMyLostItemCases(userId) {
     const cases = await SupportCase.find({
       passenger: userId,
@@ -585,7 +747,7 @@ export class CustomerSupportService {
       .populate('responses.responder', 'fullName email role')
       .sort({ createdAt: -1 });
 
-    return cases.map((supportCase) => this.formatLostItemCase(supportCase));
+    return this.attachPassengerMatchSummaries(cases.map((supportCase) => this.formatLostItemCase(supportCase)));
   }
 
   static async getMyLostItemCase(userId, caseId) {
@@ -609,7 +771,8 @@ export class CustomerSupportService {
       throw error;
     }
 
-    return this.formatLostItemCase(supportCase);
+    const [formattedCase] = await this.attachPassengerMatchSummaries([this.formatLostItemCase(supportCase)]);
+    return formattedCase;
   }
 
   static async getCaseById(caseId) {
@@ -618,7 +781,9 @@ export class CustomerSupportService {
       .populate('assignedTo', 'fullName email role')
       .populate('adminResponseBy', 'fullName email role')
       .populate('responses.responder', 'fullName email role')
-      .populate('conversation.senderId', 'fullName email role');
+      .populate('conversation.senderId', 'fullName email role')
+      .populate('correctiveActions.performedBy', 'fullName email role')
+      .populate('auditTrail.actorId', 'fullName email role');
 
     if (!supportCase) {
       throw new Error('Support case not found');
@@ -627,8 +792,9 @@ export class CustomerSupportService {
     return supportCase;
   }
 
-  static async assignFeedback(caseId, adminId, { assignedTo } = {}) {
+  static async assignFeedback(caseId, adminId, { assignedTo, assignedTeam = 'ADMIN' } = {}) {
     const targetAdminId = assignedTo || adminId;
+    const nextTeam = VALID_ASSIGNED_TEAMS.has(assignedTeam) ? assignedTeam : 'ADMIN';
     const admin = await User.findOne({ _id: targetAdminId, role: 'ADMIN' }).select('_id fullName email').lean();
 
     if (!admin) {
@@ -637,7 +803,7 @@ export class CustomerSupportService {
       throw error;
     }
 
-    const previous = await SupportCase.findById(caseId).select('type status assignedTo assignedAt referenceNumber');
+    const previous = await SupportCase.findById(caseId).select('type status assignedTo assignedTeam assignedAt referenceNumber');
 
     if (!previous) {
       throw createBusinessError('Support case not found', 404);
@@ -647,31 +813,17 @@ export class CustomerSupportService {
       throw createBusinessError('Only feedback tickets can be assigned through this action', 400);
     }
 
-    if (previous.assignedTo && String(previous.assignedTo) !== String(targetAdminId)) {
-      throw createBusinessError('Feedback ticket is already assigned to another administrator', 409);
-    }
+    const nextStatus = previous.status;
 
-    const nextStatus = normalizeFeedbackStatus(previous.status) === FEEDBACK_STATUS.PENDING
-      ? FEEDBACK_STATUS.IN_PROGRESS
-      : previous.status;
-    if (nextStatus !== previous.status) {
-      assertFeedbackTransition(previous.status, nextStatus);
-    }
-
-    const assignedAt = previous.assignedTo ? previous.assignedAt : new Date();
+    const assignedAt = String(previous.assignedTo || '') === String(targetAdminId) && previous.assignedAt
+      ? previous.assignedAt
+      : new Date();
     const updatedCase = await SupportCase.findOneAndUpdate(
-      {
-        _id: caseId,
-        type: 'SERVICE_FEEDBACK',
-        $or: [
-          { assignedTo: { $exists: false } },
-          { assignedTo: null },
-          { assignedTo: targetAdminId },
-        ],
-      },
+      { _id: caseId, type: 'SERVICE_FEEDBACK' },
       {
         $set: {
           assignedTo: admin._id,
+          assignedTeam: nextTeam,
           assignedAt,
           status: nextStatus,
         },
@@ -682,8 +834,13 @@ export class CustomerSupportService {
             action: FEEDBACK_ACTION.ASSIGN,
             previousStatus: previous.status,
             newStatus: nextStatus,
-            message: previous.assignedTo ? 'Assignment confirmed' : 'Feedback assigned',
-            metadata: { assignedTo: String(admin._id) },
+            message: previous.assignedTo ? 'Feedback reassigned' : 'Feedback assigned',
+            metadata: {
+              previousAssignedTo: previous.assignedTo ? String(previous.assignedTo) : '',
+              assignedTo: String(admin._id),
+              previousAssignedTeam: previous.assignedTeam || 'UNASSIGNED',
+              assignedTeam: nextTeam,
+            },
             createdAt: new Date(),
           },
         },
@@ -699,6 +856,278 @@ export class CustomerSupportService {
     return this.getCaseById(caseId);
   }
 
+  static formatStatusLabel(status) {
+    return String(status || '')
+      .toLowerCase()
+      .split('_')
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }
+
+  static buildComplaintNotificationMessage(supportCase, status = supportCase.status) {
+    const code = supportCase.referenceNumber || `#${supportCase._id}`;
+    const routeText = supportCase.routeName || supportCase.tripCode || 'your reported trip';
+    const normalizedStatus = normalizeFeedbackStatus(status);
+
+    const templates = {
+      [FEEDBACK_STATUS.IN_REVIEW]: `BusDN has received your complaint ${code} and our team is reviewing it. We will keep you updated when there is new information.`,
+      [FEEDBACK_STATUS.INVESTIGATING]: `BusDN is currently investigating your complaint regarding ${routeText}. We will provide an update when the review is completed.`,
+      [FEEDBACK_STATUS.WAITING_FOR_INFORMATION]: `BusDN needs additional information from you to continue processing complaint ${code}. Please check the app for more details.`,
+      [FEEDBACK_STATUS.ACTION_REQUIRED]: 'Your complaint has been reviewed and the necessary action is being taken by our operations team.',
+      [FEEDBACK_STATUS.RESOLVED]: `Your complaint ${code} has been resolved. Please check the app for the resolution details.`,
+      [FEEDBACK_STATUS.CLOSED]: `Your complaint ${code} has been closed. Thank you for helping BusDN improve our service.`,
+      [FEEDBACK_STATUS.REOPENED]: `Your complaint ${code} has been reopened for further review.`,
+    };
+
+    return templates[normalizedStatus] || `Your complaint ${code} has been updated. Please check the BusDN app for details.`;
+  }
+
+  static buildLostItemNotificationMessage(supportCase, recoveryStatus = supportCase.lostItem?.recoveryStatus) {
+    const code = supportCase.referenceNumber || `#${supportCase._id}`;
+    const templates = {
+      FOUND: 'Good news! Your reported lost item has been found. Please check the BusDN app for pickup information.',
+      RETURNED: `Your lost item report ${code} has been marked as returned. Thank you for using BusDN.`,
+      SEARCHING: `BusDN is searching for the lost item reported in case ${code}. We will update you when there is new information.`,
+      RETURN_IN_PROGRESS: `BusDN is arranging pickup or return for your lost item report ${code}. Please check the app for details.`,
+    };
+
+    return templates[recoveryStatus] || `Your lost item report ${code} has been updated. Please check the BusDN app for details.`;
+  }
+
+  static buildNotificationPreview(supportCase, eventStatus = supportCase.status) {
+    const passenger = supportCase.passenger || {};
+    const email = passenger.email || supportCase.contactEmail || '';
+    const isLostItem = supportCase.type === 'LOST_ITEM';
+    const message = isLostItem
+      ? this.buildLostItemNotificationMessage(supportCase, eventStatus)
+      : this.buildComplaintNotificationMessage(supportCase, eventStatus);
+
+    return {
+      shouldNotify: isLostItem
+        ? CUSTOMER_VISIBLE_LOST_ITEM_STATUSES.has(eventStatus)
+        : IMPORTANT_FEEDBACK_STATUSES.has(normalizeFeedbackStatus(eventStatus)),
+      title: isLostItem ? 'Lost item update' : 'Complaint update',
+      message,
+      status: eventStatus,
+      channels: {
+        inApp: true,
+        email: hasValidEmail(email),
+      },
+      emailAvailable: hasValidEmail(email),
+      emailUnavailableReason: hasValidEmail(email) ? '' : 'Passenger does not have a valid email address.',
+    };
+  }
+
+  static async previewFeedbackNotification(caseId, adminId, { status } = {}) {
+    const supportCase = await this.getCaseById(caseId);
+
+    if (supportCase.type !== 'SERVICE_FEEDBACK' && supportCase.type !== 'LOST_ITEM') {
+      throw createBusinessError('Notification preview is only available for passenger feedback or lost item cases', 400);
+    }
+
+    if (supportCase.type === 'SERVICE_FEEDBACK') {
+      this.ensureAssignedToAdmin(supportCase, adminId);
+    }
+
+    return this.buildNotificationPreview(supportCase, status || supportCase.status);
+  }
+
+  static recordDelivery(supportCase, delivery) {
+    supportCase.notificationDeliveries.push({
+      channel: delivery.channel,
+      notificationId: delivery.notificationId,
+      recipient: delivery.recipient,
+      status: delivery.status,
+      sentAt: delivery.sentAt,
+      errorMessage: delivery.errorMessage || '',
+      createdAt: new Date(),
+    });
+  }
+
+  static async sendPassengerCaseNotification(supportCase, adminId, notification = {}) {
+    const channels = notification.channels || {};
+    const passenger = supportCase.passenger || {};
+    const passengerId = passenger._id || passenger;
+    const email = passenger.email || supportCase.contactEmail || '';
+    const status = notification.status || supportCase.status;
+    const preview = this.buildNotificationPreview(supportCase, status);
+    const message = String(notification.message || preview.message || '').trim();
+    const title = notification.title || preview.title;
+    const results = [];
+
+    if (!message) {
+      throw createBusinessError('Notification message is required when sending passenger updates', 422);
+    }
+
+    if (channels.inApp) {
+      try {
+        const notificationDoc = await createBroadcastNotification({
+          title,
+          message,
+          type: 'general',
+          priority: supportCase.priority === 'CRITICAL' ? 'urgent' : 'normal',
+          targetAudience: 'specific_users',
+          userIds: [passengerId],
+          actionUrl: supportCase.type === 'LOST_ITEM' ? `/lost-items/${supportCase._id}` : `/feedback/${supportCase._id}`,
+          sourceType: 'SupportCase',
+          sourceId: supportCase._id,
+          metadata: {
+            caseId: String(supportCase._id),
+            referenceNumber: supportCase.referenceNumber,
+            supportCaseType: supportCase.type,
+            status,
+          },
+        }, adminId);
+        const delivery = {
+          channel: 'IN_APP',
+          notificationId: notificationDoc._id,
+          recipient: String(passengerId),
+          status: 'SENT',
+          sentAt: new Date(),
+        };
+        this.recordDelivery(supportCase, delivery);
+        results.push(delivery);
+      } catch (error) {
+        const delivery = {
+          channel: 'IN_APP',
+          recipient: String(passengerId),
+          status: 'FAILED',
+          sentAt: new Date(),
+          errorMessage: error.message,
+        };
+        this.recordDelivery(supportCase, delivery);
+        results.push(delivery);
+      }
+    }
+
+    if (channels.email) {
+      if (!hasValidEmail(email)) {
+        const delivery = {
+          channel: 'EMAIL',
+          recipient: email || 'NO_EMAIL',
+          status: 'FAILED',
+          sentAt: new Date(),
+          errorMessage: 'Passenger does not have a valid email address',
+        };
+        this.recordDelivery(supportCase, delivery);
+        results.push(delivery);
+      } else {
+        try {
+          await emailService.sendComplaintUpdateEmail({
+            email,
+            passengerName: passenger.fullName || 'Passenger',
+            complaintCode: supportCase.referenceNumber,
+            status: this.formatStatusLabel(status),
+            message,
+          });
+          const delivery = {
+            channel: 'EMAIL',
+            recipient: email,
+            status: 'SENT',
+            sentAt: new Date(),
+          };
+          this.recordDelivery(supportCase, delivery);
+          results.push(delivery);
+        } catch (error) {
+          const delivery = {
+            channel: 'EMAIL',
+            recipient: email,
+            status: 'FAILED',
+            sentAt: new Date(),
+            errorMessage: error.message,
+          };
+          this.recordDelivery(supportCase, delivery);
+          results.push(delivery);
+        }
+      }
+    }
+
+    if (results.length) {
+      this.appendAudit(supportCase, {
+        actorId: adminId,
+        actorRole: 'ADMIN',
+        action: FEEDBACK_ACTION.NOTIFY_PASSENGER,
+        previousStatus: supportCase.status,
+        newStatus: supportCase.status,
+        message: 'Passenger notification processed',
+        metadata: { channels: results.map((result) => result.channel), results },
+      });
+    }
+
+    return results;
+  }
+
+  static async addInternalNote(caseId, adminId, data) {
+    const supportCase = await this.getCaseById(caseId);
+
+    if (supportCase.type !== 'SERVICE_FEEDBACK' && supportCase.type !== 'COMPLAINT') {
+      throw createBusinessError('Internal notes are only available for feedback and complaint cases', 400);
+    }
+
+    if (!data.message?.trim()) {
+      throw createBusinessError('Internal note is required', 422);
+    }
+
+    supportCase.responses.push({
+      message: data.message.trim(),
+      responder: adminId,
+      statusBefore: supportCase.status,
+      statusAfter: supportCase.status,
+      responseType: 'INTERNAL_NOTE',
+      visibleToPassenger: false,
+      createdAt: new Date(),
+    });
+    this.appendAudit(supportCase, {
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: FEEDBACK_ACTION.INTERNAL_NOTE,
+      previousStatus: supportCase.status,
+      newStatus: supportCase.status,
+      message: data.message.trim(),
+    });
+
+    await supportCase.save();
+    return this.getCaseById(caseId);
+  }
+
+  static async addCorrectiveAction(caseId, adminId, data) {
+    const supportCase = await this.getCaseById(caseId);
+    const actionType = data.actionType || 'OTHER';
+    const description = String(data.description || '').trim();
+
+    if (supportCase.type !== 'SERVICE_FEEDBACK' && supportCase.type !== 'COMPLAINT') {
+      throw createBusinessError('Corrective actions are only available for feedback and complaint cases', 400);
+    }
+
+    if (!CORRECTIVE_ACTION_TYPES.has(actionType)) {
+      throw createBusinessError('Corrective action type is invalid', 422);
+    }
+
+    if (!description) {
+      throw createBusinessError('Corrective action description is required', 422);
+    }
+
+    supportCase.correctiveActions.push({
+      actionType,
+      description,
+      performedBy: adminId,
+      performedAt: data.performedAt ? new Date(data.performedAt) : new Date(),
+      createdAt: new Date(),
+    });
+    this.appendAudit(supportCase, {
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: FEEDBACK_ACTION.CORRECTIVE_ACTION,
+      previousStatus: supportCase.status,
+      newStatus: supportCase.status,
+      message: description,
+      metadata: { actionType },
+    });
+
+    await supportCase.save();
+    return this.getCaseById(caseId);
+  }
+
   static async updateFeedback(caseId, adminId, data) {
     const supportCase = await this.getCaseById(caseId);
 
@@ -709,21 +1138,48 @@ export class CustomerSupportService {
     }
 
     const previousStatus = supportCase.status;
+    const previousPriority = supportCase.priority;
     this.ensureAssignedToAdmin(supportCase, adminId);
 
     if (isTerminalFeedbackStatus(supportCase.status)) {
-      throw createBusinessError('Closed or rejected feedback cannot be updated', 409);
+      throw createBusinessError('Closed feedback cannot be updated', 409);
     }
 
     const hasMessage = Boolean(data.message?.trim());
     const hasResolution = Boolean(data.resolutionSummary?.trim() || supportCase.resolutionSummary?.trim());
+    const hasWaitingReason = Boolean(data.waitingForInformationReason?.trim() || supportCase.waitingForInformationReason?.trim() || hasMessage);
+    const incomingCorrectiveAction = data.correctiveAction || null;
+    const incomingCorrectiveDescription = String(incomingCorrectiveAction?.description || data.actionDescription || '').trim();
+    const hasCorrectiveAction = Boolean(
+      incomingCorrectiveDescription
+      || (supportCase.correctiveActions || []).length
+    );
     const nextStatus = data.status ? assertFeedbackTransition(supportCase.status, data.status) : supportCase.status;
 
-    if (nextStatus === FEEDBACK_STATUS.RESOLVED && !hasMessage && !hasResolution && !supportCase.adminResponse?.trim()) {
-      throw createBusinessError('Resolution requires an admin response or resolution summary', 422);
+    if (data.priority && !FEEDBACK_PRIORITIES.includes(data.priority)) {
+      throw createBusinessError('Priority must be LOW, NORMAL, HIGH, or CRITICAL', 422);
     }
 
-    if (nextStatus === FEEDBACK_STATUS.CLOSED && normalizeFeedbackStatus(supportCase.status) !== FEEDBACK_STATUS.RESOLVED) {
+    if (nextStatus === FEEDBACK_STATUS.WAITING_FOR_INFORMATION && !hasWaitingReason) {
+      throw createBusinessError('Waiting for information requires a reason or passenger-facing request', 422);
+    }
+
+    if (nextStatus === FEEDBACK_STATUS.ACTION_REQUIRED && !hasCorrectiveAction) {
+      throw createBusinessError('Action required status requires an action description or corrective action', 422);
+    }
+
+    if (nextStatus === FEEDBACK_STATUS.RESOLVED && !hasResolution) {
+      throw createBusinessError('Resolution summary is required before resolving feedback', 422);
+    }
+
+    if (nextStatus === FEEDBACK_STATUS.RESOLVED && !hasCorrectiveAction) {
+      throw createBusinessError('Record a corrective action or outcome before resolving feedback', 422);
+    }
+
+    if (
+      nextStatus === FEEDBACK_STATUS.CLOSED
+      && ![FEEDBACK_STATUS.RESOLVED, FEEDBACK_STATUS.WAITING_FOR_INFORMATION].includes(normalizeFeedbackStatus(supportCase.status))
+    ) {
       throw createBusinessError('Feedback must be resolved before it can be closed', 409);
     }
 
@@ -756,6 +1212,39 @@ export class CustomerSupportService {
       supportCase.resolutionSummary = data.resolutionSummary.trim();
     }
 
+    if (data.waitingForInformationReason?.trim()) {
+      supportCase.waitingForInformationReason = data.waitingForInformationReason.trim();
+    }
+
+    if (data.priority) {
+      supportCase.priority = data.priority;
+      supportCase.priorityReason = data.priorityReason?.trim() || 'Priority manually updated by admin';
+      supportCase.slaDueAt = this.calculateSlaDueAt(data.priority, supportCase.createdAt || new Date());
+    }
+
+    if (incomingCorrectiveDescription) {
+      const actionType = incomingCorrectiveAction?.actionType || 'OTHER';
+      if (!CORRECTIVE_ACTION_TYPES.has(actionType)) {
+        throw createBusinessError('Corrective action type is invalid', 422);
+      }
+      supportCase.correctiveActions.push({
+        actionType,
+        description: incomingCorrectiveDescription,
+        performedBy: adminId,
+        performedAt: incomingCorrectiveAction?.performedAt ? new Date(incomingCorrectiveAction.performedAt) : new Date(),
+        createdAt: new Date(),
+      });
+      this.appendAudit(supportCase, {
+        actorId: adminId,
+        actorRole: 'ADMIN',
+        action: FEEDBACK_ACTION.CORRECTIVE_ACTION,
+        previousStatus,
+        newStatus: nextStatus,
+        message: incomingCorrectiveDescription,
+        metadata: { actionType },
+      });
+    }
+
     supportCase.status = nextStatus;
     supportCase.replyStatus = getReplyStatusForAdminAction({
       nextStatus,
@@ -771,6 +1260,27 @@ export class CustomerSupportService {
       supportCase.closedAt = new Date();
     }
 
+    if (nextStatus === FEEDBACK_STATUS.REOPENED) {
+      supportCase.resolvedAt = null;
+      supportCase.closedAt = null;
+    }
+
+    if (previousPriority !== supportCase.priority) {
+      this.appendAudit(supportCase, {
+        actorId: adminId,
+        actorRole: 'ADMIN',
+        action: FEEDBACK_ACTION.CHANGE_PRIORITY,
+        previousStatus,
+        newStatus: nextStatus,
+        message: 'Priority changed',
+        metadata: {
+          previousPriority,
+          newPriority: supportCase.priority,
+          priorityReason: supportCase.priorityReason,
+        },
+      });
+    }
+
     this.appendAudit(supportCase, {
       actorId: adminId,
       actorRole: 'ADMIN',
@@ -781,22 +1291,24 @@ export class CustomerSupportService {
       metadata: {
         replyStatus: supportCase.replyStatus,
         hasResolutionSummary: Boolean(supportCase.resolutionSummary),
+        waitingForInformationReason: supportCase.waitingForInformationReason,
       },
     });
 
     await supportCase.save();
 
-    const notifications = [];
-    if (hasMessage) {
-      notifications.push(this.recordUserNotification(supportCase.passenger._id || supportCase.passenger, `Admin replied to feedback ${supportCase.referenceNumber}.`));
-      notifications.push(this.createPassengerFeedbackReplyNotification({ supportCase, adminId }));
+    let notificationResults = [];
+    if (data.notification?.confirmSend) {
+      notificationResults = await this.sendPassengerCaseNotification(supportCase, adminId, {
+        ...data.notification,
+        status: nextStatus,
+      });
+      await supportCase.save();
     }
-    if (previousStatus !== supportCase.status) {
-      notifications.push(this.recordUserNotification(supportCase.passenger._id || supportCase.passenger, `Feedback ${supportCase.referenceNumber} status changed to ${supportCase.status}.`));
-    }
-    await Promise.all(notifications);
 
-    return this.getCaseById(caseId);
+    const updatedCase = await this.getCaseById(caseId);
+    updatedCase.notificationResults = notificationResults;
+    return updatedCase;
   }
 
   static async getFeedbackAnalytics() {
@@ -927,6 +1439,39 @@ export class CustomerSupportService {
     }
 
     const statusBefore = supportCase.status;
+    const validStatusTransitions = {
+      WAITING_FOR_MATCH: ['POTENTIAL_MATCH', 'UNDER_REVIEW', 'IN_PROGRESS', 'CANCELLED', 'CLOSED'],
+      SUBMITTED: ['WAITING_FOR_MATCH', 'UNDER_REVIEW', 'IN_PROGRESS', 'CANCELLED', 'CLOSED'],
+      OPEN: ['WAITING_FOR_MATCH', 'UNDER_REVIEW', 'IN_PROGRESS', 'CANCELLED', 'CLOSED'],
+      POTENTIAL_MATCH: ['WAITING_FOR_MATCH', 'UNDER_REVIEW', 'MATCH_CONFIRMED', 'CANCELLED', 'CLOSED'],
+      UNDER_REVIEW: ['WAITING_FOR_MATCH', 'MATCH_CONFIRMED', 'IN_PROGRESS', 'CANCELLED', 'CLOSED'],
+      IN_PROGRESS: ['WAITING_FOR_MATCH', 'MATCH_CONFIRMED', 'RETURN_IN_PROGRESS', 'CANCELLED', 'CLOSED'],
+      MATCH_CONFIRMED: ['RETURN_IN_PROGRESS', 'CANCELLED', 'CLOSED'],
+      RETURN_IN_PROGRESS: ['RETURNED', 'RESOLVED', 'CANCELLED', 'CLOSED'],
+      RETURNED: ['RESOLVED', 'CLOSED'],
+      RESOLVED: ['CLOSED'],
+      CLOSED: [],
+      CANCELLED: [],
+      REJECTED: [],
+    };
+    const nextStatus = data.status || supportCase.status;
+
+    if (data.status && data.status !== supportCase.status) {
+      const allowedNextStatuses = validStatusTransitions[supportCase.status] || [];
+      if (!allowedNextStatuses.includes(data.status)) {
+        throw createBusinessError(`Invalid lost item status transition from ${supportCase.status} to ${data.status}`, 409);
+      }
+    }
+
+    if (['RETURNED', 'RESOLVED'].includes(nextStatus) || data.recoveryStatus === 'RETURNED') {
+      const confirmedMatch = await LostFoundMatch.exists({
+        lostItemReport: supportCase._id,
+        status: { $in: ['CONFIRMED', 'RETURN_IN_PROGRESS', 'COMPLETED'] },
+      });
+      if (!confirmedMatch) {
+        throw createBusinessError('Cannot mark a lost item as returned without a confirmed match', 409);
+      }
+    }
 
     if (data.status) {
       supportCase.status = data.status;
@@ -967,7 +1512,19 @@ export class CustomerSupportService {
     supportCase.assignedTo = supportCase.assignedTo || adminId;
 
     await supportCase.save();
-    return this.getCaseById(caseId);
+
+    let notificationResults = [];
+    if (data.notification?.confirmSend) {
+      notificationResults = await this.sendPassengerCaseNotification(supportCase, adminId, {
+        ...data.notification,
+        status: data.recoveryStatus || supportCase.lostItem?.recoveryStatus || supportCase.status,
+      });
+      await supportCase.save();
+    }
+
+    const updatedCase = await this.getCaseById(caseId);
+    updatedCase.notificationResults = notificationResults;
+    return updatedCase;
   }
 
   static buildFoundItemQuery({ status, recoveryStatus }) {
@@ -987,6 +1544,9 @@ export class CustomerSupportService {
   static mapSupportLostItemStatusToAdminStatus(supportCase) {
     if (supportCase.status === 'RESOLVED' || supportCase.lostItem?.recoveryStatus === 'RETURNED') return 'RESOLVED';
     if (supportCase.status === 'CLOSED' || supportCase.status === 'REJECTED') return 'CANCELLED';
+    if (supportCase.status === 'RETURN_IN_PROGRESS' || supportCase.lostItem?.recoveryStatus === 'RETURN_IN_PROGRESS') return 'ACKNOWLEDGED';
+    if (supportCase.status === 'MATCH_CONFIRMED' || supportCase.lostItem?.recoveryStatus === 'MATCH_CONFIRMED') return 'ACKNOWLEDGED';
+    if (supportCase.status === 'POTENTIAL_MATCH' || supportCase.lostItem?.recoveryStatus === 'POTENTIAL_MATCH') return 'ACKNOWLEDGED';
     if (['UNDER_REVIEW', 'IN_PROGRESS', 'RESPONDED', 'WAITING_FOR_PASSENGER'].includes(supportCase.status)) {
       return 'ACKNOWLEDGED';
     }
@@ -998,10 +1558,10 @@ export class CustomerSupportService {
 
     if (status && status !== 'ALL') {
       const statusMap = {
-        OPEN: ['SUBMITTED', 'OPEN'],
-        ACKNOWLEDGED: ['UNDER_REVIEW', 'IN_PROGRESS', 'RESPONDED', 'WAITING_FOR_PASSENGER'],
-        RESOLVED: ['RESOLVED'],
-        CANCELLED: ['CLOSED', 'REJECTED'],
+        OPEN: ['SUBMITTED', 'OPEN', 'WAITING_FOR_MATCH'],
+        ACKNOWLEDGED: ['UNDER_REVIEW', 'IN_PROGRESS', 'RESPONDED', 'WAITING_FOR_PASSENGER', 'POTENTIAL_MATCH', 'MATCH_CONFIRMED', 'RETURN_IN_PROGRESS'],
+        RESOLVED: ['RESOLVED', 'RETURNED'],
+        CANCELLED: ['CLOSED', 'REJECTED', 'CANCELLED'],
       };
       query.status = { $in: statusMap[status] || [status] };
     }
@@ -1137,6 +1697,9 @@ export class CustomerSupportService {
 
   static mapFoundItemRecoveryStatus(recoveryStatus) {
     if (recoveryStatus === 'STORED') return 'ACKNOWLEDGED';
+    if (recoveryStatus === 'POTENTIAL_MATCH') return 'ACKNOWLEDGED';
+    if (recoveryStatus === 'MATCHED') return 'ACKNOWLEDGED';
+    if (recoveryStatus === 'RETURN_IN_PROGRESS') return 'ACKNOWLEDGED';
     if (recoveryStatus === 'RETURNED') return 'RESOLVED';
     if (recoveryStatus === 'CANCELLED') return 'CANCELLED';
     return 'OPEN';
@@ -1148,12 +1711,31 @@ export class CustomerSupportService {
     const status = this.mapFoundItemRecoveryStatus(recoveryStatus);
     const now = new Date();
 
+    if (recoveryStatus === 'RETURNED') {
+      const confirmedMatch = await LostFoundMatch.exists({
+        foundItemReport: incident._id,
+        status: { $in: ['CONFIRMED', 'RETURN_IN_PROGRESS', 'COMPLETED'] },
+      });
+      if (!confirmedMatch) {
+        throw createBusinessError('Cannot mark a found item as returned without a confirmed match', 409);
+      }
+    }
+
     incident.foundItem = {
       ...(incident.foundItem || {}),
       recoveryStatus,
       handedTo: data.handedTo !== undefined
         ? String(data.handedTo || '').trim()
         : incident.foundItem?.handedTo || '',
+      storageLocation: data.storageLocation !== undefined
+        ? String(data.storageLocation || '').trim()
+        : incident.foundItem?.storageLocation || '',
+      storageReference: data.storageReference !== undefined
+        ? String(data.storageReference || '').trim()
+        : incident.foundItem?.storageReference || '',
+      handedOverAt: recoveryStatus === 'RETURNED'
+        ? incident.foundItem?.handedOverAt || now
+        : incident.foundItem?.handedOverAt || null,
     };
     incident.status = status;
     incident.adminNote = data.adminNote !== undefined

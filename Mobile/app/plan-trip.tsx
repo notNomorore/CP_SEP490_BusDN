@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import passengerApi, { type BusRoute, type BusRouteStop } from '@/api/passenger.api';
 import { EmptyState, LoadingState, PassengerLayout, StatusPill } from '@/components/passenger/PassengerLayout';
@@ -55,6 +55,23 @@ type BackendOption = {
 
 const normalize = (value?: string) => String(value || '').trim().toLowerCase();
 
+const BUS_DN_PLAN_STOPS = [
+  'BẾN XE BUÝT XUÂN DIỆU',
+  '49 đường 3 tháng 2',
+  '159 đường 3 tháng 2',
+  'Đối diện 221 Nguyễn Tất Thành',
+  '617 Nguyễn Tất Thành',
+  'Đối diện 735 Nguyễn Tất Thành',
+  'Đối diện 921 Nguyễn Tất Thành',
+  '583 Trần Cao Vân',
+  'Trường THPT Thái Phiên (735 Trần Cao Vân)',
+  '32-34 Huỳnh Ngọc Huệ',
+  '734 Điện Biên Phủ',
+  'Bãi đỗ xe bến xe trung tâm',
+];
+
+const BUS_DN_PLAN_STOP_SET = new Set(BUS_DN_PLAN_STOPS.map((stop) => normalize(stop)));
+
 const routeIdOf = (route?: BusRoute | RouteOption['route']) => String(route?.id || route?.routeNumber || '');
 
 const formatFare = (value?: number) => `${Number(value || 0).toLocaleString('vi-VN')} VND`;
@@ -72,6 +89,22 @@ const findEndStop = (route: BusRoute, keyword: string) => {
   if (byStop) return byStop;
   return normalize(route.destination).includes(normalize(keyword)) ? route.stops?.[route.stops.length - 1] : undefined;
 };
+
+const getRouteDirections = (route: BusRoute) => {
+  const outbound = route.directions?.OUTBOUND?.stops?.length ? route.directions.OUTBOUND.stops : route.stops || [];
+  const inbound = route.directions?.INBOUND?.stops?.length
+    ? route.directions.INBOUND.stops
+    : [...outbound].reverse().map((stop, index) => ({ ...stop, order: index + 1 }));
+
+  return [
+    { route, direction: 'OUTBOUND', stops: outbound },
+    { route, direction: 'INBOUND', stops: inbound },
+  ].filter((item) => item.stops.length >= 2);
+};
+
+const findStopInDirection = (stops: BusRouteStop[], keyword: string) => (
+  stops.find((stop) => stopMatches(stop, keyword))
+);
 
 const estimateSegment = (route: BusRoute, startStop: BusRouteStop, endStop: BusRouteStop) => {
   const routeStopCount = Math.max((route.stops?.length || 1) - 1, 1);
@@ -118,36 +151,73 @@ const directOptionFromBackend = (item: BackendOption, index: number): RouteOptio
   segments: [],
 });
 
+const buildDirectOptions = (routes: BusRoute[], from: string, to: string): RouteOption[] => {
+  const options: RouteOption[] = [];
+
+  routes.forEach((route) => {
+    getRouteDirections(route).forEach((variant) => {
+      const startStop = findStopInDirection(variant.stops, from);
+      const endStop = findStopInDirection(variant.stops, to);
+      if (!startStop || !endStop) return;
+      if (Number(startStop.order || 0) >= Number(endStop.order || 0)) return;
+
+      const directionalRoute = { ...route, stops: variant.stops };
+      const estimate = estimateSegment(directionalRoute, startStop, endStop);
+      options.push({
+        id: `direct-local-${route.routeNumber}-${variant.direction}-${startStop.order}-${endStop.order}`,
+        kind: 'direct',
+        route,
+        startStop,
+        endStop,
+        estimatedDurationMinutes: estimate.minutes,
+        estimatedDistanceKm: estimate.distanceKm,
+        estimatedFare: estimate.fare,
+        transferCount: 0,
+        walkingMinutes: 0,
+        reason: 'Tuyến trực tiếp trong mạng BusDN.',
+        segments: [{ route: directionalRoute, startStop, endStop }],
+      });
+    });
+  });
+
+  return options;
+};
+
 const buildTransferOptions = (routes: BusRoute[], from: string, to: string, preference: string): RouteOption[] => {
   const options: RouteOption[] = [];
 
   routes.forEach((firstRoute) => {
-    const startStop = findStartStop(firstRoute, from);
-    if (!startStop) return;
+    getRouteDirections(firstRoute).forEach((firstVariant) => {
+      const startStop = findStopInDirection(firstVariant.stops, from);
+      if (!startStop) return;
 
-    routes.forEach((secondRoute) => {
-      if (firstRoute.routeNumber === secondRoute.routeNumber) return;
-      const endStop = findEndStop(secondRoute, to);
-      if (!endStop) return;
+      routes.forEach((secondRoute) => {
+        if (firstRoute.routeNumber === secondRoute.routeNumber) return;
 
-      firstRoute.stops?.forEach((firstTransferStop) => {
+        getRouteDirections(secondRoute).forEach((secondVariant) => {
+          const endStop = findStopInDirection(secondVariant.stops, to);
+          if (!endStop) return;
+
+          firstVariant.stops.forEach((firstTransferStop) => {
         if (Number(firstTransferStop.order || 0) <= Number(startStop.order || 0)) return;
 
-        const secondTransferStop = secondRoute.stops?.find((candidate) => (
+        const secondTransferStop = secondVariant.stops.find((candidate) => (
           normalize(candidate.name) === normalize(firstTransferStop.name)
           && Number(candidate.order || 0) < Number(endStop.order || 0)
         ));
         if (!secondTransferStop) return;
 
-        const firstEstimate = estimateSegment(firstRoute, startStop, firstTransferStop);
-        const secondEstimate = estimateSegment(secondRoute, secondTransferStop, endStop);
+        const firstDirectionalRoute = { ...firstRoute, stops: firstVariant.stops };
+        const secondDirectionalRoute = { ...secondRoute, stops: secondVariant.stops };
+        const firstEstimate = estimateSegment(firstDirectionalRoute, startStop, firstTransferStop);
+        const secondEstimate = estimateSegment(secondDirectionalRoute, secondTransferStop, endStop);
         const waitMinutes = Math.max(Math.round((secondRoute.operatingHours?.frequencyMinutes || 20) / 2), 5);
         const estimatedDurationMinutes = firstEstimate.minutes + waitMinutes + secondEstimate.minutes;
         const estimatedDistanceKm = Number((firstEstimate.distanceKm + secondEstimate.distanceKm).toFixed(1));
         const estimatedFare = firstEstimate.fare + secondEstimate.fare;
 
         options.push({
-          id: `transfer-${firstRoute.routeNumber}-${secondRoute.routeNumber}-${firstTransferStop.order}-${endStop.order}`,
+          id: `transfer-${firstRoute.routeNumber}-${firstVariant.direction}-${secondRoute.routeNumber}-${secondVariant.direction}-${firstTransferStop.order}-${endStop.order}`,
           kind: 'transfer',
           transferStop: firstTransferStop.name,
           transferCount: 1,
@@ -159,9 +229,11 @@ const buildTransferOptions = (routes: BusRoute[], from: string, to: string, pref
             ? 'Phương án có chuyển tuyến để tránh đi vòng hoặc đoạn dễ kẹt xe.'
             : 'Phương án thay thế khi tuyến trực tiếp không tối ưu.',
           segments: [
-            { route: firstRoute, startStop, endStop: firstTransferStop },
-            { route: secondRoute, startStop: secondTransferStop, endStop },
+            { route: firstDirectionalRoute, startStop, endStop: firstTransferStop },
+            { route: secondDirectionalRoute, startStop: secondTransferStop, endStop },
           ],
+        });
+      });
         });
       });
     });
@@ -183,6 +255,9 @@ export default function PlanTripScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [fieldError, setFieldError] = useState('');
+  const [activeField, setActiveField] = useState<'from' | 'to'>('to');
+  const [stopPickerOpen, setStopPickerOpen] = useState(false);
+  const [stopPickerQuery, setStopPickerQuery] = useState('');
 
   const loadRoutes = useCallback(async () => {
     setLoadingRoutes(true);
@@ -190,34 +265,47 @@ export default function PlanTripScreen() {
       const data = await passengerApi.searchRoutes();
       const routeList = data.routes || [];
       setRoutes(routeList);
-
-      const firstRoute = routeList[0];
-      if (!params.from && !from && firstRoute?.origin) setFrom(firstRoute.origin);
-      if (!params.to && !to && firstRoute?.destination) setTo(firstRoute.destination);
     } catch {
       setError('Không thể tải danh sách tuyến. Vui lòng thử lại.');
     } finally {
       setLoadingRoutes(false);
     }
-  }, [from, params.from, params.to, to]);
+  }, []);
 
   useEffect(() => {
     void loadRoutes();
   }, [loadRoutes]);
 
-  const stopSuggestions = useMemo(() => {
+  const stopOptions = useMemo(() => {
     const map = new Map<string, { name: string; subtitle: string }>();
     routes.forEach((route) => {
-      (route.stops || []).forEach((stop) => {
-        if (!stop.name) return;
-        const key = normalize(stop.name);
-        if (!map.has(key)) {
-          map.set(key, { name: stop.name, subtitle: `${route.routeNumber} - ${route.name}` });
-        }
+      getRouteDirections(route).forEach((variant) => {
+        variant.stops.forEach((stop) => {
+          if (!stop.name) return;
+          const key = normalize(stop.name);
+          if (!BUS_DN_PLAN_STOP_SET.has(key)) return;
+          const current = map.get(key);
+          const routeLabel = route.routeNumber || route.name || 'BusDN';
+          map.set(key, {
+            name: BUS_DN_PLAN_STOPS.find((item) => normalize(item) === key) || stop.name,
+            subtitle: current?.subtitle ? `${current.subtitle}, ${routeLabel}` : routeLabel,
+          });
+        });
       });
     });
-    return Array.from(map.values()).slice(0, 12);
+    return BUS_DN_PLAN_STOPS
+      .map((stopName) => map.get(normalize(stopName)) || { name: stopName, subtitle: 'BusDN' })
+      .filter((item, index, list) => list.findIndex((candidate) => normalize(candidate.name) === normalize(item.name)) === index);
   }, [routes]);
+
+  const filteredStopOptions = useMemo(() => {
+    const query = normalize(stopPickerQuery);
+    if (!query) return stopOptions;
+    return stopOptions.filter((item) => (
+      normalize(item.name).includes(query)
+      || normalize(item.subtitle).includes(query)
+    ));
+  }, [stopOptions, stopPickerQuery]);
 
   const plan = async () => {
     const fromValue = from.trim();
@@ -233,6 +321,10 @@ export default function PlanTripScreen() {
       setFieldError('Điểm đi và điểm đến không được giống nhau.');
       return;
     }
+    if (!BUS_DN_PLAN_STOP_SET.has(normalize(fromValue)) || !BUS_DN_PLAN_STOP_SET.has(normalize(toValue))) {
+      setFieldError('Chỉ chọn điểm dừng thuộc mạng BusDN trong danh sách.');
+      return;
+    }
 
     setLoading(true);
     try {
@@ -241,9 +333,10 @@ export default function PlanTripScreen() {
         ...(data.bestRoute ? [{ ...(data.bestRoute as BackendOption), isRecommended: true }] : []),
         ...((data.alternatives || []) as BackendOption[]),
       ].map(directOptionFromBackend);
+      const localDirectOptions = buildDirectOptions(routes, fromValue, toValue);
       const transferOptions = buildTransferOptions(routes, fromValue, toValue, preference);
       const seen = new Set<string>();
-      const nextOptions = [...directOptions, ...transferOptions]
+      const nextOptions = [...directOptions, ...localDirectOptions, ...transferOptions]
         .filter((option) => {
           const key = option.kind === 'direct'
             ? `direct-${routeIdOf(option.route)}-${option.startStop?.name}-${option.endStop?.name}`
@@ -261,12 +354,17 @@ export default function PlanTripScreen() {
 
       setOptions(nextOptions);
       if (!nextOptions.length) {
-        setError('Không tìm thấy phương án phù hợp. Hãy chọn điểm dừng trong danh sách gợi ý bên dưới.');
+        setError('Không tìm thấy phương án phù hợp trong mạng BusDN cho hai điểm dừng đã chọn.');
       }
     } catch (err) {
-      const transferOptions = buildTransferOptions(routes, fromValue, toValue, preference);
-      setOptions(transferOptions);
-      setError(transferOptions.length ? '' : ((err as { message?: string })?.message || 'Không thể đề xuất tuyến. Vui lòng thử lại.'));
+      const localOptions = [
+        ...buildDirectOptions(routes, fromValue, toValue),
+        ...buildTransferOptions(routes, fromValue, toValue, preference),
+      ]
+        .sort((first, second) => scoreOption(first, preference) - scoreOption(second, preference))
+        .slice(0, 5);
+      setOptions(localOptions);
+      setError(localOptions.length ? '' : ((err as { message?: string })?.message || 'Không thể đề xuất tuyến. Vui lòng thử lại.'));
     } finally {
       setLoading(false);
     }
@@ -275,19 +373,51 @@ export default function PlanTripScreen() {
   const swapLocations = () => {
     setFrom(to);
     setTo(from);
+    setActiveField((current) => (current === 'from' ? 'to' : 'from'));
     setOptions([]);
     setFieldError('');
     setError('');
   };
 
+  const chooseSuggestion = (stopName: string) => {
+    if (activeField === 'from') {
+      setFrom(stopName);
+    } else {
+      setTo(stopName);
+    }
+    setOptions([]);
+    setFieldError('');
+    setError('');
+    setStopPickerOpen(false);
+    setStopPickerQuery('');
+  };
+
+  const openStopPicker = (field: 'from' | 'to') => {
+    setActiveField(field);
+    setStopPickerOpen(true);
+    setStopPickerQuery('');
+  };
+
   return (
     <PassengerLayout active="explore" subtitle="Gợi ý tuyến theo điểm đến" title="Đề xuất tuyến">
       <View style={styles.formCard}>
-        <Field icon="map-marker-outline" label="Điểm đi" value={from} onChangeText={setFrom} placeholder="Nhập hoặc chọn điểm đi" />
+        <Field
+          icon="map-marker-outline"
+          label="Điểm đi"
+          value={from}
+          onPress={() => openStopPicker('from')}
+          placeholder="Chọn điểm đi"
+        />
         <Pressable accessibilityLabel="Đổi điểm đi và điểm đến" onPress={swapLocations} style={styles.swapButton}>
           <MaterialCommunityIcons color={colors.primary} name="swap-vertical" size={20} />
         </Pressable>
-        <Field icon="map-marker-check-outline" label="Điểm đến" value={to} onChangeText={setTo} placeholder="Nhập điểm đến" />
+        <Field
+          icon="map-marker-check-outline"
+          label="Điểm đến"
+          value={to}
+          onPress={() => openStopPicker('to')}
+          placeholder="Chọn điểm đến"
+        />
       </View>
 
       {fieldError ? (
@@ -317,23 +447,21 @@ export default function PlanTripScreen() {
 
       {loadingRoutes ? <LoadingState label="Đang tải điểm dừng gợi ý" /> : null}
 
-      {!loadingRoutes && stopSuggestions.length ? (
-        <>
-          <Text style={styles.sectionTitle}>Điểm dừng gợi ý</Text>
-          <View style={styles.suggestionWrap}>
-            {stopSuggestions.map((item) => (
-              <Pressable key={item.name} onPress={() => setTo(item.name)} style={styles.suggestionChip}>
-                <Text numberOfLines={1} style={styles.suggestionText}>{item.name}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </>
-      ) : null}
-
       {loading ? <LoadingState label="Đang tính tuyến phù hợp" /> : null}
       {!loading && error ? <EmptyState icon="alert-circle-outline" title="Chưa có phương án" detail={error} /> : null}
       {!loading && options.length ? <Text style={styles.sectionTitle}>Phương án đề xuất</Text> : null}
       {!loading && options.map((option, index) => <RouteOptionCard key={`${option.id}-${index}`} option={option} />)}
+
+      <StopPickerModal
+        activeField={activeField}
+        loading={loadingRoutes}
+        onClose={() => setStopPickerOpen(false)}
+        onQueryChange={setStopPickerQuery}
+        onSelect={chooseSuggestion}
+        open={stopPickerOpen}
+        query={stopPickerQuery}
+        stops={filteredStopOptions}
+      />
     </PassengerLayout>
   );
 }
@@ -403,14 +531,109 @@ function RouteOptionCard({ option }: { option: RouteOption }) {
   );
 }
 
-function Field({ icon, label, value, onChangeText, placeholder }: { icon: React.ComponentProps<typeof MaterialCommunityIcons>['name']; label: string; value: string; onChangeText: (value: string) => void; placeholder?: string }) {
+function StopPickerModal({
+  activeField,
+  loading,
+  open,
+  query,
+  stops,
+  onClose,
+  onQueryChange,
+  onSelect,
+}: {
+  activeField: 'from' | 'to';
+  loading: boolean;
+  open: boolean;
+  query: string;
+  stops: Array<{ name: string; subtitle: string }>;
+  onClose: () => void;
+  onQueryChange: (value: string) => void;
+  onSelect: (stopName: string) => void;
+}) {
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} transparent visible={open}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.stopSheet}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <View>
+              <Text style={styles.sheetTitle}>{activeField === 'from' ? 'Chọn điểm đi' : 'Chọn điểm đến'}</Text>
+              <Text style={styles.sheetSubtitle}>Tất cả điểm dừng BusDN</Text>
+            </View>
+            <Pressable accessibilityLabel="Đóng chọn điểm dừng" onPress={onClose} style={styles.closeButton}>
+              <MaterialCommunityIcons color={colors.primary} name="close" size={20} />
+            </Pressable>
+          </View>
+
+          <View style={styles.searchBox}>
+            <MaterialCommunityIcons color={colors.secondary} name="magnify" size={20} />
+            <TextInput
+              autoFocus
+              onChangeText={onQueryChange}
+              placeholder="Tìm tên trạm, tuyến..."
+              placeholderTextColor={colors.secondary}
+              style={styles.searchInput}
+              value={query}
+            />
+          </View>
+
+          {loading ? (
+            <View style={styles.modalState}>
+              <Text style={styles.modalStateText}>Đang tải điểm dừng...</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={stops}
+              keyboardShouldPersistTaps="handled"
+              keyExtractor={(item) => item.name}
+              ListEmptyComponent={(
+                <View style={styles.modalState}>
+                  <MaterialCommunityIcons color={colors.secondary} name="map-marker-off-outline" size={22} />
+                  <Text style={styles.modalStateText}>Không tìm thấy điểm dừng phù hợp.</Text>
+                </View>
+              )}
+              renderItem={({ item }) => (
+                <Pressable onPress={() => onSelect(item.name)} style={styles.stopOption}>
+                  <View style={styles.stopOptionIcon}>
+                    <MaterialCommunityIcons color={colors.primary} name="bus-stop" size={18} />
+                  </View>
+                  <View style={styles.stopOptionCopy}>
+                    <Text numberOfLines={2} style={styles.stopOptionName}>{item.name}</Text>
+                    <Text numberOfLines={1} style={styles.stopOptionMeta}>{item.subtitle}</Text>
+                  </View>
+                  <MaterialCommunityIcons color={colors.secondary} name="chevron-right" size={18} />
+                </Pressable>
+              )}
+              showsVerticalScrollIndicator={false}
+            />
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function Field({
+  icon,
+  label,
+  value,
+  onPress,
+  placeholder,
+}: {
+  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+  label: string;
+  value: string;
+  onPress: () => void;
+  placeholder?: string;
+}) {
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
-      <View style={styles.inputWrap}>
+      <Pressable accessibilityRole="button" onPress={onPress} style={styles.inputWrap}>
         <MaterialCommunityIcons color={colors.secondary} name={icon} size={20} />
-        <TextInput onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={colors.secondary} style={styles.input} value={value} />
-      </View>
+        <Text numberOfLines={1} style={[styles.inputValue, !value && styles.inputPlaceholder]}>{value || placeholder}</Text>
+        <MaterialCommunityIcons color={colors.secondary} name="chevron-down" size={20} />
+      </Pressable>
     </View>
   );
 }
@@ -420,7 +643,8 @@ const styles = StyleSheet.create({
   field: { gap: 8 },
   label: { color: colors.primary, fontSize: 13, fontWeight: '900' },
   inputWrap: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 9, borderRadius: 18, backgroundColor: colors.card, paddingHorizontal: 14 },
-  input: { flex: 1, color: colors.text, fontSize: 14, fontWeight: '800' },
+  inputValue: { flex: 1, color: colors.text, fontSize: 14, fontWeight: '800' },
+  inputPlaceholder: { color: colors.secondary },
   swapButton: { alignSelf: 'center', width: 34, height: 34, alignItems: 'center', justifyContent: 'center', marginVertical: -3, borderRadius: 17, backgroundColor: '#d8f6e7' },
   inlineError: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 16, backgroundColor: colors.errorContainer, padding: 12 },
   inlineErrorText: { flex: 1, color: colors.error, fontSize: 12, fontWeight: '800' },
@@ -433,9 +657,22 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.55 },
   planText: { color: colors.white, fontSize: 14, fontWeight: '900' },
   sectionTitle: { color: colors.primary, fontSize: 18, fontWeight: '900' },
-  suggestionWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  suggestionChip: { maxWidth: '100%', borderRadius: 999, backgroundColor: '#d8f6e7', paddingHorizontal: 13, paddingVertical: 9 },
-  suggestionText: { color: colors.primary, fontSize: 12, fontWeight: '900' },
+  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 0, 0, 0.28)' },
+  stopSheet: { maxHeight: '78%', gap: 12, borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: colors.surface, padding: 16 },
+  sheetHandle: { alignSelf: 'center', width: 46, height: 5, borderRadius: 999, backgroundColor: colors.outline },
+  sheetHeader: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  sheetTitle: { color: colors.primary, fontSize: 18, fontWeight: '900' },
+  sheetSubtitle: { marginTop: 2, color: colors.secondary, fontSize: 12, fontWeight: '800' },
+  closeButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: colors.card },
+  searchBox: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 15, backgroundColor: colors.card, paddingHorizontal: 12 },
+  searchInput: { flex: 1, color: colors.text, fontSize: 14, fontWeight: '800' },
+  modalState: { minHeight: 120, alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 16, backgroundColor: colors.card, padding: 16 },
+  modalStateText: { color: colors.secondary, fontSize: 13, fontWeight: '800', textAlign: 'center' },
+  stopOption: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 16, backgroundColor: colors.card, marginBottom: 8, padding: 12 },
+  stopOptionIcon: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: '#d8f6e7' },
+  stopOptionCopy: { flex: 1, minWidth: 0 },
+  stopOptionName: { color: colors.primary, fontSize: 14, fontWeight: '900' },
+  stopOptionMeta: { marginTop: 2, color: colors.secondary, fontSize: 11, fontWeight: '700' },
   optionCard: { gap: 13, borderRadius: 22, backgroundColor: colors.card, padding: 16 },
   recommendedCard: { borderLeftWidth: 4, borderLeftColor: colors.primaryContainer },
   optionTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
