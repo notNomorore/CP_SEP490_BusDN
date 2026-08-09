@@ -4,6 +4,16 @@ import TripAllocationService from './TripAllocationService.js';
 import logger from '../../utils/logger.js';
 
 export default class ShiftController {
+  static async listStaffPriorities(req, res, _next) {
+    try {
+      const priorities = await AutoGenerateShiftService.rankStaffPriorities(req.query);
+      return res.json({ success: true, priorities });
+    } catch (error) {
+      logger.error('List staff priorities error:', error);
+      return res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Không thể xếp hạng nhân sự.' });
+    }
+  }
+
   static async previewTripAllocation(req, res, _next) {
     try { return res.json({ success: true, ...(await TripAllocationService.preview(req.query)) }); }
     catch (error) { return res.status(error.statusCode || 500).json({ success: false, message: error.message }); }

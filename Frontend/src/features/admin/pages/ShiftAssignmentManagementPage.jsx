@@ -13,6 +13,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import adminService from '../services/adminService.js';
+import { splitTripsIntoNonOverlappingDuties } from '../utils/tripDutyPlanning.js';
 import OperationalPlanningPage from './OperationalPlanningPage.jsx';
 
 const OPERATING_START = '05:30';
@@ -24,13 +25,15 @@ const TARGET_WORK_MINUTES_PER_WEEK = 40 * 60;
 const MIN_REST_MINUTES = 60;
 
 const shiftTemplates = [
-  { key: 'MORNING', label: 'Ca sáng', startTime: '05:30', endTime: '13:30', shiftType: 'MORNING' },
-  { key: 'AFTERNOON', label: 'Ca chiều', startTime: '10:30', endTime: '18:30', shiftType: 'AFTERNOON' },
+  { key: 'MORNING', label: 'Ca sáng', startTime: '05:30', endTime: '10:30', shiftType: 'MORNING' },
+  { key: 'MIDDAY', label: 'Ca trưa', startTime: '10:30', endTime: '13:30', shiftType: 'MIDDAY' },
+  { key: 'AFTERNOON', label: 'Ca chiều', startTime: '13:30', endTime: '18:30', shiftType: 'AFTERNOON' },
 ];
 
 const manualShiftTemplates = {
-  MORNING: { label: 'Ca sáng', startTime: '05:30', endTime: '13:30' },
-  AFTERNOON: { label: 'Ca chiều', startTime: '10:30', endTime: '18:30' },
+  MORNING: { label: 'Ca sáng', startTime: '05:30', endTime: '10:30' },
+  MIDDAY: { label: 'Ca trưa', startTime: '10:30', endTime: '13:30' },
+  AFTERNOON: { label: 'Ca chiều', startTime: '13:30', endTime: '18:30' },
 };
 
 const weekDays = [
@@ -119,6 +122,92 @@ const formatDate = (value) => {
 
 const getId = (value) => String(value?._id || value || '');
 
+const getTripShiftType = (departureTime) => {
+  const departure = Number.isFinite(departureTime) ? departureTime : minutesOf(departureTime);
+  if (departure < minutesOf('10:30')) return 'MORNING';
+  if (departure < minutesOf('13:30')) return 'MIDDAY';
+  return 'AFTERNOON';
+};
+
+const SHIFT_ORDER = { MORNING: 0, MIDDAY: 1, AFTERNOON: 2 };
+
+const evaluateTripGroupCompatibility = (selectedGroups, candidate) => {
+  if (selectedGroups.some((group) => group.key === candidate.key)) return { compatible: true, reason: '' };
+  if (candidate.outOfWindowTrips?.length) {
+    return { compatible: false, reason: `${candidate.outOfWindowTrips.length} chuyến vượt khung ${manualShiftTemplates[candidate.shiftType].startTime}–${manualShiftTemplates[candidate.shiftType].endTime}; cần điều chỉnh kế hoạch chuyến.` };
+  }
+  if (!selectedGroups.length) return { compatible: true, reason: '' };
+  if (selectedGroups.length >= 2) return { compatible: false, reason: 'Đã chọn tối đa hai ca.' };
+  const selected = selectedGroups[0];
+  if (selected.workDate !== candidate.workDate) return { compatible: false, reason: 'Hai ca phải cùng ngày làm việc.' };
+  if (selected.routeId !== candidate.routeId) return { compatible: false, reason: 'Khác tuyến; hiện chỉ cho ghép nhân sự trên cùng tuyến.' };
+  if (Math.abs(SHIFT_ORDER[selected.shiftType] - SHIFT_ORDER[candidate.shiftType]) !== 1) {
+    return { compatible: false, reason: 'Chỉ được ghép Sáng + Trưa hoặc Trưa + Chiều.' };
+  }
+  const [earlier, later] = SHIFT_ORDER[selected.shiftType] < SHIFT_ORDER[candidate.shiftType]
+    ? [selected, candidate]
+    : [candidate, selected];
+  if (String(earlier.endTime) > String(later.startTime)) {
+    return { compatible: false, reason: 'Chuyến trước chưa kết thúc khi chuyến tiếp theo bắt đầu.' };
+  }
+  const totalMinutes = durationMinutes(
+    manualShiftTemplates[earlier.shiftType].startTime,
+    manualShiftTemplates[earlier.shiftType].endTime,
+  ) + durationMinutes(
+    manualShiftTemplates[later.shiftType].startTime,
+    manualShiftTemplates[later.shiftType].endTime,
+  );
+  if (totalMinutes > MAX_WORK_MINUTES_PER_DAY) return { compatible: false, reason: 'Ghép ca sẽ vượt 8 giờ làm việc.' };
+  return { compatible: true, reason: 'Cùng tuyến, liền ca và không chồng chuyến.' };
+};
+
+const tripRouteShiftKey = (trip) => {
+  const shiftType = getTripShiftType(trip?.departureTime);
+  return `${toDateInput(trip?.serviceDate)}:${getId(trip?.routeId) || trip?.routeCode || 'UNASSIGNED'}:${shiftType}`;
+};
+
+const groupPendingTripsByRouteShift = (trips) => {
+  const groups = new Map();
+  trips.forEach((trip) => {
+    const key = tripRouteShiftKey(trip);
+    const current = groups.get(key) || {
+      key,
+      shiftType: getTripShiftType(trip.departureTime),
+      workDate: toDateInput(trip.serviceDate),
+      routeId: getId(trip.routeId),
+      routeCode: trip.routeCode,
+      routeName: trip.routeName,
+      trips: [],
+    };
+    current.trips.push(trip);
+    groups.set(key, current);
+  });
+  return [...groups.values()].map((group) => {
+    const sortedTrips = [...group.trips].sort((left, right) => String(left.departureTime || '').localeCompare(String(right.departureTime || '')));
+    const shiftWindow = manualShiftTemplates[group.shiftType];
+    const outOfWindowTrips = sortedTrips.filter((trip) => (
+      String(trip.departureTime || '') < shiftWindow.startTime
+      || String(trip.expectedArrivalTime || '') > shiftWindow.endTime
+    ));
+    const duties = splitTripsIntoNonOverlappingDuties(sortedTrips);
+    const assignedDriverIds = new Set(sortedTrips.map((trip) => getId(trip.driver?.userId)).filter(Boolean));
+    const assignedAssistantIds = new Set(sortedTrips.map((trip) => getId(trip.assistant?.userId)).filter(Boolean));
+    return {
+      ...group,
+      trips: sortedTrips,
+      duties,
+      shiftStartTime: shiftWindow.startTime,
+      shiftEndTime: shiftWindow.endTime,
+      outOfWindowTrips,
+      requiredTeams: duties.length,
+      missingDrivers: Math.max(0, duties.length - assignedDriverIds.size),
+      missingAssistants: Math.max(0, duties.length - assignedAssistantIds.size),
+      startTime: sortedTrips[0]?.departureTime || '',
+      endTime: sortedTrips.reduce((maximum, trip) => !maximum || String(trip.expectedArrivalTime) > maximum ? String(trip.expectedArrivalTime) : maximum, ''),
+    };
+  });
+};
+
 const getStaffName = (staff) => staff?.fullName || staff?.email || staff?.phoneNumber || 'Chưa gán';
 
 const assignmentStaff = (assignment, type) => {
@@ -132,6 +221,7 @@ const assignmentStaff = (assignment, type) => {
 const makeShiftName = ({ shiftType, startTime, endTime }) => {
   const label = {
     MORNING: 'Ca sáng',
+    MIDDAY: 'Ca trưa',
     AFTERNOON: 'Ca chiều',
   }[shiftType] || 'Ca làm việc';
   return `${label} ${startTime}-${endTime}`;
@@ -171,6 +261,14 @@ const restMinutesBetween = (first, second) => {
   if ([firstStart, firstEnd, secondStart, secondEnd].some((value) => value === null)) return Infinity;
   if (rangesOverlap(first.startTime, first.endTime, second.startTime, second.endTime)) return -1;
   return firstEnd <= secondStart ? secondStart - firstEnd : firstStart - secondEnd;
+};
+
+const formsValidEightHourBundle = (first, second) => {
+  const types = new Set([first?.shiftType, second?.shiftType]);
+  return types.size === 2
+    && types.has('MIDDAY')
+    && (types.has('MORNING') || types.has('AFTERNOON'))
+    && (first?.endTime === second?.startTime || second?.endTime === first?.startTime);
 };
 
 const defaultDemandSlots = [
@@ -263,6 +361,9 @@ const ShiftAssignmentManagementPage = () => {
     description: '',
   });
   const [autoSelection, setAutoSelection] = useState({ driverIds: [], assistantIds: [] });
+  const [staffPriorities, setStaffPriorities] = useState({ drivers: [], assistants: [] });
+  const [prioritySort, setPrioritySort] = useState('SUITABILITY');
+  const [selectedTripIds, setSelectedTripIds] = useState([]);
   const [manualPreviewRows, setManualPreviewRows] = useState([]);
   const [staff, setStaff] = useState({ drivers: [], assistants: [] });
   const [routes, setRoutes] = useState([]);
@@ -319,7 +420,9 @@ const ShiftAssignmentManagementPage = () => {
     const hasTimeConflict = assignments.some(({ shift }) => shiftBlocksTemplate(shift, template));
     if (hasTimeConflict) return false;
 
-    if (role === 'driver' && assignments.some(({ shift }) => restMinutesBetween(shift, template) < MIN_REST_MINUTES)) {
+    if (role === 'driver' && assignments.some(({ shift }) => (
+      restMinutesBetween(shift, template) < MIN_REST_MINUTES && !formsValidEightHourBundle(shift, template)
+    ))) {
       return false;
     }
 
@@ -334,13 +437,33 @@ const ShiftAssignmentManagementPage = () => {
     dateRange.some((workDate) => shiftTemplates.some((template) => canStaffTakeSlot(staffId, role, workDate, template)))
   ), [canStaffTakeSlot, dateRange]);
 
-  const availableDrivers = useMemo(() => (
-    staff.drivers.filter((driver) => hasAnyFreeSlot(getId(driver), 'driver'))
-  ), [hasAnyFreeSlot, staff.drivers]);
+  const priorityMaps = useMemo(() => ({
+    drivers: new Map(staffPriorities.drivers.map((item) => [getId(item.staffId), item])),
+    assistants: new Map(staffPriorities.assistants.map((item) => [getId(item.staffId), item])),
+  }), [staffPriorities]);
 
-  const availableAssistants = useMemo(() => (
-    staff.assistants.filter((assistant) => hasAnyFreeSlot(getId(assistant), 'assistant'))
-  ), [hasAnyFreeSlot, staff.assistants]);
+  const sortPrioritizedStaff = useCallback((items, kind) => [...items]
+    .map((item) => ({ ...item, priority: priorityMaps[kind].get(getId(item)) || null }))
+    .sort((left, right) => {
+      if (prioritySort === 'ROUTE_EXPERIENCE') {
+        return (right.priority?.routeExperienceCount || 0) - (left.priority?.routeExperienceCount || 0)
+          || (right.priority?.tripExperienceCount || 0) - (left.priority?.tripExperienceCount || 0)
+          || getStaffName(left).localeCompare(getStaffName(right), 'vi');
+      }
+      if (prioritySort === 'NAME') return getStaffName(left).localeCompare(getStaffName(right), 'vi');
+      return (right.priority?.suitabilityScore || 0) - (left.priority?.suitabilityScore || 0)
+        || getStaffName(left).localeCompare(getStaffName(right), 'vi');
+    }), [priorityMaps, prioritySort]);
+
+  const availableDrivers = useMemo(() => sortPrioritizedStaff(
+    staff.drivers.filter((driver) => hasAnyFreeSlot(getId(driver), 'driver')),
+    'drivers',
+  ), [hasAnyFreeSlot, sortPrioritizedStaff, staff.drivers]);
+
+  const availableAssistants = useMemo(() => sortPrioritizedStaff(
+    staff.assistants.filter((assistant) => hasAnyFreeSlot(getId(assistant), 'assistant')),
+    'assistants',
+  ), [hasAnyFreeSlot, sortPrioritizedStaff, staff.assistants]);
 
   const editAvailableDrivers = useMemo(() => {
     if (!selectedShift || !editForm) return [];
@@ -499,6 +622,20 @@ const ShiftAssignmentManagementPage = () => {
     }
   }, [dateRangeError, fromDate, toDate]);
 
+  const loadStaffPriorities = useCallback(async () => {
+    const selectedGroups = groupPendingTripsByRouteShift(pendingTrips).filter((group) => selectedTripIds.includes(group.key));
+    const routeIds = selectedGroups.length
+      ? [...new Set(selectedGroups.map((group) => group.routeId).filter(Boolean))]
+      : [...new Set(pendingTrips.map((trip) => getId(trip.routeId)).filter(Boolean))];
+    try {
+      const response = await adminService.getShiftStaffPriorities({ routeIds: routeIds.join(','), lookbackDays: 365 });
+      setStaffPriorities(response.priorities || { drivers: [], assistants: [] });
+    } catch (error) {
+      setStaffPriorities({ drivers: [], assistants: [] });
+      toast.error(error?.message || 'Không thể tải xếp hạng kinh nghiệm nhân sự.');
+    }
+  }, [pendingTrips, selectedTripIds]);
+
   const loadOperatingOverview = useCallback(async () => {
     if (!fromDate || dateRangeError) return setOperatingOverview(null);
     try {
@@ -549,6 +686,10 @@ const ShiftAssignmentManagementPage = () => {
   useEffect(() => {
     loadOperatingOverview();
   }, [loadOperatingOverview, rangeRefreshKey]);
+
+  useEffect(() => {
+    loadStaffPriorities();
+  }, [loadStaffPriorities]);
 
   useEffect(() => {
     if (!fromDate || !form.startTime || !form.endTime) return setEligibleManualDrivers([]);
@@ -697,28 +838,39 @@ const ShiftAssignmentManagementPage = () => {
     }));
   };
 
-  const selectRecommendedStaff = () => {
-    const assignedMinutes = (person, role) => shifts.reduce((total, shift) => {
-      const assignment = (assignmentMap[getId(shift)] || {})[role];
-      return getId(assignmentStaff(assignment, role)) === getId(person) ? total + getShiftDurationMinutes(shift) : total;
-    }, 0);
-    const pick = (items, role, count) => [...items]
-      .sort((left, right) => assignedMinutes(left, role) - assignedMinutes(right, role) || getStaffName(left).localeCompare(getStaffName(right), 'vi'))
-      .slice(0, count)
-      .map(getId);
+  const selectTripForAssignment = (tripGroup) => {
+    if (selectedTripIds.includes(tripGroup.key)) {
+      setSelectedTripIds((current) => current.filter((key) => key !== tripGroup.key));
+      return;
+    }
+    const selectedGroups = pendingTripGroups.filter((group) => selectedTripIds.includes(group.key));
+    const compatibility = evaluateTripGroupCompatibility(selectedGroups, tripGroup);
+    if (!compatibility.compatible) return toast.error(compatibility.reason);
+    const nextGroups = [...selectedGroups, tripGroup];
+    setSelectedTripIds(nextGroups.map((group) => group.key));
+    const requiredDrivers = Math.max(...nextGroups.map((group) => group.missingDrivers));
+    const requiredAssistants = Math.max(...nextGroups.map((group) => group.missingAssistants));
     setAutoSelection({
-      driverIds: pick(availableDrivers, 'driver', recommendedMissing.drivers),
-      assistantIds: pick(availableAssistants, 'assistant', recommendedMissing.assistants),
+      driverIds: availableDrivers.slice(0, requiredDrivers).map(getId),
+      assistantIds: availableAssistants.slice(0, requiredAssistants).map(getId),
     });
-    toast.success('Đã chọn số nhân sự còn thiếu theo nhu cầu chuyến.');
   };
 
   const handleAutoGenerate = async () => {
     if (dateRangeError) return toast.error(dateRangeError);
     if (!dateRange.length) return toast.error('Khoảng ngày không hợp lệ.');
-    if (!autoSelection.driverIds.length && !autoSelection.assistantIds.length) {
+    const activeTripGroups = pendingTripGroups.filter((group) => selectedTripIds.includes(group.key));
+    if (activeTripGroups.length === 2) {
+      const compatibility = evaluateTripGroupCompatibility([activeTripGroups[0]], activeTripGroups[1]);
+      if (!compatibility.compatible) return toast.error(compatibility.reason);
+    }
+    const requiredDrivers = activeTripGroups.length ? Math.max(...activeTripGroups.map((group) => group.missingDrivers)) : 0;
+    const requiredAssistants = activeTripGroups.length ? Math.max(...activeTripGroups.map((group) => group.missingAssistants)) : 0;
+    if (!activeTripGroups.length && !autoSelection.driverIds.length && !autoSelection.assistantIds.length) {
       return toast.error('Vui lòng chọn ít nhất một tài xế hoặc phụ xe.');
     }
+    if (activeTripGroups.length && autoSelection.driverIds.length < requiredDrivers) return toast.error(`Cần chọn thêm ${requiredDrivers - autoSelection.driverIds.length} tài xế.`);
+    if (activeTripGroups.length && autoSelection.assistantIds.length < requiredAssistants) return toast.error(`Cần chọn thêm ${requiredAssistants - autoSelection.assistantIds.length} phụ xe.`);
 
     setSubmitting(true);
     setMessage('');
@@ -732,6 +884,70 @@ const ShiftAssignmentManagementPage = () => {
       const selectedAssistants = autoSelection.assistantIds
         .map((id) => availableAssistants.find((assistant) => getId(assistant) === id))
         .filter(Boolean);
+
+      if (activeTripGroups.length) {
+        let totalCreatedDutyShifts = 0;
+        let totalSelectedTrips = 0;
+        for (const selectedGroup of activeTripGroups) {
+        const workDate = selectedGroup.workDate;
+        let driverCursor = 0;
+        let assistantCursor = 0;
+        const usedDriverIds = new Set();
+        const usedAssistantIds = new Set();
+        const createdDutyShifts = [];
+        for (let dutyIndex = 0; dutyIndex < selectedGroup.duties.length; dutyIndex += 1) {
+          const dutyTrips = selectedGroup.duties[dutyIndex];
+          const template = manualShiftTemplates[selectedGroup.shiftType];
+          const startTime = template.startTime;
+          const endTime = template.endTime;
+          const existingShift = selectedGroup.existingDutyShifts?.[dutyIndex];
+          const existingPair = existingShift ? assignmentMap[getId(existingShift)] || {} : {};
+          const shiftDriver = assignmentStaff(existingPair.driver, 'driver');
+          const shiftAssistant = assignmentStaff(existingPair.assistant, 'assistant');
+          const existingDriverTrip = dutyTrips.find((trip) => getId(trip.driver?.userId) && !usedDriverIds.has(getId(trip.driver.userId)));
+          const existingAssistantTrip = dutyTrips.find((trip) => getId(trip.assistant?.userId) && !usedAssistantIds.has(getId(trip.assistant.userId)));
+          const driver = shiftDriver || existingDriverTrip ? null : selectedDrivers[driverCursor++];
+          const assistant = shiftAssistant || existingAssistantTrip ? null : selectedAssistants[assistantCursor++];
+          const driverId = getId(shiftDriver) || getId(existingDriverTrip?.driver?.userId) || getId(driver);
+          const assistantId = getId(shiftAssistant) || getId(existingAssistantTrip?.assistant?.userId) || getId(assistant);
+          if (driverId) usedDriverIds.add(driverId);
+          if (assistantId) usedAssistantIds.add(assistantId);
+          if (!driverId) throw new Error(`Tổ ${dutyIndex + 1} chưa có tài xế.`);
+          if (!isValidWindow(startTime, endTime)) throw new Error(`Khung giờ tổ ${dutyIndex + 1} không hợp lệ.`);
+          const shiftResult = existingShift ? { shift: existingShift, created: false } : await createOrReuseShift({
+            shiftCode: `ROUTE-${String(selectedGroup.routeCode || selectedGroup.routeId.slice(-8)).replace(/[^a-z0-9-]/gi, '-').toUpperCase()}-${workDate.replaceAll('-', '')}-${selectedGroup.shiftType}-T${dutyIndex + 1}`,
+            workDate,
+            routeId: selectedGroup.routeId,
+            startTime,
+            endTime,
+            shiftType: selectedGroup.shiftType,
+            shiftName: `${selectedGroup.routeCode || 'Tuyến'} · Tổ ${dutyIndex + 1} · ${startTime}-${endTime}`,
+            description: `Tổ ${dutyIndex + 1}/${selectedGroup.requiredTeams}, gồm ${dutyTrips.length} lượt không chồng thời gian.`,
+            requiresAssistant: Boolean(assistantId),
+            status: 'PUBLISHED',
+            approvalStatus: 'PUBLISHED',
+          });
+          const { shift, created } = shiftResult;
+          try {
+            const currentAssignments = assignmentMap[getId(shift)] || {};
+            if (!currentAssignments.driver) await adminService.assignDriverToSelectedShift(shift._id, { driverId });
+            if (assistantId && !currentAssignments.assistant) await adminService.assignAssistantToSelectedShift(shift._id, { assistantId });
+            createdDutyShifts.push(shift);
+          } catch (error) {
+            if (created) await adminService.archiveShift(shift._id).catch(() => undefined);
+            throw error;
+          }
+        }
+          totalCreatedDutyShifts += createdDutyShifts.length;
+          totalSelectedTrips += selectedGroup.trips.length;
+        }
+        setMessage(`Đã tạo/phân ${totalCreatedDutyShifts} tổ nhân sự cho ${totalSelectedTrips} lượt trong ${activeTripGroups.length} ca đã chọn. Xe sẽ được phân ở bước riêng.`);
+        setSelectedTripIds([]);
+        setAutoSelection({ driverIds: [], assistantIds: [] });
+        toast.success(activeTripGroups.length === 2 ? 'Đã tạo gói hai ca đủ 8 giờ và phân bổ nhân sự.' : 'Đã tạo ca đơn và phân bổ nhân sự.');
+        await Promise.all([loadShifts(), loadPendingTrips()]);
+        return;
+      }
 
       const localBusy = {
         driver: new Map(),
@@ -865,7 +1081,7 @@ const ShiftAssignmentManagementPage = () => {
     setEditForm({
       startTime: shift.startTime || OPERATING_START,
       endTime: shift.endTime || OPERATING_END,
-      shiftType: ['MORNING', 'AFTERNOON'].includes(shift.shiftType) ? shift.shiftType : 'MORNING',
+      shiftType: ['MORNING', 'MIDDAY', 'AFTERNOON'].includes(shift.shiftType) ? shift.shiftType : 'MORNING',
       status: shift.status || 'ACTIVE',
       description: shift.description || '',
       driverId: getId(assignmentMap[getId(shift)]?.driver?.driverId),
@@ -977,6 +1193,7 @@ const ShiftAssignmentManagementPage = () => {
   const coverageSummary = useMemo(() => {
     const initial = {
       MORNING: { total: 0, staffed: 0 },
+      MIDDAY: { total: 0, staffed: 0 },
       AFTERNOON: { total: 0, staffed: 0 },
     };
     shifts.forEach((shift) => {
@@ -1012,6 +1229,40 @@ const ShiftAssignmentManagementPage = () => {
   }), [coverageFilter, shiftCoverage, shiftStatusFilter, shifts]);
 
   const routeById = useMemo(() => new Map(routes.map((route) => [getId(route), route])), [routes]);
+  const pendingTripGroups = useMemo(() => groupPendingTripsByRouteShift(pendingTrips).map((group) => {
+    const existingDutyShifts = shifts.filter((shift) => (
+      shift.status !== 'ARCHIVED'
+      && getId(shift.routeId) === group.routeId
+      && toDateInput(shift.workDate) === group.workDate
+      && shift.shiftType === group.shiftType
+      && shift.startTime < group.endTime
+      && shift.endTime > group.startTime
+    )).sort((left, right) => String(left.startTime).localeCompare(String(right.startTime)));
+    const assignedDriverIds = new Set(existingDutyShifts.map((shift) => getId(assignmentStaff(assignmentMap[getId(shift)]?.driver, 'driver'))).filter(Boolean));
+    const assignedAssistantIds = new Set(existingDutyShifts.map((shift) => getId(assignmentStaff(assignmentMap[getId(shift)]?.assistant, 'assistant'))).filter(Boolean));
+    return {
+      ...group,
+      existingDutyShifts,
+      missingDrivers: Math.max(0, group.requiredTeams - assignedDriverIds.size),
+      missingAssistants: Math.max(0, group.requiredTeams - assignedAssistantIds.size),
+    };
+  }), [assignmentMap, pendingTrips, shifts]);
+  const selectedTripGroups = useMemo(() => pendingTripGroups.filter((group) => selectedTripIds.includes(group.key)), [pendingTripGroups, selectedTripIds]);
+  const selectedTrip = selectedTripGroups[0] || null;
+  const selectedRequiredDrivers = selectedTripGroups.length ? Math.max(...selectedTripGroups.map((group) => group.missingDrivers)) : 0;
+  const selectedRequiredAssistants = selectedTripGroups.length ? Math.max(...selectedTripGroups.map((group) => group.missingAssistants)) : 0;
+  const pendingTripsByShift = useMemo(() => {
+    const groups = { MORNING: [], MIDDAY: [], AFTERNOON: [] };
+    pendingTripGroups.forEach((tripGroup) => {
+      if (tripGroup.missingDrivers === 0 && tripGroup.missingAssistants === 0) return;
+      groups[tripGroup.shiftType].push(tripGroup);
+    });
+    Object.values(groups).forEach((items) => items.sort((left, right) => (
+      left.workDate.localeCompare(right.workDate)
+      || String(left.startTime || '').localeCompare(String(right.startTime || ''))
+    )));
+    return groups;
+  }, [pendingTripGroups]);
   const pendingTripsByRoute = useMemo(() => {
     const groups = new Map();
     pendingTrips.forEach((trip) => {
@@ -1045,7 +1296,7 @@ const ShiftAssignmentManagementPage = () => {
       const start = Math.min(...cycle.starts.filter(Number.isFinite));
       const end = Math.max(...cycle.ends.filter(Number.isFinite));
       if (!Number.isFinite(start) || !Number.isFinite(end)) return;
-      const shiftType = start < minutesOf('12:00') ? 'MORNING' : 'AFTERNOON';
+      const shiftType = getTripShiftType(start);
       const key = `${cycle.date}:${shiftType}`;
       const bucket = buckets.get(key) || { date: cycle.date, shiftType, cycles: [], tripCount: 0 };
       bucket.cycles.push({ start, end });
@@ -1057,7 +1308,7 @@ const ShiftAssignmentManagementPage = () => {
       const routeGroups = new Map();
       pendingTrips.filter((trip) => {
         const start = minutesOf(trip.departureTime);
-        return Number.isFinite(start) && (start < minutesOf('12:00') ? 'MORNING' : 'AFTERNOON') === shiftType;
+        return Number.isFinite(start) && getTripShiftType(trip.departureTime) === shiftType;
       }).forEach((trip) => {
         const routeId = getId(trip.routeId) || trip.routeCode || 'UNASSIGNED';
         const current = routeGroups.get(routeId) || {
@@ -1093,12 +1344,8 @@ const ShiftAssignmentManagementPage = () => {
         routes: [...routeGroups.values()].sort((left, right) => left.routeCode.localeCompare(right.routeCode, 'vi')),
       };
     };
-    return [demandFor('MORNING'), demandFor('AFTERNOON')];
+    return [demandFor('MORNING'), demandFor('MIDDAY'), demandFor('AFTERNOON')];
   }, [assignmentMap, pendingTrips, routeById, shifts]);
-  const recommendedMissing = useMemo(() => staffingDemand.reduce((result, item) => ({
-    drivers: result.drivers + item.missingDrivers,
-    assistants: result.assistants + item.missingAssistants,
-  }), { drivers: 0, assistants: 0 }), [staffingDemand]);
   const routeCoverage = useMemo(() => {
     const groups = new Map();
     shifts.forEach((shift) => {
@@ -1139,7 +1386,7 @@ const ShiftAssignmentManagementPage = () => {
       if (dayMinutes > MAX_WORK_MINUTES_PER_DAY) warnings.push('Vượt 8 giờ/ngày');
       ordered.forEach((shift, index) => {
         if (ordered.slice(index + 1).some((next) => shiftBlocksTemplate(shift, next))) warnings.push('Trùng lịch');
-        if (ordered[index + 1] && restMinutesBetween(shift, ordered[index + 1]) < MIN_REST_MINUTES) warnings.push('Thiếu thời gian nghỉ');
+        if (ordered[index + 1] && restMinutesBetween(shift, ordered[index + 1]) < MIN_REST_MINUTES && !formsValidEightHourBundle(shift, ordered[index + 1])) warnings.push('Thiếu thời gian nghỉ');
       });
     });
     return { driver, items, totalMinutes, freeSlots, warnings: [...new Set(warnings)] };
@@ -1292,16 +1539,57 @@ const ShiftAssignmentManagementPage = () => {
         </div>
 
         {activeView === 'ASSIGN' ? <section className="rounded-3xl border border-cyan-200 bg-cyan-50 p-6 shadow-sm">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div><h2 className="text-xl font-black text-cyan-950">Nhu cầu nhân sự từ kế hoạch chuyến</h2><p className="mt-1 text-sm text-cyan-900/70">Tính theo số vòng D–V chạy đồng thời cao nhất; đã trừ các ca có nhân sự trong khoảng ngày đang chọn.</p></div>
-            <button type="button" disabled={!recommendedMissing.drivers && !recommendedMissing.assistants} onClick={selectRecommendedStaff} className="h-11 rounded-xl bg-cyan-700 px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Chọn đúng số nhân sự còn thiếu</button>
+          <div>
+            <h2 className="text-xl font-black text-cyan-950">Chọn tuyến cần phân bổ nhân sự</h2>
+            <p className="mt-1 text-sm text-cyan-900/70">Các lượt cùng tuyến, cùng ngày và cùng buổi được gom vào một ô; tuyến khác sẽ nằm ở ô riêng để không trộn nhân sự.</p>
           </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-2">{staffingDemand.map((item) => {
-            const driverShortage = Math.max(0, item.missingDrivers - availableDrivers.length);
-            const assistantShortage = Math.max(0, item.missingAssistants - availableAssistants.length);
-            return <article key={item.shiftType} className="rounded-2xl border border-cyan-100 bg-white p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-black">{item.shiftType === 'MORNING' ? 'Ca sáng' : 'Ca chiều'}</p><p className="mt-1 text-sm text-slate-500">{item.tripCount} lượt chạy · cao nhất {item.required} vòng đồng thời</p></div><span className={`rounded-full px-3 py-1 text-xs font-black ${item.missingDrivers || item.missingAssistants ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>{item.missingDrivers || item.missingAssistants ? 'Cần bổ sung' : 'Đã đủ ca'}</span></div>{item.routes?.length ? <div className="mt-3 space-y-2">{item.routes.map((route) => <div key={route.routeId} className="rounded-xl bg-slate-50 px-3 py-2"><p className="text-sm font-black">{route.routeCode} · {route.routeName}</p><p className="mt-0.5 text-xs text-slate-500">{route.tripCount} lượt · {route.firstDeparture}–{route.lastArrival}</p></div>)}</div> : <p className="mt-3 text-xs text-slate-500">Chưa có chuyến trong ca này.</p>}<p className="mt-3 text-sm font-bold">Còn cần {item.missingDrivers} tài xế và {item.missingAssistants} phụ xe</p>{driverShortage || assistantShortage ? <p className="mt-2 text-xs font-black text-rose-600">Nguồn lực không đủ: thiếu {driverShortage} tài xế và {assistantShortage} phụ xe khả dụng.</p> : null}</article>;
-          })}</div>
-          {!pendingTrips.length ? <p className="mt-4 rounded-xl bg-white px-4 py-3 text-sm font-bold text-slate-500">Chưa có chuyến chờ phân bổ trong khoảng ngày này. Hãy tạo kế hoạch tại mục “Phân chuyến” trước.</p> : null}
+          <div className="mt-5 grid gap-4 xl:grid-cols-2">
+            {[['MORNING', 'Ca sáng'], ['MIDDAY', 'Ca trưa'], ['AFTERNOON', 'Ca chiều']].map(([group, label]) => (
+              <div key={group} className="rounded-2xl border border-cyan-100 bg-white p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-black">{label}<span className="ml-2 text-xs font-bold text-slate-500">{manualShiftTemplates[group].startTime}–{manualShiftTemplates[group].endTime}</span></p>
+                  <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-black text-cyan-800">{pendingTripsByShift[group].length} tuyến/ngày</span>
+                </div>
+                <div className="mt-3 grid max-h-80 gap-2 overflow-y-auto pr-1">
+                  {pendingTripsByShift[group].map((tripGroup) => {
+                    const route = routeById.get(tripGroup.routeId);
+                    const isSelected = selectedTripIds.includes(tripGroup.key);
+                    const compatibility = evaluateTripGroupCompatibility(selectedTripGroups, tripGroup);
+                    const isDisabled = !isSelected && !compatibility.compatible;
+                    const missingDrivers = tripGroup.missingDrivers;
+                    const missingAssistants = tripGroup.missingAssistants;
+                    return (
+                      <button key={tripGroup.key} type="button" disabled={isDisabled} title={isDisabled ? compatibility.reason : ''} onClick={() => selectTripForAssignment(tripGroup)} className={`rounded-xl border p-3 text-left transition ${isSelected ? 'border-cyan-600 bg-cyan-50 ring-2 ring-cyan-200' : isDisabled ? 'cursor-not-allowed border-slate-200 bg-slate-100 opacity-55' : 'border-slate-200 bg-slate-50 hover:border-cyan-300 hover:bg-white'}`}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-black">{route?.routeCode || tripGroup.routeCode} · {route?.routeName || tripGroup.routeName}</p>
+                            <p className="mt-1 text-xs font-bold text-slate-500">{tripGroup.workDate} · Khung ca {tripGroup.shiftStartTime}–{tripGroup.shiftEndTime}</p>
+                            <p className="mt-1 text-xs text-slate-500">Giờ chuyến thực tế: {tripGroup.startTime}–{tripGroup.endTime}</p>
+                            <p className="mt-1 text-xs text-slate-500">{tripGroup.trips.length} lượt · cần {tripGroup.requiredTeams} tổ chạy song song trong {manualShiftTemplates[group].label.toLowerCase()}</p>
+                          </div>
+                          <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-black ${isSelected ? 'bg-cyan-700 text-white' : isDisabled ? 'bg-slate-200 text-slate-500' : 'bg-amber-100 text-amber-800'}`}>{isSelected ? 'Đang chọn' : isDisabled ? 'Không tương thích' : 'Chọn tuyến'}</span>
+                        </div>
+                        {isDisabled ? <p className="mt-2 rounded-lg bg-rose-50 px-2 py-1.5 text-[11px] font-bold text-rose-700">{compatibility.reason}</p> : null}
+                        {tripGroup.outOfWindowTrips.length ? <p className="mt-2 text-[11px] font-black text-rose-700">Vượt ca: {tripGroup.outOfWindowTrips.map((trip) => `${trip.scheduleCode || 'Chuyến'} ${trip.departureTime}–${trip.expectedArrivalTime}`).join(', ')}</p> : null}
+                        <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-black">
+                          <span className={`rounded-full px-2 py-1 ${missingDrivers ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>{missingDrivers ? `Thiếu ${missingDrivers} tài xế` : 'Đã đủ tài xế'}</span>
+                          <span className={`rounded-full px-2 py-1 ${missingAssistants ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>{missingAssistants ? `Thiếu ${missingAssistants} phụ xe` : 'Đã đủ phụ xe'}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {!pendingTripsByShift[group].length ? <p className="rounded-xl bg-slate-50 px-3 py-4 text-sm text-slate-500">Không có chuyến chờ phân bổ trong ca này.</p> : null}
+                </div>
+              </div>
+            ))}
+          </div>
+          {selectedTripGroups.length ? (
+            <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-cyan-300 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div><p className="font-black text-cyan-950">Đang chọn {selectedTripGroups.length} ca: {selectedTripGroups.map((group) => manualShiftTemplates[group.shiftType].label).join(' + ')}</p><p className="mt-1 text-sm text-slate-500">{selectedTripGroups.length === 2 ? 'Gói ca liền nhau có tổng thời lượng 8 giờ.' : 'Ca đơn được phép; có thể chọn thêm ca liền kề qua Ca trưa.'}</p></div>
+              <button type="button" onClick={() => setSelectedTripIds([])} className="h-10 shrink-0 rounded-xl border border-slate-200 px-4 text-sm font-black text-slate-600">Bỏ chọn</button>
+            </div>
+          ) : null}
+          {!pendingTripsByShift.MORNING.length && !pendingTripsByShift.MIDDAY.length && !pendingTripsByShift.AFTERNOON.length ? <p className="mt-4 rounded-xl bg-white px-4 py-3 text-sm font-bold text-emerald-700">Tất cả tuyến trong khoảng ngày này đã được phân đủ tài xế và phụ xe. Các chuyến vẫn được giữ lại để phân xe ở bước tiếp theo.</p> : null}
         </section> : null}
 
         {activeView === 'REMOVED' ? <OperationalPlanningPage embedded /> : null}
@@ -1437,17 +1725,28 @@ const ShiftAssignmentManagementPage = () => {
         </div> : null}
 
         {activeView === 'WORKLOAD' ? <section className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
-          <div className="flex items-center gap-3"><Clock3 className="text-emerald-700" size={22} /><div><h2 className="text-xl font-black">Giờ làm và hiệu suất nhân sự</h2><p className="text-sm text-slate-500">Tổng hợp tài xế và phụ xe trong khoảng ngày đã chọn. Mục tiêu được tính 8 giờ cho mỗi ngày làm việc.</p></div></div>
-          <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
-            <div className="grid grid-cols-[1.5fr_0.8fr_0.8fr_1.2fr] bg-slate-50 px-4 py-3 text-xs font-black uppercase text-slate-500"><span>Nhân viên</span><span>Vai trò</span><span>Số ca</span><span>Thời lượng / đánh giá</span></div>
-            {staffWorkloads.map((item) => {
-              const percent = Math.min(100, Math.round((item.totalMinutes / workloadTargetMinutes) * 100));
-              const completed = item.totalMinutes >= workloadTargetMinutes;
-              return <div key={`${item.role}-${getId(item.person)}`} className="grid grid-cols-[1.5fr_0.8fr_0.8fr_1.2fr] items-center border-t border-slate-100 px-4 py-4 text-sm">
-                <span className="font-black">{getStaffName(item.person)}</span>
-                <span>{item.role === 'driver' ? 'Tài xế' : 'Phụ xe'}</span>
-                <span>{item.items.length} ca</span>
-                <span><b className={completed ? 'text-emerald-700' : 'text-amber-700'}>{formatMinutes(item.totalMinutes)} / {formatMinutes(workloadTargetMinutes)}</b><span className="mt-2 block h-2 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full bg-emerald-500" style={{ width: `${percent}%` }} /></span><small className={`mt-1 block font-bold ${completed ? 'text-emerald-700' : 'text-amber-700'}`}>{completed ? 'Đã đủ giờ' : `Chưa đủ giờ · ${percent}%`}</small></span>
+          <div className="flex items-center gap-3"><Clock3 className="text-emerald-700" size={22} /><div><h2 className="text-xl font-black">Giờ làm và hiệu suất nhân sự</h2><p className="text-sm text-slate-500">Tài xế và phụ xe được theo dõi ở hai bảng riêng. Mục tiêu được tính 8 giờ cho mỗi ngày làm việc.</p></div></div>
+          <div className="mt-5 grid items-start gap-5 xl:grid-cols-2">
+            {[['driver', 'Tài xế', 'Danh sách tài xế'], ['assistant', 'Phụ xe', 'Danh sách phụ xe']].map(([role, title, description]) => {
+              const roleItems = staffWorkloads.filter((item) => item.role === role);
+              return <div key={role} className="overflow-hidden rounded-2xl border border-slate-200">
+                <div className={`flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-4 ${role === 'driver' ? 'bg-emerald-50' : 'bg-cyan-50'}`}>
+                  <div><h3 className="font-black">{title}</h3><p className="text-xs text-slate-500">{description} trong khoảng ngày đã chọn</p></div>
+                  <span className={`rounded-full px-3 py-1 text-xs font-black ${role === 'driver' ? 'bg-emerald-100 text-emerald-800' : 'bg-cyan-100 text-cyan-800'}`}>{roleItems.length} người</span>
+                </div>
+                <div className="grid grid-cols-[1.15fr_0.55fr_1.3fr] bg-slate-50 px-4 py-3 text-xs font-black uppercase text-slate-500"><span>Nhân viên</span><span>Số ca</span><span>Thời lượng / đánh giá</span></div>
+                <div className="max-h-[620px] overflow-y-auto">
+                  {roleItems.map((item) => {
+                    const percent = Math.min(100, Math.round((item.totalMinutes / workloadTargetMinutes) * 100));
+                    const completed = item.totalMinutes >= workloadTargetMinutes;
+                    return <div key={`${item.role}-${getId(item.person)}`} className="grid grid-cols-[1.15fr_0.55fr_1.3fr] items-center border-t border-slate-100 px-4 py-4 text-sm">
+                      <span className="truncate pr-3 font-black">{getStaffName(item.person)}</span>
+                      <span>{item.items.length} ca</span>
+                      <span><b className={completed ? 'text-emerald-700' : 'text-amber-700'}>{formatMinutes(item.totalMinutes)} / {formatMinutes(workloadTargetMinutes)}</b><span className="mt-2 block h-2 overflow-hidden rounded-full bg-slate-100"><span className={`block h-full rounded-full ${completed ? 'bg-emerald-500' : 'bg-amber-400'}`} style={{ width: `${percent}%` }} /></span><small className={`mt-1 block font-bold ${completed ? 'text-emerald-700' : 'text-amber-700'}`}>{completed ? 'Đã đủ giờ' : `Chưa đủ giờ · ${percent}%`}</small></span>
+                    </div>;
+                  })}
+                  {!roleItems.length ? <p className="p-6 text-center text-sm text-slate-500">Chưa có {title.toLowerCase()} trong hệ thống.</p> : null}
+                </div>
               </div>;
             })}
           </div>
@@ -1522,6 +1821,7 @@ const ShiftAssignmentManagementPage = () => {
                     }));
                   }} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold">
                     <option value="MORNING">Ca sáng</option>
+                    <option value="MIDDAY">Ca trưa</option>
                     <option value="AFTERNOON">Ca chiều</option>
                   </select>
                 </label>
@@ -1579,8 +1879,8 @@ const ShiftAssignmentManagementPage = () => {
               <div className="flex items-center gap-3">
                 <Wand2 className="text-emerald-700" size={25} />
                 <div>
-                  <h2 className="text-xl font-black">Sinh lịch phân ca tự động</h2>
-                  <p className="text-sm text-slate-500">Chọn danh sách tài xế, phụ xe; hệ thống ghép nhân sự và tạo ca sáng/chiều không trùng lịch.</p>
+                  <h2 className="text-xl font-black">Phân bổ nhân sự cho chuyến</h2>
+                  <p className="text-sm text-slate-500">{selectedTripGroups.length ? `Đang phân ${selectedTripGroups.length} ca với ${selectedTripGroups.reduce((sum, group) => sum + group.trips.length, 0)} lượt. Hãy chọn đủ ${selectedRequiredDrivers} tài xế và ${selectedRequiredAssistants} phụ xe.` : 'Hãy chọn một ô tuyến theo ngày phía trên trước khi phân bổ; có thể chọn ca đơn hoặc một cặp ca liền nhau.'}</p>
                 </div>
               </div>
               <div className="mt-6 grid gap-3">
@@ -1598,27 +1898,37 @@ const ShiftAssignmentManagementPage = () => {
                       <p className="font-black">Tài xế đủ điều kiện</p>
                       <p className="text-xs text-slate-500">{autoSelection.driverIds.length}/{availableDrivers.length} người được chọn</p>
                     </div>
-                    <label className="flex items-center gap-2 text-xs font-black">
+                    {!selectedTrip ? <label className="flex items-center gap-2 text-xs font-black">
                       <input
                         type="checkbox"
                         checked={availableDrivers.length > 0 && autoSelection.driverIds.length === availableDrivers.length}
                         onChange={(event) => setAllAutoStaff('driver', event.target.checked)}
                       />
                       Tất cả
-                    </label>
+                    </label> : <span className="text-xs font-black text-cyan-700">Cần chọn {selectedRequiredDrivers}</span>}
                   </div>
+                  <select value={prioritySort} onChange={(event) => setPrioritySort(event.target.value)} className="mt-3 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700">
+                    <option value="SUITABILITY">Phù hợp nhất</option>
+                    <option value="ROUTE_EXPERIENCE">Nhiều kinh nghiệm tuyến nhất</option>
+                    <option value="NAME">Tên A–Z</option>
+                  </select>
                   <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
                     {!availableDrivers.length ? (
                       <p className="rounded-xl bg-white px-3 py-2 text-sm text-slate-500">Không còn tài xế rảnh trong khoảng ngày này.</p>
                     ) : null}
-                    {availableDrivers.map((driver) => (
-                      <label key={driver._id} className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm">
+                    {availableDrivers.map((driver, index) => (
+                      <label key={driver._id} title={driver.priority?.reasons?.join(' · ')} className="flex items-center gap-3 rounded-xl bg-white px-3 py-2 text-sm">
                         <input
                           type="checkbox"
                           checked={autoSelection.driverIds.includes(getId(driver))}
                           onChange={() => toggleAutoStaff('driver', getId(driver))}
                         />
-                        <span className="font-bold">{getStaffName(driver)}</span>
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-black text-emerald-800">#{index + 1}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-bold">{getStaffName(driver)}</span>
+                          <span className="block text-[11px] text-slate-500">{driver.priority?.routeExperienceCount || 0} ca tuyến · {driver.priority?.tripExperienceCount || 0} lượt chạy</span>
+                        </span>
+                        <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-black ${(driver.priority?.suitabilityScore || 0) >= 80 ? 'bg-emerald-100 text-emerald-800' : (driver.priority?.suitabilityScore || 0) >= 60 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>{driver.priority?.suitabilityScore || 0}% phù hợp</span>
                       </label>
                     ))}
                   </div>
@@ -1629,34 +1939,39 @@ const ShiftAssignmentManagementPage = () => {
                       <p className="font-black">Phụ xe đủ điều kiện</p>
                       <p className="text-xs text-slate-500">{autoSelection.assistantIds.length}/{availableAssistants.length} người được chọn</p>
                     </div>
-                    <label className="flex items-center gap-2 text-xs font-black">
+                    {!selectedTrip ? <label className="flex items-center gap-2 text-xs font-black">
                       <input
                         type="checkbox"
                         checked={availableAssistants.length > 0 && autoSelection.assistantIds.length === availableAssistants.length}
                         onChange={(event) => setAllAutoStaff('assistant', event.target.checked)}
                       />
                       Tất cả
-                    </label>
+                    </label> : <span className="text-xs font-black text-cyan-700">Cần chọn {selectedRequiredAssistants}</span>}
                   </div>
                   <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
                     {!availableAssistants.length ? (
                       <p className="rounded-xl bg-white px-3 py-2 text-sm text-slate-500">Không còn phụ xe rảnh trong khoảng ngày này.</p>
                     ) : null}
-                    {availableAssistants.map((assistant) => (
-                      <label key={assistant._id} className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm">
+                    {availableAssistants.map((assistant, index) => (
+                      <label key={assistant._id} title={assistant.priority?.reasons?.join(' · ')} className="flex items-center gap-3 rounded-xl bg-white px-3 py-2 text-sm">
                         <input
                           type="checkbox"
                           checked={autoSelection.assistantIds.includes(getId(assistant))}
                           onChange={() => toggleAutoStaff('assistant', getId(assistant))}
                         />
-                        <span className="font-bold">{getStaffName(assistant)}</span>
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-cyan-100 text-xs font-black text-cyan-800">#{index + 1}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-bold">{getStaffName(assistant)}</span>
+                          <span className="block text-[11px] text-slate-500">{assistant.priority?.routeExperienceCount || 0} ca tuyến · {assistant.priority?.tripExperienceCount || 0} lượt chạy</span>
+                        </span>
+                        <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-black ${(assistant.priority?.suitabilityScore || 0) >= 80 ? 'bg-emerald-100 text-emerald-800' : (assistant.priority?.suitabilityScore || 0) >= 60 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>{assistant.priority?.suitabilityScore || 0}% phù hợp</span>
                       </label>
                     ))}
                   </div>
                 </div>
               </div>
-              <button disabled={submitting || Boolean(dateRangeError)} type="button" onClick={handleAutoGenerate} className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-black text-white disabled:opacity-60">
-                <Wand2 size={18} /> Sinh ca tự động cho nhân sự đã chọn
+              <button disabled={submitting || Boolean(dateRangeError) || (selectedTrip && (autoSelection.driverIds.length < selectedRequiredDrivers || autoSelection.assistantIds.length < selectedRequiredAssistants))} type="button" onClick={handleAutoGenerate} className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-black text-white disabled:opacity-60">
+                <Wand2 size={18} /> {selectedTrip ? `Tạo và phân bổ ${selectedTripGroups.length === 2 ? 'gói 8 giờ' : 'ca đơn'}` : 'Sinh ca tự động cho nhân sự đã chọn'}
               </button>
               {message ? <p className="mt-4 rounded-2xl bg-white/10 p-4 text-sm text-emerald-50">{message}</p> : null}
             </div>

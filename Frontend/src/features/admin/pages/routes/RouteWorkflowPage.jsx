@@ -1140,8 +1140,9 @@ const FrequencyScheduleModal = ({ onClose, onSaved, routes }) => {
 };
 
 const TRIP_DEMAND_PERIODS = [
-  { key: 'MORNING', label: 'Sáng', start: '05:30', end: '12:00', tone: 'border-amber-200 bg-amber-50' },
-  { key: 'AFTERNOON', label: 'Chiều', start: '12:00', end: '18:30', tone: 'border-violet-200 bg-violet-50' },
+  { key: 'MORNING', label: 'Sáng', start: '05:30', end: '10:30', tone: 'border-amber-200 bg-amber-50' },
+  { key: 'MIDDAY', label: 'Trưa', start: '10:30', end: '13:30', tone: 'border-sky-200 bg-sky-50' },
+  { key: 'AFTERNOON', label: 'Chiều', start: '13:30', end: '18:30', tone: 'border-violet-200 bg-violet-50' },
 ];
 
 const TripDemandPlanningPanel = ({ onSaved, routes, schedules = [] }) => {
@@ -1149,7 +1150,7 @@ const TripDemandPlanningPanel = ({ onSaved, routes, schedules = [] }) => {
     serviceDate: toDateInputValue(),
     routeId: '',
     direction: 'BOTH',
-    counts: { MORNING: 0, AFTERNOON: 0 },
+    counts: { MORNING: 0, MIDDAY: 0, AFTERNOON: 0 },
   });
   const [rows, setRows] = useState([]);
   const [message, setMessage] = useState('');
@@ -1157,6 +1158,7 @@ const TripDemandPlanningPanel = ({ onSaved, routes, schedules = [] }) => {
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [expandedPlanKey, setExpandedPlanKey] = useState('');
   const [deletingPlanKey, setDeletingPlanKey] = useState('');
+  const [latestPlanKey, setLatestPlanKey] = useState('');
   const selectedRoute = routes.find((route) => String(route._id || route.id) === String(form.routeId));
   const confirmedPlans = useMemo(() => {
     const groups = new Map();
@@ -1171,8 +1173,12 @@ const TripDemandPlanningPanel = ({ onSaved, routes, schedules = [] }) => {
     return [...groups.values()].map((plan) => ({
       ...plan,
       trips: [...plan.trips].sort((left, right) => String(left.departureTime).localeCompare(String(right.departureTime))),
-    })).sort((left, right) => right.serviceDate.localeCompare(left.serviceDate) || left.routeCode.localeCompare(right.routeCode));
-  }, [schedules]);
+    })).sort((left, right) => (
+      Number(right.key === latestPlanKey) - Number(left.key === latestPlanKey)
+      || right.serviceDate.localeCompare(left.serviceDate)
+      || left.routeCode.localeCompare(right.routeCode)
+    ));
+  }, [latestPlanKey, schedules]);
 
   const buildPreview = () => {
     if (!selectedRoute || !form.serviceDate) {
@@ -1185,6 +1191,13 @@ const TripDemandPlanningPanel = ({ onSaved, routes, schedules = [] }) => {
     const routeCode = selectedRoute.routeCode || selectedRoute.routeNumber;
     const routeName = selectedRoute.routeName || selectedRoute.name;
     const dateCode = form.serviceDate.replace(/-/g, '').slice(2);
+    const existingRows = schedules.filter((schedule) => (
+      schedule.status !== 'CANCELLED'
+      && String(schedule.routeId?._id || schedule.routeId || '') === String(routeId)
+      && toDateInputValue(schedule.serviceDate) === form.serviceDate
+    ));
+    const existingCodes = new Set(existingRows.map((schedule) => String(schedule.scheduleCode || '').trim().toUpperCase()));
+    const existingSignatures = new Set(existingRows.map((schedule) => `${schedule.direction}:${schedule.departureTime}`));
     const getDuration = (direction) => {
       const routeDirection = direction === 'INBOUND' ? selectedRoute.inboundRoute : selectedRoute.outboundRoute;
       return Math.max(10, Number(routeDirection?.estimatedDurationMinutes || selectedRoute.scheduleConfig?.estimatedTripDurationMinutes || 60));
@@ -1249,9 +1262,23 @@ const TripDemandPlanningPanel = ({ onSaved, routes, schedules = [] }) => {
     // Rows are appended as an atomic D -> V pair inside each period. Keep that
     // insertion order; sorting globally by departure time would interleave
     // another cycle's D between the current cycle's D and V.
-    setRows(nextRows);
+    const rowsWithExistingState = nextRows.map((row) => ({
+      ...row,
+      alreadyExists: existingCodes.has(String(row.scheduleCode).toUpperCase())
+        || existingSignatures.has(`${row.direction}:${row.departureTime}`),
+    }));
+    const cycleGroups = new Map();
+    rowsWithExistingState.forEach((row) => cycleGroups.set(row.operationCycleCode, [...(cycleGroups.get(row.operationCycleCode) || []), row]));
+    const remainingRows = [...cycleGroups.values()]
+      .filter((cycleRows) => cycleRows.some((row) => !row.alreadyExists))
+      .flat();
+    const existingRequestedTrips = rowsWithExistingState.filter((row) => row.alreadyExists).length;
+    const newTrips = remainingRows.filter((row) => !row.alreadyExists).length;
+    setRows(remainingRows);
     setPreviewExpanded(false);
-    setMessage(planningErrors.join(' ') || (nextRows.length ? '' : 'Cần ít nhất một chuyến trong ngày.'));
+    setMessage(planningErrors.join(' ') || (remainingRows.length
+      ? `Đã có ${existingRequestedTrips} chuyến đúng khung giờ; hệ thống sẽ giữ nguyên và chỉ sinh thêm ${newTrips} chuyến còn thiếu.`
+      : existingRequestedTrips ? 'Kế hoạch hiện tại đã đủ số chuyến và khung giờ yêu cầu.' : 'Cần ít nhất một chuyến trong ngày.'));
   };
 
   const confirmPlan = async () => {
@@ -1260,10 +1287,13 @@ const TripDemandPlanningPanel = ({ onSaved, routes, schedules = [] }) => {
     setMessage('');
     try {
       const response = await adminService.confirmGeneratedTripSchedules(rows, false, true);
+      const planKey = `${form.routeId}-${form.serviceDate}`;
+      setLatestPlanKey(planKey);
+      setExpandedPlanKey(planKey);
       await onSaved?.();
       const savedSchedules = response.schedules || [];
       setRows([]);
-      toast.success(`Đã tạo ${savedSchedules.length} chuyến. Kế hoạch đã được thu gọn ở danh sách bên dưới.`);
+      toast.success(`Đã bổ sung ${savedSchedules.length} chuyến và gộp vào kế hoạch hiện có.`);
     } catch (error) {
       setMessage(error?.message || 'Không thể lưu kế hoạch phân chuyến.');
     } finally {
@@ -1273,6 +1303,7 @@ const TripDemandPlanningPanel = ({ onSaved, routes, schedules = [] }) => {
 
   const totalPerDirection = Object.values(form.counts).reduce((sum, value) => sum + (Number(value) || 0), 0);
   const totalTrips = totalPerDirection * (form.direction === 'BOTH' ? 2 : 1);
+  const newTripCount = rows.filter((row) => !row.alreadyExists).length;
   const deleteConfirmedPlan = async (plan) => {
     if (!window.confirm(`Xóa toàn bộ ${plan.trips.length} chuyến của ${plan.routeCode || 'tuyến này'} ngày ${plan.serviceDate}?`)) return;
     setDeletingPlanKey(plan.key);
@@ -1322,13 +1353,13 @@ const TripDemandPlanningPanel = ({ onSaved, routes, schedules = [] }) => {
 
       <div className="mt-4 flex flex-wrap gap-2">
         <button type="button" onClick={buildPreview} className="rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white">Tạo bản xem trước</button>
-        {rows.length ? <button type="button" disabled={isSaving} onClick={confirmPlan} className="rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-emerald-950 disabled:opacity-60">{isSaving ? 'Đang lưu...' : `Xác nhận ${rows.length} chuyến`}</button> : null}
+        {rows.length ? <button type="button" disabled={isSaving || !newTripCount} onClick={confirmPlan} className="rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-emerald-950 disabled:opacity-60">{isSaving ? 'Đang lưu...' : `Bổ sung ${newTripCount} chuyến còn thiếu`}</button> : null}
       </div>
       {message ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">{message}</div> : null}
 
-      {rows.length ? <div className="mt-5 overflow-hidden rounded-xl border border-violet-200 bg-violet-50/40"><button type="button" onClick={() => setPreviewExpanded((value) => !value)} className="flex w-full items-center justify-between gap-4 p-4 text-left"><span><b className="block">Bản nháp · {selectedRoute?.routeCode || selectedRoute?.routeNumber}</b><small className="text-slate-500">{form.serviceDate} · {rows.length} chuyến · {rows[0]?.departureTime}–{rows.at(-1)?.expectedArrivalTime}</small></span><span className="font-black text-violet-700">{previewExpanded ? 'Thu gọn ▲' : 'Xem chi tiết ▼'}</span></button>{previewExpanded ? <div className="max-h-96 overflow-auto border-t border-violet-200 bg-white"><table className="w-full min-w-[850px] text-left text-sm"><thead className="sticky top-0 bg-slate-100"><tr>{['Ca', 'Mã chuyến', 'Chiều', 'Xuất bến', 'Đến dự kiến', 'Trạng thái'].map((item) => <th key={item} className="px-4 py-3 text-xs font-black uppercase text-slate-500">{item}</th>)}</tr></thead><tbody>{rows.map((row, index) => { const isFirstInCycle = index === 0 || rows[index - 1]?.operationCycleCode !== row.operationCycleCode; const isLastInCycle = index === rows.length - 1 || rows[index + 1]?.operationCycleCode !== row.operationCycleCode; return <tr key={row.previewId} className={`${isFirstInCycle ? 'border-t-2 border-emerald-300 bg-emerald-50/50' : 'border-t border-emerald-100 bg-white'} ${isLastInCycle ? 'border-b-2 border-b-emerald-300' : ''}`}><td className="px-4 py-3 font-bold">{scheduleShiftLabels[row.shiftLabel] || 'Ca trưa'}</td><td className="px-4 py-3 font-black">{row.scheduleCode}</td><td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-black ${row.direction === 'OUTBOUND' ? 'bg-emerald-100 text-emerald-800' : 'bg-sky-100 text-sky-800'}`}>{row.direction === 'OUTBOUND' ? 'D · Chiều đi' : 'V · Chiều về'}</span></td><td className="px-4 py-3">{row.departureTime}</td><td className="px-4 py-3">{row.expectedArrivalTime}</td><td className="px-4 py-3 text-amber-700">Chờ xác nhận</td></tr>; })}</tbody></table></div> : null}</div> : null}
+      {rows.length ? <div className="mt-5 overflow-hidden rounded-xl border border-violet-200 bg-violet-50/40"><button type="button" onClick={() => setPreviewExpanded((value) => !value)} className="flex w-full items-center justify-between gap-4 p-4 text-left"><span><b className="block">Bản bổ sung · {selectedRoute?.routeCode || selectedRoute?.routeNumber}</b><small className="text-slate-500">{form.serviceDate} · thêm {newTripCount} chuyến · {rows[0]?.departureTime}–{rows.at(-1)?.expectedArrivalTime}</small></span><span className="font-black text-violet-700">{previewExpanded ? 'Thu gọn ▲' : 'Xem chi tiết ▼'}</span></button>{previewExpanded ? <div className="max-h-96 overflow-auto border-t border-violet-200 bg-white"><table className="w-full min-w-[850px] text-left text-sm"><thead className="sticky top-0 bg-slate-100"><tr>{['Ca', 'Mã chuyến', 'Chiều', 'Xuất bến', 'Đến dự kiến', 'Trạng thái'].map((item) => <th key={item} className="px-4 py-3 text-xs font-black uppercase text-slate-500">{item}</th>)}</tr></thead><tbody>{rows.map((row, index) => { const isFirstInCycle = index === 0 || rows[index - 1]?.operationCycleCode !== row.operationCycleCode; const isLastInCycle = index === rows.length - 1 || rows[index + 1]?.operationCycleCode !== row.operationCycleCode; return <tr key={row.previewId} className={`${isFirstInCycle ? 'border-t-2 border-emerald-300 bg-emerald-50/50' : 'border-t border-emerald-100 bg-white'} ${isLastInCycle ? 'border-b-2 border-b-emerald-300' : ''} ${row.alreadyExists ? 'opacity-60' : ''}`}><td className="px-4 py-3 font-bold">{scheduleShiftLabels[row.shiftLabel] || 'Ca trưa'}</td><td className="px-4 py-3 font-black">{row.scheduleCode}</td><td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-black ${row.direction === 'OUTBOUND' ? 'bg-emerald-100 text-emerald-800' : 'bg-sky-100 text-sky-800'}`}>{row.direction === 'OUTBOUND' ? 'D · Chiều đi' : 'V · Chiều về'}</span></td><td className="px-4 py-3">{row.departureTime}</td><td className="px-4 py-3">{row.expectedArrivalTime}</td><td className={`px-4 py-3 font-bold ${row.alreadyExists ? 'text-emerald-700' : 'text-amber-700'}`}>{row.alreadyExists ? 'Đã có · giữ nguyên' : 'Sẽ bổ sung'}</td></tr>; })}</tbody></table></div> : null}</div> : null}
 
-      <section className="mt-6 border-t border-slate-200 pt-5"><div className="mb-3"><h3 className="text-lg font-black">Kế hoạch chuyến đã tạo</h3><p className="text-sm text-slate-500">Bấm vào từng tuyến để xem đầy đủ giờ chạy và các chuyến D–V.</p></div><div className="space-y-3">{confirmedPlans.length ? confirmedPlans.map((plan) => { const expanded = expandedPlanKey === plan.key; const firstTrip = plan.trips[0]; const lastTrip = plan.trips.at(-1); return <article key={plan.key} className="overflow-hidden rounded-xl border border-emerald-200"><div className="flex items-center gap-2 bg-emerald-50 p-3"><button type="button" onClick={() => setExpandedPlanKey(expanded ? '' : plan.key)} className="flex flex-1 items-center justify-between gap-4 p-1 text-left"><span><b className="block">{plan.routeCode || routes.find((route) => String(route._id || route.id) === plan.routeId)?.routeCode || 'Tuyến'} · {plan.routeName || routes.find((route) => String(route._id || route.id) === plan.routeId)?.routeName || ''}</b><small className="text-slate-600">{plan.serviceDate} · {plan.trips.length} chuyến · {firstTrip?.departureTime}–{lastTrip?.expectedArrivalTime}</small></span><span className="shrink-0 text-sm font-black text-emerald-700">{expanded ? 'Thu gọn ▲' : 'Mở chi tiết ▼'}</span></button><button type="button" disabled={deletingPlanKey === plan.key} onClick={() => deleteConfirmedPlan(plan)} className="shrink-0 rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-black text-rose-600 disabled:opacity-50">{deletingPlanKey === plan.key ? 'Đang xóa...' : 'Xóa chuyến'}</button></div>{expanded ? <div className="max-h-80 overflow-auto border-t border-emerald-200"><table className="w-full min-w-[760px] text-left text-sm"><thead className="sticky top-0 bg-slate-100"><tr>{['Mã chuyến', 'Ca', 'Chiều', 'Xuất bến', 'Đến dự kiến', 'Trạng thái'].map((item) => <th key={item} className="px-4 py-3 text-xs font-black uppercase text-slate-500">{item}</th>)}</tr></thead><tbody>{plan.trips.map((trip) => <tr key={trip._id || trip.scheduleCode} className="border-t border-slate-100"><td className="px-4 py-3 font-black">{trip.scheduleCode}</td><td className="px-4 py-3">{trip.shiftLabel === 'MORNING' ? 'Sáng' : 'Chiều'}</td><td className="px-4 py-3">{trip.direction === 'OUTBOUND' ? 'D · Chiều đi' : 'V · Chiều về'}</td><td className="px-4 py-3">{trip.departureTime}</td><td className="px-4 py-3">{trip.expectedArrivalTime}</td><td className="px-4 py-3">{trip.status === 'PLANNED' ? 'Chờ phân bổ' : trip.status}</td></tr>)}</tbody></table></div> : null}</article>; }) : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Chưa có kế hoạch chuyến nào được xác nhận.</p>}</div></section>
+      <section className="mt-6 border-t border-slate-200 pt-5"><div className="mb-3"><h3 className="text-lg font-black">Kế hoạch chuyến đã tạo</h3><p className="text-sm text-slate-500">Bấm vào từng tuyến để xem đầy đủ giờ chạy và các chuyến D–V.</p></div><div className="space-y-3">{confirmedPlans.length ? confirmedPlans.map((plan) => { const expanded = expandedPlanKey === plan.key; const firstTrip = plan.trips[0]; const lastTrip = plan.trips.at(-1); return <article key={plan.key} className="overflow-hidden rounded-xl border border-emerald-200"><div className="flex items-center gap-2 bg-emerald-50 p-3"><button type="button" onClick={() => setExpandedPlanKey(expanded ? '' : plan.key)} className="flex flex-1 items-center justify-between gap-4 p-1 text-left"><span><b className="block">{plan.routeCode || routes.find((route) => String(route._id || route.id) === plan.routeId)?.routeCode || 'Tuyến'} · {plan.routeName || routes.find((route) => String(route._id || route.id) === plan.routeId)?.routeName || ''}</b><small className="text-slate-600">{plan.serviceDate} · {plan.trips.length} chuyến · {firstTrip?.departureTime}–{lastTrip?.expectedArrivalTime}</small></span><span className="shrink-0 text-sm font-black text-emerald-700">{expanded ? 'Thu gọn ▲' : 'Mở chi tiết ▼'}</span></button><button type="button" disabled={deletingPlanKey === plan.key} onClick={() => deleteConfirmedPlan(plan)} className="shrink-0 rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-black text-rose-600 disabled:opacity-50">{deletingPlanKey === plan.key ? 'Đang xóa...' : 'Xóa chuyến'}</button></div>{expanded ? <div className="max-h-80 overflow-auto border-t border-emerald-200"><table className="w-full min-w-[760px] text-left text-sm"><thead className="sticky top-0 bg-slate-100"><tr>{['Mã chuyến', 'Ca', 'Chiều', 'Xuất bến', 'Đến dự kiến', 'Trạng thái'].map((item) => <th key={item} className="px-4 py-3 text-xs font-black uppercase text-slate-500">{item}</th>)}</tr></thead><tbody>{plan.trips.map((trip) => <tr key={trip._id || trip.scheduleCode} className="border-t border-slate-100"><td className="px-4 py-3 font-black">{trip.scheduleCode}</td><td className="px-4 py-3">{scheduleShiftLabels[trip.shiftLabel] || 'Chưa xác định'}</td><td className="px-4 py-3">{trip.direction === 'OUTBOUND' ? 'D · Chiều đi' : 'V · Chiều về'}</td><td className="px-4 py-3">{trip.departureTime}</td><td className="px-4 py-3">{trip.expectedArrivalTime}</td><td className="px-4 py-3">{trip.status === 'PLANNED' ? 'Chờ phân bổ' : trip.status}</td></tr>)}</tbody></table></div> : null}</article>; }) : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Chưa có kế hoạch chuyến nào được xác nhận.</p>}</div></section>
     </div>
   );
 };

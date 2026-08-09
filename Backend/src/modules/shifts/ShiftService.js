@@ -13,7 +13,7 @@ import RouteOperatingConfig from './RouteOperatingConfig.js';
 import { SHIFT_CLOSED_STATUSES, SHIFT_STATUS_VALUES } from './shift.constants.js';
 
 const SHIFT_STATUSES = new Set(SHIFT_STATUS_VALUES);
-const SHIFT_TYPES = new Set(['MORNING', 'AFTERNOON']);
+const SHIFT_TYPES = new Set(['MORNING', 'MIDDAY', 'AFTERNOON']);
 const ASSIGNMENT_STATUSES = new Set(['ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']);
 const BLOCKING_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'];
 const ACTIVE_TRIP_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS'];
@@ -23,8 +23,9 @@ const MIN_DRIVER_REST_MINUTES = 60;
 const OPERATING_START_MINUTES = (5 * 60) + 30;
 const OPERATING_END_MINUTES = (18 * 60) + 30;
 const AUTO_SHIFT_TEMPLATES = [
-  { key: 'MORNING', name: 'Ca sáng tự động', startTime: '05:30', endTime: '13:30', shiftType: 'MORNING' },
-  { key: 'AFTERNOON', name: 'Ca chiều tự động', startTime: '10:30', endTime: '18:30', shiftType: 'AFTERNOON' },
+  { key: 'MORNING', name: 'Ca sáng tự động', startTime: '05:30', endTime: '10:30', shiftType: 'MORNING' },
+  { key: 'MIDDAY', name: 'Ca trưa tự động', startTime: '10:30', endTime: '13:30', shiftType: 'MIDDAY' },
+  { key: 'AFTERNOON', name: 'Ca chiều tự động', startTime: '13:30', endTime: '18:30', shiftType: 'AFTERNOON' },
 ];
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
@@ -82,6 +83,7 @@ const clockToken = (value) => String(value || '').replace(':', '') || '0000';
 const generatedShiftName = ({ shiftType, startTime, endTime }) => {
   const label = {
     MORNING: 'Ca sáng',
+    MIDDAY: 'Ca trưa',
     AFTERNOON: 'Ca chiều',
   }[String(shiftType || '').toUpperCase()] || 'Ca làm việc';
   return `${label} ${startTime || '--:--'}-${endTime || '--:--'}`;
@@ -155,7 +157,7 @@ const validateShiftPayload = (payload) => {
   if (!payload.routeId) errors.push('Ca làm phải gắn với một tuyến vận hành.');
   if (startMinutes === null) errors.push('Giờ bắt đầu là bắt buộc.');
   if (endMinutes === null) errors.push('Giờ kết thúc là bắt buộc.');
-  if (!SHIFT_TYPES.has(payload.shiftType)) errors.push('Hệ thống chỉ hỗ trợ ca sáng và ca chiều.');
+  if (!SHIFT_TYPES.has(payload.shiftType)) errors.push('Hệ thống chỉ hỗ trợ ca sáng, ca trưa và ca chiều.');
   if (startMinutes !== null && endMinutes !== null) {
     if (startMinutes >= endMinutes) errors.push('Giờ kết thúc phải lớn hơn giờ bắt đầu.');
     if (startMinutes < OPERATING_START_MINUTES || endMinutes > OPERATING_END_MINUTES) {
@@ -236,8 +238,16 @@ const findInsufficientRestAssignment = async ({ model, resourceField, resourceId
   }).lean();
   const shiftById = new Map(shifts.map((item) => [String(item._id), item]));
   return assignments.find((assignment) => {
-    const assignedRange = getShiftRange(shiftById.get(String(assignment.shiftId)));
+    const assignedShift = shiftById.get(String(assignment.shiftId));
+    const assignedRange = getShiftRange(assignedShift);
     if (!assignedRange || rangesOverlap(targetRange, assignedRange)) return false;
+    const adjacentTypes = new Set([shift.shiftType, assignedShift?.shiftType]);
+    const isValidEightHourBundle = adjacentTypes.size === 2
+      && adjacentTypes.has('MIDDAY')
+      && (adjacentTypes.has('MORNING') || adjacentTypes.has('AFTERNOON'))
+      && String(shift.routeId || '') === String(assignedShift?.routeId || '')
+      && (targetRange.end === assignedRange.start || assignedRange.end === targetRange.start);
+    if (isValidEightHourBundle) return false;
     const restMinutes = targetRange.start >= assignedRange.end
       ? targetRange.start - assignedRange.end
       : assignedRange.start - targetRange.end;

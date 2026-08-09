@@ -104,6 +104,9 @@ export const adminService = {
   getShifts: async (params = {}) => {
     return apiClient.get('/admin/shifts', { params });
   },
+  getShiftStaffPriorities: async (params = {}) => {
+    return apiClient.get('/admin/shifts/staff-priorities', { params });
+  },
   getSchedulingOverview: async (date) => {
     return apiClient.get('/admin/scheduling/overview', { params: { date } });
   },
