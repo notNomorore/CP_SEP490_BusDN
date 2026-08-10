@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import useLanguage from '../../../shared/hooks/useLanguage.js';
 import useTheme from '../../../shared/hooks/useTheme.js';
+import { resolveBackendUrl } from '../../../shared/config/apiConfig.js';
 import { getBusAssistantText } from '../busAssistantI18n.js';
 import useAuthStore from '../../auth/stores/authStore.js';
 import BusAssistantI18nBoundary from '../BusAssistantI18nBoundary.jsx';
@@ -149,7 +150,7 @@ const BusAssistantShell = () => {
               : 'flex items-center gap-2 rounded border border-emerald-100 bg-white px-2 py-1.5 shadow-sm'}
             >
               {user?.avatar ? (
-                <img src={user.avatar} alt={displayName} className="h-9 w-9 rounded-full object-cover" />
+                <img src={resolveBackendUrl(user.avatar)} alt={displayName} className="h-9 w-9 rounded-full object-cover" />
               ) : (
                 <span className="grid h-9 w-9 place-items-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800">
                   {initial}

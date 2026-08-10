@@ -18,6 +18,7 @@ import profileApi from '@/api/profile.api';
 import { useLogout } from '@/auth/hooks/useLogout';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
+import { resolveBackendUrl } from '@/constants/config';
 import { useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { AuthUser, UserProfile } from '@/types/auth';
@@ -177,7 +178,7 @@ export default function ProfileScreen() {
             <View style={styles.avatarWrap}>
               <View style={styles.avatar}>
                 {displayUser.avatar ? (
-                  <Image source={{ uri: displayUser.avatar }} style={styles.avatarImage} />
+                  <Image source={{ uri: resolveBackendUrl(displayUser.avatar) }} style={styles.avatarImage} />
                 ) : (
                   <Text style={styles.avatarInitials}>{initials}</Text>
                 )}

@@ -41,6 +41,8 @@ const nodeEnv = getEnv('NODE_ENV', 'development');
 const isDevelopment = nodeEnv === 'development';
 const isProduction = nodeEnv === 'production';
 const developmentOnly = (value) => (isProduction ? undefined : value);
+const serverPort = toNumber(getEnv('PORT'), 3000);
+const serverHost = getEnv('HOST', isProduction ? '0.0.0.0' : 'localhost');
 
 const createCorsOrigin = () => {
   const configuredOrigins = toList(getEnv('CORS_ORIGIN'), []);
@@ -75,9 +77,16 @@ const createCorsOrigin = () => {
 
 export const config = {
   // Server
-  port: toNumber(getEnv('PORT'), 3000),
-  host: getEnv('HOST', isProduction ? '0.0.0.0' : 'localhost'),
+  port: serverPort,
+  host: serverHost,
   nodeEnv,
+  publicUrl: getEnv(
+    'BACKEND_PUBLIC_URL',
+    getEnv(
+      'RENDER_EXTERNAL_URL',
+      isDevelopment ? `http://${serverHost}:${serverPort}` : undefined
+    )
+  ),
 
   // Database
   mongodb: {
@@ -138,6 +147,13 @@ export const config = {
   upload: {
     dir: getEnv('UPLOAD_DIR', './uploads'),
     maxSize: toNumber(getEnv('MAX_FILE_SIZE', '5242880'), 5242880), // 5MB
+  },
+
+  cloudinary: {
+    cloudName: getEnv('CLOUDINARY_CLOUD_NAME'),
+    apiKey: getEnv('CLOUDINARY_API_KEY'),
+    apiSecret: getEnv('CLOUDINARY_API_SECRET'),
+    uploadPreset: getEnv('CLOUDINARY_UPLOAD_PRESET'),
   },
 
   // Stripe

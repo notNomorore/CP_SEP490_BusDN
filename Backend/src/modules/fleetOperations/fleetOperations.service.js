@@ -7,6 +7,10 @@ import Trip from './Trip.js';
 import Vehicle from './Vehicle.js';
 import VehicleLocationLog from './VehicleLocationLog.js';
 import {
+  notifyIncidentCreated,
+  notifyTripDelay,
+} from '../systemNotifications/triggers/notification.triggers.js';
+import {
   LEGACY_INCIDENT_SEVERITY_MAP,
   LEGACY_INCIDENT_STATUS_MAP,
   LEGACY_INCIDENT_TYPE_MAP,
@@ -250,6 +254,11 @@ export class FleetOperationsService {
       emitFleetEvent(io, SOCKET_EVENTS.TRIP_STATUS_UPDATED, withId(trip.toObject()));
       if (delayed) {
         emitFleetEvent(io, SOCKET_EVENTS.TRIP_DELAYED, withId(trip.toObject()));
+        await notifyTripDelay({
+          trip,
+          io,
+          actorId: actor.userId,
+        });
       }
     }
 
@@ -305,6 +314,11 @@ export class FleetOperationsService {
     };
 
     emitFleetEvent(io, SOCKET_EVENTS.INCIDENT_NEW, result);
+    await notifyIncidentCreated({
+      incident,
+      io,
+      actorId: actor.userId || reporterId,
+    });
     return result;
   }
 

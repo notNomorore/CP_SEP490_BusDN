@@ -134,6 +134,10 @@ const SupportCaseSchema = new mongoose.Schema(
         originalName: String,
         fileName: String,
         path: String,
+        url: String,
+        provider: String,
+        publicId: String,
+        resourceType: String,
         mimeType: String,
         size: Number,
         uploadedAt: {

@@ -369,6 +369,80 @@ class EmailService {
       throw error;
     }
   }
+
+  async sendNotificationEmail({
+    email,
+    fullName = 'User',
+    title,
+    message,
+    actionUrl = '',
+  }) {
+    try {
+      const safeName = escapeHtml(fullName);
+      const safeTitle = escapeHtml(title);
+      const safeMessage = escapeHtml(message).replace(/\n/g, '<br />');
+      const safeActionUrl = escapeHtml(actionUrl);
+      const actionMarkup = actionUrl
+        ? `<p><a href="${safeActionUrl}" style="color:#0f766e;font-weight:bold;">Open in BusDN</a></p>`
+        : '';
+
+      const html = `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937; }
+            .container { max-width: 640px; margin: 0 auto; padding: 20px; }
+            .header { background: #0f766e; color: white; padding: 24px; border-radius: 8px 8px 0 0; }
+            .content { background: #f8fafc; padding: 24px; border: 1px solid #dbe4ea; border-top: 0; border-radius: 0 0 8px 8px; }
+            .box { background: white; border-left: 4px solid #0f766e; padding: 16px; margin: 16px 0; }
+            .footer { color: #64748b; font-size: 12px; margin-top: 24px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1 style="margin:0;font-size:24px;">${safeTitle}</h1>
+            </div>
+            <div class="content">
+              <p>Hello ${safeName},</p>
+              <div class="box">${safeMessage}</div>
+              ${actionMarkup}
+              <p>Thank you,<br />BusDN Team</p>
+              <div class="footer">This is an automated message. Please do not reply to this email.</div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const mailOptions = {
+        from: `"${config.emailFrom.name || 'BusDN'}" <${config.smtp.user}>`,
+        to: email,
+        subject: title,
+        html,
+        text: [
+          `Hello ${fullName},`,
+          '',
+          message,
+          '',
+          actionUrl ? `Open in BusDN: ${actionUrl}` : '',
+          '',
+          'Thank you,',
+          'BusDN Team',
+        ].filter(Boolean).join('\n'),
+      };
+
+      const info = await this.transporter.sendMail(mailOptions);
+      logger.info(`Notification email sent to ${email}:`, info.messageId);
+      return true;
+    } catch (error) {
+      logger.error(`Failed to send notification email to ${email}:`, error);
+      throw error;
+    }
+  }
 }
 
 export default new EmailService();

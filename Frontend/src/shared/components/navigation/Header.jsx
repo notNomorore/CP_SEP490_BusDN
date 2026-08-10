@@ -5,6 +5,7 @@ import useAdminI18n from '../../i18n/adminI18n.js';
 import apiClient from '../../services/apiClient.js';
 import useTheme from '../../hooks/useTheme.js';
 import getRoleLandingPath from '../../../features/auth/utils/roleRedirect.js';
+import { resolveBackendUrl } from '../../config/apiConfig.js';
 
 const Header = ({ forceDarkMode = false }) => {
   const navigate = useNavigate();
@@ -531,7 +532,7 @@ const Header = ({ forceDarkMode = false }) => {
               >
                 {user?.avatar ? (
                   <img
-                    src={user.avatar}
+                    src={resolveBackendUrl(user.avatar)}
                     alt={displayName}
                     className={`h-9 w-9 rounded-full object-cover ${effectiveDarkMode ? 'border border-white/20' : 'border border-slate-200'}`}
                   />

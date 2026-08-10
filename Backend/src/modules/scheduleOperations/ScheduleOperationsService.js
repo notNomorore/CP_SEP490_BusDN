@@ -4,6 +4,7 @@ import User from '../auth/User.js';
 import ShiftAssignment from './ShiftAssignment.js';
 import OperationIncident from './OperationIncident.js';
 import OperationNotification from './OperationNotification.js';
+import notificationService from '../systemNotifications/notification.service.js';
 import VehicleInspection from './VehicleInspection.js';
 import IncidentReport from '../incidents/IncidentReport.js';
 import VehicleIssueService from '../vehicleIssues/vehicleIssue.service.js';
@@ -14,6 +15,7 @@ import LostAndFoundMatchingService from '../customerSupport/LostAndFoundMatching
 import Vehicle from '../fleetOperations/Vehicle.js';
 import LiveTrip from '../fleetOperations/Trip.js';
 import VehicleLocationLog from '../fleetOperations/VehicleLocationLog.js';
+import StorageService from '../../services/storage/storage.service.js';
 
 
 const TRAFFIC_CATEGORIES = [
@@ -849,7 +851,7 @@ export class ScheduleOperationsService {
       });
     }
 
-    await OperationNotification.findOneAndUpdate(
+    await notificationService.upsertOperationNotification(
       {
         sourceType: 'INCIDENT_REPORT_STATUS',
         sourceId: incident._id,
@@ -901,7 +903,7 @@ export class ScheduleOperationsService {
       }
     );
 
-    await OperationNotification.findOneAndUpdate(
+    await notificationService.upsertOperationNotification(
       {
         sourceType: role === 'DRIVER' ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT',
         sourceId: incident._id,
@@ -1033,7 +1035,7 @@ export class ScheduleOperationsService {
         });
         await existingReassignmentReport.save();
 
-        await OperationNotification.findOneAndUpdate(
+        await notificationService.upsertOperationNotification(
           {
             sourceType: role === 'DRIVER' ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT',
             sourceId: existingReassignmentReport._id,
@@ -1678,14 +1680,29 @@ export class ScheduleOperationsService {
     };
   }
 
-  static buildIncidentEvidence(files = []) {
-    return files.map((file) => ({
-      originalName: file.originalname || '',
-      filename: file.filename || '',
-      url: `/uploads/operation-incidents/${file.filename}`,
-      mimeType: file.mimetype || '',
-      size: file.size || 0,
-      uploadedAt: new Date(),
+  static async buildIncidentEvidence(files = [], metadata = {}) {
+    const uploads = [];
+
+    try {
+      for (const file of files) {
+        const upload = await StorageService.uploadOperationEvidence(file, metadata);
+        uploads.push(upload);
+      }
+    } catch (error) {
+      await StorageService.cleanupUploads(uploads);
+      throw error;
+    }
+
+    return uploads.map((upload) => ({
+      originalName: upload.originalName || '',
+      filename: upload.filename || '',
+      url: upload.url,
+      provider: upload.provider,
+      publicId: upload.publicId,
+      resourceType: upload.resourceType,
+      mimeType: upload.mimeType || '',
+      size: upload.size || 0,
+      uploadedAt: upload.uploadedAt,
     }));
   }
 
@@ -1806,7 +1823,15 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    const incident = await OperationIncident.create({
+    const evidenceFiles = await this.buildIncidentEvidence(files, {
+      userId,
+      assignmentId,
+    });
+
+    let incident;
+
+    try {
+      incident = await OperationIncident.create({
       incidentCode: this.buildIncidentCode(assignment, type),
       type,
       severity,
@@ -1865,9 +1890,13 @@ export class ScheduleOperationsService {
           recoveryStatus: String(payload.storageLocation || payload.handedTo || '').trim() ? 'STORED' : 'REPORTED',
         }
         : undefined,
-      evidenceFiles: this.buildIncidentEvidence(files),
+      evidenceFiles,
       reportedAt: new Date(),
-    });
+      });
+    } catch (error) {
+      await StorageService.cleanupUploads(evidenceFiles);
+      throw error;
+    }
 
     if (role === 'DRIVER' && ['TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN'].includes(type)) {
       const incidentGpsPayload = normalizeStartGpsPayload({

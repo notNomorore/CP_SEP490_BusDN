@@ -13,6 +13,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
+import { resolveBackendUrl } from '@/constants/config';
 import { useAuthStore } from '@/store/auth.store';
 import { isDriverAssistantRole } from '@/utils/roleNavigation';
 
@@ -105,7 +106,7 @@ export default function HomeScreen() {
               style={styles.avatar}
             >
               {user?.avatar ? (
-                <Image source={{ uri: user.avatar }} style={styles.avatarImage} />
+                <Image source={{ uri: resolveBackendUrl(user.avatar) }} style={styles.avatarImage} />
               ) : (
                 <Text style={styles.avatarText}>
                   {(user?.fullName || 'U').slice(0, 1).toUpperCase()}

@@ -23,6 +23,7 @@ import passengerApi, {
   type NearbyStopRecord,
   type NotificationRecord,
 } from '@/api/passenger.api';
+import { resolveBackendUrl } from '@/constants/config';
 import { PassengerBottomNav } from '@/components/navigation/PassengerBottomNav';
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
@@ -597,7 +598,7 @@ export default function SearchRoutesScreen() {
                 {notificationCount ? <Text style={styles.badge}>{Math.min(notificationCount, 9)}</Text> : null}
               </Pressable>
               <Pressable accessibilityLabel="Open profile" onPress={() => router.push('/profile')} style={styles.avatar}>
-                {user?.avatar ? <Image source={{ uri: user.avatar }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>{getInitials(user?.fullName)}</Text>}
+                {user?.avatar ? <Image source={{ uri: resolveBackendUrl(user.avatar) }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>{getInitials(user?.fullName)}</Text>}
               </Pressable>
             </View>
           </View>

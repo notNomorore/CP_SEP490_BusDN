@@ -1,27 +1,13 @@
 import mongoose from 'mongoose';
+import {
+  LEGACY_NOTIFICATION_TYPES,
+  LEGACY_TARGET_AUDIENCES,
+  NOTIFICATION_PRIORITIES,
+} from './notification.constants.js';
 
-export const NOTIFICATION_TYPES = [
-  'general',
-  'route_update',
-  'delay_alert',
-  'service_interruption',
-  'emergency',
-  'maintenance',
-  'promotion',
-];
-
-export const NOTIFICATION_PRIORITIES = ['low', 'normal', 'high', 'urgent'];
-
-export const NOTIFICATION_TARGET_AUDIENCES = [
-  'all',
-  'passengers',
-  'drivers',
-  'bus_assistants',
-  'admins',
-  'route_passengers',
-  'trip_staff',
-  'specific_users',
-];
+export const NOTIFICATION_TYPES = LEGACY_NOTIFICATION_TYPES;
+export { NOTIFICATION_PRIORITIES };
+export const NOTIFICATION_TARGET_AUDIENCES = LEGACY_TARGET_AUDIENCES;
 
 export const NOTIFICATION_STATUSES = ['draft', 'scheduled', 'sent', 'cancelled'];
 
@@ -55,6 +41,12 @@ const NotificationSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    notificationType: {
+      type: String,
+      trim: true,
+      default: '',
+      index: true,
+    },
     priority: {
       type: String,
       enum: NOTIFICATION_PRIORITIES,
@@ -65,6 +57,12 @@ const NotificationSchema = new mongoose.Schema(
       type: String,
       enum: NOTIFICATION_TARGET_AUDIENCES,
       required: true,
+      index: true,
+    },
+    targetType: {
+      type: String,
+      trim: true,
+      default: '',
       index: true,
     },
     routeId: {
@@ -110,6 +108,20 @@ const NotificationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: {},
     },
+    channels: {
+      inApp: { type: Boolean, default: true },
+      email: { type: Boolean, default: false },
+      push: { type: Boolean, default: false },
+    },
+    source: {
+      module: { type: String, trim: true, default: '' },
+      entityId: { type: String, trim: true, default: '' },
+    },
+    deduplicationKey: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     userIds: {
       type: [mongoose.Schema.Types.ObjectId],
       ref: 'User',
@@ -133,7 +145,7 @@ const NotificationSchema = new mongoose.Schema(
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      default: null,
       index: true,
     },
     status: {
@@ -177,6 +189,10 @@ NotificationSchema.pre('validate', function normalizeNotification(next) {
 NotificationSchema.index({ status: 1, scheduledAt: 1 });
 NotificationSchema.index({ createdAt: -1 });
 NotificationSchema.index({ targetAudience: 1, createdAt: -1 });
+NotificationSchema.index(
+  { deduplicationKey: 1 },
+  { unique: true, partialFilterExpression: { deduplicationKey: { $type: 'string', $ne: '' } } }
+);
 NotificationSchema.index(
   { type: 1, relatedPromotionId: 1 },
   { unique: true, partialFilterExpression: { type: 'promotion', relatedPromotionId: { $type: 'objectId' } } }

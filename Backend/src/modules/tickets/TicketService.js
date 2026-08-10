@@ -14,6 +14,10 @@ import Promotion from '../promotions/Promotion.js';
 import PromotionUsage from '../promotions/PromotionUsage.js';
 import TripSchedule from '../admin/TripSchedule.js';
 import {
+  notifyMonthlyPassPaymentSuccess,
+  notifyTicketPaymentSuccess,
+} from '../systemNotifications/triggers/notification.triggers.js';
+import {
   calculateMonthlyPassPrice,
   calculatePriorityDiscount,
   getMonthlyPassSettings,
@@ -2014,6 +2018,11 @@ export class TicketService {
         });
         await user.save();
       }
+
+      await notifyTicketPaymentSuccess({
+        ticket,
+        paymentOrder,
+      });
     }
 
     if (paymentOrder.ticketType === 'MONTHLY_PASS' && paymentOrder.monthlyPassId) {
@@ -2041,6 +2050,11 @@ export class TicketService {
       await User.findByIdAndUpdate(monthlyPass.passenger, {
         monthlyPassStatus: 'ACTIVE',
         monthlyPassExpireDate: monthlyPass.expiryDate,
+      });
+
+      await notifyMonthlyPassPaymentSuccess({
+        monthlyPass,
+        paymentOrder,
       });
     }
 

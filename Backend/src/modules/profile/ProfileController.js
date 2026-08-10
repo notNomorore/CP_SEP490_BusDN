@@ -1,4 +1,5 @@
 import ProfileService from './ProfileService.js';
+import StorageService from '../../services/storage/storage.service.js';
 
 export class ProfileController {
   static async getMe(req, res) {
@@ -31,9 +32,17 @@ export class ProfileController {
       return res.badRequest('Avatar image is required');
     }
 
-    const avatarPath = `/uploads/avatars/${req.file.filename}`;
-    const profile = await ProfileService.updateAvatar(req.user.userId, avatarPath);
-    return res.success(profile, 'Avatar uploaded successfully');
+    const uploadedAvatar = await StorageService.uploadAvatar(req.file, {
+      userId: req.user.userId,
+    });
+
+    try {
+      const profile = await ProfileService.updateAvatar(req.user.userId, uploadedAvatar.url);
+      return res.success(profile, 'Avatar uploaded successfully');
+    } catch (error) {
+      await StorageService.delete(uploadedAvatar.publicId);
+      throw error;
+    }
   }
 
   static async getFavoriteRoutes(req, res) {

@@ -3,7 +3,7 @@ import { HTTP_STATUS, PAGINATION } from '../../constants/index.js';
 import { CustomError } from '../../middleware/errorHandler.js';
 import IncidentReport from './IncidentReport.js';
 import OperationIncident from '../scheduleOperations/OperationIncident.js';
-import OperationNotification from '../scheduleOperations/OperationNotification.js';
+import notificationService from '../systemNotifications/notification.service.js';
 import TripSchedule from '../admin/TripSchedule.js';
 import FleetBus from '../admin/FleetBus.js';
 import LiveTrip from '../fleetOperations/Trip.js';
@@ -382,7 +382,7 @@ const createReporterStatusNotification = async ({
   ].filter(Boolean);
   const notificationTitle = `Cập nhật báo cáo: ${incident.title}`;
 
-  await OperationNotification.updateMany(
+  await notificationService.updateOperationNotifications(
     {
       sourceType: { $in: ['', null] },
       title: notificationTitle,
@@ -392,7 +392,7 @@ const createReporterStatusNotification = async ({
     { $set: { status: 'ARCHIVED' } }
   );
 
-  await OperationNotification.findOneAndUpdate(
+  await notificationService.upsertOperationNotification(
     {
       sourceType: 'INCIDENT_REPORT_STATUS',
       sourceId: incident._id,
@@ -780,7 +780,7 @@ export class IncidentReportService {
       actorId: actor?.userId,
     });
 
-    await OperationNotification.findOneAndUpdate(
+    await notificationService.upsertOperationNotification(
       {
         sourceType: 'ASSISTANT_REASSIGNMENT',
         sourceId: incident._id,
@@ -1021,7 +1021,7 @@ export class IncidentReportService {
     });
 
     const sourceType = isDriverReplacement ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT';
-    await OperationNotification.findOneAndUpdate(
+    await notificationService.upsertOperationNotification(
       {
         sourceType,
         sourceId: incident._id,

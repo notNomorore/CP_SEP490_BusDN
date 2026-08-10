@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import nodemailer from 'nodemailer';
 import AdminModel from './AdminModel.js';
 import OperationNotification from '../scheduleOperations/OperationNotification.js';
+import notificationService from '../systemNotifications/notification.service.js';
 import User from '../auth/User.js';
 import { config } from '../../config/environment.js';
 import logger from '../../utils/logger.js';
@@ -1342,7 +1343,7 @@ export class AdminController {
       if (!schedule) return res.status(404).json({ success: false, message: 'Trip schedule not found' });
 
       if (req.body.emergencyReason) {
-        await OperationNotification.create({
+        await notificationService.createOperationNotification({
           title: `Điều chỉnh khẩn cấp chuyến ${schedule.scheduleCode}`,
           message: String(req.body.emergencyReason).trim(),
           category: 'EMERGENCY_INSTRUCTION',
@@ -1490,7 +1491,7 @@ export class AdminController {
         });
       }
 
-      const notification = await OperationNotification.create(payload);
+      const notification = await notificationService.createOperationNotification(payload);
       return res.status(201).json({
         success: true,
         message: 'Operation notification created successfully',

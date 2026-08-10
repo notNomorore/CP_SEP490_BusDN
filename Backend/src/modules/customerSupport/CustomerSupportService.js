@@ -4,8 +4,9 @@ import LostFoundMatch from './LostFoundMatch.js';
 import LostAndFoundMatchingService from './LostAndFoundMatchingService.js';
 import OperationIncident from '../scheduleOperations/OperationIncident.js';
 import User from '../auth/User.js';
-import { createBroadcastNotification } from '../systemNotifications/systemNotification.service.js';
-import emailService from '../../utils/emailService.js';
+import notificationService from '../systemNotifications/notification.service.js';
+import { notifyFeedbackResponse } from '../systemNotifications/triggers/notification.triggers.js';
+import StorageService from '../../services/storage/storage.service.js';
 import {
   FEEDBACK_ACTION,
   FEEDBACK_REPLY_STATUS,
@@ -263,24 +264,20 @@ export class CustomerSupportService {
 
     if (!passengerId) return;
 
-    try {
-      await createBroadcastNotification({
-        title: 'Feedback response received',
-        message: 'Your feedback has received a response from the administrator.',
-        type: 'general',
-        priority: 'normal',
-        targetAudience: 'specific_users',
-        userIds: [passengerId],
-        actionUrl: '/my-feedback',
-        sourceType: 'SupportCase',
-        sourceId: supportCase._id,
-        metadata: {
-          caseId: String(supportCase._id),
-          referenceNumber: supportCase.referenceNumber,
-          feedbackType: supportCase.type,
-        },
-      }, adminId);
-    } catch (error) {
+    const email = supportCase.passenger?.email || supportCase.contactEmail || '';
+    const notification = await notifyFeedbackResponse({
+      supportCase,
+      adminId,
+      channels: {
+        inApp: true,
+        email: hasValidEmail(email),
+      },
+      emailRecipients: hasValidEmail(email)
+        ? [{ email, fullName: supportCase.passenger?.fullName || 'Passenger' }]
+        : [],
+    });
+
+    if (!notification) {
       // Reply persistence must not fail just because notification delivery fails.
       await this.recordUserNotification(
         passengerId,
@@ -326,14 +323,30 @@ export class CustomerSupportService {
     return `${prefix}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
   }
 
-  static normalizeAttachments(files = []) {
-    return files.map((file) => ({
-      originalName: file.originalname,
-      fileName: file.filename,
-      path: `/uploads/feedback/${file.filename}`,
-      mimeType: file.mimetype,
-      size: file.size,
-      uploadedAt: new Date(),
+  static async normalizeAttachments(files = [], metadata = {}) {
+    const uploads = [];
+
+    try {
+      for (const file of files) {
+        const upload = await StorageService.uploadSupportAttachment(file, metadata);
+        uploads.push(upload);
+      }
+    } catch (error) {
+      await StorageService.cleanupUploads(uploads);
+      throw error;
+    }
+
+    return uploads.map((upload) => ({
+      originalName: upload.originalName,
+      fileName: upload.fileName,
+      path: upload.url,
+      url: upload.url,
+      provider: upload.provider,
+      publicId: upload.publicId,
+      resourceType: upload.resourceType,
+      mimeType: upload.mimeType,
+      size: upload.size,
+      uploadedAt: upload.uploadedAt,
     }));
   }
 
@@ -373,6 +386,11 @@ export class CustomerSupportService {
         reason: data.priority ? 'Priority selected by submitter' : 'Default normal priority',
       };
 
+    const attachments = await this.normalizeAttachments(files, {
+      type: data.type,
+      userId,
+    });
+
     const supportCase = new SupportCase({
       type: data.type,
       referenceNumber: await this.generateUniqueReferenceNumber(data.type),
@@ -396,7 +414,7 @@ export class CustomerSupportService {
       incidentAt: data.incidentAt ? new Date(data.incidentAt) : undefined,
       contactPhone: data.contactPhone?.trim(),
       contactEmail: data.contactEmail?.trim(),
-      attachments: this.normalizeAttachments(files),
+      attachments,
       lostItem: data.type === 'LOST_ITEM'
         ? {
           itemName: data.lostItem.itemName.trim(),
@@ -439,7 +457,12 @@ export class CustomerSupportService {
       });
     }
 
-    await supportCase.save();
+    try {
+      await supportCase.save();
+    } catch (error) {
+      await StorageService.cleanupUploads(attachments);
+      throw error;
+    }
     if (data.type === 'SERVICE_FEEDBACK') {
       await Promise.all([
         this.recordUserNotification(userId, `Feedback ${supportCase.referenceNumber} was submitted.`),
@@ -959,82 +982,85 @@ export class CustomerSupportService {
       throw createBusinessError('Notification message is required when sending passenger updates', 422);
     }
 
-    if (channels.inApp) {
+    if (channels.inApp || channels.email) {
       try {
-        const notificationDoc = await createBroadcastNotification({
+        const notificationDoc = await notificationService.send({
+          type: 'FEEDBACK_RESPONSE',
           title,
           message,
-          type: 'general',
+          target: {
+            type: 'USER',
+            userId: passengerId,
+          },
+          channels: {
+            inApp: Boolean(channels.inApp),
+            email: Boolean(channels.email),
+            push: false,
+          },
+          emailRecipients: hasValidEmail(email)
+            ? [{ email, fullName: passenger.fullName || 'Passenger' }]
+            : [],
           priority: supportCase.priority === 'CRITICAL' ? 'urgent' : 'normal',
-          targetAudience: 'specific_users',
-          userIds: [passengerId],
           actionUrl: supportCase.type === 'LOST_ITEM' ? `/lost-items/${supportCase._id}` : `/feedback/${supportCase._id}`,
-          sourceType: 'SupportCase',
-          sourceId: supportCase._id,
-          metadata: {
+          source: {
+            module: 'SupportCase',
+            entityId: supportCase._id,
+          },
+          data: {
             caseId: String(supportCase._id),
             referenceNumber: supportCase.referenceNumber,
             supportCaseType: supportCase.type,
             status,
+            statusLabel: this.formatStatusLabel(status),
           },
-        }, adminId);
-        const delivery = {
-          channel: 'IN_APP',
-          notificationId: notificationDoc._id,
-          recipient: String(passengerId),
-          status: 'SENT',
-          sentAt: new Date(),
-        };
-        this.recordDelivery(supportCase, delivery);
-        results.push(delivery);
-      } catch (error) {
-        const delivery = {
-          channel: 'IN_APP',
-          recipient: String(passengerId),
-          status: 'FAILED',
-          sentAt: new Date(),
-          errorMessage: error.message,
-        };
-        this.recordDelivery(supportCase, delivery);
-        results.push(delivery);
-      }
-    }
+          deduplicationKey: `feedback:${supportCase._id}:passenger-notification:${status}`,
+          createdBy: adminId,
+        }, { createdBy: adminId });
 
-    if (channels.email) {
-      if (!hasValidEmail(email)) {
-        const delivery = {
-          channel: 'EMAIL',
-          recipient: email || 'NO_EMAIL',
-          status: 'FAILED',
-          sentAt: new Date(),
-          errorMessage: 'Passenger does not have a valid email address',
-        };
-        this.recordDelivery(supportCase, delivery);
-        results.push(delivery);
-      } else {
-        try {
-          await emailService.sendComplaintUpdateEmail({
-            email,
-            passengerName: passenger.fullName || 'Passenger',
-            complaintCode: supportCase.referenceNumber,
-            status: this.formatStatusLabel(status),
-            message,
-          });
+        if (channels.inApp) {
           const delivery = {
-            channel: 'EMAIL',
-            recipient: email,
+            channel: 'IN_APP',
+            notificationId: notificationDoc._id,
+            recipient: String(passengerId),
             status: 'SENT',
             sentAt: new Date(),
           };
           this.recordDelivery(supportCase, delivery);
           results.push(delivery);
-        } catch (error) {
+        }
+
+        if (channels.email) {
+          const emailDelivery = notificationDoc.metadata?.emailDelivery || {};
           const delivery = {
             channel: 'EMAIL',
-            recipient: email,
+            recipient: hasValidEmail(email) ? email : 'NO_EMAIL',
+            status: hasValidEmail(email) && emailDelivery.failedCount === 0 ? 'SENT' : 'FAILED',
+            sentAt: new Date(),
+            errorMessage: hasValidEmail(email) ? undefined : 'Passenger does not have a valid email address',
+          };
+          this.recordDelivery(supportCase, delivery);
+          results.push(delivery);
+        }
+      } catch (error) {
+        if (channels.inApp) {
+          const delivery = {
+            channel: 'IN_APP',
+            recipient: String(passengerId),
             status: 'FAILED',
             sentAt: new Date(),
             errorMessage: error.message,
+          };
+          this.recordDelivery(supportCase, delivery);
+          results.push(delivery);
+        }
+
+        if (channels.email) {
+          const delivery = {
+            channel: 'EMAIL',
+            recipient: hasValidEmail(email) ? email : 'NO_EMAIL',
+            status: 'FAILED',
+            sentAt: new Date(),
+            errorMessage: hasValidEmail(email) ? error.message : 'Passenger does not have a valid email address',
           };
           this.recordDelivery(supportCase, delivery);
           results.push(delivery);

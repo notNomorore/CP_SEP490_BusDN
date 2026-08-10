@@ -242,6 +242,21 @@ const OperationIncidentSchema = new mongoose.Schema(
             trim: true,
             default: '',
           },
+          provider: {
+            type: String,
+            trim: true,
+            default: '',
+          },
+          publicId: {
+            type: String,
+            trim: true,
+            default: '',
+          },
+          resourceType: {
+            type: String,
+            trim: true,
+            default: '',
+          },
           mimeType: {
             type: String,
             trim: true,

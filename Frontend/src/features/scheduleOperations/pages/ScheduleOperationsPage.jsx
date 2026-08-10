@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import useAuthStore from '../../auth/stores/authStore.js';
 import useLanguage from '../../../shared/hooks/useLanguage.js';
+import { resolveBackendUrl } from '../../../shared/config/apiConfig.js';
 import { OperationChatPage } from '../../operationChat';
 import scheduleOperationsService from '../services/scheduleOperationsService.js';
 
@@ -2098,7 +2099,7 @@ const ScheduleOperationsPage = () => {
             </button>
             <div className="flex items-center gap-2 rounded border border-emerald-100 bg-white px-2 py-1.5 shadow-sm">
               {user?.avatar ? (
-                <img src={user.avatar} alt={displayName} className="h-9 w-9 rounded-full object-cover" />
+                <img src={resolveBackendUrl(user.avatar)} alt={displayName} className="h-9 w-9 rounded-full object-cover" />
               ) : (
                 <span className="grid h-9 w-9 place-items-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800">
                   {initial}

@@ -1,6 +1,6 @@
-import path from 'path';
 import User from '../auth/User.js';
 import PriorityProfileRequest from './PriorityProfileRequest.js';
+import StorageService from '../../services/storage/storage.service.js';
 
 export class PriorityProfileService {
   static getStartOfToday() {
@@ -27,15 +27,34 @@ export class PriorityProfileService {
     return this.getEndOfDate(priorityProfile.expiryDate) >= new Date();
   }
 
-  static buildDocuments(files, documentTypes) {
-    return files.map((file, index) => ({
-      type: documentTypes[index],
-      originalName: file.originalname,
-      fileName: file.filename,
-      mimeType: file.mimetype,
-      size: file.size,
-      url: `/uploads/priority-profiles/${path.basename(file.filename)}`,
-      uploadedAt: new Date(),
+  static async buildDocuments(files, documentTypes, metadata = {}) {
+    const uploads = [];
+
+    try {
+      for (const [index, file] of files.entries()) {
+        const documentType = documentTypes[index];
+        const upload = await StorageService.uploadPriorityDocument(file, {
+          ...metadata,
+          documentType,
+        });
+        uploads.push({ ...upload, type: documentType });
+      }
+    } catch (error) {
+      await StorageService.cleanupUploads(uploads);
+      throw error;
+    }
+
+    return uploads.map((upload) => ({
+      type: upload.type,
+      originalName: upload.originalName,
+      fileName: upload.fileName,
+      mimeType: upload.mimeType,
+      size: upload.size,
+      url: upload.url,
+      provider: upload.provider,
+      publicId: upload.publicId,
+      resourceType: upload.resourceType,
+      uploadedAt: upload.uploadedAt,
     }));
   }
 
@@ -250,19 +269,27 @@ export class PriorityProfileService {
     }
 
     const documentTypes = JSON.parse(data.documentTypes || '[]');
-    const request = await PriorityProfileRequest.create({
-      passenger: userId,
-      profileType: data.profileType,
-      fullName: data.fullName.trim(),
-      dateOfBirth: new Date(data.dateOfBirth),
-      identityNumber: data.identityNumber.trim(),
-      cardNumber: data.cardNumber?.trim(),
-      issuingAuthority: data.issuingAuthority?.trim(),
-      reason: data.reason.trim(),
-      status: 'PENDING',
-      submittedAt: new Date(),
-      documents: this.buildDocuments(files, documentTypes),
-    });
+    const documents = await this.buildDocuments(files, documentTypes, { userId });
+    let request;
+
+    try {
+      request = await PriorityProfileRequest.create({
+        passenger: userId,
+        profileType: data.profileType,
+        fullName: data.fullName.trim(),
+        dateOfBirth: new Date(data.dateOfBirth),
+        identityNumber: data.identityNumber.trim(),
+        cardNumber: data.cardNumber?.trim(),
+        issuingAuthority: data.issuingAuthority?.trim(),
+        reason: data.reason.trim(),
+        status: 'PENDING',
+        submittedAt: new Date(),
+        documents,
+      });
+    } catch (error) {
+      await StorageService.cleanupUploads(documents);
+      throw error;
+    }
 
     user.isPriorityGroup = false;
     user.priorityStatus = 'PENDING';
@@ -327,13 +354,20 @@ export class PriorityProfileService {
       throw new Error('Approved priority profile cannot be changed');
     }
 
+    const documents = await this.buildDocuments(files, files.map(() => documentType), { userId });
+
     request.status = 'PENDING';
     request.documents = [
       ...(request.documents || []),
-      ...this.buildDocuments(files, files.map(() => documentType)),
+      ...documents,
     ];
     request.submittedAt = request.submittedAt || new Date();
-    await request.save();
+    try {
+      await request.save();
+    } catch (error) {
+      await StorageService.cleanupUploads(documents);
+      throw error;
+    }
 
     return this.getRequestById(request._id);
   }

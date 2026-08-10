@@ -2,11 +2,24 @@ import crypto from 'crypto';
 import User from './User.js';
 import logger from '../../utils/logger.js';
 import emailService from '../../utils/emailService.js';
+import { config } from '../../config/environment.js';
 
 /**
  * Auth Service - Handles authentication business logic
  */
 export class AuthService {
+  static isAllowedAvatarValue(value) {
+    if (value === '') return true;
+    if (typeof value !== 'string') return false;
+    if (/^\/uploads\/avatars\/[^/]+$/i.test(value)) return true;
+
+    const cloudName = config.cloudinary.cloudName;
+    if (!cloudName) return false;
+
+    const escapedCloudName = cloudName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`^https://res\\.cloudinary\\.com/${escapedCloudName}/`, 'i').test(value);
+  }
+
   static createLockedLoginError(user) {
     const reason = user.accountLock?.reason?.trim() || 'Kh\u00f4ng c\u00f3 l\u00fd do c\u1ee5 th\u1ec3';
     const lockedUntil = user.accountLock?.lockedUntil;
@@ -399,6 +412,12 @@ export class AuthService {
 
     for (const field of allowedFields) {
       if (updateData[field] !== undefined) {
+        if (field === 'avatar' && !this.isAllowedAvatarValue(updateData[field])) {
+          const error = new Error('Avatar must be uploaded through the profile avatar endpoint');
+          error.statusCode = 400;
+          throw error;
+        }
+
         updates[field] = updateData[field];
       }
     }
