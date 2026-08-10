@@ -26,7 +26,7 @@ export const splitRowsIntoCycleDuties = (sourceRows = []) => {
       shiftName: `Vòng D-V ${trips[0]?.operationCycleCode || index + 1}`,
       startTime,
       endTime,
-      shiftType: minutes(startTime) < 13 * 60 + 30 ? 'MORNING' : 'AFTERNOON',
+      shiftType: minutes(startTime) < 12 * 60 ? 'MORNING' : 'AFTERNOON',
       trips,
       availableTrips: trips,
       tripIds: trips.map((trip) => trip._id),

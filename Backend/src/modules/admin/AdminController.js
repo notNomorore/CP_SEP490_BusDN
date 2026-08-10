@@ -1376,8 +1376,10 @@ export class AdminController {
 
       const schedule = await AdminModel.findTripScheduleById(scheduleId);
       if (!schedule) return res.status(404).json({ success: false, message: 'Không tìm thấy ca làm.' });
-      if (['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(schedule.status)) {
-        return res.status(409).json({ success: false, message: 'Không thể xóa lịch chuyến đang chạy, đã hoàn thành hoặc đã hủy.' });
+      const hasEmbeddedAllocation = Boolean(schedule.driver?.userId || schedule.assistant?.userId || schedule.vehicle?.busId);
+      const hasAllocation = hasEmbeddedAllocation || await AdminModel.hasTripAllocation(scheduleId);
+      if (schedule.status !== 'PLANNED' || hasAllocation) {
+        return res.status(409).json({ success: false, message: 'Không thể xóa chuyến đã được phân bổ tài xế, phụ xe hoặc xe.' });
       }
 
       await AdminModel.deleteTripScheduleById(scheduleId);
@@ -1420,13 +1422,16 @@ export class AdminController {
       const deletableFilters = {
         $and: [
           filters,
-          { status: { $nin: ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'] } },
+          { status: 'PLANNED' },
+          { 'driver.userId': null },
+          { 'assistant.userId': null },
+          { 'vehicle.busId': null },
         ],
       };
       const protectedCount = await AdminModel.countTripSchedules({
         $and: [
           filters,
-          { status: { $in: ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'] } },
+          { status: { $ne: 'PLANNED' } },
         ],
       });
       const result = await AdminModel.deleteTripSchedules(deletableFilters);
@@ -1435,7 +1440,7 @@ export class AdminController {
         success: true,
         message: `Đã xóa ${result.deletedCount} lịch chuyến.`,
         ...result,
-        protectedCount,
+        protectedCount: protectedCount + Number(result.allocationProtectedCount || 0),
       });
     } catch (error) {
       logger.error('Delete trip schedules error:', error);

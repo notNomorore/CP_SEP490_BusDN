@@ -9,6 +9,13 @@ const fail = (res, error) => res.status(error.statusCode || 500).json({
 });
 
 export default class SchedulingController {
+  static async staffingDemand(req, res) {
+    try {
+      const demand = await OperationalPlanningService.staffingDemand(req.query);
+      return res.json({ success: true, demand });
+    } catch (error) { logger.error('Staffing demand error:', error); return fail(res, error); }
+  }
+
   static async overview(req, res) {
     try {
       const overview = await SchedulingService.overview(req.query.date);

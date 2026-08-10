@@ -104,8 +104,20 @@ export const adminService = {
   getShifts: async (params = {}) => {
     return apiClient.get('/admin/shifts', { params });
   },
+  getWeeklyRoster: async (weekStartDate) => apiClient.get('/admin/rosters/weekly', { params: { weekStartDate } }),
+  getRosterAvailableStaff: async (params) => apiClient.get('/admin/rosters/available-staff', { params }),
+  getWeeklyRosterRequirements: async (weekStartDate) => apiClient.get('/admin/rosters/requirements', { params: { weekStartDate } }),
+  saveWeeklyRosterRequirements: async (weekStartDate, routeRequirements) => apiClient.put('/admin/rosters/requirements', { weekStartDate, routeRequirements }),
+  resetWeeklyRosterRequirements: async (weekStartDate) => apiClient.delete('/admin/rosters/requirements', { data: { weekStartDate } }),
+  autoGenerateWeeklyRoster: async (weekStartDate) => apiClient.post('/admin/rosters/auto-generate', { weekStartDate }),
+  validateWeeklyRoster: async (weekStartDate) => apiClient.post('/admin/rosters/validate', { weekStartDate }),
+  publishWeeklyRoster: async (weekStartDate) => apiClient.post('/admin/rosters/publish', { weekStartDate }),
+  reopenWeeklyRoster: async (weekStartDate) => apiClient.post('/admin/rosters/reopen', { weekStartDate }),
   getSchedulingOverview: async (date) => {
     return apiClient.get('/admin/scheduling/overview', { params: { date } });
+  },
+  getStaffingDemand: async (params = {}) => {
+    return apiClient.get('/admin/scheduling/staffing-demand', { params });
   },
   getRouteOperatingConfigs: async (params = {}) => {
     return apiClient.get('/admin/scheduling/route-configs', { params });
@@ -145,6 +157,15 @@ export const adminService = {
   },
   confirmTripAllocation: async (rows) => {
     return apiClient.post('/admin/shifts/trip-allocation/confirm', { rows });
+  },
+  getTripAvailableDrivers: async (tripId) => {
+    return apiClient.get(`/admin/trip-schedules/${tripId}/available-drivers`);
+  },
+  assignDriverToTrip: async (tripId, driverId) => {
+    return apiClient.post(`/admin/trip-schedules/${tripId}/assign-driver`, { driverId });
+  },
+  removeDriverFromTrip: async (tripId) => {
+    return apiClient.delete(`/admin/trip-schedules/${tripId}/driver-assignment`);
   },
   getAvailableShiftDrivers: async (params) => {
     return apiClient.get('/admin/shifts/available-drivers', { params });

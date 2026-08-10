@@ -21,6 +21,7 @@ const DriverShiftAssignmentSchema = new mongoose.Schema(
       enum: ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'],
       default: 'ASSIGNED',
     },
+    rosterStatus: { type: String, enum: ['DRAFT', 'PUBLISHED'], default: 'DRAFT' },
     checkInTime: Date,
     checkOutTime: Date,
     actualWorkingHours: {

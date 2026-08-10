@@ -72,6 +72,8 @@ const TripScheduleSchema = new mongoose.Schema(
     expectedArrivalTime: { type: String, trim: true, default: '' },
     turnaroundEndTime: { type: String, trim: true, default: '' },
     shiftLabel: { type: String, trim: true, default: '' },
+    demandLevel: { type: String, enum: ['OFF_PEAK', 'MID_PEAK', 'PEAK'], default: 'OFF_PEAK' },
+    headwayMinutes: { type: Number, min: 5, max: 180, default: 30 },
     isScheduleException: { type: Boolean, default: false },
     exceptionReason: { type: String, trim: true, default: '' },
     status: {

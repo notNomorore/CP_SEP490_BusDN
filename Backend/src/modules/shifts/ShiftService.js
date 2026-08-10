@@ -19,12 +19,15 @@ const BLOCKING_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'];
 const ACTIVE_TRIP_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS'];
 const CLOSED_SHIFT_STATUSES = SHIFT_CLOSED_STATUSES;
 const MAX_DRIVER_MINUTES_PER_DAY = 8 * 60;
-const MIN_DRIVER_REST_MINUTES = 60;
+const MAX_STAFF_MINUTES_PER_WEEK = 40 * 60;
+const MIN_DRIVER_REST_MINUTES = 10 * 60;
 const OPERATING_START_MINUTES = (5 * 60) + 30;
 const OPERATING_END_MINUTES = (18 * 60) + 30;
+const MORNING_END_MINUTES = 12 * 60;
+const AFTERNOON_START_MINUTES = 12 * 60;
 const AUTO_SHIFT_TEMPLATES = [
-  { key: 'MORNING', name: 'Ca sáng tự động', startTime: '05:30', endTime: '13:30', shiftType: 'MORNING' },
-  { key: 'AFTERNOON', name: 'Ca chiều tự động', startTime: '10:30', endTime: '18:30', shiftType: 'AFTERNOON' },
+  { key: 'MORNING', name: 'Ca sáng tự động', startTime: '05:30', endTime: '12:00', shiftType: 'MORNING' },
+  { key: 'AFTERNOON', name: 'Ca chiều tự động', startTime: '12:00', endTime: '18:30', shiftType: 'AFTERNOON' },
 ];
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
@@ -152,7 +155,6 @@ const validateShiftPayload = (payload) => {
   if (!payload.shiftCode) errors.push('Ma ca la bat buoc.');
   if (!payload.workDate) errors.push('Ngay lam viec la bat buoc.');
   if (!payload.shiftName) errors.push('Tên ca là bắt buộc.');
-  if (!payload.routeId) errors.push('Ca làm phải gắn với một tuyến vận hành.');
   if (startMinutes === null) errors.push('Giờ bắt đầu là bắt buộc.');
   if (endMinutes === null) errors.push('Giờ kết thúc là bắt buộc.');
   if (!SHIFT_TYPES.has(payload.shiftType)) errors.push('Hệ thống chỉ hỗ trợ ca sáng và ca chiều.');
@@ -163,6 +165,12 @@ const validateShiftPayload = (payload) => {
     }
     if (planned.durationMinutes > MAX_DRIVER_MINUTES_PER_DAY) {
       errors.push('Mỗi ca không được vượt quá 8 giờ làm việc.');
+    }
+    if (payload.shiftType === 'MORNING' && endMinutes > MORNING_END_MINUTES) {
+      errors.push('Ca sáng phải kết thúc chậm nhất lúc 12:00.');
+    }
+    if (payload.shiftType === 'AFTERNOON' && startMinutes < AFTERNOON_START_MINUTES) {
+      errors.push('Ca chiều chỉ được bắt đầu từ 12:00.');
     }
   }
   if (!Number.isFinite(payload.breakMinutes) || payload.breakMinutes < 0) {
@@ -218,6 +226,13 @@ const findOverlappingAssignment = async ({ model, resourceField, resourceId, wor
     const assignedShift = shiftById.get(String(assignment.shiftId));
     return assignedShift && timesOverlap(shift, assignedShift);
   }) || null;
+};
+
+const hasValidDriverLicense = (driver, workDate) => {
+  const license = driver?.driverLicense;
+  if (!license?.licenseNumber && !(license?.permittedVehicleTypes || []).length) return true;
+  if (['EXPIRED', 'SUSPENDED'].includes(String(license.status || '').toUpperCase())) return false;
+  return !license.expiresAt || new Date(license.expiresAt) >= workDate;
 };
 
 const findInsufficientRestAssignment = async ({ model, resourceField, resourceId, workDate, shift, excludeShiftId }) => {
@@ -378,6 +393,36 @@ const hasLeaveConflict = (driver, workDate) => {
   });
 };
 
+const getWeekRange = (workDate) => {
+  const start = normalizeDateOnly(workDate);
+  const day = start.getDay();
+  start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
+  return { start, end: addDays(start, 7) };
+};
+
+const getWeeklyAssignedMinutes = async ({ model, resourceField, resourceId, workDate, excludeShiftId }) => {
+  const week = getWeekRange(workDate);
+  const assignments = await model.find({
+    [resourceField]: resourceId,
+    workDate: { $gte: week.start, $lt: week.end },
+    status: { $in: BLOCKING_ASSIGNMENT_STATUSES },
+    ...(excludeShiftId ? { shiftId: { $ne: excludeShiftId } } : {}),
+  }).lean();
+  if (!assignments.length) return 0;
+  const shifts = await Shift.find({
+    _id: { $in: assignments.map((assignment) => assignment.shiftId) },
+    status: { $ne: 'ARCHIVED' },
+  }).lean();
+  return shifts.reduce((total, assignedShift) => total + getShiftDurationMinutes(assignedShift), 0);
+};
+
+const assertWeeklyLimit = async ({ model, resourceField, resourceId, workDate, shift, excludeShiftId, label }) => {
+  const weeklyMinutes = await getWeeklyAssignedMinutes({ model, resourceField, resourceId, workDate, excludeShiftId });
+  if (weeklyMinutes + getShiftDurationMinutes(shift) > MAX_STAFF_MINUTES_PER_WEEK) {
+    throw Object.assign(new Error(`${label} vượt quá 40 giờ làm trong tuần.`), { statusCode: 409 });
+  }
+};
+
 const assertFutureDriverCoverage = async ({ driverId, workDate, shift }) => {
   const shiftRange = getShiftRange(shift);
   if (!shiftRange) return;
@@ -432,7 +477,7 @@ const buildAutoShiftPayload = ({ template, workDate, actorId, sequence = null })
   breakMinutes: 0,
   shiftType: template.shiftType,
   status: 'ACTIVE',
-  description: 'Ca được sinh tự động. Mỗi tài xế tối đa 8 giờ/ngày.',
+  description: 'Ca được sinh tự động theo roster tuần và quy tắc cân bằng workload.',
   createdBy: actorId,
   updatedBy: actorId,
 });
@@ -486,6 +531,10 @@ export default class ShiftService {
   static normalizeShiftPayload = normalizeShiftPayload;
 
   static validateShiftPayload = validateShiftPayload;
+
+  static async markManualAssignment(shiftId, actorId) {
+    return Shift.findByIdAndUpdate(shiftId, { $set: { assignmentSource: 'MANUAL', isLocked: true, updatedBy: actorId } }, { new: true }).lean();
+  }
 
   static async listShifts(query = {}) {
     const filters = buildShiftFilters(query);
@@ -674,6 +723,7 @@ export default class ShiftService {
     ]);
     if (!driver) throw Object.assign(new Error('Không tìm thấy tài xế.'), { statusCode: 404 });
     if (driver.status !== 'ACTIVE') throw Object.assign(new Error('Tài xế không hoạt động.'), { statusCode: 409 });
+    if (!hasValidDriverLicense(driver, dateOnly)) throw Object.assign(new Error('Giấy phép lái xe đã hết hạn hoặc bị đình chỉ.'), { statusCode: 409 });
     if (!shift || CLOSED_SHIFT_STATUSES.includes(shift.status)) throw Object.assign(new Error('Không tìm thấy ca làm việc.'), { statusCode: 404 });
     if (hasLeaveConflict(driver, dateOnly)) {
       throw Object.assign(new Error('Tài xế đang nghỉ phép.'), { statusCode: 409 });
@@ -700,13 +750,14 @@ export default class ShiftService {
       excludeShiftId: shiftId,
     });
     if (insufficientRest) {
-      throw Object.assign(new Error('Tài xế phải có ít nhất 60 phút nghỉ giữa hai ca.'), { statusCode: 409 });
+      throw Object.assign(new Error('Tài xế phải có ít nhất 10 giờ nghỉ giữa hai ca.'), { statusCode: 409 });
     }
 
     const assignedMinutes = await getTotalAssignedMinutesForDriver({ driverId, workDate: dateOnly, excludeShiftId: shiftId });
     if (assignedMinutes + getShiftDurationMinutes(shift) > MAX_DRIVER_MINUTES_PER_DAY) {
       throw Object.assign(new Error('Tai xe vuot qua so gio lam toi da trong ngay.'), { statusCode: 409 });
     }
+    await assertWeeklyLimit({ model: DriverShiftAssignment, resourceField: 'driverId', resourceId: driverId, workDate: dateOnly, shift, excludeShiftId: shiftId, label: 'Tài xế' });
 
     const assignment = new DriverShiftAssignment({
       driverId,
@@ -823,6 +874,7 @@ export default class ShiftService {
     const driver = await User.findOne({ _id: driverId, role: 'DRIVER' }).lean();
     if (!driver) throw Object.assign(new Error('Khong tim thay tai xe.'), { statusCode: 404 });
     if (driver.status !== 'ACTIVE') throw Object.assign(new Error('Tai xe khong hoat dong.'), { statusCode: 409 });
+    if (!hasValidDriverLicense(driver, workDate)) throw Object.assign(new Error('Giấy phép lái xe đã hết hạn hoặc bị đình chỉ.'), { statusCode: 409 });
     if (hasLeaveConflict(driver, workDate)) throw Object.assign(new Error('Tai xe dang nghi phep.'), { statusCode: 409 });
 
     const existingForShift = await getAssignedDriver(shiftId);
@@ -848,7 +900,7 @@ export default class ShiftService {
       excludeShiftId: shiftId,
     });
     if (insufficientRest) {
-      throw Object.assign(new Error('Tài xế phải có ít nhất 60 phút nghỉ giữa hai ca.'), { statusCode: 409 });
+      throw Object.assign(new Error('Tài xế phải có ít nhất 10 giờ nghỉ giữa hai ca.'), { statusCode: 409 });
     }
 
     await assertFutureDriverCoverage({ driverId, workDate, shift });
@@ -857,6 +909,7 @@ export default class ShiftService {
     if (assignedMinutes + getShiftDurationMinutes(shift) > MAX_DRIVER_MINUTES_PER_DAY) {
       throw Object.assign(new Error('Tai xe vuot qua so gio lam toi da trong ngay.'), { statusCode: 409 });
     }
+    await assertWeeklyLimit({ model: DriverShiftAssignment, resourceField: 'driverId', resourceId: driverId, workDate, shift, excludeShiftId: shiftId, label: 'Tài xế' });
 
     if (sameDriverAlreadyAssigned) {
       return existingForShift;
@@ -913,12 +966,13 @@ export default class ShiftService {
       shift,
       excludeShiftId: shiftId,
     });
-    if (insufficientRest) throw Object.assign(new Error('Phụ xe phải có ít nhất 60 phút nghỉ giữa hai ca.'), { statusCode: 409 });
+    if (insufficientRest) throw Object.assign(new Error('Phụ xe phải có ít nhất 10 giờ nghỉ giữa hai ca.'), { statusCode: 409 });
 
     const assignedMinutes = await getTotalAssignedMinutesForAssistant({ assistantId, workDate, excludeShiftId: shiftId });
     if (assignedMinutes + getShiftDurationMinutes(shift) > MAX_DRIVER_MINUTES_PER_DAY) {
       throw Object.assign(new Error('Phu xe vuot qua so gio lam toi da trong ngay.'), { statusCode: 409 });
     }
+    await assertWeeklyLimit({ model: AssistantShiftAssignment, resourceField: 'assistantId', resourceId: assistantId, workDate, shift, excludeShiftId: shiftId, label: 'Phụ xe' });
 
     if (sameAssistantAlreadyAssigned) {
       return existingForShift;
@@ -1045,13 +1099,13 @@ export default class ShiftService {
     ]);
   }
 
-  static async autoGenerateDailySchedule({ workDate, actorId }) {
+  static async autoGenerateDailySchedule({ workDate, actorId, rotationDayIndex = null }) {
     const dateOnly = normalizeDateOnly(workDate);
     if (!dateOnly) {
       throw Object.assign(new Error('Ngay lam viec la bat buoc.'), { statusCode: 400 });
     }
 
-    const [drivers, assistants] = await Promise.all([
+    const [drivers, assistants, vehicles] = await Promise.all([
       User.find({
         role: 'DRIVER',
         status: 'ACTIVE',
@@ -1068,6 +1122,9 @@ export default class ShiftService {
       })
       .sort({ fullName: 1, createdAt: 1 })
         .lean(),
+      FleetBus.find({ status: { $in: ['AVAILABLE', 'ACTIVE', 'RESERVE', 'ASSIGNED'] } })
+        .sort({ busCode: 1 })
+        .lean(),
     ]);
     if (!drivers.length) {
       throw Object.assign(new Error('Khong co tai xe dang hoat dong de sinh lich.'), { statusCode: 409 });
@@ -1082,6 +1139,7 @@ export default class ShiftService {
       archivedShifts: 0,
       assignedDrivers: 0,
       assignedAssistants: 0,
+      assignedVehicles: 0,
       skippedShifts: [],
       shifts: [],
     };
@@ -1102,8 +1160,13 @@ export default class ShiftService {
     }
 
     for (const [templateIndex, template] of AUTO_SHIFT_TEMPLATES.entries()) {
-      const templateDrivers = drivers.filter((_driver, index) => index % AUTO_SHIFT_TEMPLATES.length === templateIndex);
-      const templateAssistants = assistants.filter((_assistant, index) => index % AUTO_SHIFT_TEMPLATES.length === templateIndex);
+      const rotate = (index) => rotationDayIndex === null
+        ? index % AUTO_SHIFT_TEMPLATES.length
+        : (index + rotationDayIndex) % AUTO_SHIFT_TEMPLATES.length;
+      const isWeeklyRestDay = (index) => rotationDayIndex !== null && index % 7 === rotationDayIndex;
+      const templateDrivers = drivers.filter((_driver, index) => !isWeeklyRestDay(index) && rotate(index) === templateIndex);
+      const templateAssistants = assistants.filter((_assistant, index) => !isWeeklyRestDay(index) && rotate(index) === templateIndex);
+      const templateVehicles = vehicles.filter((_vehicle, index) => (index + (rotationDayIndex || 0)) % AUTO_SHIFT_TEMPLATES.length === templateIndex);
       const slotCount = Math.max(templateDrivers.length, templateAssistants.length);
 
       for (let slotIndex = 0; slotIndex < slotCount; slotIndex += 1) {
@@ -1148,16 +1211,19 @@ export default class ShiftService {
           endTime: shift?.endTime,
           driver: null,
           assistant: null,
+          vehicle: null,
           status: 'UNASSIGNED',
           reason: '',
         };
 
-        const [existingDriver, existingAssistant] = await Promise.all([
+        const [existingDriver, existingAssistant, existingVehicle] = await Promise.all([
           getAssignedDriver(shift._id),
           getAssignedAssistant(shift._id),
+          getAssignedVehicle(shift._id),
         ]);
         const targetDriver = templateDrivers[slotIndex] || null;
         const targetAssistant = templateAssistants[slotIndex] || null;
+        const targetVehicle = templateVehicles[slotIndex] || null;
 
         if (existingDriver) {
           shiftResult.driver = existingDriver.driverId;
@@ -1165,9 +1231,11 @@ export default class ShiftService {
         if (existingAssistant) {
           shiftResult.assistant = existingAssistant.assistantId;
         }
+        if (existingVehicle) shiftResult.vehicle = existingVehicle.vehicleId;
 
         let assignedDriver = existingDriver || null;
         let assignedAssistant = existingAssistant || null;
+        let assignedVehicle = existingVehicle || null;
         let lastError = null;
 
         if (!assignedDriver && targetDriver) {
@@ -1190,8 +1258,18 @@ export default class ShiftService {
           }
         }
 
-        if (assignedDriver || assignedAssistant) {
-          shiftResult.status = existingDriver || existingAssistant ? 'ALREADY_ASSIGNED' : 'ASSIGNED';
+        if (!assignedVehicle && targetVehicle) {
+          try {
+            assignedVehicle = await this.assignVehicleToShift(shift._id, { vehicleId: targetVehicle._id, actorId });
+            shiftResult.vehicle = assignedVehicle.vehicleId;
+            summary.assignedVehicles += 1;
+          } catch (error) {
+            lastError = error;
+          }
+        }
+
+        if (assignedDriver || assignedAssistant || assignedVehicle) {
+          shiftResult.status = existingDriver || existingAssistant || existingVehicle ? 'ALREADY_ASSIGNED' : 'ASSIGNED';
         } else {
           shiftResult.reason = lastError?.message || 'Khong tim duoc nhan su phu hop.';
           shiftResult.status = 'SKIPPED';
@@ -1229,6 +1307,8 @@ export default class ShiftService {
       updatedShifts: 0,
       archivedShifts: 0,
       assignedDrivers: 0,
+      assignedAssistants: 0,
+      assignedVehicles: 0,
       skippedShifts: [],
       shifts: [],
       dailySummaries: [],
@@ -1238,12 +1318,15 @@ export default class ShiftService {
       const daySummary = await this.autoGenerateDailySchedule({
         workDate: addDays(startDate, index),
         actorId,
+        rotationDayIndex: index,
       });
       summary.createdShifts += daySummary.createdShifts || 0;
       summary.existingShifts += daySummary.existingShifts || 0;
       summary.updatedShifts += daySummary.updatedShifts || 0;
       summary.archivedShifts += daySummary.archivedShifts || 0;
       summary.assignedDrivers += daySummary.assignedDrivers || 0;
+      summary.assignedAssistants += daySummary.assignedAssistants || 0;
+      summary.assignedVehicles += daySummary.assignedVehicles || 0;
       summary.skippedShifts.push(...(daySummary.skippedShifts || []));
       summary.shifts.push(...(daySummary.shifts || []));
       summary.dailySummaries.push(daySummary);

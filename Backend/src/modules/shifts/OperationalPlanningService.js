@@ -11,6 +11,7 @@ import SchedulingPlan from './SchedulingPlan.js';
 import ShiftService from './ShiftService.js';
 import {
   MAX_DAILY_WORK_MINUTES,
+  TARGET_WEEKLY_WORK_MINUTES,
   MIN_REST_MINUTES,
   rangesOverlap,
   scoreDriver,
@@ -19,12 +20,22 @@ import {
 } from './schedulingEngine.js';
 
 const ACTIVE_ASSIGNMENTS = ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'];
+const STAFFING_PERIODS = [
+  { shiftType: 'MORNING', startTime: '05:30', endTime: '12:00', from: 330, to: 720 },
+  { shiftType: 'AFTERNOON', startTime: '12:00', endTime: '18:30', from: 720, to: 1110 },
+];
 const DEMAND_PRIORITY = { VERY_HIGH: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
 const id = (value) => String(value?._id || value || '');
 const dateOnly = (value) => { const date = new Date(value); if (Number.isNaN(date.getTime())) return null; date.setHours(0, 0, 0, 0); return date; };
 const nextDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
 const dateKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const dateToken = (date) => dateKey(date).replaceAll('-', '').slice(2);
+const weekStart = (value) => {
+  const date = dateOnly(value);
+  const day = date.getDay();
+  date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+  return date;
+};
 
 const leaveConflict = (staff, date) => (staff.staffAvailability?.leaveRequests || []).some((leave) => {
   if (!['APPROVED', 'ACTIVE'].includes(String(leave.status || '').toUpperCase())) return false;
@@ -80,6 +91,59 @@ const resourceEligible = ({ resource, slot, allocations, onLeave = false, operat
 const publicStaff = (staff) => ({ _id: staff._id, fullName: staff.fullName, email: staff.email, phoneNumber: staff.phoneNumber });
 const publicVehicle = (vehicle) => ({ _id: vehicle._id, busCode: vehicle.busCode, plateNumber: vehicle.plateNumber, busType: vehicle.busType, capacity: vehicle.capacity });
 const clockMinutes = (value) => { const [hour, minute] = String(value || '').split(':').map(Number); return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : 0; };
+const minuteClock = (value) => `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+const dateRange = (startDate, endDate) => {
+  const start = dateOnly(startDate);
+  const end = dateOnly(endDate || startDate);
+  if (!start || !end || end < start) throw Object.assign(new Error('Khoảng ngày không hợp lệ.'), { statusCode: 400 });
+  const result = [];
+  for (let cursor = start; cursor <= end && result.length < 31; cursor = nextDay(cursor)) result.push(cursor);
+  if (nextDay(result.at(-1)) <= end) throw Object.assign(new Error('Chỉ được phân tích tối đa 31 ngày.'), { statusCode: 400 });
+  return result;
+};
+
+export const globalDemandFromTrips = (trips) => {
+  const cycles = new Map();
+  trips.forEach((trip) => {
+    const key = `${id(trip.routeId)}:${String(trip.operationCycleCode || id(trip))}`;
+    const current = cycles.get(key) || { routeId: trip.routeId, starts: [], ends: [], trips: [] };
+    current.starts.push(clockMinutes(trip.departureTime));
+    current.ends.push(clockMinutes(trip.turnaroundEndTime || trip.expectedArrivalTime));
+    current.trips.push(trip);
+    cycles.set(key, current);
+  });
+  return STAFFING_PERIODS.map((period) => {
+    const ownCycles = [...cycles.values()].filter((cycle) => Math.min(...cycle.starts) >= period.from && Math.min(...cycle.starts) < period.to);
+    const events = ownCycles.flatMap((cycle) => [{ at: Math.min(...cycle.starts), delta: 1 }, { at: Math.max(...cycle.ends), delta: -1 }])
+      .sort((left, right) => left.at - right.at || left.delta - right.delta);
+    let active = 0;
+    let required = 0;
+    let previous = events[0]?.at;
+    const rawWindows = [];
+    for (let index = 0; index < events.length;) {
+      const at = events[index].at;
+      if (previous !== undefined && at > previous && active > 0) rawWindows.push({ from: previous, to: at, required: active });
+      while (index < events.length && events[index].at === at) {
+        active += events[index].delta;
+        index += 1;
+      }
+      required = Math.max(required, active);
+      previous = at;
+    }
+    const windows = rawWindows.reduce((result, window) => {
+      const previousWindow = result.at(-1);
+      if (previousWindow?.to === window.from && previousWindow.required === window.required) previousWindow.to = window.to;
+      else result.push({ ...window });
+      return result;
+    }, []).map((window) => ({
+      startTime: minuteClock(window.from),
+      endTime: minuteClock(window.to),
+      required: window.required,
+      demandLevel: window.required === required ? 'PEAK' : 'NORMAL',
+    }));
+    return { ...period, required, tripCount: ownCycles.reduce((sum, cycle) => sum + cycle.trips.length, 0), cycles: ownCycles, windows };
+  });
+};
 
 export const configsFromTrips = (trips) => {
   const cycles = new Map();
@@ -91,10 +155,7 @@ export const configsFromTrips = (trips) => {
     current.trips.push(trip);
     cycles.set(key, current);
   });
-  const periods = [
-    { startTime: '05:30', endTime: '13:30', from: 330, to: 810, demandLevel: 'HIGH' },
-    { startTime: '10:30', endTime: '18:30', from: 810, to: 1110, demandLevel: 'HIGH' },
-  ];
+  const periods = STAFFING_PERIODS.map((period) => ({ ...period, demandLevel: 'HIGH' }));
   const routeIds = [...new Set(trips.map((trip) => id(trip.routeId)))];
   return routeIds.flatMap((routeId) => periods.flatMap((period) => {
     const periodCycles = [...cycles.values()].filter((cycle) => id(cycle.routeId) === routeId
@@ -127,6 +188,100 @@ const validationSummary = (rows) => {
 };
 
 export default class OperationalPlanningService {
+  static async staffingDemand({ startDate, endDate } = {}) {
+    const days = dateRange(startDate, endDate);
+    const start = days[0];
+    const endExclusive = nextDay(days.at(-1));
+    const assignmentStart = weekStart(start);
+    const assignmentEnd = weekStart(days.at(-1));
+    assignmentEnd.setDate(assignmentEnd.getDate() + 7);
+    const [trips, drivers, assistants, driverAssignments, assistantAssignments, history, routes] = await Promise.all([
+      TripSchedule.find({ serviceDate: { $gte: start, $lt: endExclusive }, status: { $nin: ['CANCELLED'] } })
+        .select('serviceDate routeId routeCode routeName operationCycleCode departureTime expectedArrivalTime turnaroundEndTime').lean(),
+      User.find({ role: 'DRIVER', status: 'ACTIVE', 'accountLock.isLocked': { $ne: true } }).select('fullName email phoneNumber staffAvailability driverLicense').lean(),
+      User.find({ role: { $in: ['CONDUCTOR', 'BUS_ASSISTANT'] }, status: 'ACTIVE', 'accountLock.isLocked': { $ne: true } }).select('fullName email phoneNumber staffAvailability').lean(),
+      DriverShiftAssignment.find({ workDate: { $gte: assignmentStart, $lt: assignmentEnd }, status: { $in: ACTIVE_ASSIGNMENTS } }).populate('shiftId').lean(),
+      AssistantShiftAssignment.find({ workDate: { $gte: assignmentStart, $lt: assignmentEnd }, status: { $in: ACTIVE_ASSIGNMENTS } }).populate('shiftId').lean(),
+      TripSchedule.find({ status: 'COMPLETED', $or: [{ 'driver.userId': { $ne: null } }, { 'assistant.userId': { $ne: null } }] }).select('routeId driver.userId assistant.userId').lean(),
+      Route.find({ status: 'PUBLISHED' }).select('vehicleAssignment routeCode').lean(),
+    ]);
+    const routesById = new Map(routes.map((route) => [id(route), route]));
+    const result = days.flatMap((date) => {
+      const key = dateKey(date);
+      const dailyTrips = trips.filter((trip) => dateKey(new Date(trip.serviceDate)) === key);
+      const ownDriverAssignments = driverAssignments.filter((item) => dateKey(new Date(item.workDate)) === key && item.shiftId);
+      const ownAssistantAssignments = assistantAssignments.filter((item) => dateKey(new Date(item.workDate)) === key && item.shiftId);
+      const driverAllocations = ownDriverAssignments.map((item) => ({ resourceId: item.driverId, startTime: item.shiftId.startTime, endTime: item.shiftId.endTime }));
+      const assistantAllocations = ownAssistantAssignments.map((item) => ({ resourceId: item.assistantId, startTime: item.shiftId.startTime, endTime: item.shiftId.endTime }));
+      return globalDemandFromTrips(dailyTrips).map((demand) => {
+        const windowCoverage = demand.windows.map((window) => {
+          const coversWindow = (item) => clockMinutes(item.shiftId.startTime) <= clockMinutes(window.startTime)
+            && clockMinutes(item.shiftId.endTime) >= clockMinutes(window.endTime);
+          const assignedDrivers = new Set(ownDriverAssignments.filter(coversWindow).map((item) => id(item.driverId))).size;
+          const assignedAssistants = new Set(ownAssistantAssignments.filter(coversWindow).map((item) => id(item.assistantId))).size;
+          return { ...window, assignedDrivers, assignedAssistants, missingDrivers: Math.max(0, window.required - assignedDrivers), missingAssistants: Math.max(0, window.required - assignedAssistants), surplusDrivers: Math.max(0, assignedDrivers - window.required), surplusAssistants: Math.max(0, assignedAssistants - window.required) };
+        });
+        const missingDrivers = Math.max(0, ...windowCoverage.map((window) => window.missingDrivers));
+        const missingAssistants = Math.max(0, ...windowCoverage.map((window) => window.missingAssistants));
+        const assignedDrivers = Math.max(0, demand.required - missingDrivers);
+        const assignedAssistants = Math.max(0, demand.required - missingAssistants);
+        const periodTrips = demand.cycles.flatMap((cycle) => cycle.trips);
+        const periodRouteIds = new Set(periodTrips.map((trip) => id(trip.routeId)));
+        const routeGroups = new Map();
+        periodTrips.forEach((trip) => {
+          const routeId = id(trip.routeId) || trip.routeCode;
+          const current = routeGroups.get(routeId) || { routeId, routeCode: trip.routeCode, routeName: trip.routeName, tripCount: 0, firstDeparture: trip.departureTime, lastArrival: trip.expectedArrivalTime };
+          current.tripCount += 1;
+          if (trip.departureTime < current.firstDeparture) current.firstDeparture = trip.departureTime;
+          if (trip.expectedArrivalTime > current.lastArrival) current.lastArrival = trip.expectedArrivalTime;
+          routeGroups.set(routeId, current);
+        });
+        const candidate = (person, role) => {
+          const allocations = role === 'DRIVER' ? driverAllocations : assistantAllocations;
+          const allAssignments = role === 'DRIVER' ? driverAssignments : assistantAssignments;
+          const stats = allocationStats(allocations, person._id);
+          const currentWeek = dateKey(weekStart(date));
+          const weeklyMinutes = allAssignments
+            .filter((item) => id(role === 'DRIVER' ? item.driverId : item.assistantId) === id(person)
+              && item.shiftId && dateKey(weekStart(item.workDate)) === currentWeek)
+            .reduce((sum, item) => sum + Math.max(0, clockMinutes(item.shiftId.endTime) - clockMinutes(item.shiftId.startTime)), 0);
+          const licenseEligible = role !== 'DRIVER' || [...periodRouteIds].every((routeId) => {
+            const route = routesById.get(routeId);
+            return route && suitableLicense(person, route, date);
+          });
+          const eligible = licenseEligible
+            && weeklyMinutes + (clockMinutes(demand.endTime) - clockMinutes(demand.startTime)) <= TARGET_WEEKLY_WORK_MINUTES
+            && resourceEligible({ resource: person, slot: demand, allocations, onLeave: leaveConflict(person, date) });
+          const experienceCount = history.filter((trip) => periodRouteIds.has(id(trip.routeId)) && id(role === 'DRIVER' ? trip.driver?.userId : trip.assistant?.userId) === id(person)).length;
+          let score = 60 + Math.min(20, experienceCount * 2) + Math.max(0, Math.round((TARGET_WEEKLY_WORK_MINUTES - weeklyMinutes) / 240));
+          if (!eligible) score = 0;
+          const reasons = [weeklyMinutes < TARGET_WEEKLY_WORK_MINUTES * 0.75 ? 'Đang thiếu giờ làm trong tuần' : '', experienceCount ? `Đã phục vụ các tuyến này ${experienceCount} lượt` : '', eligible ? 'Không trùng ca, đủ thời gian nghỉ và đủ điều kiện' : (licenseEligible ? 'Không đủ điều kiện nhận ca' : 'Giấy phép lái xe không phù hợp')].filter(Boolean);
+          return { ...publicStaff(person), role, score: Math.min(100, score), assignedMinutes: stats.minutes, weeklyAssignedMinutes: weeklyMinutes, routeExperienceCount: experienceCount, eligible, reasons };
+        };
+        return {
+          workDate: key,
+          shiftType: demand.shiftType,
+          startTime: demand.startTime,
+          endTime: demand.endTime,
+          tripCount: demand.tripCount,
+          requiredDrivers: demand.required,
+          requiredAssistants: demand.required,
+          assignedDrivers,
+          assignedAssistants,
+          missingDrivers,
+          missingAssistants,
+          surplusDrivers: Math.max(0, ...windowCoverage.map((window) => window.surplusDrivers)),
+          surplusAssistants: Math.max(0, ...windowCoverage.map((window) => window.surplusAssistants)),
+          coverageWindows: windowCoverage,
+          routes: [...routeGroups.values()],
+          driverCandidates: drivers.map((person) => candidate(person, 'DRIVER')).filter((person) => person.eligible).sort((left, right) => right.score - left.score),
+          assistantCandidates: assistants.map((person) => candidate(person, 'ASSISTANT')).filter((person) => person.eligible).sort((left, right) => right.score - left.score),
+        };
+      });
+    });
+    return { startDate: dateKey(start), endDate: dateKey(days.at(-1)), days: result };
+  }
+
   static async list({ workDate, status } = {}) {
     const filter = {};
     const date = dateOnly(workDate);
@@ -172,7 +327,7 @@ export default class OperationalPlanningService {
     for (const config of ordered) {
       const route = routeMap.get(id(config.routeId));
       if (!route) continue;
-      const configShiftType = config.endTime <= '13:30' ? 'MORNING' : 'AFTERNOON';
+      const configShiftType = config.endTime <= '12:00' ? 'MORNING' : 'AFTERNOON';
       const configRange = timeRange(config);
       const requiredTrips = Number(config.actualTripCount || (Math.ceil((configRange.end - configRange.start) / Number(config.frequencyMinutes || 1)) * 2));
       const plannedTrips = dailyTrips.filter((trip) => id(trip.routeId) === id(route) && trip.departureTime >= config.startTime && trip.departureTime < config.endTime).length;
@@ -211,7 +366,7 @@ export default class OperationalPlanningService {
     const summary = validationSummary(rows);
     summary.demandByShift = configs.map((config) => ({
       routeId: config.routeId,
-      shiftType: config.endTime <= '13:30' ? 'MORNING' : 'AFTERNOON',
+      shiftType: config.endTime <= '12:00' ? 'MORNING' : 'AFTERNOON',
       startTime: config.startTime,
       endTime: config.endTime,
       tripCount: Number(config.actualTripCount || 0),

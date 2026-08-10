@@ -15,7 +15,7 @@ import { splitRowsIntoCycleDuties, validateAtomicCycleDuties } from './shiftDuty
 
 const MAX_WORK_MINUTES = 8 * 60;
 const MAX_WEEKLY_WORK_MINUTES = 40 * 60;
-const MIN_REST_MINUTES = 60;
+const MIN_REST_MINUTES = 10 * 60;
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'];
 const SHIFT_TYPES = new Set(['MORNING', 'AFTERNOON', 'EVENING', 'FULL_DAY', 'CUSTOM']);
 
@@ -583,9 +583,9 @@ export default class AutoGenerateShiftService {
       existingWeeklyDriverMinutes = driver ? assignedMinutes(weeklyAssignments.drivers, 'driverId', driver._id) : 0;
       existingWeeklyAssistantMinutes = assistant ? assignedMinutes(weeklyAssignments.assistants, 'assistantId', assistant._id) : 0;
       if (driver && assignmentConflicts(assignments.drivers, 'driverId', driver._id, range)) warnings.push('Tài xế bị trùng ca.');
-      if (driver && hasInsufficientRest(assignments.drivers, 'driverId', driver._id, range)) warnings.push('Tài xế không đủ 60 phút nghỉ giữa hai ca.');
+      if (driver && hasInsufficientRest(assignments.drivers, 'driverId', driver._id, range)) warnings.push('Tài xế không đủ 10 giờ nghỉ giữa hai ca.');
       if (assistant && assignmentConflicts(assignments.assistants, 'assistantId', assistant._id, range)) warnings.push('Phụ xe bị trùng ca.');
-      if (assistant && hasInsufficientRest(assignments.assistants, 'assistantId', assistant._id, range)) warnings.push('Phụ xe không đủ 60 phút nghỉ giữa hai ca.');
+      if (assistant && hasInsufficientRest(assignments.assistants, 'assistantId', assistant._id, range)) warnings.push('Phụ xe không đủ 10 giờ nghỉ giữa hai ca.');
       if (vehicle && assignmentConflicts(assignments.vehicles, 'vehicleId', vehicle._id, range)) warnings.push('Xe bị trùng lịch.');
       if (driver && assignedMinutes(assignments.drivers, 'driverId', driver._id) + range.end - range.start > MAX_WORK_MINUTES) warnings.push('Tài xế vượt quá 8 giờ làm trong ngày.');
       if (assistant && assignedMinutes(assignments.assistants, 'assistantId', assistant._id) + range.end - range.start > MAX_WORK_MINUTES) warnings.push('Phụ xe vượt quá 8 giờ làm trong ngày.');
@@ -743,6 +743,8 @@ export default class AutoGenerateShiftService {
             ...base,
             tripId: trip._id,
             driverId: result.driver._id,
+            assistantId: result.assistant._id,
+            assistantShiftId: shift._id,
             vehicleId: result.vehicle._id,
           }], { session });
           rollback.tripIds.push(tripAssignment._id);
