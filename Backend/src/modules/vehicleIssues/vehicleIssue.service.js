@@ -364,7 +364,7 @@ export class VehicleIssueService {
       },
     });
 
-    await this.markVehicleUnderMaintenance(vehicleId);
+    await this.markVehicleHasIssue(vehicleId);
     issue.maintenanceTaskId = await this.createMaintenanceTask(
       issue,
       { userId },
@@ -444,7 +444,7 @@ export class VehicleIssueService {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    await this.markVehicleUnderMaintenance(vehicleId);
+    await this.markVehicleHasIssue(vehicleId);
     issue.maintenanceTaskId = await this.createMaintenanceTask(
       issue,
       { userId },
@@ -622,9 +622,24 @@ export class VehicleIssueService {
   }
 
   static async markVehicleUnderMaintenance(vehicleId) {
+    const bus = await FleetBus.findById(vehicleId).select('busCode plateNumber').lean();
     await Promise.all([
       FleetBus.updateOne({ _id: vehicleId }, { $set: { status: 'MAINTENANCE' } }),
-      Vehicle.updateOne({ _id: vehicleId }, { $set: { status: 'maintenance' } }),
+      bus ? Vehicle.updateOne(
+        { $or: [{ vehicleCode: bus.busCode }, { plateNumber: bus.plateNumber }] },
+        { $set: { status: 'maintenance' } }
+      ) : null,
+    ]);
+  }
+
+  static async markVehicleHasIssue(vehicleId) {
+    const bus = await FleetBus.findById(vehicleId).select('busCode plateNumber').lean();
+    await Promise.all([
+      FleetBus.updateOne({ _id: vehicleId }, { $set: { status: 'ISSUE' } }),
+      bus ? Vehicle.updateOne(
+        { $or: [{ vehicleCode: bus.busCode }, { plateNumber: bus.plateNumber }] },
+        { $set: { status: 'idle' } }
+      ) : null,
     ]);
   }
 

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import Header from '../../../shared/components/navigation/Header.jsx';
 import useTheme from '../../../shared/hooks/useTheme.js';
 import adminService from '../services/adminService.js';
 import {
@@ -45,14 +44,6 @@ const toDateInputValue = (date = new Date()) => {
   const month = String(value.getMonth() + 1).padStart(2, '0');
   const day = String(value.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
-};
-
-const parseClockToMinutes = (value) => {
-  const match = String(value || '').match(/^(\d{2}):(\d{2})$/);
-  if (!match) return null;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  return hours <= 23 && minutes <= 59 ? (hours * 60) + minutes : null;
 };
 
 const formatPerson = (person = {}) => ({
@@ -184,7 +175,7 @@ const RouteMap = ({ schedule, routes }) => {
   }, [detail]);
 
   return (
-    <div className="relative h-[420px] overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+    <div className="relative h-[330px] overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
       <div ref={elementRef} className="h-full w-full" />
       {!schedule ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-white/75 p-6 text-center text-sm font-semibold text-slate-500">
@@ -196,10 +187,10 @@ const RouteMap = ({ schedule, routes }) => {
 };
 
 const SummaryCard = ({ label, value, hint }) => (
-  <div className="rounded-lg border border-slate-200 bg-white p-4">
+  <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
     <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">{label}</span>
-    <strong className="mt-2 block text-2xl font-black text-slate-950">{value}</strong>
-    <span className="mt-1 block text-xs font-semibold text-slate-500">{hint}</span>
+    <strong className="mt-1 block text-xl font-black text-slate-950">{value}</strong>
+    <span className="mt-0.5 block text-[11px] font-semibold text-slate-500">{hint}</span>
   </div>
 );
 
@@ -284,59 +275,59 @@ const TripScheduleDetailPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-950">
-      <Header />
-      <main className="mx-auto w-full max-w-[1720px] px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div className="min-h-full bg-[#eef9f4] text-slate-950">
+      <main className="mx-auto w-full max-w-[1500px] px-4 py-4 lg:px-6">
+        <div className="mb-4 flex flex-col gap-3 rounded-2xl bg-[#062819] px-5 py-4 text-white shadow-lg shadow-emerald-950/15 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-3xl font-black tracking-tight">Lịch chuyến</h1>
-            <p className="mt-1 text-sm text-slate-500">Theo dõi từng chuyến, tuyến đường, xe khai thác và kíp vận hành.</p>
+            <p className="text-xs font-black uppercase tracking-[0.3em] text-emerald-300">Điều hành chuyến</p>
+            <h1 className="mt-1 text-2xl font-black tracking-tight">Lịch chuyến</h1>
+            <p className="mt-1 text-sm text-emerald-50/80">Theo dõi từng chuyến, tuyến đường, xe khai thác và kíp vận hành.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => updateFilter('serviceDate', toDateInputValue())} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-black hover:border-emerald-300">Hôm nay</button>
-            <button type="button" onClick={() => setFilters({ serviceDate: '', status: '', routeId: '', search: '' })} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold hover:bg-slate-50">Xem tất cả</button>
-            <button type="button" onClick={loadData} disabled={isLoading} className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-black text-emerald-950 disabled:opacity-50">Tải lại</button>
+            <button type="button" onClick={() => updateFilter('serviceDate', toDateInputValue())} className="h-10 rounded-xl bg-white px-4 text-sm font-black text-emerald-950">Hôm nay</button>
+            <button type="button" onClick={() => setFilters({ serviceDate: '', status: '', routeId: '', search: '' })} className="h-10 rounded-xl border border-white/25 bg-white/10 px-4 text-sm font-bold text-white hover:bg-white/20">Xem tất cả</button>
+            <button type="button" onClick={loadData} disabled={isLoading} className="h-10 rounded-xl bg-emerald-400 px-4 text-sm font-black text-emerald-950 disabled:opacity-50">Tải lại</button>
           </div>
         </div>
 
-        <div className="mb-5 grid gap-3 md:grid-cols-4">
+        <div className="mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           <SummaryCard label="Tổng lịch" value={summary.total} hint={filters.serviceDate ? `Ngày ${filters.serviceDate}` : 'Tất cả ngày'} />
           <SummaryCard label="Đã phân công" value={summary.assigned} hint="Đủ xe, tài xế, phụ xe" />
           <SummaryCard label="Đang chạy" value={summary.running} hint="Theo trạng thái vận hành" />
           <SummaryCard label="Cần kiểm tra" value={summary.unassigned} hint="Thiếu xe hoặc nhân sự" />
         </div>
 
-        <section className="mb-5 rounded-lg border border-slate-200 bg-white p-4">
+        <section className="mb-4 rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
           <div className="grid gap-3 lg:grid-cols-[180px_220px_220px_minmax(220px,1fr)]">
             <label>
               <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Ngày chạy</span>
-              <input type="date" value={filters.serviceDate} onChange={(event) => updateFilter('serviceDate', event.target.value)} className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-300" />
+              <input type="date" value={filters.serviceDate} onChange={(event) => updateFilter('serviceDate', event.target.value)} className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-300" />
             </label>
             <label>
               <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Trạng thái</span>
-              <select value={filters.status} onChange={(event) => updateFilter('status', event.target.value)} className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-300">
+              <select value={filters.status} onChange={(event) => updateFilter('status', event.target.value)} className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-300">
                 <option value="">Tất cả trạng thái</option>
                 {Object.entries(scheduleStatusLabels).map(([status, label]) => <option key={status} value={status}>{label}</option>)}
               </select>
             </label>
             <label>
               <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Tuyến</span>
-              <select value={filters.routeId} onChange={(event) => updateFilter('routeId', event.target.value)} className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-300">
+              <select value={filters.routeId} onChange={(event) => updateFilter('routeId', event.target.value)} className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-300">
                 <option value="">Tất cả tuyến</option>
                 {routes.map((route) => <option key={route._id} value={route._id}>{route.routeCode} - {route.routeName}</option>)}
               </select>
             </label>
             <label>
               <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Tìm kiếm</span>
-              <input value={filters.search} onChange={(event) => updateFilter('search', event.target.value)} placeholder="Mã lịch, tuyến, biển số, tài xế..." className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-300" />
+              <input value={filters.search} onChange={(event) => updateFilter('search', event.target.value)} placeholder="Mã lịch, tuyến, biển số, tài xế..." className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-300" />
             </label>
           </div>
         </section>
 
         {message ? <div className="mb-5 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700">{message}</div> : null}
 
-        <div className="grid gap-5 xl:grid-cols-[minmax(560px,0.92fr)_minmax(520px,1.08fr)]">
-          <section className="rounded-lg border border-slate-200 bg-white">
+        <div className="grid gap-4 xl:grid-cols-[minmax(500px,0.9fr)_minmax(520px,1.1fr)]">
+          <section className="overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div>
                 <h2 className="font-black">Danh sách chuyến</h2>
@@ -344,7 +335,7 @@ const TripScheduleDetailPage = () => {
               </div>
               <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">{schedules.length} lịch</span>
             </div>
-            <div className="max-h-[720px] overflow-auto">
+            <div className="max-h-[620px] overflow-auto">
               {isLoading ? (
                 <div className="p-8 text-center text-sm font-semibold text-slate-500">Đang tải lịch chuyến...</div>
               ) : schedules.length ? schedules.map((schedule) => {
@@ -356,7 +347,7 @@ const TripScheduleDetailPage = () => {
                     key={schedule._id}
                     type="button"
                     onClick={() => setSelectedScheduleId(schedule._id)}
-                    className={`block w-full border-b border-slate-100 px-4 py-4 text-left transition ${isSelected ? 'bg-emerald-50' : 'hover:bg-slate-50'}`}
+                    className={`block w-full border-b border-slate-100 px-4 py-3 text-left transition ${isSelected ? 'border-l-4 border-l-emerald-500 bg-emerald-50' : 'hover:bg-slate-50'}`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -365,7 +356,7 @@ const TripScheduleDetailPage = () => {
                       </div>
                       <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-black ${statusTone[schedule.status] || 'bg-slate-100 text-slate-700'}`}>{scheduleStatusLabels[schedule.status] || schedule.status}</span>
                     </div>
-                    <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                    <div className="mt-2 grid gap-1.5 text-xs text-slate-600 sm:grid-cols-2">
                       <span><strong className="text-slate-900">{toDateInputValue(schedule.serviceDate)}</strong> | {schedule.departureTime} - {schedule.expectedArrivalTime}</span>
                       <span>{scheduleDirectionLabels[schedule.direction] || schedule.direction} | {scheduleShiftLabels[schedule.shiftLabel] || '-'}</span>
                       <span className="truncate">Xe: <strong>{schedule.vehicle?.busCode || 'Chưa gán'}</strong></span>
@@ -380,8 +371,8 @@ const TripScheduleDetailPage = () => {
             </div>
           </section>
 
-          <section className="space-y-5">
-            <div className="rounded-lg border border-slate-200 bg-white p-5">
+          <section className="space-y-4">
+            <div className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <h2 className="text-xl font-black">Chi tiết chuyến</h2>
@@ -393,7 +384,7 @@ const TripScheduleDetailPage = () => {
               </div>
 
               {selectedSchedule ? (
-                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                <div className="mt-4 grid gap-2 md:grid-cols-2">
                   {[
                     ['Tuyến', `${selectedSchedule.routeCode || selectedDetail.route?.routeCode || '-'} - ${selectedSchedule.routeName || selectedDetail.route?.routeName || '-'}`],
                     ['Thời gian', `${toDateInputValue(selectedSchedule.serviceDate)} | ${selectedSchedule.departureTime} - ${selectedSchedule.expectedArrivalTime}`],
@@ -402,7 +393,7 @@ const TripScheduleDetailPage = () => {
                     ['Phụ xe', `${formatPerson(selectedSchedule.assistant).name}${formatPerson(selectedSchedule.assistant).phone ? ` - ${formatPerson(selectedSchedule.assistant).phone}` : ''}`],
                     ['Lộ trình', `${selectedDetail.stops.length} trạm | ${selectedDetail.distance || 0} km | ${selectedDetail.duration || 0} phút`],
                   ].map(([label, value]) => (
-                    <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
                       <span className="block text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">{label}</span>
                       <span className="mt-1 block text-sm font-black text-slate-950">{value}</span>
                     </div>
@@ -413,7 +404,7 @@ const TripScheduleDetailPage = () => {
               )}
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-white p-5">
+            <div className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <h2 className="font-black">Bản đồ tuyến đường</h2>
@@ -424,7 +415,7 @@ const TripScheduleDetailPage = () => {
               <RouteMap schedule={selectedSchedule} routes={routes} />
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-white p-5">
+            <div className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
               <h2 className="font-black">Trạm dừng</h2>
               <div className="mt-3 max-h-[360px] overflow-auto rounded-lg border border-slate-200">
                 {selectedDetail.stops.length ? selectedDetail.stops.map((stop, index) => (

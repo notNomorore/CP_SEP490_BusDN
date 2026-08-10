@@ -167,6 +167,10 @@ export const config = {
     apiKey: getEnv('GOOGLE_MAPS_API_KEY'),
   },
 
+  serpApi: {
+    apiKey: getEnv('SERPAPI_KEY'),
+  },
+
   // Da Nang public bus data
   danabus: {
     stopApiUrl: getEnv(

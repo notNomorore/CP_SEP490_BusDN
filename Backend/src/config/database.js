@@ -1,10 +1,12 @@
 // Database connection and initialization
 import mongoose from 'mongoose';
+import dns from 'node:dns';
 import { config } from '../config/environment.js';
 import logger from '../utils/logger.js';
 
 let isConnected = false;
 let lastConnectionError = null;
+let dnsConfigured = false;
 
 mongoose.set('bufferCommands', false);
 
@@ -20,6 +22,14 @@ export const connectDatabase = async () => {
 
   try {
     logger.info('Connecting to MongoDB...');
+
+    // Some Windows/network DNS resolvers refuse Atlas SRV lookups even though
+    // public DNS resolves them correctly. Configure Node's resolver only for
+    // mongodb+srv connections so normal/direct MongoDB URIs are unaffected.
+    if (!dnsConfigured && config.mongodb.uri.startsWith('mongodb+srv://')) {
+      dns.setServers(['8.8.8.8', '1.1.1.1']);
+      dnsConfigured = true;
+    }
 
     await mongoose.connect(config.mongodb.uri, {
       ...config.mongodb.options,

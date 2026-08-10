@@ -51,6 +51,4 @@ router.get(
   asyncHandler(FleetMonitoringController.getFleetLocations)
 );
 
-router.post('/mock-data', asyncHandler(FleetMonitoringController.seedDemoFleet));
-
 export default router;

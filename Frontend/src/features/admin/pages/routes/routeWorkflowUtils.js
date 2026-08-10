@@ -506,39 +506,9 @@ export const prepareRoutePayload = (draft, status = draft.status) => {
     vehicleAssignment: {
       ...draft.vehicleAssignment,
       capacity: Number(draft.vehicleAssignment.capacity || 0),
-      shiftSchedule: `Ngh\u1ec9 \u0111\u1ea7u cu\u1ed1i ${draft.scheduleConfig.layoverMinutes || 0} ph\u00fat; \u0111\u1ed9i xe ${draft.vehicleAssignment.estimatedFleetSize || 0} xe`,
+      shiftSchedule: '',
     },
   };
-};
-
-const parseClock = (value) => {
-  const match = String(value || '').match(/^(\d{2}):(\d{2})$/);
-  if (!match) return null;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (hours > 23 || minutes > 59) return null;
-  return hours * 60 + minutes;
-};
-
-const isPeakScheduleMinute = (minute) => (
-  (minute >= 390 && minute <= 510)
-  || (minute >= 990 && minute <= 1110)
-);
-
-const estimateDailyTrips = (firstTrip, lastTrip, peakFrequency, offPeakFrequency) => {
-  if (
-    firstTrip === null
-    || lastTrip === null
-    || firstTrip >= lastTrip
-    || peakFrequency <= 0
-    || offPeakFrequency <= 0
-  ) return 0;
-  let departuresPerDirection = 0;
-  for (let departure = firstTrip; departure <= lastTrip;) {
-    departuresPerDirection += 1;
-    departure += isPeakScheduleMinute(departure) ? peakFrequency : offPeakFrequency;
-  }
-  return departuresPerDirection * 2;
 };
 
 const sameStopLocation = (left, right) => {
@@ -555,8 +525,6 @@ export const validateRouteDraft = (draft) => {
   const warnings = [];
   const outbound = computeDirection(draft.outboundRoute);
   const inbound = computeDirection(draft.inboundRoute);
-  const firstTrip = parseClock(draft.scheduleConfig.firstDepartureTime);
-  const lastTrip = parseClock(draft.scheduleConfig.lastDepartureTime);
   const totalStops = outbound.orderedStops.length + inbound.orderedStops.length;
   const totalDistance = Number((outbound.estimatedDistanceKm + inbound.estimatedDistanceKm).toFixed(1));
   const totalDuration = outbound.estimatedDurationMinutes + inbound.estimatedDurationMinutes;
@@ -570,12 +538,6 @@ export const validateRouteDraft = (draft) => {
     if (!sameStopLocation(outbound.endStation, inbound.startStation)) errors.push('Chi\u1ec1u v\u1ec1 ph\u1ea3i b\u1eaft \u0111\u1ea7u t\u1ea1i b\u1ebfn cu\u1ed1i c\u1ee7a chi\u1ec1u \u0111i.');
     if (!sameStopLocation(outbound.startStation, inbound.endStation)) errors.push('Chi\u1ec1u v\u1ec1 ph\u1ea3i k\u1ebft th\u00fac t\u1ea1i b\u1ebfn \u0111\u1ea7u c\u1ee7a chi\u1ec1u \u0111i.');
   }
-  if (firstTrip === null || lastTrip === null) errors.push('L\u1ecbch ch\u1ea1y thi\u1ebfu gi\u1edd chuy\u1ebfn \u0111\u1ea7u ho\u1eb7c chuy\u1ebfn cu\u1ed1i.');
-  if (firstTrip !== null && lastTrip !== null && firstTrip >= lastTrip) errors.push('Chuy\u1ebfn \u0111\u1ea7u ph\u1ea3i s\u1edbm h\u01a1n chuy\u1ebfn cu\u1ed1i.');
-  if (lastTrip !== null && lastTrip > parseClock(LAST_BUS_DEPARTURE_TIME)) errors.push('Chuy\u1ebfn cu\u1ed1i kh\u00f4ng \u0111\u01b0\u1ee3c mu\u1ed9n h\u01a1n 18:30.');
-  if (Number(draft.scheduleConfig.peakFrequencyMinutes || 0) <= 0) errors.push('T\u1ea7n su\u1ea5t cao \u0111i\u1ec3m ph\u1ea3i l\u1edbn h\u01a1n 0.');
-  if (Number(draft.scheduleConfig.offPeakFrequencyMinutes || 0) <= 0) errors.push('T\u1ea7n su\u1ea5t th\u1ea5p \u0111i\u1ec3m ph\u1ea3i l\u1edbn h\u01a1n 0.');
-  if (!draft.scheduleConfig.operatingDays.length) errors.push('C\u1ea7n ch\u1ecdn \u00edt nh\u1ea5t m\u1ed9t ng\u00e0y ho\u1ea1t \u0111\u1ed9ng.');
 
   [outbound, inbound].forEach((direction, directionIndex) => {
     const seen = new Set();
@@ -608,12 +570,6 @@ export const validateRouteDraft = (draft) => {
     totalStops,
     totalDistance,
     totalDuration,
-    dailyTrips: estimateDailyTrips(
-      firstTrip,
-      lastTrip,
-      Number(draft.scheduleConfig.peakFrequencyMinutes || 0),
-      Number(draft.scheduleConfig.offPeakFrequencyMinutes || 0)
-    ),
   };
 };
 

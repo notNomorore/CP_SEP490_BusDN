@@ -62,6 +62,7 @@ const DriverAcceptanceSchema = new mongoose.Schema(
 const TripScheduleSchema = new mongoose.Schema(
   {
     scheduleCode: { type: String, required: true, unique: true, trim: true, uppercase: true },
+    operationCycleCode: { type: String, trim: true, uppercase: true, default: '', index: true },
     serviceDate: { type: Date, required: true },
     routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
     routeCode: { type: String, trim: true, default: '' },
@@ -71,6 +72,8 @@ const TripScheduleSchema = new mongoose.Schema(
     expectedArrivalTime: { type: String, trim: true, default: '' },
     turnaroundEndTime: { type: String, trim: true, default: '' },
     shiftLabel: { type: String, trim: true, default: '' },
+    demandLevel: { type: String, enum: ['OFF_PEAK', 'MID_PEAK', 'PEAK'], default: 'OFF_PEAK' },
+    headwayMinutes: { type: Number, min: 5, max: 180, default: 30 },
     isScheduleException: { type: Boolean, default: false },
     exceptionReason: { type: String, trim: true, default: '' },
     status: {

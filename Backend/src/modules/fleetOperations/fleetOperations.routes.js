@@ -34,7 +34,7 @@ router.post(
 
 router.post(
   '/gps',
-  authorizeRole('DRIVER', 'BUS_ASSISTANT', 'ADMIN'),
+  authorizeRole('DRIVER'),
   validateRequest(validateGpsUpdate),
   asyncHandler(FleetOperationsController.updateGps)
 );

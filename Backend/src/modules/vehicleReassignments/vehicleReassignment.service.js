@@ -207,11 +207,13 @@ export class VehicleReassignmentService {
     const [vehicles, buses] = await Promise.all([
       Vehicle.find({
         status: 'available',
+        vehicleCode: { $not: /^(DN-AUTO-|DN-DEMO-)/i },
         ...(requiredCapacity ? { capacity: { $gte: requiredCapacity } } : {}),
         ...(oldVehicleId ? { _id: { $ne: target.oldVehicleId } } : {}),
       }).sort({ capacity: 1, vehicleCode: 1 }).lean(),
       FleetBus.find({
-        status: { $in: ['ACTIVE', 'RESERVE'] },
+        status: { $in: ['AVAILABLE', 'ACTIVE', 'RESERVE'] },
+        busCode: { $not: /^(DN-AUTO-|DN-DEMO-)/i },
         ...(requiredCapacity ? { capacity: { $gte: requiredCapacity } } : {}),
         ...(oldVehicleId ? { _id: { $ne: target.oldVehicleId } } : {}),
       }).sort({ capacity: 1, busCode: 1 }).lean(),

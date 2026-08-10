@@ -1,8 +1,34 @@
 import ShiftService from './ShiftService.js';
 import AutoGenerateShiftService from './AutoGenerateShiftService.js';
+import TripAllocationService from './TripAllocationService.js';
+import DriverAssignmentService from './DriverAssignmentService.js';
 import logger from '../../utils/logger.js';
 
 export default class ShiftController {
+  static async tripAvailableDrivers(req, res) {
+    try { return res.json({ success: true, ...(await DriverAssignmentService.availableDrivers(req.params.tripId)) }); }
+    catch (error) { return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: error.message, details: error.details }); }
+  }
+
+  static async assignDriverToTrip(req, res) {
+    try { return res.status(201).json({ success: true, message: 'Phân công tài xế vào chuyến thành công.', ...(await DriverAssignmentService.assign({ tripId: req.params.tripId, driverId: req.body?.driverId, actorId: req.user?.userId })) }); }
+    catch (error) { return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: error.message, details: error.details }); }
+  }
+
+  static async removeDriverFromTrip(req, res) {
+    try { return res.json({ success: true, message: 'Đã gỡ tài xế khỏi chuyến.', ...(await DriverAssignmentService.remove({ tripId: req.params.tripId, actorId: req.user?.userId })) }); }
+    catch (error) { return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: error.message }); }
+  }
+
+  static async previewTripAllocation(req, res, _next) {
+    try { return res.json({ success: true, ...(await TripAllocationService.preview(req.query)) }); }
+    catch (error) { return res.status(error.statusCode || 500).json({ success: false, message: error.message }); }
+  }
+
+  static async confirmTripAllocation(req, res, _next) {
+    try { return res.status(201).json({ success: true, ...(await TripAllocationService.confirm({ rows: req.body?.rows, actorId: req.user?.userId })) }); }
+    catch (error) { return res.status(error.statusCode || 500).json({ success: false, message: error.message }); }
+  }
   static async listShifts(req, res, next) {
     try {
       const shifts = await ShiftService.listShifts(req.query);
@@ -189,6 +215,7 @@ export default class ShiftController {
   static async assignDriverToSelectedShift(req, res, _next) {
     try {
       const assignment = await ShiftService.assignDriverToShift(req.params.shiftId, { ...req.body, actorId: req.user?.userId });
+      await ShiftService.markManualAssignment(req.params.shiftId, req.user?.userId);
       return res.status(201).json({ success: true, message: 'Phan cong tai xe vao ca thanh cong', assignment });
     } catch (error) {
       logger.error('Assign driver to selected shift error:', error);
@@ -199,6 +226,7 @@ export default class ShiftController {
   static async assignAssistantToSelectedShift(req, res, _next) {
     try {
       const assignment = await ShiftService.assignAssistantToShift(req.params.shiftId, { ...req.body, actorId: req.user?.userId });
+      await ShiftService.markManualAssignment(req.params.shiftId, req.user?.userId);
       return res.status(201).json({ success: true, message: 'Phan cong phu xe vao ca thanh cong', assignment });
     } catch (error) {
       logger.error('Assign assistant to selected shift error:', error);
@@ -209,6 +237,7 @@ export default class ShiftController {
   static async assignVehicleToSelectedShift(req, res, _next) {
     try {
       const assignment = await ShiftService.assignVehicleToShift(req.params.shiftId, { ...req.body, actorId: req.user?.userId });
+      await ShiftService.markManualAssignment(req.params.shiftId, req.user?.userId);
       return res.status(201).json({ success: true, message: 'Phan cong xe vao ca thanh cong', assignment });
     } catch (error) {
       logger.error('Assign vehicle to selected shift error:', error);

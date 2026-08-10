@@ -14,6 +14,12 @@ const VehicleLocationLogSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    driverId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
     lat: {
       type: Number,
       required: true,
