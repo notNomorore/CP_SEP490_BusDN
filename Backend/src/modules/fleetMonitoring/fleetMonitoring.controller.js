@@ -36,10 +36,6 @@ export class FleetMonitoringController {
     return res.success(result, 'Fleet locations retrieved successfully');
   }
 
-  static async seedDemoFleet(req, res) {
-    const result = await FleetMonitoringService.seedDemoFleet(req.user);
-    return res.created(result, 'Demo fleet data created successfully');
-  }
 }
 
 export default FleetMonitoringController;

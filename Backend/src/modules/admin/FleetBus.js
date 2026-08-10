@@ -50,8 +50,8 @@ const FleetBusSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['ACTIVE', 'INACTIVE', 'RESERVE', 'ASSIGNED', 'MAINTENANCE'],
-      default: 'ACTIVE',
+      enum: ['AVAILABLE', 'ACTIVE', 'INACTIVE', 'RESERVE', 'ASSIGNED', 'ISSUE', 'MAINTENANCE'],
+      default: 'AVAILABLE',
     },
     notes: {
       type: String,

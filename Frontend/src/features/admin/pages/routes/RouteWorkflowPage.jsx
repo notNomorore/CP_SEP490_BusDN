@@ -2,51 +2,54 @@
 import L from 'leaflet';
 import toast from 'react-hot-toast';
 import 'leaflet/dist/leaflet.css';
-import Header from '../../../../shared/components/navigation/Header.jsx';
 import { HOME_BUS_HERO_IMAGE } from '../../../../shared/constants/images.js';
 import useTheme from '../../../../shared/hooks/useTheme.js';
 import adminService from '../../services/adminService.js';
-import ConfigureScheduleStep from './ConfigureScheduleStep.jsx';
 import CreateRouteStep from './CreateRouteStep.jsx';
 import DefinePathStep from './DefinePathStep.jsx';
 import ReviewRouteStep from './ReviewRouteStep.jsx';
-import { DA_NANG_BOUNDS, DA_NANG_CENTER, FIRST_BUS_DEPARTURE_TIME, LAST_BUS_DEPARTURE_TIME, computeDirection, isInsideDaNang, normalizeRouteFromApi, routeStatusLabels, validateRouteDraft } from './routeWorkflowUtils.js';
+import TripAllocationPanel from './TripAllocationPanel.jsx';
+import { DA_NANG_BOUNDS, DA_NANG_CENTER, FIRST_BUS_DEPARTURE_TIME, LAST_BUS_DEPARTURE_TIME, computeDirection, isInsideDaNang, normalizeRouteFromApi, routeStatusLabels } from './routeWorkflowUtils.js';
 import { useRouteWorkflowStore } from './routeWorkflowStore.js';
 
 const steps = [
   { label: 'Tạo tuyến', hint: 'Thông tin cơ bản' },
   { label: 'Dựng lộ trình', hint: 'Trạm + bản đồ' },
-  { label: 'Cấu hình lịch chạy', hint: 'Kế hoạch vận hành' },
   { label: 'Rà soát & kích hoạt', hint: 'Kiểm tra dữ liệu' },
 ];
 
 const operationSections = [
   { key: 'routes', label: 'Vận hành tuyến', hint: 'Tạo, cập nhật, tạm dừng và dựng lộ trình' },
   { key: 'stops', label: 'Quản lý trạm dừng', hint: 'Tạo, cập nhật và gán trạm vào tuyến' },
-  { key: 'fleet', label: 'Quản lý đội xe', hint: 'Thêm và cập nhật trạng thái đội xe' },
+  { key: 'trip-planning', label: 'Phân chuyến', hint: 'Quyết định số chuyến sáng, trưa và chiều' },
+    { key: 'trip-assignment', label: 'Phân bổ chuyến', hint: 'Gán ca nhân sự và xe vào các chuyến đã lập' },
 ];
 
-operationSections.push({ key: 'scheduling', label: 'Điều phối lịch chuyến', hint: 'Tạo lịch, gán xe và nhân sự theo chuyến' });
-
 const busStatusLabels = {
+  AVAILABLE: 'Sẵn sàng',
   ACTIVE: 'Đang hoạt động',
-  RESERVE: 'Dự phòng',
+  ISSUE: 'Gặp sự cố',
   MAINTENANCE: 'Đang bảo trì',
 };
 const BUS_CAPACITY_MIN = 15;
 const BUS_CAPACITY_MAX = 25;
-const ASSIGNABLE_BUS_STATUSES = new Set(['ACTIVE', 'RESERVE']);
+const ASSIGNABLE_BUS_STATUSES = new Set(['AVAILABLE', 'ACTIVE', 'RESERVE']);
 
 const busStatusOverview = {
+  AVAILABLE: {
+    icon: 'check_circle',
+    accentClassName: 'bg-cyan-100 text-cyan-700',
+    barClassName: 'bg-cyan-400',
+  },
   ACTIVE: {
     icon: 'directions_bus',
     accentClassName: 'bg-emerald-100 text-emerald-700',
     barClassName: 'bg-emerald-400',
   },
-  RESERVE: {
-    icon: 'backup',
-    accentClassName: 'bg-sky-100 text-sky-700',
-    barClassName: 'bg-sky-400',
+  ISSUE: {
+    icon: 'warning',
+    accentClassName: 'bg-rose-100 text-rose-700',
+    barClassName: 'bg-rose-400',
   },
   MAINTENANCE: {
     icon: 'build',
@@ -72,7 +75,7 @@ const emptyBusForm = {
   plateNumber: '',
   busType: 'Standard City Bus',
   capacity: BUS_CAPACITY_MIN,
-  status: 'ACTIVE',
+  status: 'AVAILABLE',
 };
 
 const WarningModal = ({ open, message, onClose }) => {
@@ -145,7 +148,13 @@ const scheduleDirectionLabels = {
 
 const scheduleShiftLabels = {
   MORNING: 'Ca sáng',
+  MIDDAY: 'Ca trưa',
   AFTERNOON: 'Ca chiều',
+};
+const addDateDays = (value, days) => {
+  const date = new Date(`${value}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return toDateInputValue(date);
 };
 
 const parseClockToMinutes = (value = '') => {
@@ -155,6 +164,17 @@ const parseClockToMinutes = (value = '') => {
   const minutes = Number(match[2]);
   if (hours > 23 || minutes > 59) return null;
   return (hours * 60) + minutes;
+};
+
+const toMinutes = (value = '') => parseClockToMinutes(value);
+
+const addMinutesToClock = (clock, minutesToAdd = 0) => {
+  const base = parseClockToMinutes(clock);
+  if (base === null) return '';
+  const total = Math.max(0, Math.min(1439, base + Number(minutesToAdd || 0)));
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 };
 
 const routeScheduleWeekdayTokens = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -405,15 +425,15 @@ const StopMapPicker = ({
           if (isInsideDaNang(lat, lng)) pickLocationRef.current({ lat, lng });
         })
         .addTo(layer);
-      mapRef.current.setView([latitude, longitude], Math.max(mapRef.current.getZoom(), 15));
+      mapRef.current.setView([latitude, longitude], Math.max(mapRef.current.getZoom(), 18));
     }
 
     window.setTimeout(() => mapRef.current?.invalidateSize(), 80);
   }, [form._id, form.latitude, form.longitude, form.stationName, stations]);
 
   return (
-    <div className="relative min-h-[320px] overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
-      <div ref={elementRef} className="h-[360px] w-full" />
+    <div className="relative min-h-[420px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm">
+      <div ref={elementRef} className="h-[460px] w-full" />
       <div className="pointer-events-none absolute bottom-4 left-4 z-[500] max-w-[260px] rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 text-xs font-semibold leading-5 text-slate-700 shadow-md backdrop-blur">
         Bấm bản đồ để lấy tọa độ. Kéo marker xanh để chỉnh vị trí trạm.
       </div>
@@ -426,9 +446,9 @@ const StopMapPicker = ({
           box-shadow: 0 10px 24px rgba(15, 23, 42, 0.25);
           color: #083344;
           display: flex;
-          height: 30px;
+          height: 24px;
           justify-content: center;
-          width: 30px;
+          width: 24px;
         }
         .stop-map-marker-draft {
           background: #34d399;
@@ -639,7 +659,7 @@ const ScheduleListPanel = ({ onDeleteSchedule, onEditSchedule, onEmergencyReassi
                 <td className="px-3 py-3"><span className="block font-bold">{route?.routeCode || schedule.routeCode || '-'}</span><span className="mt-1 block max-w-56 text-slate-500">{route?.routeName || schedule.routeName || '-'}</span></td>
                 <td className="px-3 py-3 whitespace-nowrap">{toDateInputValue(schedule.serviceDate)}</td>
                 <td className="px-3 py-3 whitespace-nowrap font-bold">{schedule.departureTime || '--:--'} - {schedule.expectedArrivalTime || '--:--'}</td>
-                <td className="px-3 py-3 whitespace-nowrap">{scheduleShiftLabels[schedule.shiftLabel] || (parseClockToMinutes(schedule.departureTime) < 810 ? 'Ca sáng' : 'Ca chiều')}</td>
+                <td className="px-3 py-3 whitespace-nowrap">{scheduleShiftLabels[schedule.shiftLabel] || (parseClockToMinutes(schedule.departureTime) < 720 ? 'Ca sáng' : 'Ca chiều')}</td>
                 <td className="px-3 py-3 whitespace-nowrap">{scheduleDirectionLabels[schedule.direction] || schedule.direction}</td>
                 <td className="px-3 py-3"><span className="block font-bold">{schedule.vehicle?.busCode || vehicle.busCode || 'Chưa gán'}</span><span className="mt-1 block text-slate-500">{schedule.vehicle?.plateNumber || vehicle.plateNumber || ''}</span></td>
                 <td className="px-3 py-3"><span className="block font-bold">{schedule.driver?.fullName || driver.fullName || 'Chưa gán'}</span><span className="mt-1 block text-slate-500">{schedule.driver?.phone || driver.phoneNumber || ''}</span></td>
@@ -1018,7 +1038,7 @@ const FrequencyScheduleModal = ({ onClose, onSaved, routes }) => {
     startDate: toDateInputValue(),
     endDate: toDateInputValue(),
     autoAssign: true,
-    replaceScheduled: false,
+    replaceScheduled: true,
   });
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -1117,6 +1137,455 @@ const FrequencyScheduleModal = ({ onClose, onSaved, routes }) => {
         ) : null}
         {rows.length ? <div className="mt-5"><div className="mb-3 flex justify-between"><h3 className="font-black">Bản xem trước</h3><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold">{rows.length} chuyến · {rows.filter((row) => row.shiftLabel === 'MORNING').length} sáng · {rows.filter((row) => row.shiftLabel === 'AFTERNOON').length} chiều</span></div>{hasIncompleteRows ? <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">Chỉ lưu được lịch đã đủ xe, tài xế và phụ xe. Các dòng còn cảnh báo cần xóa hoặc bổ sung ca làm trước.</div> : null}<div className="max-h-96 overflow-auto rounded-lg border border-slate-200"><table className="min-w-[1200px] w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr>{['Ngày', 'Mã lịch', 'Ca', 'Chiều', 'Xuất bến', 'Đến', 'Rảnh lại', 'Xe', 'Tài xế', 'Phụ xe', 'Cảnh báo', ''].map((item) => <th key={item} className="px-3 py-3 font-black uppercase text-slate-500">{item}</th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.previewId} className="border-t border-slate-200"><td className="px-3 py-3">{row.serviceDate}</td><td className="px-3 py-3 font-bold">{row.scheduleCode}</td><td className="px-3 py-3 font-bold">{scheduleShiftLabels[row.shiftLabel] || '-'}</td><td className="px-3 py-3">{scheduleDirectionLabels[row.direction]}</td><td className="px-3 py-3">{row.departureTime}</td><td className="px-3 py-3">{row.expectedArrivalTime}</td><td className="px-3 py-3">{row.turnaroundEndTime || row.expectedArrivalTime}</td><td className="px-3 py-3">{row.vehicle?.busCode || 'Chưa gán'}</td><td className="px-3 py-3">{row.driver?.fullName || 'Chưa gán'}</td><td className="px-3 py-3">{row.assistant?.fullName || 'Chưa gán'}</td><td className="px-3 py-3 text-amber-700">{row.warnings?.join(' ') || 'Hợp lệ'}</td><td className="px-3 py-3"><button type="button" onClick={() => setRows((current) => current.filter((item) => item.previewId !== row.previewId))} className="text-rose-600">Xóa</button></td></tr>)}</tbody></table></div><div className="mt-4 flex justify-end"><button type="button" disabled={isLoading || hasIncompleteRows} onClick={confirm} className="rounded-lg bg-emerald-500 px-5 py-3 text-sm font-black text-emerald-950 disabled:opacity-50">Xác nhận tạo lịch</button></div></div> : null}
       </div>
+    </div>
+  );
+};
+
+const TRIP_DEMAND_PERIODS = [
+  { key: 'MORNING', label: 'Khung chuyến sáng', start: '05:30', end: '12:00', tone: 'border-amber-200 bg-amber-50' },
+  { key: 'AFTERNOON', label: 'Khung chuyến chiều', start: '12:00', end: '18:30', tone: 'border-violet-200 bg-violet-50' },
+];
+
+const formatPlanningDate = (value) => {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('vi-VN', {
+    weekday: 'long',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(date);
+};
+
+const TripDemandPlanningPanel = ({ onSaved, routes, schedules = [] }) => {
+  const [form, setForm] = useState({
+    applyMode: 'WEEK',
+    serviceDate: toDateInputValue(),
+    selectedWeekdays: [1, 2, 3, 4, 5],
+    routeId: '',
+    direction: 'BOTH',
+    frequencies: { MORNING: 30, AFTERNOON: 30 },
+    peakWindows: {
+      MORNING: { enabled: true, start: '06:30', end: '08:30', frequency: 15 },
+      AFTERNOON: { enabled: true, start: '15:30', end: '16:30', frequency: 15 },
+    },
+    middayWindow: { enabled: true, start: '10:00', end: '12:00', frequency: 20 },
+  });
+  const [rows, setRows] = useState([]);
+  const [message, setMessage] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [expandedPlanKey, setExpandedPlanKey] = useState('');
+  const [deletingPlanKey, setDeletingPlanKey] = useState('');
+  const [deletingTripId, setDeletingTripId] = useState('');
+  const selectedRoute = routes.find((route) => String(route._id || route.id) === String(form.routeId));
+  const planningDates = useMemo(() => {
+    if (form.applyMode === 'DAY') return [form.serviceDate];
+    const selected = new Date(`${form.serviceDate}T00:00:00`);
+    if (Number.isNaN(selected.getTime())) return [];
+    const day = selected.getDay();
+    const monday = addDateDays(form.serviceDate, -(day === 0 ? 6 : day - 1));
+    return Array.from({ length: 7 }, (_, index) => addDateDays(monday, index))
+      .filter((date) => form.selectedWeekdays.includes(new Date(`${date}T00:00:00`).getDay()));
+  }, [form.applyMode, form.selectedWeekdays, form.serviceDate]);
+  const routeDuration = (direction) => {
+    if (!selectedRoute) return 60;
+    const routeDirection = direction === 'INBOUND' ? selectedRoute.inboundRoute : selectedRoute.outboundRoute;
+    return Math.max(10, Number(routeDirection?.estimatedDurationMinutes || selectedRoute.scheduleConfig?.estimatedTripDurationMinutes || 60));
+  };
+  const departuresForPeriod = (period) => {
+    if (!selectedRoute) return [];
+    const normalFrequency = Number(form.frequencies[period.key]);
+    if (!Number.isFinite(normalFrequency) || normalFrequency < 5) return [];
+    const cycleDuration = form.direction === 'BOTH'
+      ? routeDuration('OUTBOUND') + MIN_RESOURCE_BUFFER_MINUTES + routeDuration('INBOUND')
+      : routeDuration(form.direction);
+    const start = toMinutes(period.start);
+    const latest = toMinutes(period.end) - cycleDuration;
+    if (latest < start) return [];
+    const specialWindows = [
+      { ...form.peakWindows[period.key], level: 'PEAK' },
+      ...(period.key === 'MORNING' ? [{ ...form.middayWindow, level: 'MID_PEAK' }] : []),
+    ].filter((window) => window.enabled)
+      .map((window) => ({ ...window, from: Math.max(start, toMinutes(window.start)), to: Math.min(toMinutes(period.end), toMinutes(window.end)), frequency: Math.max(5, Number(window.frequency) || normalFrequency) }))
+      .filter((window) => window.from < window.to)
+      .sort((left, right) => left.from - right.from);
+    const departures = [];
+    for (let cursor = start; cursor <= latest;) {
+      departures.push(cursor);
+      const activeWindow = specialWindows.find((window) => cursor >= window.from && cursor < window.to);
+      let next = cursor + (activeWindow?.frequency || normalFrequency);
+      const nextBoundary = specialWindows.flatMap((window) => [window.from, window.to]).filter((boundary) => boundary > cursor).sort((left, right) => left - right)[0];
+      if (Number.isFinite(nextBoundary) && next > nextBoundary) next = nextBoundary;
+      if (next <= cursor) break;
+      cursor = next;
+    }
+    return departures;
+  };
+  const roundCountForPeriod = (period) => departuresForPeriod(period).length;
+  const confirmedPlans = useMemo(() => {
+    const groups = new Map();
+    schedules.filter((schedule) => schedule.status !== 'CANCELLED').forEach((schedule) => {
+      const routeId = String(schedule.routeId?._id || schedule.routeId || '');
+      const serviceDate = toDateInputValue(schedule.serviceDate);
+      if (!routeId || !serviceDate) return;
+      const key = `${routeId}-${serviceDate}`;
+      if (!groups.has(key)) groups.set(key, { key, routeId, serviceDate, routeCode: schedule.routeCode, routeName: schedule.routeName, trips: [] });
+      groups.get(key).trips.push(schedule);
+    });
+    return [...groups.values()].map((plan) => ({
+      ...plan,
+      trips: [...plan.trips].sort((left, right) => String(left.departureTime).localeCompare(String(right.departureTime))),
+    })).sort((left, right) => right.serviceDate.localeCompare(left.serviceDate) || left.routeCode.localeCompare(right.routeCode));
+  }, [schedules]);
+  const confirmedPlansByDate = useMemo(() => {
+    const groups = new Map();
+    confirmedPlans.forEach((plan) => {
+      if (!groups.has(plan.serviceDate)) groups.set(plan.serviceDate, []);
+      groups.get(plan.serviceDate).push(plan);
+    });
+    return [...groups.entries()].map(([serviceDate, plans]) => ({
+      serviceDate,
+      plans,
+      totalTrips: plans.reduce((sum, plan) => sum + plan.trips.length, 0),
+    }));
+  }, [confirmedPlans]);
+
+  const buildPreview = () => {
+    if (!selectedRoute || !form.serviceDate || !planningDates.length) {
+      setMessage('Vui lòng chọn tuyến và ít nhất một ngày vận hành.');
+      return;
+    }
+    const nextRows = [];
+    const planningErrors = [];
+    const routeId = selectedRoute._id || selectedRoute.id;
+    const routeCode = selectedRoute.routeCode || selectedRoute.routeNumber;
+    const routeName = selectedRoute.routeName || selectedRoute.name;
+    const appendRow = ({ period, serviceDate, dateCode, direction, index, departure, duration, pairCode = '', demandLevelOverride, headwayOverride }) => {
+      const departureTime = addMinutesToClock('00:00', departure);
+      const expectedArrivalTime = addMinutesToClock(departureTime, duration);
+      const directionCode = direction === 'OUTBOUND' ? 'D' : 'V';
+      const peak = form.peakWindows[period.key];
+      const inPeak = peak.enabled && departure >= toMinutes(peak.start) && departure < toMinutes(peak.end);
+      const inMidPeak = period.key === 'MORNING' && form.middayWindow.enabled && departure >= toMinutes(form.middayWindow.start) && departure < toMinutes(form.middayWindow.end);
+      const demandLevel = demandLevelOverride || (inPeak ? 'PEAK' : (inMidPeak ? 'MID_PEAK' : 'OFF_PEAK'));
+      const headwayMinutes = Number(headwayOverride || (inPeak ? peak.frequency : (inMidPeak ? form.middayWindow.frequency : form.frequencies[period.key])));
+      nextRows.push({
+        previewId: `${serviceDate}-${period.key}-${direction}-${index}`,
+        scheduleCode: `${routeCode}-${dateCode}-${departureTime.replace(':', '')}-${directionCode}`,
+        serviceDate,
+        routeId,
+        routeCode,
+        routeName,
+        direction,
+        departureTime,
+        expectedArrivalTime,
+        turnaroundEndTime: addMinutesToClock(expectedArrivalTime, MIN_RESOURCE_BUFFER_MINUTES),
+        shiftLabel: period.key,
+        demandLevel,
+        headwayMinutes,
+        vehicle: {},
+        driver: {},
+        assistant: {},
+        status: 'PLANNED',
+        operationCycleCode: pairCode,
+        warnings: ['Chờ phân ca, xe và nhân sự.'],
+      });
+      return { departureTime, expectedArrivalTime, demandLevel, headwayMinutes };
+    };
+    TRIP_DEMAND_PERIODS.forEach((period) => {
+      const frequency = Number(form.frequencies[period.key]);
+      if (!Number.isFinite(frequency) || frequency < 5 || frequency > 180) {
+        planningErrors.push(`${period.label}: tần suất phải từ 5 đến 180 phút.`);
+        return;
+      }
+      const peak = form.peakWindows[period.key];
+      if (peak?.enabled) {
+        const peakFrequency = Number(peak.frequency);
+        if (!Number.isFinite(peakFrequency) || peakFrequency < 5 || peakFrequency > 180) {
+          planningErrors.push(`${period.label}: tần suất cao điểm phải từ 5 đến 180 phút.`);
+          return;
+        }
+        if (toMinutes(peak.start) < toMinutes(period.start) || toMinutes(peak.end) > toMinutes(period.end) || toMinutes(peak.start) >= toMinutes(peak.end)) {
+          planningErrors.push(`${period.label}: khung cao điểm phải nằm trong khung vận hành và giờ kết thúc phải sau giờ bắt đầu.`);
+          return;
+        }
+      }
+      if (period.key === 'MORNING' && form.middayWindow.enabled) {
+        const midday = form.middayWindow;
+        const middayFrequency = Number(midday.frequency);
+        if (!Number.isFinite(middayFrequency) || middayFrequency < 5 || middayFrequency > 180) {
+          planningErrors.push('Khung tăng cường giữa ngày: tần suất phải từ 5 đến 180 phút.');
+          return;
+        }
+        if (toMinutes(midday.start) < toMinutes(period.start) || toMinutes(midday.end) > toMinutes(period.end) || toMinutes(midday.start) >= toMinutes(midday.end)) {
+          planningErrors.push('Khung tăng cường giữa ngày phải nằm trong ca sáng và giờ kết thúc phải sau giờ bắt đầu.');
+          return;
+        }
+        if (peak?.enabled && toMinutes(midday.start) < toMinutes(peak.end) && toMinutes(midday.end) > toMinutes(peak.start)) {
+          planningErrors.push('Khung cao điểm sáng và khung tăng cường giữa ngày không được chồng lấn.');
+          return;
+        }
+      }
+      const start = toMinutes(period.start);
+      const end = toMinutes(period.end);
+      const outboundDuration = routeDuration('OUTBOUND');
+      const inboundDuration = routeDuration('INBOUND');
+      const cycleDuration = form.direction === 'BOTH'
+        ? outboundDuration + MIN_RESOURCE_BUFFER_MINUTES + inboundDuration
+        : routeDuration(form.direction);
+      const latestDeparture = end - cycleDuration;
+      if (latestDeparture < start) {
+        planningErrors.push(`${period.label} không đủ thời gian cho một ${form.direction === 'BOTH' ? 'vòng đi-về' : 'chuyến'} hoàn chỉnh.`);
+        return;
+      }
+      const departures = departuresForPeriod(period);
+      planningDates.forEach((serviceDate) => {
+        const dateCode = serviceDate.replace(/-/g, '').slice(2);
+        for (let index = 0; index < departures.length; index += 1) {
+          const departure = departures[index];
+          if (form.direction === 'BOTH') {
+            const pairCode = `${routeCode}-${dateCode}-${period.key}-${index + 1}`;
+            const outbound = appendRow({ period, serviceDate, dateCode, direction: 'OUTBOUND', index, departure, duration: outboundDuration, pairCode });
+            const inboundDeparture = departure + outboundDuration + MIN_RESOURCE_BUFFER_MINUTES;
+            appendRow({ period, serviceDate, dateCode, direction: 'INBOUND', index, departure: inboundDeparture, duration: inboundDuration, pairCode, demandLevelOverride: outbound.demandLevel, headwayOverride: outbound.headwayMinutes });
+          } else {
+            appendRow({ period, serviceDate, dateCode, direction: form.direction, index, departure, duration: routeDuration(form.direction) });
+          }
+        }
+      });
+    });
+    // Rows are appended as an atomic D -> V pair inside each period. Keep that
+    // insertion order; sorting globally by departure time would interleave
+    // another cycle's D between the current cycle's D and V.
+    setRows(nextRows.sort((left, right) => left.serviceDate.localeCompare(right.serviceDate)));
+    setPreviewExpanded(false);
+    setMessage(planningErrors.join(' ') || (nextRows.length ? '' : 'Không tạo được chuyến cho các ngày đã chọn.'));
+  };
+
+  const confirmPlan = async () => {
+    if (!rows.length) return;
+    setIsSaving(true);
+    setMessage('');
+    try {
+      const response = await adminService.confirmGeneratedTripSchedules(rows, false, true);
+      await onSaved?.();
+      const savedSchedules = response.schedules || [];
+      setRows([]);
+      toast.success(`Đã tạo ${savedSchedules.length} chuyến. Kế hoạch đã được thu gọn ở danh sách bên dưới.`);
+    } catch (error) {
+      setMessage(error?.message || 'Không thể lưu kế hoạch phân chuyến.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const totalPerDirection = TRIP_DEMAND_PERIODS.reduce((sum, period) => sum + roundCountForPeriod(period), 0);
+  const totalTrips = totalPerDirection * (form.direction === 'BOTH' ? 2 : 1) * planningDates.length;
+  const previewRequiredTeams = useMemo(() => {
+    const dates = [...new Set(rows.map((row) => row.serviceDate))];
+    return Math.max(0, ...dates.map((serviceDate) => {
+      const cycles = [...rows.filter((row) => row.serviceDate === serviceDate).reduce((groups, row) => {
+        const key = row.operationCycleCode || row.previewId;
+        const current = groups.get(key) || { start: Number.POSITIVE_INFINITY, end: 0 };
+        current.start = Math.min(current.start, toMinutes(row.departureTime));
+        current.end = Math.max(current.end, toMinutes(row.turnaroundEndTime || row.expectedArrivalTime));
+        groups.set(key, current);
+        return groups;
+      }, new Map()).values()];
+      const events = cycles.flatMap((cycle) => [{ at: cycle.start, delta: 1 }, { at: cycle.end, delta: -1 }])
+        .sort((left, right) => left.at - right.at || left.delta - right.delta);
+      let active = 0;
+      return events.reduce((peak, event) => { active += event.delta; return Math.max(peak, active); }, 0);
+    }));
+  }, [rows]);
+  const deleteConfirmedPlan = async (plan) => {
+    if (!window.confirm(`Xóa toàn bộ ${plan.trips.length} chuyến của ${plan.routeCode || 'tuyến này'} ngày ${plan.serviceDate}?`)) return;
+    setDeletingPlanKey(plan.key);
+    try {
+      const response = await adminService.deleteTripSchedules({ scheduleIds: plan.trips.map((trip) => trip._id).filter(Boolean) });
+      if (expandedPlanKey === plan.key) setExpandedPlanKey('');
+      await onSaved?.();
+      toast.success(`Đã xóa ${response.deletedCount || 0} chuyến.`);
+      if (response.protectedCount) toast(`Có ${response.protectedCount} chuyến đang chạy/đã hoàn thành nên được giữ lại.`);
+    } catch (error) {
+      toast.error(error?.message || 'Không thể xóa kế hoạch chuyến.');
+    } finally {
+      setDeletingPlanKey('');
+    }
+  };
+  const deleteConfirmedTrip = async (trip) => {
+    const tripId = String(trip._id || '');
+    if (!tripId || trip.status !== 'PLANNED') return;
+    if (!window.confirm(`Xóa riêng chuyến ${trip.scheduleCode}?\n\nChuyến còn lại trong cùng vòng D–V sẽ được giữ nguyên. Thao tác này không thể hoàn tác.`)) return;
+    setDeletingTripId(tripId);
+    try {
+      await adminService.deleteTripSchedule(tripId);
+      await onSaved?.();
+      toast.success(`Đã xóa chuyến ${trip.scheduleCode}.`);
+    } catch (error) {
+      toast.error(error?.message || `Không thể xóa chuyến ${trip.scheduleCode}.`);
+    } finally {
+      setDeletingTripId('');
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 text-slate-900 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.22em] text-emerald-600">Kế hoạch nhu cầu vận hành</p>
+          <h2 className="mt-2 text-2xl font-black">Phân chuyến theo ngày và khung giờ</h2>
+          <p className="mt-2 text-sm text-slate-500">Chỉ xác định chuyến cần chạy. Xe và nhân sự sẽ được phân ở bước tiếp theo.</p>
+        </div>
+        <div className="rounded-xl bg-emerald-50 px-5 py-3 text-right">
+          <span className="block text-xs font-bold uppercase text-emerald-700">Tổng lượt chạy dự kiến</span>
+          <strong className="text-2xl text-emerald-900">{totalTrips} lượt</strong>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-4">
+        <label><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Chế độ lập kế hoạch</span><select className="h-11 w-full rounded-xl border border-slate-200 px-3 font-bold" value={form.applyMode} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, applyMode: event.target.value })); }}><option value="WEEK">Theo tuần</option><option value="DAY">Một ngày ngoại lệ</option></select></label>
+        <label><span className="mb-1 block text-xs font-bold uppercase text-slate-500">{form.applyMode === 'WEEK' ? 'Chọn một ngày trong tuần' : 'Ngày phục vụ'}</span><input type="date" className="h-11 w-full rounded-xl border border-slate-200 px-3" value={form.serviceDate} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, serviceDate: event.target.value })); }} /></label>
+        <label><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Tuyến</span><select className="h-11 w-full rounded-xl border border-slate-200 px-3" value={form.routeId} onChange={(event) => { setRows([]); setMessage(''); setForm((current) => ({ ...current, routeId: event.target.value })); }}><option value="">Chọn tuyến đã công bố</option>{routes.filter((route) => route.status === 'PUBLISHED').map((route) => { const routeId = route._id || route.id; return <option key={routeId} value={routeId}>{route.routeCode || route.routeNumber} - {route.routeName || route.name}</option>; })}</select></label>
+        <label><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Chiều chạy bắt buộc</span><div className="flex h-11 items-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-sm font-black text-emerald-800">Đủ cặp Chiều đi (D) → Chiều về (V)</div></label>
+      </div>
+      {form.applyMode === 'WEEK' ? <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 p-3"><div className="flex flex-wrap items-center gap-2"><span className="mr-2 text-xs font-black uppercase text-emerald-800">Ngày áp dụng</span>{[{ key: 1, label: 'T2' }, { key: 2, label: 'T3' }, { key: 3, label: 'T4' }, { key: 4, label: 'T5' }, { key: 5, label: 'T6' }, { key: 6, label: 'T7' }, { key: 0, label: 'CN' }].map((day) => <label key={day.key} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-black ${form.selectedWeekdays.includes(day.key) ? 'border-emerald-300 bg-white text-emerald-900' : 'border-slate-200 bg-slate-50 text-slate-500'}`}><input type="checkbox" checked={form.selectedWeekdays.includes(day.key)} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, selectedWeekdays: event.target.checked ? [...new Set([...current.selectedWeekdays, day.key])] : current.selectedWeekdays.filter((value) => value !== day.key) })); }} />{day.label}</label>)}</div><p className="mt-2 text-xs text-emerald-800">Sẽ sinh lịch cho {planningDates.length} ngày: {planningDates.join(', ') || 'chưa chọn ngày'}.</p></div> : null}
+
+      <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+        <b>Khung chuyến được chia theo giờ xuất bến và không chồng lấn.</b>
+        <span className="ml-1">Mốc 12:00 được đồng bộ với ca làm: ca sáng 05:30–12:00 và ca chiều 12:00–18:30. Mỗi vòng D–V phải hoàn tất trong khung ca tương ứng.</span>
+      </div>
+
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
+        {TRIP_DEMAND_PERIODS.map((period) => (
+          <div key={period.key} className={`rounded-xl border p-4 ${period.tone}`}>
+            <span className="text-sm font-black">{period.label}</span>
+            <span className="ml-2 text-xs text-slate-500">{period.start}–{period.end}</span>
+            <div className="mt-3 flex items-center gap-2 rounded-lg border border-white bg-white px-3"><input type="number" min="5" max="180" step="5" className="h-11 min-w-0 flex-1 bg-transparent text-lg font-black outline-none" value={form.frequencies[period.key]} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, frequencies: { ...current.frequencies, [period.key]: event.target.value } })); }} /><span className="text-sm font-bold text-slate-500">phút/vòng</span></div>
+            <span className="mt-2 block text-xs font-semibold text-slate-500">Bình thường: cứ {form.frequencies[period.key] || 0} phút xuất bến một vòng D–V.</span>
+            <div className="mt-3 rounded-lg border border-white/80 bg-white/70 p-3">
+              <label className="flex items-center justify-between gap-3 text-sm font-black"><span>Áp dụng giờ cao điểm</span><input type="checkbox" checked={form.peakWindows[period.key].enabled} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, peakWindows: { ...current.peakWindows, [period.key]: { ...current.peakWindows[period.key], enabled: event.target.checked } } })); }} /></label>
+              {form.peakWindows[period.key].enabled ? <div className="mt-3 grid grid-cols-3 gap-2"><label className="text-[11px] font-bold text-slate-500">Từ<input type="time" min={period.start} max={period.end} value={form.peakWindows[period.key].start} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, peakWindows: { ...current.peakWindows, [period.key]: { ...current.peakWindows[period.key], start: event.target.value } } })); }} className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900" /></label><label className="text-[11px] font-bold text-slate-500">Đến<input type="time" min={period.start} max={period.end} value={form.peakWindows[period.key].end} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, peakWindows: { ...current.peakWindows, [period.key]: { ...current.peakWindows[period.key], end: event.target.value } } })); }} className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900" /></label><label className="text-[11px] font-bold text-slate-500">Phút/vòng<input type="number" min="5" max="180" step="5" value={form.peakWindows[period.key].frequency} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, peakWindows: { ...current.peakWindows, [period.key]: { ...current.peakWindows[period.key], frequency: event.target.value } } })); }} className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-black text-slate-900" /></label></div> : null}
+            </div>
+            <span className="mt-2 block text-xs font-black text-slate-600">Dự kiến {roundCountForPeriod(period)} vòng · {roundCountForPeriod(period) * 2} lượt chạy</span>
+          </div>
+        ))}
+        <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
+          <span className="text-sm font-black">Tăng cường giữa ngày</span>
+          <span className="ml-2 text-xs text-slate-500">Nhu cầu trung bình–cao</span>
+          <div className="mt-3 rounded-lg border border-white/80 bg-white/70 p-3">
+            <label className="flex items-center justify-between gap-3 text-sm font-black"><span>Áp dụng khung tăng cường</span><input type="checkbox" checked={form.middayWindow.enabled} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, middayWindow: { ...current.middayWindow, enabled: event.target.checked } })); }} /></label>
+            {form.middayWindow.enabled ? <div className="mt-3 grid grid-cols-3 gap-2"><label className="text-[11px] font-bold text-slate-500">Từ<input type="time" min="05:30" max="12:00" value={form.middayWindow.start} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, middayWindow: { ...current.middayWindow, start: event.target.value } })); }} className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900" /></label><label className="text-[11px] font-bold text-slate-500">Đến<input type="time" min="05:30" max="12:00" value={form.middayWindow.end} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, middayWindow: { ...current.middayWindow, end: event.target.value } })); }} className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900" /></label><label className="text-[11px] font-bold text-slate-500">Phút/vòng<input type="number" min="5" max="180" step="5" value={form.middayWindow.frequency} onChange={(event) => { setRows([]); setForm((current) => ({ ...current, middayWindow: { ...current.middayWindow, frequency: event.target.value } })); }} className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-black text-slate-900" /></label></div> : null}
+          </div>
+          <p className="mt-3 text-xs font-semibold text-slate-600">Mặc định 10:00–12:00, dùng khi nhu cầu cuối ca sáng cao hơn bình thường. Vòng chạy vẫn phải hoàn tất trước 12:00.</p>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button type="button" onClick={buildPreview} className="rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white">Tạo bản xem trước</button>
+        {rows.length ? <button type="button" disabled={isSaving} onClick={confirmPlan} className="rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-emerald-950 disabled:opacity-60">{isSaving ? 'Đang lưu...' : `Xác nhận ${rows.length} chuyến`}</button> : null}
+      </div>
+      {message ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">{message}</div> : null}
+
+      {rows.length ? (
+        <div className="mt-5 overflow-hidden rounded-xl border border-violet-200 bg-violet-50/40">
+          <button type="button" onClick={() => setPreviewExpanded((value) => !value)} className="flex w-full items-center justify-between gap-4 p-4 text-left">
+            <span>
+              <b className="block">Bản nháp · {selectedRoute?.routeCode || selectedRoute?.routeNumber}</b>
+              <small className="text-slate-500">
+                {planningDates.length === 1
+                  ? planningDates[0]
+                  : `${planningDates[0]} – ${planningDates.at(-1)} · ${planningDates.length} ngày`}
+                {' · '}{rows.length} lượt · cần tối thiểu {previewRequiredTeams} tổ xe/tài xế/phụ xe cùng lúc
+              </small>
+            </span>
+            <span className="font-black text-violet-700">{previewExpanded ? 'Thu gọn ▲' : 'Xem chi tiết ▼'}</span>
+          </button>
+          {previewExpanded ? (
+            <div className="max-h-96 overflow-auto border-t border-violet-200 bg-white">
+              <table className="w-full min-w-[980px] text-left text-sm">
+                <thead className="sticky top-0 bg-slate-100">
+                  <tr>{['Ngày', 'Ca', 'Mã chuyến', 'Chiều', 'Xuất bến', 'Đến dự kiến', 'Trạng thái'].map((item) => <th key={item} className="px-4 py-3 text-xs font-black uppercase text-slate-500">{item}</th>)}</tr>
+                </thead>
+                <tbody>{rows.map((row, index) => {
+                  const isFirstInCycle = index === 0 || rows[index - 1]?.operationCycleCode !== row.operationCycleCode;
+                  const isLastInCycle = index === rows.length - 1 || rows[index + 1]?.operationCycleCode !== row.operationCycleCode;
+                  const isFirstOfDate = index === 0 || rows[index - 1]?.serviceDate !== row.serviceDate;
+                  return (
+                    <tr key={row.previewId} className={`${isFirstOfDate ? 'border-t-4 border-violet-300' : isFirstInCycle ? 'border-t-2 border-emerald-300' : 'border-t border-emerald-100'} ${isFirstInCycle ? 'bg-emerald-50/50' : 'bg-white'} ${isLastInCycle ? 'border-b-2 border-b-emerald-300' : ''}`}>
+                      <td className="px-4 py-3 font-bold text-violet-700">{row.serviceDate}</td>
+                      <td className="px-4 py-3 font-bold">{scheduleShiftLabels[row.shiftLabel] || 'Ca sáng'}</td>
+                      <td className="px-4 py-3 font-black">{row.scheduleCode}</td>
+                      <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-black ${row.direction === 'OUTBOUND' ? 'bg-emerald-100 text-emerald-800' : 'bg-sky-100 text-sky-800'}`}>{row.direction === 'OUTBOUND' ? 'D · Chiều đi' : 'V · Chiều về'}</span></td>
+                      <td className="px-4 py-3">{row.departureTime}</td>
+                      <td className="px-4 py-3">{row.expectedArrivalTime}</td>
+                      <td className="px-4 py-3 text-amber-700">Chờ xác nhận</td>
+                    </tr>
+                  );
+                })}</tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <section className="mt-6 border-t border-slate-200 pt-5">
+        <div className="mb-4">
+          <h3 className="text-lg font-black">Kế hoạch chuyến đã tạo theo ngày</h3>
+          <p className="text-sm text-slate-500">Mỗi ngày hiển thị các tuyến và toàn bộ chuyến D–V đã xác nhận trong ngày đó.</p>
+        </div>
+        {confirmedPlansByDate.length ? (
+          <div className="space-y-4">
+            {confirmedPlansByDate.map((dateGroup) => (
+              <section key={dateGroup.serviceDate} className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70">
+                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-100 px-4 py-3">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">Ngày phục vụ</p>
+                    <h4 className="mt-1 text-base font-black capitalize">{formatPlanningDate(dateGroup.serviceDate)}</h4>
+                  </div>
+                  <div className="flex gap-2 text-xs font-black">
+                    <span className="rounded-full bg-white px-3 py-1.5 text-slate-700">{dateGroup.plans.length} tuyến</span>
+                    <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-emerald-800">{dateGroup.totalTrips} chuyến</span>
+                  </div>
+                </header>
+                <div className="space-y-2 p-3">
+                  {dateGroup.plans.map((plan) => {
+                    const expanded = expandedPlanKey === plan.key;
+                    const firstTrip = plan.trips[0];
+                    const lastTrip = plan.trips.at(-1);
+                    const route = routes.find((item) => String(item._id || item.id) === plan.routeId);
+                    return (
+                      <article key={plan.key} className="overflow-hidden rounded-xl border border-emerald-200 bg-white">
+                        <div className="flex flex-col gap-2 bg-emerald-50 p-3 sm:flex-row sm:items-center">
+                          <button type="button" onClick={() => setExpandedPlanKey(expanded ? '' : plan.key)} className="flex flex-1 items-center justify-between gap-4 text-left">
+                            <span>
+                              <b className="block">{plan.routeCode || route?.routeCode || 'Tuyến'} · {plan.routeName || route?.routeName || ''}</b>
+                              <small className="text-slate-600">{plan.trips.length} chuyến · {firstTrip?.departureTime}–{lastTrip?.expectedArrivalTime}</small>
+                            </span>
+                            <span className="shrink-0 text-xs font-black text-emerald-700">{expanded ? 'Thu gọn ▲' : 'Chi tiết ▼'}</span>
+                          </button>
+                          <button type="button" disabled={deletingPlanKey === plan.key || Boolean(deletingTripId)} onClick={() => deleteConfirmedPlan(plan)} className="shrink-0 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-black text-rose-600 disabled:opacity-50">
+                            {deletingPlanKey === plan.key ? 'Đang xóa...' : 'Xóa toàn bộ kế hoạch'}
+                          </button>
+                        </div>
+                        {expanded ? (
+                          <div className="max-h-80 overflow-auto border-t border-emerald-200">
+                            <table className="w-full min-w-[980px] text-left text-sm">
+                              <thead className="sticky top-0 bg-slate-100"><tr>{['Mã chuyến', 'Ca', 'Chiều', 'Xuất bến', 'Đến dự kiến', 'Trạng thái', 'Thao tác'].map((item) => <th key={item} className="px-4 py-3 text-xs font-black uppercase text-slate-500">{item}</th>)}</tr></thead>
+                              <tbody>{plan.trips.map((trip) => { const protectedTrip = trip.status !== 'PLANNED'; const deleting = deletingTripId === String(trip._id || ''); return <tr key={trip._id || trip.scheduleCode} className="border-t border-slate-100"><td className="px-4 py-3 font-black">{trip.scheduleCode}</td><td className="px-4 py-3">{trip.shiftLabel === 'MORNING' ? 'Sáng' : 'Chiều'}</td><td className="px-4 py-3">{trip.direction === 'OUTBOUND' ? 'D · Chiều đi' : 'V · Chiều về'}</td><td className="px-4 py-3">{trip.departureTime}</td><td className="px-4 py-3">{trip.expectedArrivalTime}</td><td className="px-4 py-3">{trip.status === 'PLANNED' ? 'Chờ phân bổ' : trip.status}</td><td className="px-4 py-3"><button type="button" title={protectedTrip ? 'Chuyến đã được phân bổ hoặc đã phát sinh vận hành nên không thể xóa' : `Xóa riêng ${trip.scheduleCode}`} disabled={protectedTrip || Boolean(deletingPlanKey) || Boolean(deletingTripId)} onClick={() => deleteConfirmedTrip(trip)} className="whitespace-nowrap rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400">{deleting ? 'Đang xóa…' : protectedTrip ? 'Đã phân bổ · Không thể xóa' : 'Xóa chuyến này'}</button></td></tr>; })}</tbody>
+                            </table>
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Chưa có kế hoạch chuyến nào được xác nhận.</p>}
+      </section>
     </div>
   );
 };
@@ -1494,7 +1963,7 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
   );
 };
 
-const FleetOperationsPanel = ({ buses, onSaved }) => {
+export const FleetOperationsPanel = ({ buses, onSaved }) => {
   const [query, setQuery] = useState('');
   const [editingBusId, setEditingBusId] = useState('');
   const [form, setForm] = useState(emptyBusForm);
@@ -1504,8 +1973,7 @@ const FleetOperationsPanel = ({ buses, onSaved }) => {
   const filteredBuses = useMemo(() => {
     const normalizedQuery = normalizeStationSearch(query);
     return buses
-      .filter((bus) => !normalizedQuery || [bus.busCode, bus.plateNumber, bus.busType, bus.status].some((value) => normalizeStationSearch(value).includes(normalizedQuery)))
-      .slice(0, 5);
+      .filter((bus) => !normalizedQuery || [bus.busCode, bus.plateNumber, bus.busType, bus.status].some((value) => normalizeStationSearch(value).includes(normalizedQuery)));
   }, [buses, query]);
   const resetForm = () => {
     setEditingBusId('');
@@ -1569,9 +2037,10 @@ const FleetOperationsPanel = ({ buses, onSaved }) => {
           <input className={inputClassName} placeholder="Loại xe" value={form.busType} onChange={(event) => setForm((current) => ({ ...current, busType: event.target.value }))} />
           <div className="grid gap-2 sm:grid-cols-2">
             <input type="number" min={BUS_CAPACITY_MIN} max={BUS_CAPACITY_MAX} className={inputClassName} placeholder={`Sức chứa ${BUS_CAPACITY_MIN}-${BUS_CAPACITY_MAX} chỗ`} value={form.capacity} onChange={(event) => setForm((current) => ({ ...current, capacity: event.target.value }))} />
-            <select className={inputClassName} value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
+            <select disabled className={`${inputClassName} disabled:cursor-not-allowed disabled:bg-slate-100`} value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
+              <option value="AVAILABLE">{busStatusLabels.AVAILABLE}</option>
               <option value="ACTIVE">{busStatusLabels.ACTIVE}</option>
-              <option value="RESERVE">{busStatusLabels.RESERVE}</option>
+              <option value="ISSUE">{busStatusLabels.ISSUE}</option>
               <option value="MAINTENANCE">{busStatusLabels.MAINTENANCE}</option>
             </select>
           </div>
@@ -1636,6 +2105,20 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
       .filter((station) => isInsideDaNang(station.latitude, station.longitude))
       .slice(0, 5);
   }, [stations]);
+  const requestedHouseNumber = addressQuery.trim().match(/^\s*(\d+[A-Za-z]?(?:[/-]\d+[A-Za-z]?)?)/)?.[1] || '';
+  const requiresExactHouseNumber = Boolean(requestedHouseNumber);
+  const getExactHouseNumberError = () => (
+    `Chưa tìm thấy tọa độ chính xác cho số nhà ${requestedHouseNumber}. Cần nguồn dữ liệu có house_number, ví dụ cấu hình GOOGLE_MAPS_API_KEY, hoặc chọn thủ công trên bản đồ.`
+  );
+  const getAddressResultMessage = (result) => {
+    if (result?.exactStreetNumber) {
+      return 'Đã đặt marker xanh đúng tọa độ số nhà tìm thấy trên bản đồ.';
+    }
+    if (requiresExactHouseNumber) {
+      return getExactHouseNumberError();
+    }
+    return 'Đã đặt marker xanh tại tọa độ gần nhất tìm thấy. Nếu chưa đúng cửa nhà, kéo marker xanh để chỉnh chính xác.';
+  };
 
   const searchAddress = async (event) => {
     event?.preventDefault();
@@ -1654,7 +2137,9 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
       const response = await adminService.searchStopAddresses(searchText);
       const results = response.results || [];
       setAddressSearchResults(results);
-      const firstResult = results[0];
+      const firstResult = requiresExactHouseNumber
+        ? results.find((result) => result.exactStreetNumber)
+        : results[0];
       if (firstResult) {
         setSelectedAddressResult(firstResult);
         setEditingStationId('');
@@ -1668,9 +2153,9 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
           ward: firstResult.ward || current.ward,
         }));
         setErrors((current) => ({ ...current, address: undefined, latitude: undefined, longitude: undefined }));
-        setMessage(firstResult.exactStreetNumber
-          ? 'Đã hiển thị đúng vị trí số nhà trên bản đồ.'
-          : 'Đã hiển thị vị trí gần đúng trên bản đồ. Có thể kéo marker xanh để chỉnh lại.');
+        setMessage(getAddressResultMessage(firstResult));
+      } else if (results.length && requiresExactHouseNumber) {
+        setMessage(getExactHouseNumberError());
       } else {
         setMessage('Không tìm thấy địa điểm phù hợp.');
       }
@@ -1753,6 +2238,11 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
     }
   };
   const pickAddressResult = (result) => {
+    if (requiresExactHouseNumber && !result.exactStreetNumber) {
+      setSelectedAddressResult(null);
+      setMessage(getExactHouseNumberError());
+      return;
+    }
     setSelectedAddressResult(result);
     setEditingStationId('');
     setForm((current) => ({
@@ -1765,13 +2255,16 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
       ward: result.ward || current.ward,
     }));
     setErrors((current) => ({ ...current, address: undefined, latitude: undefined, longitude: undefined }));
-    setMessage('Đã chọn địa chỉ và hiển thị vị trí trên bản đồ.');
+    setMessage(getAddressResultMessage(result));
   };
 
   const fillStopFromSearch = () => {
-    const result = selectedAddressResult || addressSearchResults[0];
+    const result = selectedAddressResult
+      || (requiresExactHouseNumber
+        ? addressSearchResults.find((item) => item.exactStreetNumber)
+        : addressSearchResults[0]);
     if (!result) {
-      setMessage('Hãy tìm và chọn một địa điểm trước khi thêm trạm nhanh.');
+      setMessage(requiresExactHouseNumber ? getExactHouseNumberError() : 'Hãy tìm và chọn một địa điểm trước khi thêm trạm nhanh.');
       return;
     }
 
@@ -1843,19 +2336,19 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
   const stopInputClassName = 'h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100';
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 text-slate-900">
-      <div className="flex items-start justify-between gap-3">
+    <div className="overflow-hidden rounded-3xl border border-emerald-100 bg-white text-slate-900 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 bg-gradient-to-r from-emerald-950 to-emerald-800 px-6 py-5 text-white">
         <div>
-          <h2 className="text-lg font-black text-slate-950">Quản lý trạm dừng</h2>
-          <p className="mt-1 text-xs leading-5 text-slate-500">
-            Tạo và cập nhật trạm dừng. Gán trạm vào tuyến tại bước Dựng lộ trình bằng cách thêm trạm vào chiều tuyến.
+          <h2 className="text-xl font-black">Quản lý trạm dừng</h2>
+          <p className="mt-1 text-sm leading-5 text-emerald-100">
+            Tìm vị trí, tạo trạm và quản lý thư viện điểm dừng trên cùng một màn hình.
           </p>
         </div>
-        <span className="shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">{stations.length}</span>
+        <span className="shrink-0 rounded-full bg-white/15 px-4 py-2 text-xs font-black text-white">{stations.length} trạm khả dụng · {routes.length} tuyến</span>
       </div>
 
-      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <form onSubmit={saveStop} className="grid content-start gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+      <div className="grid items-start gap-5 p-5 xl:grid-cols-[380px_minmax(0,1fr)]">
+        <form onSubmit={saveStop} className="grid content-start gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
           <div>
             <h3 className="text-sm font-black text-slate-950">Thông tin trạm</h3>
             <p className="mt-1 text-xs text-slate-500">Nhập thông tin cơ bản hoặc chọn nhanh một trạm trên bản đồ.</p>
@@ -1913,7 +2406,13 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
                       className={`rounded-lg border px-3 py-2 text-left text-xs transition ${isSelected ? 'border-cyan-400 bg-cyan-50' : 'border-slate-200 hover:border-cyan-300 hover:bg-slate-50'}`}
                     >
                       <span className="block text-sm font-black text-slate-900">{result.displayName}</span>
-                      <span className="mt-1 block font-semibold text-slate-500">{result.exactStreetNumber ? 'Khớp số nhà' : 'Bấm để xem trên bản đồ'}</span>
+                      <span className="mt-1 block font-semibold text-slate-500">
+                        {result.exactStreetNumber
+                          ? 'Khớp số nhà'
+                          : requiresExactHouseNumber
+                            ? 'Không khớp số nhà, không đặt marker tự động'
+                            : 'Chưa có tọa độ số nhà, bấm để đặt marker gần nhất'}
+                      </span>
                     </button>
                   );
                 })}
@@ -1934,19 +2433,19 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
           </div>
           {message ? <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">{message}</div> : null}
         </form>
-        <div className="grid content-start gap-3">
+        <div className="grid min-w-0 content-start gap-4">
           <StopMapPicker
             form={form}
             onPickLocation={pickMapLocation}
             onPickStation={pickSuggestedStation}
             stations={stations}
           />
-          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-sm font-black text-slate-950">Gợi ý nhanh</h3>
               <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">{quickSuggestions.length}</span>
             </div>
-            <div className="mt-3 grid max-h-56 gap-2 overflow-y-auto pr-1">
+            <div className="mt-3 grid max-h-44 gap-2 overflow-y-auto pr-1 md:grid-cols-2">
               {quickSuggestions.map((station) => (
                 <button key={station._id} type="button" onClick={() => pickSuggestedStation(station)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-emerald-300 hover:shadow-sm">
                   <span className="block font-black text-slate-900">{station.stationName || station.stationCode}</span>
@@ -1961,7 +2460,7 @@ const StopOperationsPanel = ({ isDarkMode, onSaved, routes, stations }) => {
         </div>
       </div>
 
-      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+      <div className="mx-5 mb-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-black text-slate-950">Trạm được tạo mới</h3>
@@ -2013,15 +2512,15 @@ const RouteWorkflowPage = () => {
   const [assistantStaff, setAssistantStaff] = useState([]);
   const [driverShiftAssignments, setDriverShiftAssignments] = useState([]);
   const [assistantShiftAssignments, setAssistantShiftAssignments] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const hasLoadedCoreData = useRef(false);
   const [error, setError] = useState('');
   const [activeOperationSection, setActiveOperationSection] = useState('routes');
   const activeStep = useRouteWorkflowStore((state) => state.activeStep);
   const setActiveStep = useRouteWorkflowStore((state) => state.setActiveStep);
-  const draft = useRouteWorkflowStore((state) => state.draft);
   const loadRoute = useRouteWorkflowStore((state) => state.loadRoute);
   const resetDraft = useRouteWorkflowStore((state) => state.resetDraft);
-  const validation = useMemo(() => validateRouteDraft(draft), [draft]);
 
   const shellClassName = isDarkMode ? 'bg-[#071516] text-slate-100' : 'bg-[#f4fbfd] text-slate-900';
   const panelClassName = isDarkMode
@@ -2031,20 +2530,40 @@ const RouteWorkflowPage = () => {
     isDarkMode ? 'border-white/10 bg-white/[0.04] text-white placeholder:text-slate-500' : 'border-slate-200 bg-white text-slate-900 placeholder:text-slate-400'
   }`;
 
-  const loadData = async () => {
-    setIsLoading(true);
+  useEffect(() => {
+    if (activeStep > steps.length - 1) setActiveStep(steps.length - 1);
+  }, [activeStep, setActiveStep]);
+
+  const loadData = useCallback(async () => {
+    const isInitialRequest = !hasLoadedCoreData.current;
+    if (isInitialRequest) setIsInitialLoading(true);
+    else setIsRefreshing(true);
     setError('');
     try {
-      const [stationsResponse, routesResponse, busesResponse, staffResponse, schedulesResponse, shiftAssignmentsResponse] = await Promise.all([
-        adminService.getStations({ limit: 1000 }),
-        adminService.getRoutes({ limit: 100 }),
-        adminService.getBuses(),
-        adminService.getDrivers(),
-        loadAllTripSchedules(),
-        adminService.getShiftAssignments(),
-      ]);
+      const stationsRequest = adminService.getStations({ limit: 1000 });
+      const routesRequest = adminService.getRoutes({ limit: 100 });
+      const busesRequest = adminService.getBuses();
+      const staffRequest = adminService.getDrivers();
+      const schedulesRequest = loadAllTripSchedules();
+      const shiftAssignmentsRequest = adminService.getShiftAssignments();
+      const operationsRequest = Promise.all([
+        busesRequest,
+        staffRequest,
+        schedulesRequest,
+        shiftAssignmentsRequest,
+      ]).then((value) => ({ value }), (requestError) => ({ requestError }));
+
+      // Route and station data are enough to render the main workflow. The
+      // heavier operations datasets continue loading without blocking the UI.
+      const [stationsResponse, routesResponse] = await Promise.all([stationsRequest, routesRequest]);
       setStations(stationsResponse.stations || []);
       setRoutes(routesResponse.routes || []);
+      hasLoadedCoreData.current = true;
+      setIsInitialLoading(false);
+
+      const operationsResult = await operationsRequest;
+      if (operationsResult.requestError) throw operationsResult.requestError;
+      const [busesResponse, staffResponse, schedulesResponse, shiftAssignmentsResponse] = operationsResult.value;
       setBuses(busesResponse.buses || []);
       setDrivers(staffResponse.drivers || []);
       setAssistantStaff(staffResponse.assistantStaff || []);
@@ -2059,13 +2578,14 @@ const RouteWorkflowPage = () => {
     } catch (loadError) {
       setError(loadError?.message || 'Không thể tải dữ liệu quản lý tuyến.');
     } finally {
-      setIsLoading(false);
+      setIsInitialLoading(false);
+      setIsRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   const deleteSchedule = async (schedule) => {
     const confirmed = window.confirm(`Xóa ca ${schedule.scheduleCode}? Thao tác này không thể hoàn tác.`);
@@ -2121,15 +2641,13 @@ const RouteWorkflowPage = () => {
   const activeStepContent = [
     <CreateRouteStep key="create" inputClassName={inputClassName} panelClassName={panelClassName} routes={routes} stations={stations} />,
     <DefinePathStep key="path" inputClassName={inputClassName} panelClassName={panelClassName} stations={stations} isDarkMode={isDarkMode} />,
-    <ConfigureScheduleStep key="schedule" inputClassName={inputClassName} panelClassName={panelClassName} />,
     <ReviewRouteStep key="review" panelClassName={panelClassName} isDarkMode={isDarkMode} onSaved={loadData} routes={routes} />,
   ];
 
-  if (isLoading) {
+  if (isInitialLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white">
-        <Header forceDarkMode={isDarkMode} />
-        <div className="px-6 pt-40 text-center">
+      <div className="min-h-full bg-slate-950 text-white">
+        <div className="px-6 py-16 text-center">
           <p className="text-sm uppercase tracking-[0.32em] text-slate-500">Đang tải workflow quản lý tuyến</p>
         </div>
       </div>
@@ -2137,10 +2655,9 @@ const RouteWorkflowPage = () => {
   }
 
   return (
-    <div className={`min-h-screen overflow-hidden ${shellClassName}`}>
-      <Header forceDarkMode={isDarkMode} />
+    <div className={`min-h-full overflow-hidden ${shellClassName}`}>
       <WarningModal open={Boolean(error)} message={error} onClose={() => setError('')} />
-      <main className="relative min-h-screen pt-28">
+      <main className="relative min-h-full py-4">
         <style>{`
           .route-workflow-readable .bg-white,
           .route-workflow-readable .bg-slate-50 {
@@ -2155,36 +2672,37 @@ const RouteWorkflowPage = () => {
         `}</style>
         <div className={`absolute inset-0 ${isDarkMode ? 'bg-[#071516]' : 'bg-[#f4fbfd]'}`} />
         <div className="pointer-events-none absolute inset-0">
-          <img src={HOME_BUS_HERO_IMAGE} alt="" aria-hidden="true" className="h-full w-full object-cover object-center" style={{ opacity: isDarkMode ? 0.36 : 0.14 }} />
-          <div className={`absolute inset-0 ${isDarkMode ? 'bg-[#001a0f]/70' : 'bg-white/68'}`} />
+          <img src={HOME_BUS_HERO_IMAGE} alt="" aria-hidden="true" className="h-full w-full object-cover object-center" style={{ opacity: isDarkMode ? 0.28 : 0.06 }} />
+          <div className={`absolute inset-0 ${isDarkMode ? 'bg-[#001a0f]/75' : 'bg-white/80'}`} />
         </div>
-        <div className="route-workflow-readable relative mx-auto max-w-[1800px] px-4 pb-16 lg:px-6">
-          <div className="mb-6 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+        <div className="route-workflow-readable relative mx-auto max-w-[1500px] px-4 pb-8 lg:px-6">
+          <div className="mb-4 flex flex-col gap-3 rounded-2xl bg-[#062819] px-5 py-4 text-white shadow-lg shadow-emerald-950/15 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.34em] text-emerald-500">Quản lý tuyến</p>
-              <h1 className="mt-3 text-4xl font-black tracking-tight">Quản lý tuyến xe buýt</h1>
-              <p className="mt-3 max-w-3xl text-base leading-7 text-slate-500">
+              <p className="text-xs font-bold uppercase tracking-[0.3em] text-emerald-300">Quản lý tuyến</p>
+              <h1 className="mt-1 text-2xl font-black tracking-tight">Quản lý tuyến xe buýt</h1>
+              <p className="mt-1 max-w-3xl text-sm text-emerald-50/80">
                 Hoàn tất các nghiệp vụ quản trị: tạo tuyến, cập nhật thông tin, dựng lộ trình hai chiều, quản lý trạm dừng và điều phối đội xe.
               </p>
             </div>
-            <div className="flex flex-wrap gap-3">
-              <button type="button" onClick={resetDraft} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700">
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={resetDraft} className="h-10 rounded-xl bg-white px-4 text-sm font-bold text-emerald-950">
                 Tạo bản nháp mới
               </button>
-              <button type="button" onClick={loadData} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700">
-                Tải lại
+              <button type="button" disabled={isRefreshing} onClick={loadData} className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-4 text-sm font-bold text-white disabled:opacity-60">
+                <span className={`material-symbols-outlined text-base ${isRefreshing ? 'animate-spin' : ''}`}>refresh</span>
+                {isRefreshing ? 'Đang đồng bộ' : 'Tải lại'}
               </button>
             </div>
           </div>
 
-          <div className={`mb-5 rounded-2xl border p-3 ${panelClassName}`}>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div className={`mb-4 rounded-2xl border p-2 ${panelClassName}`}>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
               {operationSections.map((section) => (
                 <button
                   key={section.key}
                   type="button"
                   onClick={() => setActiveOperationSection(section.key)}
-                  className={`rounded-xl border px-4 py-3 text-left transition ${
+                  className={`rounded-xl border px-4 py-2.5 text-left transition ${
                     activeOperationSection === section.key
                       ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
                       : isDarkMode
@@ -2200,14 +2718,14 @@ const RouteWorkflowPage = () => {
           </div>
 
           {activeOperationSection === 'routes' ? (
-          <div className={`mb-5 rounded-2xl border p-4 ${panelClassName}`}>
-            <div className="grid gap-3 md:grid-cols-4">
+          <div className={`mb-4 rounded-2xl border p-2 ${panelClassName}`}>
+            <div className="grid gap-2 md:grid-cols-3">
               {steps.map((step, index) => (
                 <button
                   key={step.label}
                   type="button"
                   onClick={() => setActiveStep(index)}
-                  className={`rounded-xl border px-4 py-3 text-left transition ${
+                  className={`rounded-xl border px-4 py-2.5 text-left transition ${
                     activeStep === index
                       ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
                       : isDarkMode
@@ -2225,14 +2743,14 @@ const RouteWorkflowPage = () => {
           ) : null}
 
           {activeOperationSection === 'routes' ? (
-          <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className={`mb-4 grid gap-4 ${activeStep === 2 ? 'xl:grid-cols-[minmax(0,1fr)_280px]' : 'xl:grid-cols-[minmax(0,1fr)_320px]'}`}>
             <div>{activeStepContent[activeStep]}</div>
-            <aside className={`rounded-2xl border p-5 ${panelClassName}`}>
+            <aside className={`rounded-2xl border p-4 ${panelClassName}`}>
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-black">Thư viện tuyến</h2>
                 <span className="text-xs font-bold text-slate-500">{routes.length} tuyến</span>
               </div>
-              <div className="mt-4 max-h-[520px] space-y-3 overflow-y-auto pr-1">
+              <div className="mt-3 max-h-[500px] space-y-2 overflow-y-auto pr-1">
                 {routes.length ? routes.map((route) => (
                   <div key={route._id} className="rounded-xl border border-slate-200 bg-white p-3 text-slate-800">
                     <div className="w-full text-left">
@@ -2253,51 +2771,30 @@ const RouteWorkflowPage = () => {
                 )}
               </div>
 
-              {activeStep === 2 ? (
-                <div className="mt-5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
-                  <strong className="block text-slate-900">Xem nhanh kiểm tra</strong>
-                  <span className="mt-2 block">{validation.errors.length} lỗi, {validation.warnings.length} cảnh báo. Chi tiết đầy đủ hiển thị ở bước rà soát.</span>
-                </div>
-              ) : null}
             </aside>
           </div>
           ) : null}
 
           {activeOperationSection === 'stops' ? (
             <section className="mb-5 grid gap-5">
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
               <StopOperationsPanel
                 isDarkMode={isDarkMode}
                 onSaved={loadData}
                 routes={routes}
                 stations={stations}
               />
-              <aside className={`rounded-2xl border p-5 ${panelClassName}`}>
-                <h2 className="text-lg font-black">Gán trạm vào tuyến</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Trạm sau khi tạo hoặc cập nhật sẽ xuất hiện trong bước Dựng lộ trình. Thêm trạm vào Chiều đi/Chiều về và sắp xếp thứ tự để tạo chuỗi điểm dừng.
-                </p>
-                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
-                  <strong className="block text-slate-900">{stations.length} trạm khả dụng</strong>
-                  <span className="mt-1 block">{routes.length} tuyến trong thư viện có thể gán trạm.</span>
-                </div>
-              </aside>
-              </div>
-              <ScheduleListPanel
-                onDeleteSchedule={deleteSchedule}
-                onEditSchedule={(schedule) => {
-                  setScheduleForEditing(schedule);
-                  setSelectedSchedule(schedule);
-                }}
-                onEmergencyReassign={(schedule) => {
-                  setEmergencySchedule(schedule);
-                  setSelectedSchedule(schedule);
-                }}
-                onSelectSchedule={setSelectedSchedule}
-                routes={routes}
-                schedules={schedules}
-                selectedScheduleId={selectedSchedule?._id}
-              />
+            </section>
+          ) : null}
+
+          {activeOperationSection === 'trip-planning' ? (
+            <section className="mb-5 grid gap-5">
+              <TripDemandPlanningPanel onSaved={loadData} routes={routes} schedules={schedules} />
+            </section>
+          ) : null}
+
+          {activeOperationSection === 'trip-assignment' ? (
+            <section className="mb-5">
+              <TripAllocationPanel onSaved={loadData} routes={routes} />
             </section>
           ) : null}
 
@@ -2313,7 +2810,7 @@ const RouteWorkflowPage = () => {
                     </div>
                   </div>
                   <div className="grid flex-1 gap-3 md:grid-cols-3">
-                    {['ACTIVE', 'RESERVE', 'MAINTENANCE'].map((status) => {
+                    {['AVAILABLE', 'ACTIVE', 'ISSUE', 'MAINTENANCE'].map((status) => {
                       const count = buses.filter((bus) => bus.status === status).length;
                       const percent = buses.length ? Math.round((count / buses.length) * 100) : 0;
                       const tone = busStatusOverview[status];

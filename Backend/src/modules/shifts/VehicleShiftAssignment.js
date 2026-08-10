@@ -21,6 +21,7 @@ const VehicleShiftAssignmentSchema = new mongoose.Schema(
       enum: ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'],
       default: 'ASSIGNED',
     },
+    rosterStatus: { type: String, enum: ['DRAFT', 'PUBLISHED'], default: 'DRAFT' },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },

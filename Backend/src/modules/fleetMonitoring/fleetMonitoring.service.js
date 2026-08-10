@@ -9,6 +9,8 @@ import Vehicle from '../fleetOperations/Vehicle.js';
 import VehicleLocationLog from '../fleetOperations/VehicleLocationLog.js';
 import TripSchedule from '../admin/TripSchedule.js';
 import OperationAlert from '../fleetOperations/OperationAlert.js';
+import FleetBus from '../admin/FleetBus.js';
+import MaintenanceTask from '../vehicleIssues/MaintenanceTask.js';
 
 const ACTIVE_TRIP_STATUSES = ['active', 'paused', 'delayed', 'incident'];
 const OPEN_INCIDENT_STATUSES = ['PENDING', 'IN_PROGRESS'];
@@ -19,17 +21,6 @@ const SYSTEM_INCIDENT_TYPES = ['GPS_LOST_SIGNAL', 'VEHICLE_IDLE_TOO_LONG', 'SEVE
 const GPS_LOST_SIGNAL_MINUTES = 5;
 const VEHICLE_IDLE_TOO_LONG_MINUTES = 10;
 const SEVERE_DELAY_MINUTES = 20;
-
-const DA_NANG_POINTS = [
-  [16.0678, 108.2208],
-  [16.0544, 108.2022],
-  [16.0471, 108.2068],
-  [16.0719, 108.2241],
-  [16.0606, 108.2469],
-  [16.0755, 108.1692],
-  [16.0327, 108.2245],
-  [16.0804, 108.2141],
-];
 
 const normalizeId = (value) => String(value || '').trim();
 const isObjectId = (value) => mongoose.isValidObjectId(value);
@@ -134,6 +125,37 @@ const getRouteSummary = (route) => {
     routeCode: route.routeCode || route.routeNumber || route.code || '',
     routeName: route.routeName || route.name || '',
   };
+};
+
+const getRoutePath = (route, direction = 'OUTBOUND') => {
+  const routeDirection = String(direction || '').toUpperCase() === 'INBOUND'
+    ? route?.inboundRoute
+    : route?.outboundRoute;
+  const source = routeDirection?.polylinePath?.length >= 2
+    ? routeDirection.polylinePath
+    : routeDirection?.orderedStops || [];
+  return source
+    .map((point) => ({ lat: Number(point.latitude), lng: Number(point.longitude) }))
+    .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+};
+
+const getDirectionalRouteStops = (route, direction = 'OUTBOUND') => {
+  const routeDirection = String(direction || '').toUpperCase() === 'INBOUND'
+    ? route?.inboundRoute
+    : route?.outboundRoute;
+  return (routeDirection?.orderedStops || [])
+    .map((stop, index, stops) => ({
+      id: stop.stationId?.toString() || stop._id?.toString() || `${direction}-${index}`,
+      name: stop.stopName || stop.name || `Trạm ${index + 1}`,
+      address: stop.address || '',
+      order: stop.stopOrder ?? index + 1,
+      lat: Number(stop.latitude),
+      lng: Number(stop.longitude),
+      isStart: index === 0,
+      isEnd: index === stops.length - 1,
+      arrivalOffsetMinutes: stop.arrivalOffsetMinutes ?? null,
+    }))
+    .filter((stop) => Number.isFinite(stop.lat) && Number.isFinite(stop.lng));
 };
 
 const normalizeStop = (stop, index = 0) => {
@@ -999,7 +1021,7 @@ export class FleetMonitoringService {
     const driverIds = [...new Set(trips.map((trip) => normalizeId(trip.driverId)).filter(Boolean))];
     const tripIds = trips.map((trip) => trip._id);
 
-    const [vehicles, routes, drivers, incidentCounts] = await Promise.all([
+    const [vehicles, routes, drivers, incidentCounts, managedBuses, maintenanceTasks, runningSchedules] = await Promise.all([
       Vehicle.find({ _id: { $in: vehicleIds } }).lean(),
       Route.find({ _id: { $in: routeIds } }).lean(),
       User.find({ _id: { $in: driverIds } }).select('fullName role').lean(),
@@ -1007,17 +1029,32 @@ export class FleetMonitoringService {
         { $match: { tripId: { $in: tripIds }, status: { $in: OPEN_INCIDENT_STATUSES } } },
         { $group: { _id: '$tripId', count: { $sum: 1 } } },
       ]),
+      FleetBus.find({ busCode: { $not: /^(DN-AUTO-|DN-DEMO-)/i } }).populate('assignedDriverId', 'fullName role').lean(),
+      MaintenanceTask.find({
+        status: { $in: ['draft', 'assigned', 'in_progress', 'completed', 'pending_rework'] },
+        approvalStatus: { $ne: 'approved' },
+      }).select('vehicleId status updatedAt').sort({ updatedAt: -1 }).lean(),
+      TripSchedule.find({ status: 'IN_PROGRESS', 'vehicle.busId': { $ne: null } })
+        .select('vehicle driver routeId routeCode routeName scheduleCode direction startLocation gpsSync')
+        .lean(),
     ]);
 
     const vehicleMap = new Map(vehicles.map((item) => [normalizeId(item._id), item]));
     const routeMap = new Map(routes.map((item) => [normalizeId(item._id), item]));
     const driverMap = new Map(drivers.map((item) => [normalizeId(item._id), item]));
     const incidentMap = new Map(incidentCounts.map((item) => [normalizeId(item._id), item.count]));
+    const runningScheduleById = new Map(runningSchedules.map((schedule) => [normalizeId(schedule._id), schedule]));
 
-    const fleet = trips
+    const liveFleet = trips
       .map((trip) => {
         const vehicle = vehicleMap.get(normalizeId(trip.vehicleId));
         if (!vehicle) return null;
+        const runningSchedule = runningScheduleById.get(normalizeId(trip.scheduleId));
+        const isIncident = trip.status === 'incident' || incidentMap.get(normalizeId(trip._id)) > 0;
+        if (!isIncident && (
+          !runningSchedule
+          || normalizeId(runningSchedule.driver?.userId) !== normalizeId(trip.driverId)
+        )) return null;
 
         const hasActiveReason = (
           VISIBLE_VEHICLE_STATUSES.includes(vehicle.status)
@@ -1028,7 +1065,7 @@ export class FleetMonitoringService {
           return null;
         }
 
-        return buildDto({
+        const dto = buildDto({
           trip,
           vehicle,
           route: routeMap.get(normalizeId(trip.routeId)),
@@ -1036,8 +1073,94 @@ export class FleetMonitoringService {
           openIncidentCount: incidentMap.get(normalizeId(trip._id)) || 0,
           now,
         });
+        dto.routePath = getRoutePath(routeMap.get(normalizeId(trip.routeId)), runningSchedule?.direction);
+        dto.routeStops = getDirectionalRouteStops(routeMap.get(normalizeId(trip.routeId)), runningSchedule?.direction);
+        dto.routeDirection = runningSchedule?.direction || 'OUTBOUND';
+        if (vehicle.status === 'maintenance') {
+          return { ...dto, operationalStatus: 'maintenance' };
+        }
+        return {
+          ...dto,
+          operationalStatus: isIncident ? 'incident' : 'active',
+        };
       })
       .filter(Boolean)
+      .filter((item) => !/^(DN-AUTO-|DN-DEMO-)/i.test(String(item.vehicleCode || '')))
+      .filter((item) => (query.status ? item.operationalStatus === query.status : true))
+      .filter((item) => matchesKeyword(item, String(query.keyword || '').trim()));
+
+    const maintenanceStateByVehicleId = new Map();
+    maintenanceTasks.forEach((task) => {
+      const vehicleId = normalizeId(task.vehicleId);
+      if (maintenanceStateByVehicleId.has(vehicleId)) return;
+      maintenanceStateByVehicleId.set(
+        vehicleId,
+        ['in_progress', 'completed', 'pending_rework'].includes(task.status) ? 'maintenance' : 'incident'
+      );
+    });
+    const runningScheduleByVehicleId = new Map(runningSchedules.map((schedule) => [
+      normalizeId(schedule.vehicle?.busId),
+      schedule,
+    ]));
+    const lifecyclePlateNumbers = new Set(managedBuses
+      .filter((bus) => maintenanceStateByVehicleId.has(normalizeId(bus._id)))
+      .map((bus) => String(bus.plateNumber || '').toUpperCase()));
+    const effectiveLiveFleet = liveFleet.filter((item) => !lifecyclePlateNumbers.has(String(item.plateNumber || '').toUpperCase()));
+    const representedPlateNumbers = new Set(effectiveLiveFleet.map((item) => String(item.plateNumber || '').toUpperCase()));
+    const managedFleet = managedBuses
+      .filter((bus) => !representedPlateNumbers.has(String(bus.plateNumber || '').toUpperCase()))
+      .map((bus) => {
+        const hasGps = Number.isFinite(Number(bus.currentLatitude)) && Number.isFinite(Number(bus.currentLongitude));
+        const workflowStatus = maintenanceStateByVehicleId.get(normalizeId(bus._id));
+        const runningSchedule = runningScheduleByVehicleId.get(normalizeId(bus._id));
+        const operationalStatus = workflowStatus || (bus.status === 'ISSUE'
+          ? 'incident'
+          : bus.status === 'MAINTENANCE'
+          ? 'maintenance'
+          : bus.status === 'INACTIVE'
+            ? 'inactive'
+            : bus.status === 'ASSIGNED'
+              ? 'assigned'
+              : runningSchedule
+                ? 'active'
+                : 'available');
+        const currentDriverId = runningSchedule?.driver?.userId || bus.assignedDriverId?._id || bus.assignedDriverId;
+        const gpsBelongsToCurrentDriver = normalizeId(bus.assignedDriverId?._id || bus.assignedDriverId) === normalizeId(currentDriverId);
+        const shouldExposeGps = ['active', 'incident'].includes(operationalStatus)
+          && hasGps
+          && gpsBelongsToCurrentDriver;
+        return {
+          id: `managed:${bus._id}`,
+          vehicleId: bus._id.toString(),
+          vehicleCode: bus.busCode,
+          plateNumber: bus.plateNumber,
+          route: runningSchedule ? { id: normalizeId(runningSchedule.routeId), routeCode: runningSchedule.routeCode || '', routeName: runningSchedule.routeName || '' } : null,
+          routeId: runningSchedule ? normalizeId(runningSchedule.routeId) : null,
+          tripId: runningSchedule?._id?.toString() || null,
+          tripCode: runningSchedule?.scheduleCode || '',
+          routePath: getRoutePath(routeMap.get(normalizeId(runningSchedule?.routeId)), runningSchedule?.direction),
+          routeStops: getDirectionalRouteStops(routeMap.get(normalizeId(runningSchedule?.routeId)), runningSchedule?.direction),
+          routeDirection: runningSchedule?.direction || null,
+          driver: runningSchedule?.driver?.userId
+            ? { id: normalizeId(runningSchedule.driver.userId), fullName: runningSchedule.driver.fullName || '' }
+            : bus.assignedDriverId ? { id: bus.assignedDriverId._id?.toString(), fullName: bus.assignedDriverId.fullName } : null,
+          currentLocation: {
+            lat: shouldExposeGps ? bus.currentLatitude : null,
+            lng: shouldExposeGps ? bus.currentLongitude : null,
+            heading: bus.heading ?? null,
+            speed: 0,
+            updatedAt: shouldExposeGps ? bus.lastTelemetryAt || null : null,
+          },
+          speed: 0,
+          heading: bus.heading ?? null,
+          lastGpsAt: shouldExposeGps ? bus.lastTelemetryAt || null : null,
+          tripStatus: operationalStatus,
+          operationalStatus,
+          delayMinutes: 0,
+          openIncidentCount: 0,
+        };
+      });
+    const fleet = [...effectiveLiveFleet, ...managedFleet]
       .filter((item) => (query.status ? item.operationalStatus === query.status : true))
       .filter((item) => matchesKeyword(item, String(query.keyword || '').trim()));
 
@@ -1048,10 +1171,12 @@ export class FleetMonitoringService {
         delayedBuses: fleet.filter((item) => item.operationalStatus === 'delayed').length,
         lostSignalBuses: fleet.filter((item) => item.operationalStatus === 'lost_signal').length,
         incidentBuses: fleet.filter((item) => item.operationalStatus === 'incident').length,
+        availableBuses: fleet.filter((item) => item.operationalStatus === 'available').length,
+        maintenanceBuses: fleet.filter((item) => item.operationalStatus === 'maintenance').length,
       },
       filters: {
         routes: [...new Map(fleet.map((item) => [item.routeId, item.route]).filter(([, route]) => route)).values()],
-        statuses: ['active', 'idle', 'delayed', 'incident', 'lost_signal'],
+        statuses: ['available', 'active', 'incident', 'maintenance'],
       },
       generatedAt: now.toISOString(),
     };
@@ -1129,6 +1254,7 @@ export class FleetMonitoringService {
     await VehicleLocationLog.create({
       vehicleId: vehicle._id,
       tripId: trip._id,
+      driverId: trip.driverId,
       lat,
       lng,
       speed,
@@ -1170,175 +1296,6 @@ export class FleetMonitoringService {
     return dto;
   }
 
-  static async seedDemoFleet(actor = {}) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new CustomError('Demo fleet seeding is disabled in production', HTTP_STATUS.FORBIDDEN);
-    }
-
-    const route = await Route.findOneAndUpdate(
-      { routeCode: 'DN-DEMO-01' },
-      {
-        $set: {
-          routeCode: 'DN-DEMO-01',
-          routeName: 'Da Nang Demo Loop',
-          routeType: 'URBAN',
-          operator: 'BusDN',
-          status: 'PUBLISHED',
-          routeColor: '#0f766e',
-          outboundRoute: {
-            startStation: {
-              stopName: 'Da Nang Railway Station',
-              address: 'Da Nang Railway Station',
-              latitude: DA_NANG_POINTS[0][0],
-              longitude: DA_NANG_POINTS[0][1],
-              isMainStation: true,
-            },
-            endStation: {
-              stopName: 'My Khe Beach',
-              address: 'My Khe Beach',
-              latitude: DA_NANG_POINTS[4][0],
-              longitude: DA_NANG_POINTS[4][1],
-              isMainStation: true,
-            },
-            estimatedDistanceKm: 12,
-            estimatedDurationMinutes: 42,
-            orderedStops: DA_NANG_POINTS.slice(0, 5).map(([latitude, longitude], index) => ({
-              stopName: `Demo Stop ${index + 1}`,
-              address: `Demo Stop ${index + 1}`,
-              stopOrder: index + 1,
-              arrivalOffsetMinutes: index * 8,
-              departureOffsetMinutes: index * 8,
-              latitude,
-              longitude,
-            })),
-            polylinePath: DA_NANG_POINTS.map(([latitude, longitude]) => ({ latitude, longitude })),
-          },
-          fareConfig: {
-            baseFare: 8000,
-          },
-          scheduleConfig: {
-            firstDepartureTime: '05:30',
-            lastDepartureTime: '21:00',
-            frequencyMinutes: 30,
-          },
-        },
-        $setOnInsert: { createdBy: actor.userId },
-      },
-      { upsert: true, new: true }
-    );
-
-    let driver = await User.findOne({ email: 'demo.driver@busdn.local' });
-    if (!driver) {
-      driver = await User.create({
-        fullName: 'Demo Fleet Driver',
-        email: 'demo.driver@busdn.local',
-        phoneNumber: '0900000001',
-        password: 'Demo@123456',
-        role: 'DRIVER',
-        status: 'ACTIVE',
-        isVerified: true,
-      });
-    } else {
-      driver.fullName = 'Demo Fleet Driver';
-      driver.role = 'DRIVER';
-      driver.status = 'ACTIVE';
-      driver.isVerified = true;
-      await driver.save();
-    }
-
-    const now = new Date();
-    const vehicles = [];
-
-    for (let index = 0; index < DA_NANG_POINTS.length; index += 1) {
-      const [lat, lng] = DA_NANG_POINTS[index];
-      const vehicle = await Vehicle.findOneAndUpdate(
-        { vehicleCode: `DN-DEMO-${String(index + 1).padStart(2, '0')}` },
-        {
-          $set: {
-            plateNumber: `43A-${90000 + index}`,
-            vehicleCode: `DN-DEMO-${String(index + 1).padStart(2, '0')}`,
-            capacity: 42,
-            status: index === 5 ? 'idle' : 'active',
-            assignedRouteId: route._id,
-            currentLocation: {
-              lat,
-              lng,
-              speed: index === 5 ? 0 : 18 + index,
-              heading: 35 + (index * 24),
-              updatedAt: new Date(now.getTime() - (index === 6 ? 4 * 60000 : index * 12000)),
-            },
-          },
-        },
-        { upsert: true, new: true }
-      );
-
-      const trip = await Trip.findOneAndUpdate(
-        { vehicleId: vehicle._id, status: { $in: ACTIVE_TRIP_STATUSES } },
-        {
-          $set: {
-            routeId: route._id,
-            vehicleId: vehicle._id,
-            driverId: driver._id,
-            plannedStartTime: new Date(now.getTime() - 20 * 60000),
-            plannedEndTime: new Date(now.getTime() + 40 * 60000),
-            actualStartTime: index === 4
-              ? new Date(now.getTime() - 11 * 60000)
-              : new Date(now.getTime() - 18 * 60000),
-            status: index === 2 ? 'delayed' : index === 3 ? 'incident' : 'active',
-            progressPercent: 20 + (index * 8),
-            currentStopIndex: index % 4,
-            delayMinutes: index === 2 ? 9 : index === 3 ? 24 : 0,
-            delayReason: index === 2 ? 'reported_delay' : index === 3 ? 'accident_incident' : '',
-            idleSince: index === 5 ? new Date(now.getTime() - 7 * 60000) : null,
-            lastGpsAt: vehicle.currentLocation.updatedAt,
-          },
-        },
-        { upsert: true, new: true }
-      );
-
-      if (index === 3) {
-        await IncidentReport.findOneAndUpdate(
-          { tripId: trip._id, incidentType: 'ACCIDENT', status: { $in: OPEN_INCIDENT_STATUSES } },
-          {
-            $set: {
-              reporterId: driver._id,
-              reporterRole: 'DRIVER',
-              incidentType: 'ACCIDENT',
-              title: 'Demo accident near Han River bridge',
-              description: 'Demo incident for delayed trip monitoring.',
-              routeId: route._id,
-              tripId: trip._id,
-              vehicleId: vehicle._id,
-              location: 'Han River bridge',
-              latitude: lat,
-              longitude: lng,
-              severity: 'HIGH',
-              status: 'PENDING',
-            },
-          },
-          { upsert: true, new: true }
-        );
-      }
-
-      await VehicleLocationLog.create({
-        vehicleId: vehicle._id,
-        tripId: trip._id,
-        lat,
-        lng,
-        speed: vehicle.currentLocation.speed,
-        heading: vehicle.currentLocation.heading,
-        recordedAt: vehicle.currentLocation.updatedAt,
-      });
-
-      vehicles.push(vehicle);
-    }
-
-    return {
-      routeId: route._id,
-      driverId: driver._id,
-      vehiclesCreated: vehicles.length,
-    };
-  }
 }
 
 export default FleetMonitoringService;

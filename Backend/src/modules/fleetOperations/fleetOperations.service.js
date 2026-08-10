@@ -168,7 +168,7 @@ export class FleetOperationsService {
     return withId(trip.toObject());
   }
 
-  static async updateGps(payload, io = null) {
+  static async updateGps(payload, actor = {}, io = null) {
     const recordedAt = payload.recordedAt ? new Date(payload.recordedAt) : new Date();
     const vehicleId = toObjectId(payload.vehicleId, 'vehicleId');
     const tripId = toObjectId(payload.tripId, 'tripId');
@@ -184,6 +184,18 @@ export class FleetOperationsService {
       if (!existingTrip) {
         throw new CustomError('Trip not found', HTTP_STATUS.NOT_FOUND);
       }
+    }
+    if (!existingTrip) {
+      throw new CustomError('An active trip is required for driver GPS updates', HTTP_STATUS.UNPROCESSABLE_ENTITY);
+    }
+    if (!['active', 'paused', 'delayed', 'incident'].includes(existingTrip.status)) {
+      throw new CustomError('Trip is not active for GPS updates', HTTP_STATUS.CONFLICT);
+    }
+    if (String(existingTrip.driverId || '') !== String(actor.userId || '')) {
+      throw new CustomError('Driver is not assigned to this trip', HTTP_STATUS.FORBIDDEN);
+    }
+    if (String(existingTrip.vehicleId || '') !== String(vehicleId || '')) {
+      throw new CustomError('Vehicle is not assigned to this trip', HTTP_STATUS.FORBIDDEN);
     }
 
     const vehicle = await Vehicle.findByIdAndUpdate(
@@ -218,6 +230,7 @@ export class FleetOperationsService {
     const log = await VehicleLocationLog.create({
       vehicleId,
       tripId,
+      driverId: existingTrip.driverId,
       lat: payload.lat,
       lng: payload.lng,
       speed: payload.speed || 0,

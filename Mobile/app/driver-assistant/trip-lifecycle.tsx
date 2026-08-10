@@ -27,6 +27,7 @@ import {
 import { getErrorMessage } from '@/utils/validation';
 
 const ARRIVAL_RADIUS_METERS = 30;
+const LIVE_GPS_SYNC_INTERVAL_MS = 10000;
 const DRIVER_FALLBACK_CENTER = { latitude: 16.047079, longitude: 108.20623 };
 
 function parseTripParam(value: unknown): AssignedTrip | null {
@@ -575,6 +576,8 @@ export default function TripLifecycleScreen() {
   const [currentGps, setCurrentGps] = useState<DeviceGpsPayload | null>(
     toDeviceGpsPayload(initialTrip?.startLocation),
   );
+  const lastGpsSyncAtRef = useRef(0);
+  const gpsSyncInFlightRef = useRef(false);
   const [processingAction, setProcessingAction] = useState('');
   const [currentStopIndex, setCurrentStopIndex] = useState(0);
   const [completedStopCount, setCompletedStopCount] = useState(0);
@@ -773,6 +776,21 @@ export default function TripLifecycleScreen() {
       (gps) => {
         if (isMounted && isValidGpsCoordinate(gps)) {
           setCurrentGps(gps);
+          const now = Date.now();
+          if (now - lastGpsSyncAtRef.current >= LIVE_GPS_SYNC_INTERVAL_MS && !gpsSyncInFlightRef.current) {
+            lastGpsSyncAtRef.current = now;
+            gpsSyncInFlightRef.current = true;
+            void scheduleOperationsApi.syncTripGps(assignmentId, { gps })
+              .then((updated) => {
+                if (isMounted) setTrip(updated);
+              })
+              .catch(() => {
+                // Keep tracking locally; the next GPS sample will retry automatically.
+              })
+              .finally(() => {
+                gpsSyncInFlightRef.current = false;
+              });
+          }
         }
       },
       (gps) => {
