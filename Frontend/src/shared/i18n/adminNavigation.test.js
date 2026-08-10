@@ -3,7 +3,7 @@ import { adminNavGroups, adminNavigation } from './adminMessages.js';
 
 const expectedGroups = [
   ['operations-monitoring', 8],
-  ['analytics-statistics', 5],
+  ['analytics-statistics', 4],
   ['fares-promotions', 3],
   ['incidents-maintenance', 4],
   ['users-support', 4],
@@ -20,7 +20,6 @@ const expectedPaths = [
   '/admin/operation-chat',
   '/admin/analytics/congested-routes',
   '/admin/analytics/route-efficiency',
-  '/admin/analytics/feedback',
   '/admin/promotions/statistics',
   '/admin/revenue',
   '/admin/staff-performance',

@@ -12,6 +12,9 @@ const PriorityProfileDocumentSchema = new mongoose.Schema(
     mimeType: String,
     size: Number,
     url: String,
+    provider: String,
+    publicId: String,
+    resourceType: String,
     uploadedAt: {
       type: Date,
       default: Date.now,

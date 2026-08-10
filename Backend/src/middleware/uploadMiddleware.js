@@ -1,28 +1,7 @@
-import fs from 'fs';
-import path from 'path';
 import multer from 'multer';
 import { config } from '../config/environment.js';
 
-const avatarDirectory = path.join(config.paths.uploads, 'avatars');
-const feedbackDirectory = path.join(config.paths.uploads, 'feedback');
-fs.mkdirSync(avatarDirectory, { recursive: true });
-fs.mkdirSync(feedbackDirectory, { recursive: true });
-
-const createStorage = (directory, fallbackName) => multer.diskStorage({
-  destination: (req, file, cb) => cb(null, directory),
-  filename: (req, file, cb) => {
-    const extension = path.extname(file.originalname).toLowerCase();
-    const sanitizedBase = path
-      .basename(file.originalname, extension)
-      .replace(/[^a-zA-Z0-9-_]/g, '-')
-      .slice(0, 40);
-
-    cb(null, `${Date.now()}-${sanitizedBase || fallbackName}${extension}`);
-  },
-});
-
-const storage = createStorage(avatarDirectory, 'avatar');
-const feedbackStorage = createStorage(feedbackDirectory, 'feedback');
+const storage = multer.memoryStorage();
 const imageMimeTypes = new Set(['image/jpeg', 'image/png', 'image/jpg', 'image/webp']);
 const feedbackMimeTypes = new Set([
   ...imageMimeTypes,
@@ -48,7 +27,7 @@ export const avatarUpload = multer({
 });
 
 export const feedbackUpload = multer({
-  storage: feedbackStorage,
+  storage,
   limits: {
     fileSize: config.upload.maxSize,
     files: 5,

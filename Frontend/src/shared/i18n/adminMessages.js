@@ -26,7 +26,6 @@ export const adminMessages = {
     'admin.sidebar.operationChat': 'Operation Chat',
     'admin.sidebar.routeAnalytics': 'Route Analytics',
     'admin.sidebar.congestedRoutes': 'Congested Routes',
-    'admin.sidebar.feedbackAnalytics': 'Feedback Analytics',
     'admin.sidebar.fareOperations': 'Fare Operations',
     'admin.sidebar.promotions': 'Promotions',
     'admin.sidebar.promotionStatistics': 'Promotion Statistics',
@@ -108,7 +107,6 @@ export const adminMessages = {
     'admin.sidebar.shiftScheduling': 'Phân ca & Ca làm',
     'admin.sidebar.routeAnalytics': 'Phân tích tuyến',
     'admin.sidebar.congestedRoutes': 'Tuyến ùn tắc',
-    'admin.sidebar.feedbackAnalytics': 'Phân tích phản hồi',
     'admin.sidebar.fareOperations': 'Vận hành giá vé',
     'admin.sidebar.promotions': 'Khuyến mãi',
     'admin.sidebar.promotionStatistics': 'Thống kê khuyến mãi',
@@ -192,7 +190,6 @@ export const adminNavGroups = [
     icon: 'monitoring',
     children: [
       { path: '/admin/analytics/route-efficiency', key: 'admin.sidebar.routeAnalytics', icon: 'query_stats' },
-      { path: '/admin/analytics/feedback', key: 'admin.sidebar.feedbackAnalytics', icon: 'reviews' },
       { path: '/admin/promotions/statistics', key: 'admin.sidebar.promotionStatistics', icon: 'bar_chart' },
       { path: '/admin/revenue', key: 'admin.sidebar.revenue', icon: 'receipt_long' },
       { path: '/admin/staff-performance', key: 'admin.sidebar.staffPerformance', icon: 'leaderboard' },

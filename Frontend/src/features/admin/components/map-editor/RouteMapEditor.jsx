@@ -49,6 +49,7 @@ const RouteMapEditor = ({
   onUpdateStop,
   routingStatus = 'idle',
   selectedStopIndex,
+  compact = false,
 }) => {
   const elementRef = useRef(null);
   const mapRef = useRef(null);
@@ -213,7 +214,7 @@ const RouteMapEditor = ({
   ]);
 
   return (
-    <div className={`relative h-[640px] min-h-[520px] w-full overflow-hidden rounded-2xl border ${isDarkMode ? 'border-white/10 bg-[#071416]' : 'border-slate-200 bg-slate-100'}`}>
+    <div className={`relative w-full overflow-hidden rounded-2xl border ${compact ? 'h-[440px] min-h-[380px]' : 'h-[640px] min-h-[520px]'} ${isDarkMode ? 'border-white/10 bg-[#071416]' : 'border-slate-200 bg-slate-100'}`}>
       <div ref={elementRef} className="h-full w-full" />
       <div className="pointer-events-none absolute left-4 top-4 rounded-2xl border border-white/20 bg-slate-950/75 px-4 py-3 text-xs font-semibold text-white shadow-lg">
         Bam ban do de them diem dung. Keo marker de chinh vi tri.

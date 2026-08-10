@@ -12,7 +12,15 @@ const TripShiftAssignmentSchema = new mongoose.Schema(
       ref: 'Shift',
       required: true,
     },
+    assistantShiftId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Shift',
+    },
     driverId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    assistantId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
     },
@@ -38,6 +46,7 @@ const TripShiftAssignmentSchema = new mongoose.Schema(
 TripShiftAssignmentSchema.index({ tripId: 1, workDate: 1, status: 1 });
 TripShiftAssignmentSchema.index({ shiftId: 1, workDate: 1 });
 TripShiftAssignmentSchema.index({ driverId: 1, workDate: 1 });
+TripShiftAssignmentSchema.index({ assistantId: 1, workDate: 1 });
 TripShiftAssignmentSchema.index({ vehicleId: 1, workDate: 1 });
 
 export default mongoose.model('TripShiftAssignment', TripShiftAssignmentSchema);

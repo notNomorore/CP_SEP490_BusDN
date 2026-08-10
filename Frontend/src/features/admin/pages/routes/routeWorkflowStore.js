@@ -28,6 +28,35 @@ const buildStationKeys = (station) => [
   normalizeSearch(station?.stationName || station?.stopName || ''),
 ].filter(Boolean);
 
+const toStationShape = (station) => station ? ({
+  ...station,
+  _id: station._id || station.stationId || '',
+  stationName: station.stationName || station.stopName || '',
+}) : null;
+
+const rebuildDirectionWithTerminals = (direction, startStation, endStation, previousTerminals = []) => {
+  const start = toStationShape(startStation);
+  const end = toStationShape(endStation);
+  const terminalKeys = new Set(
+    [...previousTerminals, start, end]
+      .flatMap((item) => buildStationKeys(item))
+  );
+  const intermediateStops = direction.orderedStops
+    .filter((stop) => !buildStationKeys(stop).some((key) => terminalKeys.has(key)))
+    .map(toStationShape);
+  const stations = [start, ...intermediateStops, end].filter(Boolean);
+
+  return computeDirection({
+    ...direction,
+    startStation: stationToRef(start),
+    endStation: stationToRef(end),
+    orderedStops: stations.map((item, index) => stationToStop(item, index + 1)),
+    polylinePath: [],
+    estimatedDistanceKm: 0,
+    estimatedDurationMinutes: 0,
+  });
+};
+
 export const useRouteWorkflowStore = create(
   persist(
     (set, get) => ({
@@ -92,21 +121,31 @@ export const useRouteWorkflowStore = create(
         const nextDefaultName = buildDefaultRouteName(outboundStart, outboundEnd);
         const shouldUseDefaultName = !state.draft.routeName?.trim()
           || state.draft.routeName.trim() === previousDefaultName;
+        const previousTerminals = [
+          state.draft.outboundRoute.startStation,
+          state.draft.outboundRoute.endStation,
+          state.draft.inboundRoute.startStation,
+          state.draft.inboundRoute.endStation,
+        ];
+        const nextOutbound = rebuildDirectionWithTerminals(
+          state.draft.outboundRoute,
+          outboundStart,
+          outboundEnd,
+          previousTerminals
+        );
+        const nextInbound = rebuildDirectionWithTerminals(
+          state.draft.inboundRoute,
+          inboundStart,
+          inboundEnd,
+          previousTerminals
+        );
 
         return {
           draft: {
             ...state.draft,
             routeName: shouldUseDefaultName ? nextDefaultName : state.draft.routeName,
-            outboundRoute: {
-              ...state.draft.outboundRoute,
-              startStation: outboundStart,
-              endStation: outboundEnd,
-            },
-            inboundRoute: {
-              ...state.draft.inboundRoute,
-              startStation: inboundStart,
-              endStation: inboundEnd,
-            },
+            outboundRoute: nextOutbound,
+            inboundRoute: nextInbound,
           },
         };
       }),

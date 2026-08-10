@@ -8,6 +8,7 @@ import busAssistantApi from '@/api/busAssistant.api';
 import scheduleOperationsApi from '@/api/scheduleOperations.api';
 import { RoleBottomNav } from '@/components/navigation/RoleBottomNav';
 import { colors } from '@/constants/colors';
+import { resolveBackendUrl } from '@/constants/config';
 import { formatDriverStatus, useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { ShiftRevenue } from '@/types/busAssistant';
@@ -200,7 +201,7 @@ export default function DriverBusAssistantHomeScreen() {
           <View style={styles.topBar}>
             <View style={styles.profileRow}>
               <View style={styles.avatar}>
-                {user?.avatar ? <Image source={{ uri: user.avatar }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>{displayName.slice(0, 1).toUpperCase()}</Text>}
+                {user?.avatar ? <Image source={{ uri: resolveBackendUrl(user.avatar) }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>{displayName.slice(0, 1).toUpperCase()}</Text>}
               </View>
               <View>
                 <Text style={styles.brand}>{t.home.brand}</Text>

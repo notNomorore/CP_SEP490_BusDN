@@ -3,8 +3,11 @@ import { HTTP_STATUS, PAGINATION } from '../../constants/index.js';
 import { CustomError } from '../../middleware/errorHandler.js';
 import IncidentReport from './IncidentReport.js';
 import OperationIncident from '../scheduleOperations/OperationIncident.js';
-import OperationNotification from '../scheduleOperations/OperationNotification.js';
+import notificationService from '../systemNotifications/notification.service.js';
 import TripSchedule from '../admin/TripSchedule.js';
+import FleetBus from '../admin/FleetBus.js';
+import LiveTrip from '../fleetOperations/Trip.js';
+import Vehicle from '../fleetOperations/Vehicle.js';
 import User from '../auth/User.js';
 
 const toPositiveInteger = (value, fallback, max = Number.MAX_SAFE_INTEGER) => {
@@ -379,7 +382,7 @@ const createReporterStatusNotification = async ({
   ].filter(Boolean);
   const notificationTitle = `Cập nhật báo cáo: ${incident.title}`;
 
-  await OperationNotification.updateMany(
+  await notificationService.updateOperationNotifications(
     {
       sourceType: { $in: ['', null] },
       title: notificationTitle,
@@ -389,7 +392,7 @@ const createReporterStatusNotification = async ({
     { $set: { status: 'ARCHIVED' } }
   );
 
-  await OperationNotification.findOneAndUpdate(
+  await notificationService.upsertOperationNotification(
     {
       sourceType: 'INCIDENT_REPORT_STATUS',
       sourceId: incident._id,
@@ -777,7 +780,7 @@ export class IncidentReportService {
       actorId: actor?.userId,
     });
 
-    await OperationNotification.findOneAndUpdate(
+    await notificationService.upsertOperationNotification(
       {
         sourceType: 'ASSISTANT_REASSIGNMENT',
         sourceId: incident._id,
@@ -927,6 +930,16 @@ export class IncidentReportService {
         respondedAt: null,
         rejectionReason: '',
       };
+      if (trip.status === 'IN_PROGRESS') {
+        trip.startLocation = {};
+        trip.gpsSync = {
+          status: 'NOT_REQUESTED',
+          retryCount: 0,
+          message: 'Waiting for GPS from replacement driver',
+          syncedAt: null,
+          lastAttemptAt: null,
+        };
+      }
     } else {
       trip.assistant = nextStaff;
       trip.assistantAcceptance = {
@@ -945,6 +958,29 @@ export class IncidentReportService {
       previousAssistant: isDriverReplacement ? trip.assistant : previousStaff,
     });
     await trip.save();
+
+    if (isDriverReplacement && trip.status === 'IN_PROGRESS') {
+      const liveTrip = await LiveTrip.findOneAndUpdate(
+        { scheduleId: trip._id },
+        { $set: { driverId: staff._id }, $unset: { lastGpsAt: 1 } },
+        { new: true }
+      ).lean();
+      await Promise.all([
+        FleetBus.updateOne(
+          { _id: trip.vehicle?.busId },
+          {
+            $set: { assignedDriverId: staff._id },
+            $unset: { currentLatitude: 1, currentLongitude: 1, lastTelemetryAt: 1 },
+          }
+        ),
+        liveTrip?.vehicleId
+          ? Vehicle.updateOne(
+            { _id: liveTrip.vehicleId },
+            { $set: { currentLocation: {} } }
+          )
+          : null,
+      ].filter(Boolean));
+    }
 
     incident.status = 'IN_PROGRESS';
     incident.handlingAction = 'REASSIGN_TRIP';
@@ -985,7 +1021,7 @@ export class IncidentReportService {
     });
 
     const sourceType = isDriverReplacement ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT';
-    await OperationNotification.findOneAndUpdate(
+    await notificationService.upsertOperationNotification(
       {
         sourceType,
         sourceId: incident._id,

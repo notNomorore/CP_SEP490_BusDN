@@ -6,8 +6,8 @@ import TripSchedule from '../admin/TripSchedule.js';
 import Vehicle from '../fleetOperations/Vehicle.js';
 import PassengerTicket from '../tickets/Ticket.js';
 import OperationIncident from '../scheduleOperations/OperationIncident.js';
-import OperationNotification from '../scheduleOperations/OperationNotification.js';
 import { createBroadcastNotification } from '../systemNotifications/systemNotification.service.js';
+import notificationService from '../systemNotifications/notification.service.js';
 import VehicleReassignmentService from '../vehicleReassignments/vehicleReassignment.service.js';
 import VehicleIssue from './VehicleIssue.js';
 import MaintenanceTask from './MaintenanceTask.js';
@@ -364,7 +364,7 @@ export class VehicleIssueService {
       },
     });
 
-    await this.markVehicleUnderMaintenance(vehicleId);
+    await this.markVehicleHasIssue(vehicleId);
     issue.maintenanceTaskId = await this.createMaintenanceTask(
       issue,
       { userId },
@@ -374,9 +374,9 @@ export class VehicleIssueService {
 
     try {
       await createBroadcastNotification({
-        title: 'Emergency vehicle breakdown reported',
-        message: `Driver reported ${breakdownType.replaceAll('_', ' ').toLowerCase()} on trip ${assignment.trip.scheduleCode || tripId}.`,
-        type: 'emergency',
+        title: 'Cảnh báo sự cố phương tiện',
+        message: `Tài xế đã báo cáo sự cố ${breakdownType.replaceAll('_', ' ').toLowerCase()} trên chuyến ${assignment.trip.scheduleCode || tripId}.`,
+        type: 'MAINTENANCE_REQUIRED',
         priority: 'urgent',
         targetAudience: 'admins',
         tripId,
@@ -388,6 +388,7 @@ export class VehicleIssueService {
           vehicleId: String(vehicleId),
           breakdownType,
         },
+        deduplicationKey: `maintenance-required:${issue._id}:admins`,
       }, userId, io);
     } catch {
       // The emergency issue itself must still be stored even if realtime notification fails.
@@ -444,7 +445,7 @@ export class VehicleIssueService {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    await this.markVehicleUnderMaintenance(vehicleId);
+    await this.markVehicleHasIssue(vehicleId);
     issue.maintenanceTaskId = await this.createMaintenanceTask(
       issue,
       { userId },
@@ -622,9 +623,24 @@ export class VehicleIssueService {
   }
 
   static async markVehicleUnderMaintenance(vehicleId) {
+    const bus = await FleetBus.findById(vehicleId).select('busCode plateNumber').lean();
     await Promise.all([
       FleetBus.updateOne({ _id: vehicleId }, { $set: { status: 'MAINTENANCE' } }),
-      Vehicle.updateOne({ _id: vehicleId }, { $set: { status: 'maintenance' } }),
+      bus ? Vehicle.updateOne(
+        { $or: [{ vehicleCode: bus.busCode }, { plateNumber: bus.plateNumber }] },
+        { $set: { status: 'maintenance' } }
+      ) : null,
+    ]);
+  }
+
+  static async markVehicleHasIssue(vehicleId) {
+    const bus = await FleetBus.findById(vehicleId).select('busCode plateNumber').lean();
+    await Promise.all([
+      FleetBus.updateOne({ _id: vehicleId }, { $set: { status: 'ISSUE' } }),
+      bus ? Vehicle.updateOne(
+        { $or: [{ vehicleCode: bus.busCode }, { plateNumber: bus.plateNumber }] },
+        { $set: { status: 'idle' } }
+      ) : null,
     ]);
   }
 
@@ -655,7 +671,7 @@ export class VehicleIssueService {
       createBroadcastNotification({
         title,
         message,
-        type: 'maintenance',
+        type: 'MAINTENANCE_REQUIRED',
         priority: 'urgent',
         targetAudience: 'trip_staff',
         tripId,
@@ -666,8 +682,9 @@ export class VehicleIssueService {
           tripId: String(tripId),
           vehicleId: vehicleId ? String(vehicleId) : '',
         },
+        deduplicationKey: `maintenance-required:${issue._id}:trip-staff`,
       }, actorId, io),
-      OperationNotification.findOneAndUpdate(
+      notificationService.upsertOperationNotification(
         {
           sourceType,
           sourceId: issue._id,
@@ -813,9 +830,9 @@ export class VehicleIssueService {
     let notification = null;
     if (passengerIds.length) {
       notification = await createBroadcastNotification({
-        title: 'Standby bus dispatched',
-        message: 'Your bus has encountered a technical issue.\nA standby bus has been dispatched and will continue your journey shortly.\nWe sincerely apologize for the inconvenience.',
-        type: 'emergency',
+        title: 'Xe dự phòng đã được điều phối',
+        message: 'Xe của bạn gặp sự cố kỹ thuật.\nXe dự phòng đã được điều phối và sẽ tiếp tục hành trình trong thời gian sớm nhất.\nBusDN xin lỗi vì sự bất tiện này.',
+        type: 'MAINTENANCE_REQUIRED',
         priority: 'urgent',
         targetAudience: 'specific_users',
         userIds: passengerIds,
@@ -826,6 +843,7 @@ export class VehicleIssueService {
           issueId: String(issue._id),
           standbyVehicleId: String(dispatchedVehicleId || payload.standbyVehicleId),
         },
+        deduplicationKey: `maintenance-standby:${issue._id}:passengers`,
       }, actor.userId, io);
     }
 

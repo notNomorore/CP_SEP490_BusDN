@@ -4,12 +4,19 @@ import User from '../auth/User.js';
 import ShiftAssignment from './ShiftAssignment.js';
 import OperationIncident from './OperationIncident.js';
 import OperationNotification from './OperationNotification.js';
+import notificationService from '../systemNotifications/notification.service.js';
 import VehicleInspection from './VehicleInspection.js';
 import IncidentReport from '../incidents/IncidentReport.js';
 import VehicleIssueService from '../vehicleIssues/vehicleIssue.service.js';
 import Shift from '../shifts/Shift.js';
 import DriverShiftAssignment from '../shifts/DriverShiftAssignment.js';
 import AssistantShiftAssignment from '../shifts/AssistantShiftAssignment.js';
+import LostAndFoundMatchingService from '../customerSupport/LostAndFoundMatchingService.js';
+import Vehicle from '../fleetOperations/Vehicle.js';
+import LiveTrip from '../fleetOperations/Trip.js';
+import VehicleLocationLog from '../fleetOperations/VehicleLocationLog.js';
+import StorageService from '../../services/storage/storage.service.js';
+
 
 const TRAFFIC_CATEGORIES = [
   'HEAVY_TRAFFIC',
@@ -83,6 +90,26 @@ const parseDate = (value, fallback) => {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+};
+
+const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const VIETNAM_UTC_OFFSET_HOURS = 7;
+
+const parseRangeBoundary = (value, fallback, end = false) => {
+  const match = DATE_ONLY_PATTERN.exec(String(value || ''));
+  if (!match) {
+    const parsed = parseDate(value, fallback);
+    return end ? endOfDay(parsed) : startOfDay(parsed);
+  }
+
+  const [, year, month, day] = match;
+  const vietnamMidnightUtc = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    -VIETNAM_UTC_OFFSET_HOURS
+  );
+  return new Date(vietnamMidnightUtc + (end ? 86400000 - 1 : 0));
 };
 
 const normalizeScheduleStatus = (status) => {
@@ -191,6 +218,7 @@ const BUS_ASSISTANT_INCIDENT_TYPES = [
 ];
 const INCIDENT_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 const BREAKDOWN_TYPES = ['ENGINE_FAILURE', 'BRAKE_FAILURE', 'FLAT_TIRE', 'ACCIDENT', 'OTHER'];
+const FOUND_ITEM_CATEGORIES = ['PERSONAL_BELONGINGS', 'ELECTRONICS', 'WALLET_DOCUMENTS', 'CLOTHING', 'BAGS_LUGGAGE', 'OTHER_ITEMS'];
 
 const normalizeStartGpsPayload = (payload = {}, startedAt = new Date()) => {
   const latitude = Number(payload.latitude);
@@ -225,6 +253,124 @@ const normalizeStartGpsPayload = (payload = {}, startedAt = new Date()) => {
       lastAttemptAt: startedAt,
     },
   };
+};
+
+const scheduleDateTime = (serviceDate, clock, fallback) => {
+  const date = new Date(serviceDate || fallback || Date.now());
+  const [hours, minutes] = String(clock || '').split(':').map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return new Date(fallback || date);
+  date.setHours(hours, minutes, 0, 0);
+  return date;
+};
+
+const syncLiveFleetGps = async ({ schedule, gpsPayload, driverId, io, incidentType = '' }) => {
+  const location = gpsPayload?.startLocation;
+  if (!schedule || !location || !isValidLatitude(location.latitude) || !isValidLongitude(location.longitude)) return null;
+  const authoritativeSchedule = await TripSchedule.findById(schedule._id)
+    .select('status driver vehicle routeId')
+    .lean();
+  if (
+    !authoritativeSchedule
+    || authoritativeSchedule.status !== 'IN_PROGRESS'
+    || String(authoritativeSchedule.driver?.userId || '') !== String(driverId || '')
+  ) {
+    const error = new Error('GPS source is not the currently assigned driver of this running trip');
+    error.statusCode = 403;
+    throw error;
+  }
+  const fleetBusId = getScheduleVehicleId(schedule);
+  const routeId = getScheduleRouteId(schedule);
+  if (!fleetBusId || !routeId) return null;
+
+  const fleetBus = await FleetBus.findById(fleetBusId).lean();
+  if (!fleetBus) return null;
+  const recordedAt = location.capturedAt || new Date();
+  const isBreakdown = incidentType === 'VEHICLE_BREAKDOWN';
+  const hasIncident = ['TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN'].includes(incidentType);
+  const vehicle = await Vehicle.findOneAndUpdate(
+    { vehicleCode: fleetBus.busCode },
+    {
+      $set: {
+        plateNumber: fleetBus.plateNumber,
+        vehicleCode: fleetBus.busCode,
+        capacity: fleetBus.capacity,
+        assignedRouteId: routeId,
+        status: isBreakdown ? 'idle' : 'active',
+        currentLocation: {
+          lat: location.latitude,
+          lng: location.longitude,
+          speed: 0,
+          heading: Number(fleetBus.heading || 0),
+          updatedAt: recordedAt,
+        },
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  ).lean();
+
+  await FleetBus.updateOne(
+    { _id: fleetBusId },
+    { $set: {
+      currentLatitude: location.latitude,
+      currentLongitude: location.longitude,
+      lastTelemetryAt: recordedAt,
+      assignedDriverId: driverId,
+      status: hasIncident ? 'ISSUE' : 'ACTIVE',
+    } }
+  );
+
+  const liveTrip = await LiveTrip.findOneAndUpdate(
+    { scheduleId: schedule._id },
+    {
+      $set: {
+        routeId,
+        scheduleId: schedule._id,
+        vehicleId: vehicle._id,
+        driverId,
+        assistantId: schedule.assistant?.userId || null,
+        plannedStartTime: scheduleDateTime(schedule.serviceDate, schedule.departureTime, schedule.actualStartAt),
+        plannedEndTime: scheduleDateTime(schedule.serviceDate, schedule.expectedArrivalTime, schedule.actualStartAt),
+        actualStartTime: schedule.actualStartAt || new Date(),
+        status: hasIncident ? 'incident' : 'active',
+        lastGpsAt: recordedAt,
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  ).lean();
+
+  await VehicleLocationLog.create({
+    vehicleId: vehicle._id,
+    tripId: liveTrip._id,
+    driverId,
+    lat: location.latitude,
+    lng: location.longitude,
+    speed: 0,
+    heading: Number(fleetBus.heading || 0),
+    recordedAt,
+  });
+
+  const dto = {
+    id: `${vehicle._id}:${liveTrip._id}`,
+    vehicleId: vehicle._id.toString(),
+    vehicleCode: vehicle.vehicleCode,
+    plateNumber: vehicle.plateNumber,
+    routeId: routeId.toString(),
+    tripId: liveTrip._id.toString(),
+    tripCode: schedule.scheduleCode,
+    driver: { id: String(driverId), fullName: schedule.driver?.fullName || '' },
+    route: { id: routeId.toString(), routeCode: schedule.routeCode || '', routeName: schedule.routeName || '' },
+    currentLocation: { lat: location.latitude, lng: location.longitude, speed: 0, heading: Number(fleetBus.heading || 0), updatedAt: recordedAt },
+    speed: 0,
+    heading: Number(fleetBus.heading || 0),
+    lastGpsAt: recordedAt,
+    tripStatus: liveTrip.status,
+    operationalStatus: isBreakdown ? 'maintenance' : hasIncident ? 'incident' : 'active',
+    delayMinutes: incidentType === 'TRAFFIC_CONGESTION' ? 1 : 0,
+    openIncidentCount: hasIncident ? 1 : 0,
+  };
+  io?.to('fleet:operations').emit('server:fleet:locationUpdated', dto);
+  if (hasIncident) io?.to('fleet:operations').emit('server:incident:new', { incidentType, fleet: dto });
+  return { vehicle, liveTrip, dto };
 };
 
 const buildTripScheduleAssignment = (schedule, role) => {
@@ -395,8 +541,8 @@ export class ScheduleOperationsService {
   }
 
   static async listAssignedTrips(userId, role, query = {}) {
-    const from = startOfDay(parseDate(query.from, new Date()));
-    const to = endOfDay(parseDate(query.to, addDays(from, 7)));
+    const from = parseRangeBoundary(query.from, new Date());
+    const to = parseRangeBoundary(query.to, addDays(from, 7), true);
 
     const schedules = await TripSchedule.find({
       ...this.buildActorScheduleQuery(userId, role),
@@ -408,22 +554,16 @@ export class ScheduleOperationsService {
     await this.attachInspectionRecords(assignments);
 
     return assignments
-      .filter((assignment) => {
-        const scheduledStart = buildTimeOnServiceDate(assignment.trip?.serviceDate, assignment.trip?.departureTime);
-        return scheduledStart
-          && scheduledStart >= from
-          && scheduledStart <= to
-          && isScheduleAssignedToActor(assignment.trip, userId, role);
-      })
+      .filter((assignment) => isScheduleAssignedToActor(assignment.trip, userId, role))
       .sort((left, right) => (
-        buildTimeOnServiceDate(left.trip.serviceDate, left.trip.departureTime)
-        - buildTimeOnServiceDate(right.trip.serviceDate, right.trip.departureTime)
+        (buildTimeOnServiceDate(left.trip.serviceDate, left.trip.departureTime)?.getTime() || 0)
+        - (buildTimeOnServiceDate(right.trip.serviceDate, right.trip.departureTime)?.getTime() || 0)
       ));
   }
 
   static async listShiftSchedule(userId, role, query = {}) {
-    const from = startOfDay(parseDate(query.from, new Date()));
-    const to = endOfDay(parseDate(query.to, addDays(from, 6)));
+    const from = parseRangeBoundary(query.from, new Date());
+    const to = parseRangeBoundary(query.to, addDays(from, 6), true);
     const isDriver = role === 'DRIVER';
     const isAssistant = role === 'BUS_ASSISTANT' || role === 'CONDUCTOR';
 
@@ -461,8 +601,8 @@ export class ScheduleOperationsService {
   }
 
   static async listOperationNotifications(userId, role, query = {}) {
-    const from = startOfDay(parseDate(query.from, new Date()));
-    const to = endOfDay(parseDate(query.to, addDays(from, 7)));
+    const from = parseRangeBoundary(query.from, new Date());
+    const to = parseRangeBoundary(query.to, addDays(from, 7), true);
     const now = new Date();
 
     const schedules = await TripSchedule.find({
@@ -711,7 +851,7 @@ export class ScheduleOperationsService {
       });
     }
 
-    await OperationNotification.findOneAndUpdate(
+    await notificationService.upsertOperationNotification(
       {
         sourceType: 'INCIDENT_REPORT_STATUS',
         sourceId: incident._id,
@@ -763,7 +903,7 @@ export class ScheduleOperationsService {
       }
     );
 
-    await OperationNotification.findOneAndUpdate(
+    await notificationService.upsertOperationNotification(
       {
         sourceType: role === 'DRIVER' ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT',
         sourceId: incident._id,
@@ -895,7 +1035,7 @@ export class ScheduleOperationsService {
         });
         await existingReassignmentReport.save();
 
-        await OperationNotification.findOneAndUpdate(
+        await notificationService.upsertOperationNotification(
           {
             sourceType: role === 'DRIVER' ? 'DRIVER_REASSIGNMENT' : 'ASSISTANT_REASSIGNMENT',
             sourceId: existingReassignmentReport._id,
@@ -1079,14 +1219,14 @@ export class ScheduleOperationsService {
     await Promise.all([
       FleetBus.updateOne(
         { _id: getScheduleVehicleId(assignment.trip) },
-        { $set: { status: 'ACTIVE' } }
+        { $set: { status: 'AVAILABLE' } }
       ),
     ]);
 
     return inspection;
   }
 
-  static async reportVehicleIssue(userId, role, assignmentId, payload = {}) {
+  static async reportVehicleIssue(userId, role, assignmentId, payload = {}, io = null) {
     if (role !== 'DRIVER') {
       const error = new Error('Only drivers can report vehicle issues');
       error.statusCode = 403;
@@ -1166,9 +1306,15 @@ export class ScheduleOperationsService {
       TripSchedule.updateOne({ _id: assignment.trip._id }, { $set: { status: 'ASSIGNED' } }),
       FleetBus.updateOne(
         { _id: getScheduleVehicleId(assignment.trip) },
-        { $set: { status: 'MAINTENANCE' } }
+        { $set: { status: 'ISSUE' } }
       ),
     ]);
+    io?.to('fleet:operations').emit('server:vehicleIssue:reported', {
+      vehicleId: String(getScheduleVehicleId(assignment.trip)),
+      tripId: String(assignment.trip._id),
+      issueType: issueCategory,
+      status: 'ISSUE',
+    });
 
     await this.syncToAdminIncidentReport({
       sourceType: 'OPERATION_VEHICLE_ISSUE',
@@ -1221,7 +1367,7 @@ export class ScheduleOperationsService {
     }
   }
 
-  static async startTrip(userId, role, assignmentId, payload = {}) {
+  static async startTrip(userId, role, assignmentId, payload = {}, io = null) {
     if (role !== 'DRIVER') {
       const error = new Error('Only drivers can start assigned trips');
       error.statusCode = 403;
@@ -1272,6 +1418,7 @@ export class ScheduleOperationsService {
     ]);
 
     const updatedSchedule = await TripSchedule.findById(trip._id).populate('routeId');
+    await syncLiveFleetGps({ schedule: updatedSchedule, gpsPayload, driverId: userId, io });
     return buildTripScheduleAssignment(updatedSchedule, 'DRIVER');
   }
 
@@ -1346,18 +1493,27 @@ export class ScheduleOperationsService {
       updates.push(
         FleetBus.updateOne(
           { _id: vehicleId },
-          { $set: { status: 'ACTIVE' } }
+          { $set: { status: 'AVAILABLE' } }
         )
       );
     }
 
     await Promise.all(updates);
 
+    const completedLiveTrip = await LiveTrip.findOneAndUpdate(
+      { scheduleId: trip._id },
+      { $set: { status: 'completed', actualEndTime: completedAt } },
+      { new: true }
+    ).lean();
+    if (completedLiveTrip?.vehicleId) {
+      await Vehicle.updateOne({ _id: completedLiveTrip.vehicleId }, { $set: { status: 'available' } });
+    }
+
     const updatedSchedule = await TripSchedule.findById(trip._id).populate('routeId');
     return buildTripScheduleAssignment(updatedSchedule, 'DRIVER');
   }
 
-  static async syncTripGps(userId, role, assignmentId, payload = {}) {
+  static async syncTripGps(userId, role, assignmentId, payload = {}, io = null) {
     if (role !== 'DRIVER') {
       const error = new Error('Only drivers can sync trip GPS');
       error.statusCode = 403;
@@ -1388,6 +1544,7 @@ export class ScheduleOperationsService {
     );
 
     const updatedSchedule = await TripSchedule.findById(trip._id).populate('routeId');
+    await syncLiveFleetGps({ schedule: updatedSchedule, gpsPayload, driverId: userId, io });
     return buildTripScheduleAssignment(updatedSchedule, 'DRIVER');
   }
 
@@ -1499,6 +1656,18 @@ export class ScheduleOperationsService {
         error.statusCode = 400;
         throw error;
       }
+
+      if (String(payload.storageLocation || payload.handedTo || '').trim().length < 3) {
+        const error = new Error('Storage location is required for found item reports');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      if (payload.itemCategory && !FOUND_ITEM_CATEGORIES.includes(payload.itemCategory)) {
+        const error = new Error('Found item category is invalid');
+        error.statusCode = 400;
+        throw error;
+      }
     }
 
     return {
@@ -1511,14 +1680,29 @@ export class ScheduleOperationsService {
     };
   }
 
-  static buildIncidentEvidence(files = []) {
-    return files.map((file) => ({
-      originalName: file.originalname || '',
-      filename: file.filename || '',
-      url: `/uploads/operation-incidents/${file.filename}`,
-      mimeType: file.mimetype || '',
-      size: file.size || 0,
-      uploadedAt: new Date(),
+  static async buildIncidentEvidence(files = [], metadata = {}) {
+    const uploads = [];
+
+    try {
+      for (const file of files) {
+        const upload = await StorageService.uploadOperationEvidence(file, metadata);
+        uploads.push(upload);
+      }
+    } catch (error) {
+      await StorageService.cleanupUploads(uploads);
+      throw error;
+    }
+
+    return uploads.map((upload) => ({
+      originalName: upload.originalName || '',
+      filename: upload.filename || '',
+      url: upload.url,
+      provider: upload.provider,
+      publicId: upload.publicId,
+      resourceType: upload.resourceType,
+      mimeType: upload.mimeType || '',
+      size: upload.size || 0,
+      uploadedAt: upload.uploadedAt,
     }));
   }
 
@@ -1592,7 +1776,7 @@ export class ScheduleOperationsService {
     return 'PENDING';
   }
 
-  static async reportOperationIncident(userId, role, assignmentId, payload = {}, files = []) {
+  static async reportOperationIncident(userId, role, assignmentId, payload = {}, files = [], io = null) {
     if (!['DRIVER', 'BUS_ASSISTANT'].includes(role)) {
       const error = new Error('Only drivers or bus assistants can report operation incidents');
       error.statusCode = 403;
@@ -1639,7 +1823,15 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    const incident = await OperationIncident.create({
+    const evidenceFiles = await this.buildIncidentEvidence(files, {
+      userId,
+      assignmentId,
+    });
+
+    let incident;
+
+    try {
+      incident = await OperationIncident.create({
       incidentCode: this.buildIncidentCode(assignment, type),
       type,
       severity,
@@ -1686,15 +1878,34 @@ export class ScheduleOperationsService {
       foundItem: type === 'FOUND_ITEM'
         ? {
           itemName: String(payload.itemName || '').trim(),
+          itemCategory: String(payload.itemCategory || '').trim(),
           itemDescription: String(payload.itemDescription || description).trim(),
+          color: String(payload.color || '').trim(),
+          brand: String(payload.brand || '').trim(),
+          identifyingDetails: String(payload.identifyingDetails || '').trim(),
           foundLocation: String(payload.foundLocation || locationText).trim(),
+          storageLocation: String(payload.storageLocation || payload.handedTo || '').trim(),
+          storageReference: String(payload.storageReference || '').trim(),
           handedTo: String(payload.handedTo || '').trim(),
-          recoveryStatus: 'REPORTED',
+          recoveryStatus: String(payload.storageLocation || payload.handedTo || '').trim() ? 'STORED' : 'REPORTED',
         }
         : undefined,
-      evidenceFiles: this.buildIncidentEvidence(files),
+      evidenceFiles,
       reportedAt: new Date(),
-    });
+      });
+    } catch (error) {
+      await StorageService.cleanupUploads(evidenceFiles);
+      throw error;
+    }
+
+    if (role === 'DRIVER' && ['TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN'].includes(type)) {
+      const incidentGpsPayload = normalizeStartGpsPayload({
+        latitude: Number.isFinite(Number(payload.latitude)) ? Number(payload.latitude) : assignment.trip.startLocation?.latitude,
+        longitude: Number.isFinite(Number(payload.longitude)) ? Number(payload.longitude) : assignment.trip.startLocation?.longitude,
+        capturedAt: new Date(),
+      }, new Date());
+      await syncLiveFleetGps({ schedule: assignment.trip, gpsPayload: incidentGpsPayload, driverId: userId, io, incidentType: type });
+    }
 
     if (type === 'VEHICLE_BREAKDOWN') {
       await VehicleIssueService.createEmergencyBreakdownFromOperationIncident({
@@ -1708,7 +1919,7 @@ export class ScheduleOperationsService {
     if (type === 'VEHICLE_BREAKDOWN') {
       await FleetBus.updateOne(
         { _id: getScheduleVehicleId(assignment.trip) },
-        { $set: { status: 'MAINTENANCE' } }
+        { $set: { status: 'ISSUE' } }
       );
     }
 
@@ -1792,6 +2003,18 @@ export class ScheduleOperationsService {
         longitude: Number.isFinite(Number(payload.longitude)) ? Number(payload.longitude) : null,
         severity,
         attachments: (incident.evidenceFiles || []).map((file) => file.url).filter(Boolean),
+      });
+    }
+
+    if (type === 'FOUND_ITEM') {
+      await LostAndFoundMatchingService.notifyReportCreated({
+        type: 'FOUND_ITEM',
+        report: incident,
+        actorId: userId,
+      });
+      await LostAndFoundMatchingService.runForFoundItem(incident._id, {
+        userId,
+        role,
       });
     }
 

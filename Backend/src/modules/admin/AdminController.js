@@ -3,17 +3,19 @@ import mongoose from 'mongoose';
 import nodemailer from 'nodemailer';
 import AdminModel from './AdminModel.js';
 import OperationNotification from '../scheduleOperations/OperationNotification.js';
+import notificationService from '../systemNotifications/notification.service.js';
 import User from '../auth/User.js';
 import { config } from '../../config/environment.js';
 import logger from '../../utils/logger.js';
 import ScheduleGenerationService from './ScheduleGenerationService.js';
+import { isTripOutsideOperatingWindow } from './scheduleOperatingWindow.js';
 
 const ALLOWED_MANAGED_ROLES = new Set(['DRIVER', 'CONDUCTOR', 'BUS_ASSISTANT']);
 const ALLOWED_ACCOUNT_ROLES = new Set(['DRIVER', 'CONDUCTOR', 'BUS_ASSISTANT']);
 const ALLOWED_ROUTE_STATUS = new Set(['DRAFT', 'PENDING_APPROVAL', 'PUBLISHED', 'SUSPENDED']);
-const ALLOWED_BUS_STATUS = new Set(['ACTIVE', 'INACTIVE', 'RESERVE', 'ASSIGNED', 'MAINTENANCE']);
+const ALLOWED_BUS_STATUS = new Set(['AVAILABLE', 'ACTIVE', 'INACTIVE', 'RESERVE', 'ASSIGNED', 'ISSUE', 'MAINTENANCE']);
 const ALLOWED_SCHEDULE_STATUS = new Set(['PLANNED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']);
-const ASSIGNABLE_BUS_STATUSES = new Set(['ACTIVE', 'RESERVE']);
+const ASSIGNABLE_BUS_STATUSES = new Set(['AVAILABLE', 'ACTIVE', 'RESERVE']);
 const LOCKED_SCHEDULE_STATUSES = new Set(['COMPLETED', 'CANCELLED']);
 const EDITABLE_SCHEDULE_STATUSES = new Set(['PLANNED', 'ASSIGNED']);
 const ALLOWED_OPERATION_NOTIFICATION_CATEGORIES = new Set(['ROUTE_UPDATE', 'SCHEDULE_CHANGE', 'EMERGENCY_INSTRUCTION', 'GENERAL']);
@@ -94,7 +96,7 @@ const normalizeBusPayload = (body = {}) => ({
   year: body.year === '' || body.year === undefined ? undefined : asNumber(body.year),
   capacity: asNumber(body.capacity),
   operator: String(body.operator || 'Veridian Transit').trim(),
-  status: ALLOWED_BUS_STATUS.has(body.status) ? body.status : 'ACTIVE',
+  status: ALLOWED_BUS_STATUS.has(body.status) ? body.status : 'AVAILABLE',
   notes: String(body.notes || '').trim(),
   maintenance: body.status === 'MAINTENANCE'
     ? {
@@ -175,7 +177,7 @@ const scheduleWeekdayToken = (date) => (
   ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()]
 );
 
-const getRouteScheduleMismatch = (route, serviceDate, departureTime, expectedArrivalTime) => {
+const getRouteScheduleMismatch = (route, serviceDate, departureTime, expectedArrivalTime, direction) => {
   if (!route || !serviceDate || Number.isNaN(serviceDate.getTime())) return '';
   const config = route.scheduleConfig || {};
   const operatingDays = Array.isArray(config.operatingDays) ? config.operatingDays : [];
@@ -184,14 +186,24 @@ const getRouteScheduleMismatch = (route, serviceDate, departureTime, expectedArr
   }
   const departure = toMinutes(departureTime);
   const { first, last, firstTime, lastTime } = getRouteOperatingWindow(route);
-  if (departure !== null && first !== null && last !== null && (departure < first || departure > last)) {
-    return `Giờ xuất bến phải nằm trong khung ${firstTime}-${lastTime}.`;
-  }
+  const normalizedDirection = direction === 'INBOUND' ? 'INBOUND' : 'OUTBOUND';
   const arrival = toMinutes(expectedArrivalTime);
-  if (arrival !== null && last !== null && arrival > last) {
-    return `Giờ kết thúc chuyến phải nằm trong khung ${firstTime}-${lastTime}.`;
+  const isOutsideOperatingWindow = departure !== null && arrival !== null
+    && isTripOutsideOperatingWindow({
+      direction: normalizedDirection,
+      departure,
+      arrival,
+      routeFirst: first,
+      routeLast: last,
+    });
+  if (!isOutsideOperatingWindow) return '';
+  if (departure < FIRST_BUS_DEPARTURE_MINUTES || departure > LAST_BUS_DEPARTURE_MINUTES) {
+    return `Giờ xuất bến phải nằm trong khung vận hành ${FIRST_BUS_DEPARTURE_TIME}-${LAST_BUS_DEPARTURE_TIME}.`;
   }
-  return '';
+  if (arrival > LAST_BUS_DEPARTURE_MINUTES) {
+    return `Giờ kết thúc chuyến phải nằm trong khung vận hành ${FIRST_BUS_DEPARTURE_TIME}-${LAST_BUS_DEPARTURE_TIME}.`;
+  }
+  return `Giờ xuất bến phải nằm trong khung ${firstTime}-${lastTime}.`;
 };
 
 const normalizeTripSchedulePayload = async (body = {}, userId) => {
@@ -202,7 +214,13 @@ const normalizeTripSchedulePayload = async (body = {}, userId) => {
   const driver = normalizeAssignedPerson(body.driver);
   const assistant = normalizeAssignedPerson(body.assistant);
   const serviceDate = normalizeDateOnly(body.serviceDate);
-  const routeScheduleMismatch = getRouteScheduleMismatch(route, serviceDate, body.departureTime, body.expectedArrivalTime);
+  const routeScheduleMismatch = getRouteScheduleMismatch(
+    route,
+    serviceDate,
+    body.departureTime,
+    body.expectedArrivalTime,
+    body.direction,
+  );
   const fallbackTurnaroundEndTime = addMinutesToClock(body.expectedArrivalTime, MIN_RESOURCE_BUFFER_MINUTES);
 
   return {
@@ -1126,7 +1144,7 @@ export class AdminController {
       }
       const currentBus = await AdminModel.findBusById(busId);
       if (!currentBus) return res.status(404).json({ success: false, message: 'Bus not found' });
-      if (currentBus.status === 'MAINTENANCE' && payload.status === 'ACTIVE' && req.body.completeMaintenance !== true) {
+      if (currentBus.status === 'MAINTENANCE' && ['AVAILABLE', 'ACTIVE'].includes(payload.status) && req.body.completeMaintenance !== true) {
         return res.status(409).json({ success: false, message: 'Use maintenance completion confirmation before returning this vehicle to active service.' });
       }
       if (payload.status === 'MAINTENANCE' && !payload.maintenance?.reason) {
@@ -1168,7 +1186,12 @@ export class AdminController {
 
   static async confirmGeneratedTripSchedules(req, res, _next) {
     try {
-      const schedules = await ScheduleGenerationService.confirm(req.body?.rows, req.user?.userId, Boolean(req.body?.replaceScheduled));
+      const schedules = await ScheduleGenerationService.confirm(
+        req.body?.rows,
+        req.user?.userId,
+        Boolean(req.body?.replaceScheduled),
+        Boolean(req.body?.planningOnly)
+      );
       return res.status(201).json({ success: true, message: 'Đã lưu lịch chuyến.', schedules });
     } catch (error) {
       logger.error('Confirm generated trip schedules error:', error);
@@ -1320,7 +1343,7 @@ export class AdminController {
       if (!schedule) return res.status(404).json({ success: false, message: 'Trip schedule not found' });
 
       if (req.body.emergencyReason) {
-        await OperationNotification.create({
+        await notificationService.createOperationNotification({
           title: `Điều chỉnh khẩn cấp chuyến ${schedule.scheduleCode}`,
           message: String(req.body.emergencyReason).trim(),
           category: 'EMERGENCY_INSTRUCTION',
@@ -1354,8 +1377,10 @@ export class AdminController {
 
       const schedule = await AdminModel.findTripScheduleById(scheduleId);
       if (!schedule) return res.status(404).json({ success: false, message: 'Không tìm thấy ca làm.' });
-      if (['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(schedule.status)) {
-        return res.status(409).json({ success: false, message: 'Không thể xóa lịch chuyến đang chạy, đã hoàn thành hoặc đã hủy.' });
+      const hasEmbeddedAllocation = Boolean(schedule.driver?.userId || schedule.assistant?.userId || schedule.vehicle?.busId);
+      const hasAllocation = hasEmbeddedAllocation || await AdminModel.hasTripAllocation(scheduleId);
+      if (schedule.status !== 'PLANNED' || hasAllocation) {
+        return res.status(409).json({ success: false, message: 'Không thể xóa chuyến đã được phân bổ tài xế, phụ xe hoặc xe.' });
       }
 
       await AdminModel.deleteTripScheduleById(scheduleId);
@@ -1398,13 +1423,16 @@ export class AdminController {
       const deletableFilters = {
         $and: [
           filters,
-          { status: { $nin: ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'] } },
+          { status: 'PLANNED' },
+          { 'driver.userId': null },
+          { 'assistant.userId': null },
+          { 'vehicle.busId': null },
         ],
       };
       const protectedCount = await AdminModel.countTripSchedules({
         $and: [
           filters,
-          { status: { $in: ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'] } },
+          { status: { $ne: 'PLANNED' } },
         ],
       });
       const result = await AdminModel.deleteTripSchedules(deletableFilters);
@@ -1413,7 +1441,7 @@ export class AdminController {
         success: true,
         message: `Đã xóa ${result.deletedCount} lịch chuyến.`,
         ...result,
-        protectedCount,
+        protectedCount: protectedCount + Number(result.allocationProtectedCount || 0),
       });
     } catch (error) {
       logger.error('Delete trip schedules error:', error);
@@ -1463,7 +1491,7 @@ export class AdminController {
         });
       }
 
-      const notification = await OperationNotification.create(payload);
+      const notification = await notificationService.createOperationNotification(payload);
       return res.status(201).json({
         success: true,
         message: 'Operation notification created successfully',

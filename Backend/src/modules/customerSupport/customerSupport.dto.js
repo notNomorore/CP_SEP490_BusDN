@@ -1,6 +1,12 @@
 const CASE_TYPES = ['COMPLAINT', 'LOST_ITEM', 'SERVICE_FEEDBACK'];
-const COMPLAINT_RESPONSE_STATUSES = ['IN_PROGRESS', 'RESOLVED', 'REJECTED', 'CLOSED'];
+const COMPLAINT_RESPONSE_STATUSES = ['IN_PROGRESS', 'INVESTIGATING', 'ACTION_REQUIRED', 'RESOLVED', 'CLOSED'];
 const CASE_STATUSES = [
+  'NEW',
+  'IN_REVIEW',
+  'INVESTIGATING',
+  'WAITING_FOR_INFORMATION',
+  'ACTION_REQUIRED',
+  'REOPENED',
   'PENDING',
   'IN_PROGRESS',
   'WAITING_FOR_PASSENGER',
@@ -11,8 +17,26 @@ const CASE_STATUSES = [
   'SUBMITTED',
   'UNDER_REVIEW',
   'RESPONDED',
+  'WAITING_FOR_MATCH',
+  'POTENTIAL_MATCH',
+  'MATCH_CONFIRMED',
+  'RETURN_IN_PROGRESS',
+  'RETURNED',
+  'CANCELLED',
 ];
-const FEEDBACK_STATUSES = ['PENDING', 'IN_PROGRESS', 'WAITING_FOR_PASSENGER', 'RESOLVED', 'REJECTED', 'CLOSED'];
+const FEEDBACK_STATUSES = [
+  'NEW',
+  'IN_REVIEW',
+  'INVESTIGATING',
+  'WAITING_FOR_INFORMATION',
+  'ACTION_REQUIRED',
+  'RESOLVED',
+  'CLOSED',
+  'REOPENED',
+  'PENDING',
+  'IN_PROGRESS',
+  'WAITING_FOR_PASSENGER',
+];
 const ADMIN_REPLY_MAX_LENGTH = 2000;
 const RESOLUTION_SUMMARY_MAX_LENGTH = 1000;
 const TITLE_MIN_LENGTH = 5;
@@ -21,8 +45,19 @@ const DESCRIPTION_MIN_LENGTH = 10;
 const DESCRIPTION_MAX_LENGTH = 5000;
 const PASSENGER_REPLY_MAX_LENGTH = 2000;
 const CASE_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'NORMAL', 'URGENT'];
-const RECOVERY_STATUSES = ['REPORTED', 'SEARCHING', 'FOUND', 'RETURNED', 'UNRECOVERED'];
-const LOST_ITEM_RECOVERY_STATUSES = ['REPORTED', 'STORED', 'RETURNED', 'CANCELLED'];
+const ENTERPRISE_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'CRITICAL'];
+const ASSIGNED_TEAMS = ['UNASSIGNED', 'ADMIN', 'OPERATION_TEAM', 'SUPPORT_TEAM', 'MAINTENANCE_TEAM'];
+const CORRECTIVE_ACTION_TYPES = [
+  'DRIVER_WARNING',
+  'DRIVER_TRAINING',
+  'SUPERVISOR_REVIEW',
+  'SCHEDULE_ADJUSTMENT',
+  'MAINTENANCE_ACTION',
+  'NO_VIOLATION_FOUND',
+  'OTHER',
+];
+const RECOVERY_STATUSES = ['REPORTED', 'SEARCHING', 'POTENTIAL_MATCH', 'MATCH_CONFIRMED', 'RETURN_IN_PROGRESS', 'FOUND', 'RETURNED', 'UNRECOVERED', 'CANCELLED'];
+const LOST_ITEM_RECOVERY_STATUSES = ['REPORTED', 'STORED', 'POTENTIAL_MATCH', 'MATCHED', 'RETURN_IN_PROGRESS', 'RETURNED', 'CANCELLED'];
 const FEEDBACK_CATEGORIES = [
   'SERVICE_QUALITY',
   'DRIVER_BEHAVIOR',
@@ -106,6 +141,15 @@ export const CreateSupportCaseDTO = {
         errors.itemDescription = 'Lost item description must contain at least 10 characters';
       }
       if (!body.lostItem?.lastSeenLocation?.trim()) errors.lastSeenLocation = 'Estimated lost location is required';
+      if (body.lostItem?.color !== undefined && String(body.lostItem.color).length > 60) {
+        errors.color = 'Color must not exceed 60 characters';
+      }
+      if (body.lostItem?.brand !== undefined && String(body.lostItem.brand).length > 80) {
+        errors.brand = 'Brand must not exceed 80 characters';
+      }
+      if (body.lostItem?.identifyingDetails !== undefined && String(body.lostItem.identifyingDetails).length > 1000) {
+        errors.identifyingDetails = 'Identifying details must not exceed 1000 characters';
+      }
       if (!body.lostItem?.lostAt || Number.isNaN(new Date(body.lostItem.lostAt).getTime())) {
         errors.lostAt = 'Estimated lost date and time is invalid';
       } else if (new Date(body.lostItem.lostAt).getTime() > Date.now()) {
@@ -128,6 +172,10 @@ export const FeedbackAdminActionDTO = {
       errors.status = 'Feedback status is invalid';
     }
 
+    if (body.priority && !ENTERPRISE_PRIORITIES.includes(body.priority)) {
+      errors.priority = 'Priority must be LOW, NORMAL, HIGH, or CRITICAL';
+    }
+
     if (body.message !== undefined && !body.message?.trim()) {
       errors.message = 'Message cannot be empty';
     }
@@ -144,6 +192,69 @@ export const FeedbackAdminActionDTO = {
       errors.resolutionSummary = `Resolution summary must not exceed ${RESOLUTION_SUMMARY_MAX_LENGTH} characters`;
     }
 
+    if (body.waitingForInformationReason !== undefined && !body.waitingForInformationReason?.trim()) {
+      errors.waitingForInformationReason = 'Waiting reason cannot be empty';
+    }
+
+    if (body.correctiveAction) {
+      if (!CORRECTIVE_ACTION_TYPES.includes(body.correctiveAction.actionType || 'OTHER')) {
+        errors.correctiveAction = 'Corrective action type is invalid';
+      }
+      if (!body.correctiveAction.description?.trim()) {
+        errors.correctiveActionDescription = 'Corrective action description is required';
+      }
+    }
+
+    if (body.notification) {
+      if (body.notification.confirmSend && !body.notification.message?.trim()) {
+        errors.notificationMessage = 'Notification message is required';
+      }
+      if (
+        body.notification.channels
+        && body.notification.channels.inApp !== true
+        && body.notification.channels.email !== true
+      ) {
+        errors.notificationChannels = 'Select at least one notification channel or cancel notification sending';
+      }
+    }
+
+    return Object.keys(errors).length === 0 ? null : errors;
+  },
+};
+
+export const AssignFeedbackDTO = {
+  validate: (body) => {
+    const errors = {};
+    if (body.assignedTeam && !ASSIGNED_TEAMS.includes(body.assignedTeam)) {
+      errors.assignedTeam = 'Assigned team is invalid';
+    }
+    return Object.keys(errors).length === 0 ? null : errors;
+  },
+};
+
+export const InternalNoteDTO = {
+  validate: (body) => {
+    const errors = {};
+    if (!body.message?.trim()) errors.message = 'Internal note is required';
+    if (body.message?.trim() && body.message.trim().length > 2000) {
+      errors.message = 'Internal note must not exceed 2000 characters';
+    }
+    return Object.keys(errors).length === 0 ? null : errors;
+  },
+};
+
+export const CorrectiveActionDTO = {
+  validate: (body) => {
+    const errors = {};
+    if (!CORRECTIVE_ACTION_TYPES.includes(body.actionType || 'OTHER')) {
+      errors.actionType = 'Corrective action type is invalid';
+    }
+    if (!body.description?.trim()) {
+      errors.description = 'Corrective action description is required';
+    }
+    if (body.performedAt && Number.isNaN(new Date(body.performedAt).getTime())) {
+      errors.performedAt = 'Performed time is invalid';
+    }
     return Object.keys(errors).length === 0 ? null : errors;
   },
 };
@@ -203,6 +314,7 @@ export const SupportCaseResponseDTO = {
     ratingScore: supportCase.ratingScore,
     rating: supportCase.ratingScore,
     priority: supportCase.priority,
+    priorityReason: supportCase.priorityReason,
     status: supportCase.status,
     replyStatus: supportCase.replyStatus || 'UNREPLIED',
     routeId: supportCase.routeId,
@@ -217,6 +329,7 @@ export const SupportCaseResponseDTO = {
     contactEmail: supportCase.contactEmail,
     attachments: supportCase.attachments || [],
     lostItem: supportCase.lostItem,
+    potentialMatches: supportCase.potentialMatches || [],
     responses: includeInternal
       ? supportCase.responses || []
       : (supportCase.responses || []).filter((response) => response.visibleToPassenger !== false),
@@ -236,6 +349,7 @@ export const SupportCaseResponseDTO = {
       createdAt: message.createdAt,
     })),
     assignedTo: supportCase.assignedTo,
+    assignedTeam: supportCase.assignedTeam || 'UNASSIGNED',
     assignedAt: supportCase.assignedAt,
     adminResponse: supportCase.adminResponse,
     adminResponseBy: supportCase.adminResponseBy
@@ -250,8 +364,49 @@ export const SupportCaseResponseDTO = {
     firstResponseAt: supportCase.firstResponseAt,
     lastResponseAt: supportCase.lastResponseAt,
     resolutionSummary: supportCase.resolutionSummary,
+    waitingForInformationReason: includeInternal ? supportCase.waitingForInformationReason : undefined,
+    correctiveActions: includeInternal
+      ? (supportCase.correctiveActions || []).map((action) => ({
+        id: action._id,
+        actionType: action.actionType,
+        description: action.description,
+        performedBy: action.performedBy
+          ? {
+            id: action.performedBy._id || action.performedBy,
+            fullName: action.performedBy.fullName,
+            email: action.performedBy.email,
+            role: action.performedBy.role,
+          }
+          : null,
+        performedAt: action.performedAt,
+        createdAt: action.createdAt,
+      }))
+      : undefined,
+    slaDueAt: supportCase.slaDueAt,
     resolvedAt: supportCase.resolvedAt,
     closedAt: supportCase.closedAt,
+    notificationDeliveries: includeInternal ? supportCase.notificationDeliveries || [] : undefined,
+    notificationResults: includeInternal ? supportCase.notificationResults || [] : undefined,
+    activityTimeline: includeInternal
+      ? (supportCase.auditTrail || []).map((entry) => ({
+        id: entry._id,
+        action: entry.action,
+        actorRole: entry.actorRole,
+        actor: entry.actorId
+          ? {
+            id: entry.actorId._id || entry.actorId,
+            fullName: entry.actorId.fullName,
+            email: entry.actorId.email,
+            role: entry.actorId.role || entry.actorRole,
+          }
+          : null,
+        previousStatus: entry.previousStatus,
+        newStatus: entry.newStatus,
+        message: entry.message,
+        metadata: entry.metadata || {},
+        createdAt: entry.createdAt,
+      }))
+      : undefined,
     publicTimeline: (supportCase.auditTrail || [])
       .filter((entry) => includeInternal || !['INTERNAL_NOTE', 'REASSIGN', 'CHANGE_PRIORITY'].includes(entry.action))
       .map((entry) => ({
@@ -292,7 +447,61 @@ export const UpdateFoundItemCaseDTO = {
     if (body.adminNote !== undefined && !body.adminNote?.trim()) {
       errors.adminNote = 'Admin note cannot be empty';
     }
+    if (body.storageLocation !== undefined && String(body.storageLocation).length > 200) {
+      errors.storageLocation = 'Storage location must not exceed 200 characters';
+    }
+    if (body.storageReference !== undefined && String(body.storageReference).length > 120) {
+      errors.storageReference = 'Storage reference must not exceed 120 characters';
+    }
 
+    return Object.keys(errors).length === 0 ? null : errors;
+  },
+};
+
+export const MatchReviewDTO = {
+  validateConfirm: (body) => {
+    const errors = {};
+    if (body.adminNote !== undefined && String(body.adminNote).length > 1000) {
+      errors.adminNote = 'Admin note must not exceed 1000 characters';
+    }
+    return Object.keys(errors).length === 0 ? null : errors;
+  },
+
+  validateReject: (body) => {
+    const errors = {};
+    if (!body.rejectionReason?.trim()) errors.rejectionReason = 'Rejection reason is required';
+    if (body.rejectionReason?.trim() && body.rejectionReason.trim().length > 200) {
+      errors.rejectionReason = 'Rejection reason must not exceed 200 characters';
+    }
+    if (body.adminNote !== undefined && String(body.adminNote).length > 1000) {
+      errors.adminNote = 'Admin note must not exceed 1000 characters';
+    }
+    return Object.keys(errors).length === 0 ? null : errors;
+  },
+
+  validateStartReturn: (body) => {
+    const errors = {};
+    const methods = ['PICKUP_AT_BUS_STATION', 'HANDOVER_BY_STAFF', 'OTHER'];
+    if (body.method && !methods.includes(body.method)) errors.method = 'Return method is invalid';
+    if (!body.location?.trim()) errors.location = 'Return location is required';
+    if (body.scheduledAt && Number.isNaN(new Date(body.scheduledAt).getTime())) {
+      errors.scheduledAt = 'Scheduled return time is invalid';
+    }
+    if (body.note !== undefined && String(body.note).length > 1000) {
+      errors.note = 'Return note must not exceed 1000 characters';
+    }
+    return Object.keys(errors).length === 0 ? null : errors;
+  },
+
+  validateCompleteReturn: (body) => {
+    const errors = {};
+    if (!body.receiverName?.trim()) errors.receiverName = 'Receiver name is required';
+    if (body.returnedAt && Number.isNaN(new Date(body.returnedAt).getTime())) {
+      errors.returnedAt = 'Returned time is invalid';
+    }
+    if (body.handoverNote !== undefined && String(body.handoverNote).length > 1000) {
+      errors.handoverNote = 'Handover note must not exceed 1000 characters';
+    }
     return Object.keys(errors).length === 0 ? null : errors;
   },
 };
@@ -305,9 +514,15 @@ export const FoundItemCaseResponseDTO = {
     status: incident.status,
     severity: incident.severity,
     recoveryStatus: incident.foundItem?.recoveryStatus || 'REPORTED',
+    itemCategory: incident.foundItem?.itemCategory || '',
     itemName: incident.foundItem?.itemName || '',
     itemDescription: incident.foundItem?.itemDescription || incident.description,
+    color: incident.foundItem?.color || '',
+    brand: incident.foundItem?.brand || '',
+    identifyingDetails: incident.foundItem?.identifyingDetails || '',
     foundLocation: incident.foundItem?.foundLocation || incident.locationText,
+    storageLocation: incident.foundItem?.storageLocation || '',
+    storageReference: incident.foundItem?.storageReference || '',
     handedTo: incident.foundItem?.handedTo || '',
     adminNote: incident.adminNote || '',
     reporterRole: incident.reporterRole,
@@ -376,8 +591,12 @@ export const PassengerLostItemCaseResponseDTO = {
       caseStatus: supportCase.status,
       severity: supportCase.priority || 'NORMAL',
       recoveryStatus: supportCase.lostItem?.recoveryStatus || 'REPORTED',
+      itemCategory: supportCase.lostItem?.itemCategory || '',
       itemName: supportCase.lostItem?.itemName || supportCase.title || '',
       itemDescription: supportCase.lostItem?.itemDescription || supportCase.description,
+      color: supportCase.lostItem?.color || '',
+      brand: supportCase.lostItem?.brand || '',
+      identifyingDetails: supportCase.lostItem?.identifyingDetails || '',
       foundLocation: supportCase.lostItem?.lastSeenLocation || '',
       lastSeenLocation: supportCase.lostItem?.lastSeenLocation || '',
       handedTo: '',
@@ -426,6 +645,65 @@ export const PassengerLostItemCaseResponseDTO = {
       resolvedAt: supportCase.resolvedAt,
       createdAt: supportCase.createdAt,
       updatedAt: supportCase.updatedAt,
+    };
+  },
+};
+
+const formatUser = (user) => (user
+  ? {
+    id: user._id || user,
+    fullName: user.fullName,
+    email: user.email,
+    phone: user.phone || user.phoneNumber,
+    role: user.role,
+  }
+  : null);
+
+export const LostFoundMatchResponseDTO = {
+  format: (match) => {
+    const lost = match.lostItemReport || {};
+    const found = match.foundItemReport || {};
+    return {
+      id: match._id,
+      status: match.status,
+      matchScore: match.matchScore,
+      matchingFactors: match.matchingFactors || {},
+      reviewedBy: formatUser(match.reviewedBy),
+      reviewedAt: match.reviewedAt,
+      rejectionReason: match.rejectionReason || '',
+      adminNote: match.adminNote || '',
+      returnProcess: match.returnProcess || {},
+      lostReport: lost?._id
+        ? {
+          id: lost._id,
+          referenceNumber: lost.referenceNumber,
+          status: lost.status,
+          recoveryStatus: lost.lostItem?.recoveryStatus || 'REPORTED',
+          passenger: formatUser(lost.passenger),
+          itemName: lost.lostItem?.itemName || lost.title || '',
+          itemCategory: lost.lostItem?.itemCategory || '',
+          itemDescription: lost.lostItem?.itemDescription || lost.description || '',
+          color: lost.lostItem?.color || '',
+          brand: lost.lostItem?.brand || '',
+          identifyingDetails: lost.lostItem?.identifyingDetails || '',
+          lastSeenLocation: lost.lostItem?.lastSeenLocation || '',
+          lostAt: lost.lostItem?.lostAt || lost.incidentAt,
+          routeName: lost.routeName || '',
+          tripCode: lost.tripCode || lost.tripId || lost.relatedTripId || '',
+          busPlate: lost.busPlate || '',
+          contactPhone: lost.contactPhone || '',
+          contactEmail: lost.contactEmail || '',
+          attachments: lost.attachments || [],
+          auditTrail: lost.auditTrail || [],
+          createdAt: lost.createdAt,
+          updatedAt: lost.updatedAt,
+        }
+        : null,
+      foundReport: found?._id
+        ? FoundItemCaseResponseDTO.format(found)
+        : null,
+      createdAt: match.createdAt,
+      updatedAt: match.updatedAt,
     };
   },
 };

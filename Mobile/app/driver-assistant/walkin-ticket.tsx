@@ -13,7 +13,13 @@ import { useAuthStore } from '@/store/auth.store';
 import type { WalkInTicketHistory, WalkInTicketResult } from '@/types/busAssistant';
 import type { AssignedTrip } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
-import { getTripDepartureTimeLabel, toDateInput } from '@/utils/scheduleOperations';
+import {
+  getAssignedTripsRange,
+  getTripDepartureTimeLabel,
+  getTripPlannedStartDate,
+  isTripToday,
+  toDateInput,
+} from '@/utils/scheduleOperations';
 import { getErrorMessage, isPermissionError } from '@/utils/validation';
 
 const passengerTypes = ['ADULT', 'STUDENT', 'CHILD', 'SENIOR'];
@@ -129,12 +135,15 @@ export default function WalkInTicketScreen() {
 
   const loadTrips = useCallback(async () => {
     try {
-      // Keep this list identical to the web walk-in-ticket dropdown: use the
-      // backend's default assignment scope and filter by tripStatus only.
-      const payload = await scheduleOperationsApi.getAssignedTrips();
-      const usableTrips = (payload.trips || []).filter((trip) => (
-        !['COMPLETED', 'CANCELLED'].includes(String(trip.tripStatus || '').toUpperCase())
-      ));
+      const payload = await scheduleOperationsApi.getAssignedTrips(getAssignedTripsRange());
+      const usableTrips = (payload.trips || [])
+        .filter((trip) => !['COMPLETED', 'CANCELLED'].includes(String(trip.tripStatus || '').toUpperCase()))
+        .sort((left, right) => {
+          const leftToday = isTripToday(left) ? 0 : 1;
+          const rightToday = isTripToday(right) ? 0 : 1;
+          if (leftToday !== rightToday) return leftToday - rightToday;
+          return (getTripPlannedStartDate(left)?.getTime() || 0) - (getTripPlannedStartDate(right)?.getTime() || 0);
+        });
       setTrips(usableTrips);
       const first = usableTrips[0];
       setSelectedTripId((current) => current || first?.id || '');

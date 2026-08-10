@@ -355,7 +355,7 @@ const DefinePathStep = ({ inputClassName, panelClassName, stations, isDarkMode }
         />
         <div className="mt-5 flex justify-between">
           <button type="button" onClick={() => setActiveStep(0)} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-bold">Quay lại</button>
-          <button type="button" onClick={() => setActiveStep(2)} className="rounded-xl bg-cyan-400 px-5 py-3 text-sm font-black text-slate-950">Tiếp tục đến lịch chạy</button>
+          <button type="button" onClick={() => setActiveStep(2)} className="rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-white">Tiếp tục rà soát</button>
         </div>
       </div>
     </section>

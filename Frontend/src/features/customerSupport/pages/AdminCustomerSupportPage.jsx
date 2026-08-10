@@ -3,8 +3,10 @@ import toast from 'react-hot-toast';
 import Header from '../../../shared/components/navigation/Header.jsx';
 import Footer from '../../../shared/components/common/Footer.jsx';
 import customerSupportService, {
+  ASSIGNED_TEAMS,
   CASE_STATUSES,
   CASE_TYPES,
+  CORRECTIVE_ACTION_TYPES,
   FEEDBACK_CATEGORIES,
   FEEDBACK_STATUSES,
   PRIORITIES,
@@ -13,6 +15,12 @@ import customerSupportService, {
 import { resolveBackendUrl } from '../../../shared/config/apiConfig.js';
 
 const STATUS_BADGE = {
+  NEW: 'bg-blue-100 text-blue-800',
+  IN_REVIEW: 'bg-cyan-100 text-cyan-800',
+  INVESTIGATING: 'bg-amber-100 text-amber-900',
+  WAITING_FOR_INFORMATION: 'bg-purple-100 text-purple-800',
+  ACTION_REQUIRED: 'bg-orange-100 text-orange-900',
+  REOPENED: 'bg-indigo-100 text-indigo-800',
   PENDING: 'bg-blue-100 text-blue-800',
   OPEN: 'bg-blue-100 text-blue-800',
   SUBMITTED: 'bg-blue-100 text-blue-800',
@@ -24,6 +32,17 @@ const STATUS_BADGE = {
   REJECTED: 'bg-red-100 text-red-800',
   CLOSED: 'bg-slate-100 text-slate-700',
 };
+
+const ENTERPRISE_PRIORITIES = PRIORITIES.filter((item) => ['LOW', 'NORMAL', 'HIGH', 'CRITICAL'].includes(item.value));
+const CUSTOMER_VISIBLE_STATUSES = new Set([
+  'IN_REVIEW',
+  'INVESTIGATING',
+  'WAITING_FOR_INFORMATION',
+  'ACTION_REQUIRED',
+  'RESOLVED',
+  'CLOSED',
+  'REOPENED',
+]);
 
 const TYPE_BADGE = {
   COMPLAINT: 'bg-purple-100 text-purple-800',
@@ -65,10 +84,18 @@ const getAttachmentUrl = (attachment) => {
 
 const isImageAttachment = (attachment) => String(attachment?.mimeType || '').startsWith('image/');
 
-const buildFeedbackPayload = ({ message, status, resolutionSummary }) => {
+const buildFeedbackPayload = ({
+  message,
+  status,
+  resolutionSummary,
+  priority,
+  waitingForInformationReason,
+  correctiveAction,
+}) => {
   const payload = {};
   const trimmedMessage = message.trim();
   const trimmedResolution = resolutionSummary.trim();
+  const trimmedWaitingReason = waitingForInformationReason.trim();
 
   if (status) {
     payload.status = status;
@@ -82,14 +109,44 @@ const buildFeedbackPayload = ({ message, status, resolutionSummary }) => {
     payload.resolutionSummary = trimmedResolution;
   }
 
+  if (priority) {
+    payload.priority = priority;
+  }
+
+  if (trimmedWaitingReason) {
+    payload.waitingForInformationReason = trimmedWaitingReason;
+  }
+
+  if (correctiveAction?.description?.trim()) {
+    payload.correctiveAction = {
+      actionType: correctiveAction.actionType || 'OTHER',
+      description: correctiveAction.description.trim(),
+    };
+  }
+
   return payload;
+};
+
+const getSlaDisplay = (supportCase) => {
+  if (!supportCase?.slaDueAt) return { label: 'Chua co', tone: 'text-on-surface' };
+  if (['RESOLVED', 'CLOSED'].includes(supportCase.status)) {
+    return { label: 'Completed', tone: 'text-emerald-700' };
+  }
+  const remainingMs = new Date(supportCase.slaDueAt).getTime() - Date.now();
+  if (remainingMs <= 0) return { label: 'SLA BREACHED', tone: 'text-red-700' };
+  const hours = Math.floor(remainingMs / 36e5);
+  const minutes = Math.floor((remainingMs % 36e5) / 60000);
+  return {
+    label: `SLA: ${hours}h ${minutes}m remaining`,
+    tone: remainingMs <= 2 * 36e5 ? 'text-orange-700' : 'text-emerald-700',
+  };
 };
 
 const getWorkflowHint = (supportCase) => {
   if (!supportCase) return '';
   if (!supportCase.assignedTo) return 'Gan ticket cho admin truoc khi xu ly de tranh trung viec.';
   if (supportCase.status === 'PENDING') return 'Bat dau xu ly bang cach doi trang thai sang Dang xu ly hoac hoi them thong tin.';
-  if (supportCase.status === 'WAITING_FOR_PASSENGER') return 'Dang cho hanh khach bo sung thong tin. Khi khach tra loi, ticket se quay lai Dang xu ly.';
+  if (['WAITING_FOR_INFORMATION', 'WAITING_FOR_PASSENGER'].includes(supportCase.status)) return 'Dang cho hanh khach bo sung thong tin. Khi khach tra loi, ticket se quay lai Dang dieu tra.';
   if (supportCase.status === 'RESOLVED') return 'Ticket da giai quyet. Co the dong ticket sau khi khong can trao doi them.';
   if (supportCase.status === 'CLOSED') return 'Ticket da dong.';
   return 'Cap nhat trang thai, gui phan hoi cho hanh khach, sau do giai quyet hoac dong ticket.';
@@ -117,7 +174,12 @@ const AdminCustomerSupportPage = () => {
   const [analytics, setAnalytics] = useState(null);
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackStatus, setFeedbackStatus] = useState('IN_PROGRESS');
+  const [feedbackPriority, setFeedbackPriority] = useState('NORMAL');
+  const [waitingReason, setWaitingReason] = useState('');
   const [resolutionSummary, setResolutionSummary] = useState('');
+  const [internalNote, setInternalNote] = useState('');
+  const [correctiveAction, setCorrectiveAction] = useState({ actionType: 'OTHER', description: '' });
+  const [assignedTeam, setAssignedTeam] = useState('ADMIN');
   const [responseMessage, setResponseMessage] = useState('');
   const [nextStatus, setNextStatus] = useState('IN_PROGRESS');
   const [lostItemNote, setLostItemNote] = useState('');
@@ -126,6 +188,10 @@ const AdminCustomerSupportPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingUpdate, setPendingUpdate] = useState(null);
+  const [notificationDraft, setNotificationDraft] = useState(null);
+  const [notificationChannels, setNotificationChannels] = useState({ inApp: true, email: true });
+  const [notificationMessage, setNotificationMessage] = useState('');
 
   const selectedType = selectedCase?.type;
   const isFeedback = selectedType === 'SERVICE_FEEDBACK';
@@ -198,9 +264,17 @@ const AdminCustomerSupportPage = () => {
     try {
       const response = await customerSupportService.getAdminCaseDetail(caseId);
       setSelectedCase(response.data);
-      setFeedbackStatus(response.data?.status === 'PENDING' ? 'IN_PROGRESS' : response.data?.status || 'IN_PROGRESS');
+      setFeedbackStatus(['PENDING', 'OPEN'].includes(response.data?.status) ? 'IN_REVIEW' : response.data?.status || 'IN_REVIEW');
+      setFeedbackPriority(['LOW', 'NORMAL', 'HIGH', 'CRITICAL'].includes(response.data?.priority) ? response.data.priority : 'NORMAL');
+      setWaitingReason(response.data?.waitingForInformationReason || '');
       setResolutionSummary(response.data?.resolutionSummary || '');
       setFeedbackMessage('');
+      setInternalNote('');
+      setCorrectiveAction({ actionType: 'OTHER', description: '' });
+      setAssignedTeam(response.data?.assignedTeam || 'ADMIN');
+      setPendingUpdate(null);
+      setNotificationDraft(null);
+      setNotificationMessage('');
       setNextStatus(response.data?.status === 'OPEN' ? 'IN_PROGRESS' : response.data?.status || 'IN_PROGRESS');
       setRecoveryStatus(response.data?.lostItem?.recoveryStatus || 'SEARCHING');
       setLostItemStatus(response.data?.status || 'IN_PROGRESS');
@@ -235,9 +309,9 @@ const AdminCustomerSupportPage = () => {
     setIsSubmitting(true);
 
     try {
-      const response = await customerSupportService.assignFeedback(selectedCase.id);
+      const response = await customerSupportService.assignFeedback(selectedCase.id, { assignedTeam });
       await refreshAfterMutation(response.data);
-      toast.success('Feedback da duoc gan cho ban.');
+      toast.success('Feedback assignment updated.');
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
@@ -251,11 +325,50 @@ const AdminCustomerSupportPage = () => {
     const payload = buildFeedbackPayload({
       message: feedbackMessage,
       status: feedbackStatus,
+      priority: feedbackPriority !== selectedCase.priority ? feedbackPriority : '',
+      waitingForInformationReason: waitingReason,
       resolutionSummary,
+      correctiveAction,
     });
 
-    if (!payload.message && selectedCase.status === payload.status && !payload.resolutionSummary) {
-      toast.error('Hay nhap phan hoi, ghi chu ket qua, hoac chon trang thai moi.');
+    if (!payload.message && selectedCase.status === payload.status && !payload.resolutionSummary && !payload.priority && !payload.waitingForInformationReason && !payload.correctiveAction) {
+      toast.error('Hay nhap cap nhat, doi trang thai, muc do uu tien, hoac them ket qua xu ly.');
+      return;
+    }
+
+    if (payload.status === 'WAITING_FOR_INFORMATION' && !payload.message && !payload.waitingForInformationReason) {
+      toast.error('Trang thai cho bo sung thong tin can ly do hoac noi dung gui khach.');
+      return;
+    }
+
+    if (payload.status === 'RESOLVED' && !payload.resolutionSummary) {
+      toast.error('Can nhap tom tat ket qua truoc khi danh dau da giai quyet.');
+      return;
+    }
+
+    if (payload.status === 'RESOLVED' && !payload.correctiveAction && !(selectedCase.correctiveActions || []).length) {
+      toast.error('Can ghi nhan hanh dong khac phuc hoac ket qua dieu tra truoc khi giai quyet.');
+      return;
+    }
+
+    const customerVisible = CUSTOMER_VISIBLE_STATUSES.has(payload.status) || Boolean(payload.message) || Boolean(payload.resolutionSummary);
+
+    if (customerVisible) {
+      try {
+        const response = await customerSupportService.previewCaseNotification(selectedCase.id, {
+          status: payload.status,
+        });
+        const preview = response.data || {};
+        setPendingUpdate(payload);
+        setNotificationDraft(preview);
+        setNotificationChannels({
+          inApp: true,
+          email: Boolean(preview.emailAvailable),
+        });
+        setNotificationMessage(preview.message || '');
+      } catch (error) {
+        toast.error(getErrorMessage(error));
+      }
       return;
     }
 
@@ -264,6 +377,7 @@ const AdminCustomerSupportPage = () => {
     try {
       const response = await customerSupportService.updateFeedback(selectedCase.id, payload);
       setFeedbackMessage('');
+      setCorrectiveAction({ actionType: 'OTHER', description: '' });
       await refreshAfterMutation(response.data);
       toast.success('Feedback da duoc cap nhat.');
     } catch (error) {
@@ -273,24 +387,80 @@ const AdminCustomerSupportPage = () => {
     }
   };
 
-  const handleQuickFeedbackStatus = async (status, defaultMessage = '') => {
-    if (!selectedCase?.id) return;
+  const handleConfirmFeedbackUpdate = async () => {
+    if (!selectedCase?.id || !pendingUpdate) return;
+    if (!notificationChannels.inApp && !notificationChannels.email) {
+      const confirmed = window.confirm('No notification will be sent to the passenger. Continue?');
+      if (!confirmed) return;
+    }
 
     setIsSubmitting(true);
 
     try {
-      const response = await customerSupportService.updateFeedback(selectedCase.id, buildFeedbackPayload({
-        message: defaultMessage,
-        status,
-        resolutionSummary,
-      }));
+      const response = await customerSupportService.updateFeedback(selectedCase.id, {
+        ...pendingUpdate,
+        notification: {
+          confirmSend: notificationChannels.inApp || notificationChannels.email,
+          channels: notificationChannels,
+          title: notificationDraft?.title || 'Complaint update',
+          message: notificationMessage,
+        },
+      });
       setFeedbackMessage('');
+      setCorrectiveAction({ actionType: 'OTHER', description: '' });
+      setPendingUpdate(null);
+      setNotificationDraft(null);
       await refreshAfterMutation(response.data);
-      toast.success('Trang thai feedback da duoc cap nhat.');
+      const results = response.data?.notificationResults || [];
+      const emailFailed = results.some((item) => item.channel === 'EMAIL' && item.status === 'FAILED');
+      toast.success(emailFailed ? 'Complaint updated. Email notification failed.' : 'Complaint updated successfully.');
     } catch (error) {
-      await handleMutationError(error);
+      toast.error(getErrorMessage(error));
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleAddInternalNote = async (event) => {
+    event.preventDefault();
+    if (!selectedCase?.id || !internalNote.trim()) return;
+    setIsSubmitting(true);
+
+    try {
+      const response = await customerSupportService.addInternalNote(selectedCase.id, {
+        message: internalNote,
+      });
+      setInternalNote('');
+      await refreshAfterMutation(response.data);
+      toast.success('Internal note saved.');
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAddCorrectiveAction = async (event) => {
+    event.preventDefault();
+    if (!selectedCase?.id || !correctiveAction.description.trim()) return;
+    setIsSubmitting(true);
+
+    try {
+      const response = await customerSupportService.addCorrectiveAction(selectedCase.id, correctiveAction);
+      setCorrectiveAction({ actionType: 'OTHER', description: '' });
+      await refreshAfterMutation(response.data);
+      toast.success('Corrective action recorded.');
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleQuickFeedbackStatus = async (status, defaultMessage = '') => {
+    setFeedbackStatus(status);
+    if (defaultMessage) {
+      setFeedbackMessage(defaultMessage);
     }
   };
 
@@ -476,8 +646,11 @@ const AdminCustomerSupportPage = () => {
                   <InfoRow label="Rating" value={selectedCase.ratingScore ? `${selectedCase.ratingScore}/5` : 'Chua co'} />
                   <InfoRow label="Route / trip" value={selectedCase.routeName || selectedCase.tripCode || selectedCase.relatedTripId || 'Chua co'} />
                   <InfoRow label="Assigned admin" value={selectedCase.assignedTo?.fullName || 'Not assigned'} />
+                  <InfoRow label="Assigned team" value={getLabel(ASSIGNED_TEAMS, selectedCase.assignedTeam || 'UNASSIGNED')} />
                   <InfoRow label="Reply status" value={getReplyStatus(selectedCase)} />
                   <InfoRow label="Priority" value={selectedCase.priority || 'LOW'} />
+                  <InfoRow label="Priority reason" value={selectedCase.priorityReason || 'Chua co'} />
+                  <InfoRow label="SLA" value={<span className={getSlaDisplay(selectedCase).tone}>{getSlaDisplay(selectedCase).label}</span>} />
                   <InfoRow label="Submitted" value={formatDateTime(selectedCase.createdAt)} />
                 </dl>
 
@@ -542,14 +715,25 @@ const AdminCustomerSupportPage = () => {
                         <h3 className="text-lg font-headline font-black text-primary">Feedback workflow</h3>
                         <p className="mt-1 text-sm text-on-surface-variant">{getWorkflowHint(selectedCase)}</p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleAssignToSelf}
-                        disabled={isSubmitting || Boolean(selectedCase.assignedTo)}
-                        className="rounded-full border border-outline-variant px-4 py-2 text-sm font-bold text-primary hover:bg-surface-container disabled:opacity-50"
-                      >
-                        {selectedCase.assignedTo ? 'Already assigned' : 'Assign to self'}
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={assignedTeam}
+                          onChange={(event) => setAssignedTeam(event.target.value)}
+                          className="h-10 rounded-xl border border-outline-variant/70 px-3 text-sm"
+                        >
+                          {ASSIGNED_TEAMS.filter((item) => item.value !== 'UNASSIGNED').map((item) => (
+                            <option key={item.value} value={item.value}>{item.label}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={handleAssignToSelf}
+                          disabled={isSubmitting}
+                          className="rounded-full border border-outline-variant px-4 py-2 text-sm font-bold text-primary hover:bg-surface-container disabled:opacity-50"
+                        >
+                          {selectedCase.assignedTo ? 'Reassign to self' : 'Assign to self'}
+                        </button>
+                      </div>
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button
@@ -562,8 +746,8 @@ const AdminCustomerSupportPage = () => {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setFeedbackStatus('WAITING_FOR_PASSENGER')}
-                        disabled={isSubmitting || !selectedCase.assignedTo || selectedCase.status === 'WAITING_FOR_PASSENGER'}
+                        onClick={() => setFeedbackStatus('WAITING_FOR_INFORMATION')}
+                        disabled={isSubmitting || !selectedCase.assignedTo || selectedCase.status === 'WAITING_FOR_INFORMATION'}
                         className="min-h-10 rounded-xl border border-outline-variant/60 px-4 py-2 text-sm font-black text-primary hover:bg-surface-container disabled:opacity-50"
                       >
                         Need passenger info
@@ -589,12 +773,32 @@ const AdminCustomerSupportPage = () => {
                       <label className="space-y-2">
                         <span className="text-sm font-bold text-on-surface">Next status</span>
                         <select value={feedbackStatus} onChange={(event) => setFeedbackStatus(event.target.value)} className="w-full rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm">
-                          {FEEDBACK_STATUSES.filter((item) => item.value !== 'ALL').map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                          {FEEDBACK_STATUSES.filter((item) => item.value !== 'ALL' && !['PENDING', 'IN_PROGRESS', 'WAITING_FOR_PASSENGER', 'REJECTED'].includes(item.value)).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                        </select>
+                      </label>
+                      <label className="space-y-2">
+                        <span className="text-sm font-bold text-on-surface">Priority</span>
+                        <select value={feedbackPriority} onChange={(event) => setFeedbackPriority(event.target.value)} className="w-full rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm">
+                          {ENTERPRISE_PRIORITIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                         </select>
                       </label>
                       <label className="space-y-2">
                         <span className="text-sm font-bold text-on-surface">Resolution summary</span>
                         <input value={resolutionSummary} onChange={(event) => setResolutionSummary(event.target.value)} maxLength={1000} className="w-full rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm" placeholder="Visible resolution note" />
+                      </label>
+                      <label className="space-y-2">
+                        <span className="text-sm font-bold text-on-surface">Waiting reason</span>
+                        <input value={waitingReason} onChange={(event) => setWaitingReason(event.target.value)} maxLength={1000} className="w-full rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm" placeholder="Required when waiting for information" />
+                      </label>
+                      <label className="space-y-2">
+                        <span className="text-sm font-bold text-on-surface">Action type</span>
+                        <select value={correctiveAction.actionType} onChange={(event) => setCorrectiveAction((current) => ({ ...current, actionType: event.target.value }))} className="w-full rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm">
+                          {CORRECTIVE_ACTION_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                        </select>
+                      </label>
+                      <label className="space-y-2">
+                        <span className="text-sm font-bold text-on-surface">Action description</span>
+                        <input value={correctiveAction.description} onChange={(event) => setCorrectiveAction((current) => ({ ...current, description: event.target.value }))} maxLength={1000} className="w-full rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm" placeholder="Required for action required or resolution" />
                       </label>
                       <label className="space-y-2 md:col-span-2">
                         <span className="text-sm font-bold text-on-surface">Reply to passenger</span>
@@ -603,7 +807,7 @@ const AdminCustomerSupportPage = () => {
                       </label>
                     </div>
                     <button type="submit" disabled={isSubmitting || !selectedCase.assignedTo} className="mt-4 rounded-full bg-primary px-6 py-3 text-sm font-black text-white disabled:opacity-50">
-                      Save feedback update
+                      Update Complaint
                     </button>
                   </form>
                 ) : null}
@@ -635,6 +839,96 @@ const AdminCustomerSupportPage = () => {
                   </form>
                 ) : null}
 
+                {(isFeedback || isComplaint) ? (
+                  <section className="rounded-2xl border border-outline-variant/30 bg-white p-5">
+                    <h3 className="text-lg font-headline font-black text-primary">Investigation</h3>
+                    <form onSubmit={handleAddInternalNote} className="mt-4 space-y-3">
+                      <textarea
+                        value={internalNote}
+                        onChange={(event) => setInternalNote(event.target.value)}
+                        rows={3}
+                        maxLength={2000}
+                        className="w-full rounded-xl border border-outline-variant/70 px-4 py-3 text-sm"
+                        placeholder="Internal note, not visible to passenger"
+                      />
+                      <button type="submit" disabled={isSubmitting || !internalNote.trim()} className="rounded-full bg-primary px-5 py-2.5 text-sm font-black text-white disabled:opacity-50">
+                        Add Note
+                      </button>
+                    </form>
+                    <ul className="mt-4 space-y-3">
+                      {(selectedCase.responses || []).filter((item) => item.responseType === 'INTERNAL_NOTE' || item.visibleToPassenger === false).map((note) => (
+                        <li key={note._id || note.id || `${note.createdAt}-${note.message}`} className="rounded-xl bg-surface-container-low p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="text-sm font-bold text-on-surface">{note.responder?.fullName || 'Admin'}</p>
+                            <span className="text-xs text-on-surface-variant">{formatDateTime(note.createdAt)}</span>
+                          </div>
+                          <p className="mt-2 text-sm leading-6 text-on-surface-variant">{note.message}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+
+                {(isFeedback || isComplaint) ? (
+                  <section className="rounded-2xl border border-outline-variant/30 bg-white p-5">
+                    <h3 className="text-lg font-headline font-black text-primary">Corrective Action</h3>
+                    <form onSubmit={handleAddCorrectiveAction} className="mt-4 grid gap-3 md:grid-cols-[0.6fr_1fr_auto]">
+                      <select
+                        value={correctiveAction.actionType}
+                        onChange={(event) => setCorrectiveAction((current) => ({ ...current, actionType: event.target.value }))}
+                        className="rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm"
+                      >
+                        {CORRECTIVE_ACTION_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                      </select>
+                      <input
+                        value={correctiveAction.description}
+                        onChange={(event) => setCorrectiveAction((current) => ({ ...current, description: event.target.value }))}
+                        className="rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm"
+                        placeholder="Action description"
+                      />
+                      <button type="submit" disabled={isSubmitting || !correctiveAction.description.trim()} className="rounded-full bg-primary px-5 py-2.5 text-sm font-black text-white disabled:opacity-50">
+                        Save Action
+                      </button>
+                    </form>
+                    <ul className="mt-4 space-y-3">
+                      {(selectedCase.correctiveActions || []).map((action) => (
+                        <li key={action.id || action._id || `${action.createdAt}-${action.description}`} className="rounded-xl bg-surface-container-low p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="text-sm font-black text-on-surface">{getLabel(CORRECTIVE_ACTION_TYPES, action.actionType)}</p>
+                            <span className="text-xs text-on-surface-variant">{formatDateTime(action.performedAt || action.createdAt)}</span>
+                          </div>
+                          <p className="mt-2 text-sm text-on-surface-variant">{action.description}</p>
+                          <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-on-surface-variant">
+                            {action.performedBy?.fullName || 'Admin'}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+
+                <section className="rounded-2xl border border-outline-variant/30 bg-white p-5">
+                  <h3 className="text-lg font-headline font-black text-primary">Activity Timeline</h3>
+                  {(selectedCase.activityTimeline || selectedCase.publicTimeline || []).length === 0 ? (
+                    <p className="mt-3 rounded-xl bg-surface-container p-4 text-sm text-on-surface-variant">No activity yet.</p>
+                  ) : (
+                    <ol className="mt-3 space-y-3">
+                      {(selectedCase.activityTimeline || selectedCase.publicTimeline || []).map((entry) => (
+                        <li key={entry.id || `${entry.createdAt}-${entry.action}`} className="rounded-xl bg-surface-container-low p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="text-sm font-black text-on-surface">{entry.action}</p>
+                            <span className="text-xs text-on-surface-variant">{formatDateTime(entry.createdAt)}</span>
+                          </div>
+                          <p className="mt-2 text-sm text-on-surface-variant">
+                            {entry.previousStatus && entry.newStatus ? `${entry.previousStatus} -> ${entry.newStatus}` : entry.message || 'Updated'}
+                          </p>
+                          {entry.message ? <p className="mt-1 text-xs text-on-surface-variant">{entry.message}</p> : null}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </section>
+
                 <section className="rounded-2xl border border-outline-variant/30 bg-white p-5">
                   <h3 className="text-lg font-headline font-black text-primary">Conversation history</h3>
                   {conversation.length === 0 ? (
@@ -659,6 +953,90 @@ const AdminCustomerSupportPage = () => {
           </section>
         </section>
       </main>
+      {notificationDraft ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-6">
+          <section className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-headline font-black text-on-surface">Send update to passenger?</h2>
+                <p className="mt-2 text-sm text-on-surface-variant">
+                  The complaint status has been changed to: <strong>{getLabel(FEEDBACK_STATUSES, pendingUpdate?.status)}</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setNotificationDraft(null);
+                  setPendingUpdate(null);
+                }}
+                className="rounded-full p-2 text-on-surface-variant hover:bg-surface-container"
+                aria-label="Close notification confirmation"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="mt-4 space-y-3 rounded-xl bg-surface-container-low p-4">
+              <label className="flex items-center gap-3 text-sm font-bold text-on-surface">
+                <input
+                  type="checkbox"
+                  checked={notificationChannels.inApp}
+                  onChange={(event) => setNotificationChannels((current) => ({ ...current, inApp: event.target.checked }))}
+                  className="rounded border-outline-variant text-primary focus:ring-primary"
+                />
+                In-app notification
+              </label>
+              <label className="flex items-center gap-3 text-sm font-bold text-on-surface">
+                <input
+                  type="checkbox"
+                  checked={notificationChannels.email}
+                  disabled={!notificationDraft.emailAvailable}
+                  onChange={(event) => setNotificationChannels((current) => ({ ...current, email: event.target.checked }))}
+                  className="rounded border-outline-variant text-primary focus:ring-primary disabled:opacity-50"
+                />
+                Email
+              </label>
+              {!notificationDraft.emailAvailable ? (
+                <p className="text-xs font-semibold text-orange-700">{notificationDraft.emailUnavailableReason}</p>
+              ) : null}
+              {!notificationChannels.inApp && !notificationChannels.email ? (
+                <p className="rounded-lg bg-orange-50 px-3 py-2 text-xs font-bold text-orange-800">
+                  No notification will be sent to the passenger.
+                </p>
+              ) : null}
+            </div>
+            <label className="mt-4 block space-y-2">
+              <span className="text-sm font-bold text-on-surface">Message</span>
+              <textarea
+                value={notificationMessage}
+                onChange={(event) => setNotificationMessage(event.target.value)}
+                rows={5}
+                maxLength={1000}
+                className="w-full rounded-xl border border-outline-variant/70 px-4 py-3 text-sm"
+              />
+            </label>
+            <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setNotificationDraft(null);
+                  setPendingUpdate(null);
+                }}
+                className="rounded-full border border-outline-variant px-5 py-2.5 text-sm font-black text-primary hover:bg-surface-container"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmFeedbackUpdate}
+                disabled={isSubmitting || !notificationMessage.trim()}
+                className="rounded-full bg-primary px-5 py-2.5 text-sm font-black text-white disabled:opacity-50"
+              >
+                Confirm Update & Send
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       <Footer />
     </div>
   );

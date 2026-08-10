@@ -6,7 +6,7 @@ import { ActivityIndicator, Alert, Image, Linking, Modal, Pressable, StyleSheet,
 import { DOCUMENT_TYPES, PROFILE_TYPES } from '@/api/priorityProfile.api';
 import { AppButton } from '@/components/AppButton';
 import { Screen } from '@/components/Screen';
-import { config } from '@/constants/config';
+import { resolveBackendUrl } from '@/constants/config';
 import { colors } from '@/constants/colors';
 import usePriorityProfileStore from '@/store/priorityProfile.store';
 import type { PriorityProfileDocument, PriorityProfileResponse, PriorityStatus } from '@/types/priorityProfile';
@@ -51,10 +51,7 @@ const formatSize = (size?: number) => {
 };
 
 const resolveDocumentUrl = (url?: string) => {
-  if (!url) return '';
-  if (/^https?:\/\//i.test(url)) return url;
-  const apiRoot = config.apiBaseUrl.replace(/\/api\/?$/, '');
-  return `${apiRoot}${url.startsWith('/') ? url : `/${url}`}`;
+  return resolveBackendUrl(url);
 };
 
 const isImageDocument = (document: PriorityProfileDocument) => (

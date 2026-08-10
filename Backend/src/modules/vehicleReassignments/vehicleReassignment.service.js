@@ -3,9 +3,9 @@ import { HTTP_STATUS } from '../../constants/index.js';
 import { CustomError } from '../../middleware/errorHandler.js';
 import FleetBus from '../admin/FleetBus.js';
 import TripSchedule from '../admin/TripSchedule.js';
-import OperationNotification from '../scheduleOperations/OperationNotification.js';
 import VehicleInspection from '../scheduleOperations/VehicleInspection.js';
 import { createBroadcastNotification } from '../systemNotifications/systemNotification.service.js';
+import notificationService from '../systemNotifications/notification.service.js';
 import Trip from '../fleetOperations/Trip.js';
 import Vehicle from '../fleetOperations/Vehicle.js';
 import { SOCKET_EVENTS } from '../fleetOperations/fleetOperations.constants.js';
@@ -207,11 +207,13 @@ export class VehicleReassignmentService {
     const [vehicles, buses] = await Promise.all([
       Vehicle.find({
         status: 'available',
+        vehicleCode: { $not: /^(DN-AUTO-|DN-DEMO-)/i },
         ...(requiredCapacity ? { capacity: { $gte: requiredCapacity } } : {}),
         ...(oldVehicleId ? { _id: { $ne: target.oldVehicleId } } : {}),
       }).sort({ capacity: 1, vehicleCode: 1 }).lean(),
       FleetBus.find({
-        status: { $in: ['ACTIVE', 'RESERVE'] },
+        status: { $in: ['AVAILABLE', 'ACTIVE', 'RESERVE'] },
+        busCode: { $not: /^(DN-AUTO-|DN-DEMO-)/i },
         ...(requiredCapacity ? { capacity: { $gte: requiredCapacity } } : {}),
         ...(oldVehicleId ? { _id: { $ne: target.oldVehicleId } } : {}),
       }).sort({ capacity: 1, busCode: 1 }).lean(),
@@ -398,22 +400,42 @@ export class VehicleReassignmentService {
       notifications.push(await createBroadcastNotification({
         title,
         message,
-        type: 'maintenance',
+        type: 'VEHICLE_REASSIGNED',
         priority: 'urgent',
         targetAudience: 'trip_staff',
         tripId,
+        source: {
+          module: 'trip',
+          entityId: tripId,
+        },
+        data: {
+          oldVehicleId: oldVehicle?._id ? String(oldVehicle._id) : '',
+          replacementVehicleId: replacement?._id ? String(replacement._id) : '',
+          reason: payload.reason,
+        },
+        deduplicationKey: `vehicle-reassignment:${tripId}:${replacement._id}:staff`,
       }, adminId, io));
     }
 
     if (payload.notifyPassengers && target.routeId) {
       notifications.push(await createBroadcastNotification({
-        title: 'Vehicle changed for your trip',
-        message: 'A replacement bus has been assigned to keep the trip operating. Please follow staff instructions at stops and onboard.',
-        type: 'service_interruption',
+        title: 'Phương tiện được thay đổi',
+        message: 'Xe thay thế đã được phân bổ để chuyến đi tiếp tục vận hành. Vui lòng theo dõi hướng dẫn từ nhân viên.',
+        type: 'VEHICLE_REASSIGNED',
         priority: target.kind === 'trip' && target.trip.status !== 'scheduled' ? 'high' : 'normal',
         targetAudience: 'route_passengers',
         routeId: target.routeId,
         tripId,
+        source: {
+          module: 'trip',
+          entityId: tripId,
+        },
+        data: {
+          routeId: String(target.routeId),
+          oldVehicleId: oldVehicle?._id ? String(oldVehicle._id) : '',
+          replacementVehicleId: replacement?._id ? String(replacement._id) : '',
+        },
+        deduplicationKey: `vehicle-reassignment:${tripId}:${replacement._id}:passengers`,
       }, adminId, io));
     }
 
@@ -435,7 +457,7 @@ export class VehicleReassignmentService {
 
     if (!tripId || !targetUsers.length) return null;
 
-    return OperationNotification.findOneAndUpdate(
+    return notificationService.upsertOperationNotification(
       {
         sourceType: 'TRIP_VEHICLE_REASSIGNED_STAFF',
         sourceId: sourceId || tripId,
