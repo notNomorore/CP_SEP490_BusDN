@@ -23,6 +23,8 @@ const getOriginalName = (file = {}) => file.originalname || file.name || '';
 
 const getExtension = (file = {}) => path.extname(getOriginalName(file)).toLowerCase();
 
+const getCloudinaryError = (error) => error?.error || error;
+
 const normalizeUploadResult = (file, result) => ({
   provider: PROVIDER,
   publicId: result.public_id,
@@ -52,8 +54,12 @@ export class StorageService {
 
       return normalizeUploadResult(file, result);
     } catch (error) {
+      const cloudinaryError = getCloudinaryError(error);
+
       logger.error('Cloudinary upload failed', {
-        message: error.message,
+        message: cloudinaryError?.message || error.message,
+        httpCode: cloudinaryError?.http_code || error.http_code,
+        name: error.name,
         folder: options.folder,
       });
       throw new CustomError('File upload failed', HTTP_STATUS.SERVICE_UNAVAILABLE);

@@ -10,6 +10,7 @@
     "test": "vitest",
     "test:integration:roster": "node scripts/run-roster-integration.mjs",
     "test:coverage": "vitest --coverage",
+    "check:cloudinary": "node scripts/check-cloudinary.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "seed": "node scripts/seed.js"

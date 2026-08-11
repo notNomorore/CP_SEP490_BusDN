@@ -37,12 +37,31 @@ const toList = (value, fallback = []) => {
   return list.length ? list : fallback;
 };
 
+const parseCloudinaryUrl = () => {
+  const value = getEnv('CLOUDINARY_URL');
+  if (!value) return {};
+
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'cloudinary:') return {};
+
+    return {
+      cloudName: parsed.hostname,
+      apiKey: decodeURIComponent(parsed.username),
+      apiSecret: decodeURIComponent(parsed.password),
+    };
+  } catch {
+    return {};
+  }
+};
+
 const nodeEnv = getEnv('NODE_ENV', 'development');
 const isDevelopment = nodeEnv === 'development';
 const isProduction = nodeEnv === 'production';
 const developmentOnly = (value) => (isProduction ? undefined : value);
 const serverPort = toNumber(getEnv('PORT'), 3000);
 const serverHost = getEnv('HOST', isProduction ? '0.0.0.0' : 'localhost');
+const cloudinaryUrlCredentials = parseCloudinaryUrl();
 
 const createCorsOrigin = () => {
   const allowedOrigins = toList(getEnv('CORS_ORIGIN'), [
@@ -145,9 +164,9 @@ export const config = {
   },
 
   cloudinary: {
-    cloudName: getEnv('CLOUDINARY_CLOUD_NAME'),
-    apiKey: getEnv('CLOUDINARY_API_KEY'),
-    apiSecret: getEnv('CLOUDINARY_API_SECRET'),
+    cloudName: cloudinaryUrlCredentials.cloudName || getEnv('CLOUDINARY_CLOUD_NAME'),
+    apiKey: cloudinaryUrlCredentials.apiKey || getEnv('CLOUDINARY_API_KEY'),
+    apiSecret: cloudinaryUrlCredentials.apiSecret || getEnv('CLOUDINARY_API_SECRET'),
     uploadPreset: getEnv('CLOUDINARY_UPLOAD_PRESET'),
   },
 
