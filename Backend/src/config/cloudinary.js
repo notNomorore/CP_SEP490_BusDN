@@ -17,6 +17,12 @@ if (missingKeys.length > 0) {
   throw new Error(`Missing required Cloudinary environment variables: ${missingKeys.join(', ')}`);
 }
 
+if (config.cloudinary.cloudName === 'busdn') {
+  throw new Error(
+    'Invalid CLOUDINARY_CLOUD_NAME: "busdn" is the app/upload folder name, not a Cloudinary cloud name. Use the Cloud name shown in your Cloudinary dashboard.'
+  );
+}
+
 cloudinary.config({
   cloud_name: config.cloudinary.cloudName,
   api_key: config.cloudinary.apiKey,
