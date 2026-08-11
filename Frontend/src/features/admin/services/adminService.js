@@ -113,6 +113,7 @@ export const adminService = {
   validateWeeklyRoster: async (weekStartDate) => apiClient.post('/admin/rosters/validate', { weekStartDate }),
   publishWeeklyRoster: async (weekStartDate) => apiClient.post('/admin/rosters/publish', { weekStartDate }),
   reopenWeeklyRoster: async (weekStartDate) => apiClient.post('/admin/rosters/reopen', { weekStartDate }),
+  cancelAllWeeklyRosterShifts: async (weekStartDate) => apiClient.delete('/admin/rosters/weekly', { data: { weekStartDate } }),
   getSchedulingOverview: async (date) => {
     return apiClient.get('/admin/scheduling/overview', { params: { date } });
   },
@@ -199,6 +200,9 @@ export const adminService = {
   },
   assignDriverToSelectedShift: async (shiftId, data) => {
     return apiClient.post(`/admin/shifts/${shiftId}/assign-driver`, data);
+  },
+  removeDriverFromSelectedShift: async (shiftId) => {
+    return apiClient.delete(`/admin/shifts/${shiftId}/driver-assignment`);
   },
   assignAssistantToSelectedShift: async (shiftId, data) => {
     return apiClient.post(`/admin/shifts/${shiftId}/assign-assistant`, data);

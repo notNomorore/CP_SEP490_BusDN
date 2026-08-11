@@ -13,4 +13,5 @@ export default class RosterController {
   static async validate(req, res) { try { return res.json({ success: true, ...(await WeeklyRosterService.validate(req.body)) }); } catch (error) { logger.error('Validate weekly roster error:', error); return fail(res, error); } }
   static async publish(req, res) { try { return res.json({ success: true, roster: await WeeklyRosterService.publish({ ...req.body, actorId: req.user?.userId }) }); } catch (error) { logger.error('Publish weekly roster error:', error); return fail(res, error); } }
   static async reopen(req, res) { try { return res.json({ success: true, roster: await WeeklyRosterService.reopen({ ...req.body, actorId: req.user?.userId }) }); } catch (error) { logger.error('Reopen weekly roster error:', error); return fail(res, error); } }
+  static async cancelAll(req, res) { try { return res.json({ success: true, ...(await WeeklyRosterService.cancelAll({ ...req.body, actorId: req.user?.userId })) }); } catch (error) { logger.error('Cancel all weekly roster shifts error:', error); return fail(res, error); } }
 }
