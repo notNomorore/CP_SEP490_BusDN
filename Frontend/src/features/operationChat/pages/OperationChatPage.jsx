@@ -16,6 +16,11 @@ import useAuthStore from '../../auth/stores/authStore.js';
 import { SOCKET_URL } from '../../../shared/config/apiConfig.js';
 import operationChatService from '../services/operationChatService.js';
 
+const getApiOrigin = () => {
+  const configured = import.meta.env.VITE_API_URL?.trim();
+  return configured ? configured.replace(/\/$/, '') : (import.meta.env.VITE_SOCKET_URL?.trim().replace(/\/$/, '') || 'https://cp-sep490-busdn.onrender.com');
+};
+
 const getToken = () => localStorage.getItem('authToken')
   || localStorage.getItem('token')
   || localStorage.getItem('accessToken')

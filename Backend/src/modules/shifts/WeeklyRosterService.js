@@ -7,6 +7,7 @@ import Roster from './Roster.js';
 import DriverShiftAssignment from './DriverShiftAssignment.js';
 import AssistantShiftAssignment from './AssistantShiftAssignment.js';
 import VehicleShiftAssignment from './VehicleShiftAssignment.js';
+import TripShiftAssignment from './TripShiftAssignment.js';
 import RouteOperatingConfig from './RouteOperatingConfig.js';
 import ShiftService from './ShiftService.js';
 import DRIVER_SCHEDULING_RULES from './driverScheduling.config.js';
@@ -151,16 +152,21 @@ export default class WeeklyRosterService {
 
   static async get({ weekStartDate }) {
     const range = weekRange(weekStartDate);
-    const [roster, assignments, staff] = await Promise.all([
+    const [roster, assignments, staff, tripAssignments] = await Promise.all([
       Roster.findOne({ weekStartDate: range.start }).lean(),
       loadAssignments(range.start, range.end),
       User.find({ role: { $in: ['DRIVER', 'CONDUCTOR', 'BUS_ASSISTANT'] }, status: 'ACTIVE' }).select('fullName role status').sort({ role: 1, fullName: 1 }).lean(),
+      TripShiftAssignment.find({ workDate: { $gte: range.start, $lt: range.end }, status: { $in: ['ASSIGNED', 'IN_PROGRESS'] } }).populate('tripId', 'scheduleCode routeId status').lean(),
     ]);
     const shifts = await Shift.find({ workDate: { $gte: range.start, $lt: range.end }, status: { $nin: ['ARCHIVED', 'CANCELLED'] } }).populate('routeId', 'routeCode routeName').sort({ workDate: 1, startTime: 1 }).lean();
     const driverByShift = new Map(assignments.drivers.map((row) => [id(row.shiftId), row]));
     const assistantByShift = new Map(assignments.assistants.map((row) => [id(row.shiftId), row]));
     const vehicleByShift = new Map(assignments.vehicles.map((row) => [id(row.shiftId), row]));
-    const rows = shifts.map((shift) => ({ ...shift, driverAssignment: driverByShift.get(id(shift)) || null, assistantAssignment: assistantByShift.get(id(shift)) || null, vehicleAssignment: vehicleByShift.get(id(shift)) || null }));
+    const tripAssignmentsByShift = new Map();
+    tripAssignments.forEach((assignment) => {
+      [assignment.shiftId, assignment.assistantShiftId].filter(Boolean).forEach((shiftId) => tripAssignmentsByShift.set(id(shiftId), [...(tripAssignmentsByShift.get(id(shiftId)) || []), assignment]));
+    });
+    const rows = shifts.map((shift) => ({ ...shift, driverAssignment: driverByShift.get(id(shift)) || null, assistantAssignment: assistantByShift.get(id(shift)) || null, vehicleAssignment: vehicleByShift.get(id(shift)) || null, tripAssignments: tripAssignmentsByShift.get(id(shift)) || [] }));
     return { roster: roster || { weekStartDate: range.start, weekEndDate: range.last, status: 'DRAFT' }, days: Array.from({ length: 7 }, (_, index) => addDays(range.start, index)), staff, rows, requirements: await this.resolvedRequirements(range.start), workloads: { drivers: calculateWorkload(assignments.drivers, 'driverId'), assistants: calculateWorkload(assignments.assistants, 'assistantId') } };
   }
 
@@ -333,5 +339,36 @@ export default class WeeklyRosterService {
       await VehicleShiftAssignment.updateMany(assignmentFilter, { $set: { rosterStatus: 'DRAFT' } }, { session });
       await session.commitTransaction(); return updated.toObject();
     } catch (error) { await session.abortTransaction(); throw error; } finally { await session.endSession(); }
+  }
+
+  static async cancelAll({ weekStartDate, actorId }) {
+    const range = weekRange(weekStartDate);
+    const tomorrow = addDays(day(new Date()), 1);
+    const cancellableStart = range.start > tomorrow ? range.start : tomorrow;
+    const roster = await Roster.findOne({ weekStartDate: range.start });
+    if (!roster) throw Object.assign(new Error('Không tìm thấy lịch tuần.'), { statusCode: 404 });
+    if (roster.status === 'PUBLISHED') throw Object.assign(new Error('Lịch tuần đã công bố. Hãy mở chỉnh sửa trước khi hủy toàn bộ ca.'), { statusCode: 409 });
+    // Keep this scope identical to get(): the weekly grid includes legacy and
+    // manually-created shifts that may not have a rosterId yet.
+    const [shifts, protectedShiftCount] = await Promise.all([
+      Shift.find({ workDate: { $gte: cancellableStart, $lt: range.end }, status: { $nin: ['ARCHIVED', 'CANCELLED'] } }).select('_id').lean(),
+      Shift.countDocuments({ workDate: { $gte: range.start, $lt: cancellableStart < range.end ? cancellableStart : range.end }, status: { $nin: ['ARCHIVED', 'CANCELLED'] } }),
+    ]);
+    const shiftIds = shifts.map((shift) => shift._id);
+    if (!shiftIds.length) return { cancelledShifts: 0, protectedCurrentOrPastShifts: protectedShiftCount, cancelledAssignments: { drivers: 0, assistants: 0, vehicles: 0 } };
+    const [shiftResult, driverResult, assistantResult, vehicleResult, tripResult] = await Promise.all([
+      Shift.updateMany({ _id: { $in: shiftIds } }, { $set: { status: 'ARCHIVED', isLocked: false, updatedBy: actorId } }),
+      DriverShiftAssignment.updateMany({ shiftId: { $in: shiftIds }, status: { $in: ACTIVE } }, { $set: { status: 'CANCELLED', updatedBy: actorId } }),
+      AssistantShiftAssignment.updateMany({ shiftId: { $in: shiftIds }, status: { $in: ACTIVE } }, { $set: { status: 'CANCELLED', updatedBy: actorId } }),
+      VehicleShiftAssignment.updateMany({ shiftId: { $in: shiftIds }, status: { $in: ACTIVE } }, { $set: { status: 'CANCELLED', updatedBy: actorId } }),
+      TripShiftAssignment.updateMany(
+        { $or: [{ shiftId: { $in: shiftIds } }, { assistantShiftId: { $in: shiftIds } }], status: { $in: ['ASSIGNED', 'IN_PROGRESS'] } },
+        { $set: { status: 'CANCELLED', updatedBy: actorId } }
+      ),
+    ]);
+    roster.validation = { valid: false, errors: [], warnings: [] };
+    roster.updatedBy = actorId;
+    await roster.save();
+    return { cancelledShifts: shiftResult.modifiedCount || 0, protectedCurrentOrPastShifts: protectedShiftCount, cancelledTripAllocations: tripResult.modifiedCount || 0, cancelledAssignments: { drivers: driverResult.modifiedCount || 0, assistants: assistantResult.modifiedCount || 0, vehicles: vehicleResult.modifiedCount || 0 } };
   }
 }

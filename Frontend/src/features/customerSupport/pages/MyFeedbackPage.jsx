@@ -45,7 +45,9 @@ const getAttachmentUrl = (attachment) => {
   if (!path) return '';
   if (/^https?:\/\//i.test(path)) return path;
 
-  return resolveBackendUrl(path);
+  const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+  const apiOrigin = apiBase.replace(/\/api\/?$/, '') || import.meta.env.VITE_API_URL || 'https://cp-sep490-busdn.onrender.com';
+  return `${apiOrigin.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
 };
 
 const isImageAttachment = (attachment) => String(attachment?.mimeType || '').startsWith('image/');

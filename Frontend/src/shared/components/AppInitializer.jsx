@@ -4,6 +4,11 @@ import useAuthStore from '../../features/auth/stores/authStore.js';
 import { SOCKET_URL } from '../config/apiConfig.js';
 import toast from '../utils/toast.js';
 
+const getApiOrigin = () => {
+  const configured = import.meta.env.VITE_API_URL?.trim();
+  return configured ? configured.replace(/\/$/, '') : 'https://cp-sep490-busdn.onrender.com';
+};
+
 const notificationTargetsCurrentUser = (notification, user) => {
   if (!user) return false;
   const userId = String(user.id || user._id || '');
