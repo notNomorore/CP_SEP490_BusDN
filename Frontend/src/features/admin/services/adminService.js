@@ -207,6 +207,9 @@ export const adminService = {
   assignAssistantToSelectedShift: async (shiftId, data) => {
     return apiClient.post(`/admin/shifts/${shiftId}/assign-assistant`, data);
   },
+  removeAssistantFromSelectedShift: async (shiftId) => {
+    return apiClient.delete(`/admin/shifts/${shiftId}/assistant-assignment`);
+  },
   assignVehicleToSelectedShift: async (shiftId, data) => {
     return apiClient.post(`/admin/shifts/${shiftId}/assign-vehicle`, data);
   },

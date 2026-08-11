@@ -38,7 +38,10 @@ const toList = (value, fallback = []) => {
 };
 
 const createCorsOrigin = () => {
-  const allowedOrigins = toList(getEnv('CORS_ORIGIN'), ['http://localhost:5173']);
+  const allowedOrigins = toList(getEnv('CORS_ORIGIN'), [
+    'http://localhost:5173',
+    'https://cp-sep-490-bus-dn.vercel.app',
+  ]);
   const isDevelopment = getEnv('NODE_ENV', 'development') === 'development';
   const localDevOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
 

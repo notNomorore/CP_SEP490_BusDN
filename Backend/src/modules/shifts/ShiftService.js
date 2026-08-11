@@ -960,6 +960,33 @@ export default class ShiftService {
     return { shiftId, removedDriverId: assignment.driverId, cancelledTripAllocations: tripResult.modifiedCount || 0, removed: driverResult.modifiedCount === 1 };
   }
 
+  static async removeAssistantFromShift(shiftId, actorId) {
+    if (!isValidObjectId(shiftId)) throw Object.assign(new Error('Không tìm thấy ca làm.'), { statusCode: 404 });
+    const shift = await Shift.findById(shiftId).lean();
+    if (!shift) throw Object.assign(new Error('Không tìm thấy ca làm.'), { statusCode: 404 });
+    const shiftDate = normalizeDateOnly(shift.workDate);
+    const today = normalizeDateOnly(new Date());
+    if (!shiftDate || shiftDate < today) {
+      throw Object.assign(new Error('Không thể gỡ ca của phụ xe trong quá khứ. Chỉ được gỡ ca hôm nay hoặc trong tương lai.'), { statusCode: 409 });
+    }
+    const assignment = await AssistantShiftAssignment.findOne({ shiftId, status: 'ASSIGNED' }).lean();
+    if (!assignment) throw Object.assign(new Error('Ca không có phụ xe đang được phân công.'), { statusCode: 404 });
+    const [assistantResult, tripResult] = await Promise.all([
+      AssistantShiftAssignment.updateOne({ _id: assignment._id, status: 'ASSIGNED' }, { $set: { status: 'CANCELLED', updatedBy: actorId } }),
+      TripShiftAssignment.updateMany({ assistantShiftId: shiftId, status: { $in: ACTIVE_TRIP_ASSIGNMENT_STATUSES } }, { $set: { status: 'CANCELLED', updatedBy: actorId } }),
+      Shift.findByIdAndUpdate(shiftId, { $set: { assignmentSource: 'MANUAL', isLocked: false, approvalStatus: 'DRAFT', publishedAt: null, updatedBy: actorId } }),
+    ]);
+    await logShiftAudit({
+      shiftId,
+      action: 'ASSISTANT_REMOVED',
+      oldValue: { assistantId: assignment.assistantId, assignmentId: assignment._id },
+      newValue: { assistantId: null },
+      changedBy: actorId,
+      reason: 'Gỡ ca của phụ xe từ lịch tuần',
+    });
+    return { shiftId, removedAssistantId: assignment.assistantId, cancelledTripAllocations: tripResult.modifiedCount || 0, removed: assistantResult.modifiedCount === 1 };
+  }
+
   static async assignAssistantToShift(shiftId, { assistantId, actorId }) {
     const shift = await ensureActiveShift(shiftId);
     const workDate = normalizeDateOnly(shift.workDate);

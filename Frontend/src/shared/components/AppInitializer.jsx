@@ -5,7 +5,7 @@ import toast from '../utils/toast.js';
 
 const getApiOrigin = () => {
   const configured = import.meta.env.VITE_API_URL?.trim();
-  return configured ? configured.replace(/\/$/, '') : 'http://localhost:3000';
+  return configured ? configured.replace(/\/$/, '') : 'https://cp-sep490-busdn.onrender.com';
 };
 
 const notificationTargetsCurrentUser = (notification, user) => {

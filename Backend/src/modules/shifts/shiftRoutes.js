@@ -42,6 +42,7 @@ router.get('/shifts/available-vehicles', ShiftController.listAvailableVehicles);
 router.post('/shifts/:shiftId/assign-driver', ShiftController.assignDriverToSelectedShift);
 router.delete('/shifts/:shiftId/driver-assignment', ShiftController.removeDriverFromSelectedShift);
 router.post('/shifts/:shiftId/assign-assistant', ShiftController.assignAssistantToSelectedShift);
+router.delete('/shifts/:shiftId/assistant-assignment', ShiftController.removeAssistantFromSelectedShift);
 router.post('/shifts/:shiftId/assign-vehicle', ShiftController.assignVehicleToSelectedShift);
 router.post('/shifts/:shiftId/assign-trip', ShiftController.assignTripToSelectedShift);
 router.get('/shifts/:shiftId/assignments', ShiftController.listShiftAssignments);
