@@ -168,7 +168,7 @@ export const customerSupportService = {
   listAdminCases: async (params = {}) => (
     apiClient.get('/customer-support/admin/cases', {
       params: {
-        type: 'ALL',
+        type: 'SERVICE_FEEDBACK',
         status: 'ALL',
         priority: 'ALL',
         page: 1,

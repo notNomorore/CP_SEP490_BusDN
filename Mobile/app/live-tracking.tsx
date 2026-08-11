@@ -8,6 +8,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   useWindowDimensions,
@@ -17,15 +18,19 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview';
 
 import passengerApi, { type BusRoute, type BusRouteStop, type LiveBus } from '@/api/passenger.api';
+import routeDiscoveryApi from '@/api/routeDiscovery.api';
 import { PassengerBottomNav } from '@/components/navigation/PassengerBottomNav';
 import { EmptyState, LoadingState, StatusPill } from '@/components/passenger/PassengerLayout';
 import { colors } from '@/constants/colors';
+import { useAuthStore } from '@/store/auth.store';
 import { type DeviceGpsPayload } from '@/utils/deviceGps';
+import { getErrorMessage } from '@/utils/validation';
 
 const pollingMs = 10000;
 type MaterialIconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 type SheetLevel = 'collapsed' | 'half' | 'full';
 type StopState = 'completed' | 'current' | 'next' | 'pending' | 'unknown';
+type RoutePanelTab = 'info' | 'schedule' | 'alerts';
 type PanHandlers = ReturnType<typeof PanResponder.create>['panHandlers'];
 
 type ProgressStop = BusRouteStop & {
@@ -34,12 +39,26 @@ type ProgressStop = BusRouteStop & {
   label: string;
 };
 
+type NotificationSubscriptionView = {
+  subscriptionId: string;
+  routeId?: string;
+  routeNumber?: string;
+  stopId?: string;
+  stopName?: string;
+  notificationStatus?: string;
+};
+
 const routeIdOf = (route?: BusRoute) => String(route?.id || route?._id || route?.routeNumber || '');
 const normalize = (value?: string) => String(value || '').trim().toLowerCase();
 const normalizeSearch = (value?: string) => normalize(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const stopKey = (stop: BusRouteStop, index = 0) => String(stop.stopId || `${stop.order || index + 1}-${normalize(stop.name)}`);
+const notificationStopId = (route: BusRoute, stop: BusRouteStop) => {
+  const normalizedName = String(stop.name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return `${route.routeNumber}-${stop.order || 0}-${normalizedName}`;
+};
 const clampProgress = (value?: number) => Math.min(Math.max(Math.round(Number(value) || 0), 0), 100);
 const normalizeStatus = (status?: string) => String(status || 'UNKNOWN').toUpperCase();
+const isPassenger = (role?: string | null) => String(role || '').toUpperCase() === 'PASSENGER';
 
 const escapeHtml = (value?: string) => String(value || '')
   .replace(/&/g, '&amp;')
@@ -53,6 +72,47 @@ const formatTime = (value?: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+};
+
+const formatFare = (fare?: number) => (
+  typeof fare === 'number' && fare > 0
+    ? `${fare.toLocaleString('vi-VN')} VND`
+    : 'Chưa có giá vé'
+);
+
+const formatRouteHours = (route?: BusRoute | null) => {
+  const hours = route?.operatingHours;
+  if (!hours) return 'Chưa có giờ hoạt động';
+  return `${hours.firstDeparture || '--:--'} - ${hours.lastDeparture || '--:--'} | mỗi ${hours.frequencyMinutes || '?'} phút`;
+};
+
+const parseClockMinutes = (value?: string) => {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  return hour * 60 + minute;
+};
+
+const formatClockMinutes = (value: number) => {
+  const normalized = ((value % 1440) + 1440) % 1440;
+  const hour = Math.floor(normalized / 60);
+  const minute = normalized % 60;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+};
+
+const buildDeparturePreview = (route: BusRoute, limit = 8) => {
+  const first = parseClockMinutes(route.operatingHours?.firstDeparture);
+  const last = parseClockMinutes(route.operatingHours?.lastDeparture);
+  const frequency = Number(route.operatingHours?.frequencyMinutes || 0);
+  if (first === null || last === null || !frequency || frequency <= 0) return [];
+
+  const times: string[] = [];
+  for (let minute = first; minute <= last && times.length < limit; minute += frequency) {
+    times.push(formatClockMinutes(minute));
+  }
+  return times;
 };
 
 const tripStatusDisplay = (status?: string) => {
@@ -92,8 +152,8 @@ const buildStopStates = (route: BusRoute | null, bus: LiveBus | null): ProgressS
       state,
       label: {
         completed: 'Đã đi qua',
-        current: 'Current',
-        next: 'Next Stop',
+        current: 'Trạm hiện tại',
+        next: 'Trạm tiếp theo',
         pending: 'Chưa đến',
         unknown: 'Chưa xác định',
       }[state],
@@ -245,9 +305,12 @@ export default function LiveTrackingScreen() {
   const params = useLocalSearchParams<{ routeId?: string; tripId?: string; vehicleId?: string }>();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
+  const user = useAuthStore((state) => state.user);
   const mountedRef = useRef(true);
   const requestSeq = useRef(0);
   const sheetAnim = useRef(new Animated.Value(0)).current;
+  const sheetHeightRef = useRef(0);
+  const dragStartHeightRef = useRef(0);
   const [routes, setRoutes] = useState<BusRoute[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState(params.routeId || '');
   const [selectedBusId, setSelectedBusId] = useState('');
@@ -261,6 +324,10 @@ export default function LiveTrackingScreen() {
   const [autoFollow, setAutoFollow] = useState(true);
   const [error, setError] = useState('');
   const [actionMessage, setActionMessage] = useState('');
+  const [arrivalSubs, setArrivalSubs] = useState<NotificationSubscriptionView[]>([]);
+  const [delaySubs, setDelaySubs] = useState<NotificationSubscriptionView[]>([]);
+  const [routeChangeSubs, setRouteChangeSubs] = useState<NotificationSubscriptionView[]>([]);
+  const [savingAlert, setSavingAlert] = useState('');
   const [mapFocusTarget, setMapFocusTarget] = useState<'bus' | 'stop' | 'route' | 'user'>('route');
   const [sheetLevel, setSheetLevel] = useState<SheetLevel>('collapsed');
   const [refreshedAt, setRefreshedAt] = useState('');
@@ -269,12 +336,13 @@ export default function LiveTrackingScreen() {
   const bottomNavHeight = Math.max(insets.bottom, 10) + 72;
   const sheetMaxHeight = Math.max(windowHeight - insets.top - bottomNavHeight - 16, 420);
   const sheetHeights = useMemo(() => ({
-    collapsed: Math.min(250, sheetMaxHeight * 0.32),
+    collapsed: Math.min(188, sheetMaxHeight * 0.24),
     half: sheetMaxHeight * 0.5,
     full: sheetMaxHeight * 0.78,
   }), [sheetMaxHeight]);
 
   const selectedRoute = route || routes.find((item) => routeIdOf(item) === selectedRouteId) || null;
+  const canUsePassengerFeatures = isPassenger(user?.role);
   const selectedBus = useMemo(() => {
     if (!buses.length) return null;
     return buses.find((bus) => bus.busId === selectedBusId)
@@ -315,9 +383,28 @@ export default function LiveTrackingScreen() {
     focusTarget: mapFocusTarget,
     userLocation: null,
   }), [buses, mapFocusTarget, progressPercent, selectedBus?.busId, selectedRoute, selectedStop?.key, stopStates]);
+  const routeDelaySub = useMemo(() => (
+    selectedRoute
+      ? delaySubs.find((item) => item.routeNumber === selectedRoute.routeNumber || String(item.routeId || '') === routeIdOf(selectedRoute))
+      : null
+  ), [delaySubs, selectedRoute]);
+  const routeChangeSub = useMemo(() => (
+    selectedRoute
+      ? routeChangeSubs.find((item) => item.routeNumber === selectedRoute.routeNumber || String(item.routeId || '') === routeIdOf(selectedRoute))
+      : null
+  ), [routeChangeSubs, selectedRoute]);
+  const selectedStopArrivalSub = useMemo(() => (
+    selectedRoute && selectedStop
+      ? arrivalSubs.find((item) => (
+        item.stopId === notificationStopId(selectedRoute, selectedStop)
+        || (item.routeNumber === selectedRoute.routeNumber && normalize(item.stopName) === normalize(selectedStop.name))
+      ))
+      : null
+  ), [arrivalSubs, selectedRoute, selectedStop]);
 
   const snapSheet = useCallback((level: SheetLevel) => {
     setSheetLevel(level);
+    sheetHeightRef.current = sheetHeights[level];
     Animated.spring(sheetAnim, {
       toValue: sheetHeights[level],
       damping: 22,
@@ -327,18 +414,39 @@ export default function LiveTrackingScreen() {
     }).start();
   }, [sheetAnim, sheetHeights]);
 
+  const clampSheetHeight = useCallback((height: number) => (
+    Math.min(Math.max(height, sheetHeights.collapsed), sheetHeights.full)
+  ), [sheetHeights]);
+
+  const getNearestSheetLevel = useCallback((height: number): SheetLevel => {
+    const levels: SheetLevel[] = ['collapsed', 'half', 'full'];
+    return levels.reduce((nearest, level) => (
+      Math.abs(sheetHeights[level] - height) < Math.abs(sheetHeights[nearest] - height) ? level : nearest
+    ), 'collapsed');
+  }, [sheetHeights]);
+
   const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: (_event, gesture) => Math.abs(gesture.dy) > 8,
-    onPanResponderRelease: (_event, gesture) => {
-      if (gesture.dy < -40 || gesture.vy < -0.7) {
-        snapSheet(sheetLevel === 'collapsed' ? 'half' : 'full');
-        return;
-      }
-      if (gesture.dy > 40 || gesture.vy > 0.7) {
-        snapSheet(sheetLevel === 'full' ? 'half' : 'collapsed');
-      }
+    onPanResponderGrant: () => {
+      sheetAnim.stopAnimation((height) => {
+        dragStartHeightRef.current = height || sheetHeights[sheetLevel];
+        sheetHeightRef.current = dragStartHeightRef.current;
+      });
     },
-  }), [sheetLevel, snapSheet]);
+    onPanResponderMove: (_event, gesture) => {
+      const nextHeight = clampSheetHeight(dragStartHeightRef.current - gesture.dy);
+      sheetHeightRef.current = nextHeight;
+      sheetAnim.setValue(nextHeight);
+    },
+    onPanResponderRelease: (_event, gesture) => {
+      const projectedHeight = clampSheetHeight(sheetHeightRef.current - gesture.vy * 80);
+      snapSheet(getNearestSheetLevel(projectedHeight));
+    },
+    onPanResponderTerminate: () => {
+      snapSheet(getNearestSheetLevel(sheetHeightRef.current || sheetHeights[sheetLevel]));
+    },
+  }), [clampSheetHeight, getNearestSheetLevel, sheetAnim, sheetHeights, sheetLevel, snapSheet]);
 
   const loadRoutes = useCallback(async () => {
     const data = await passengerApi.searchRoutes();
@@ -346,6 +454,29 @@ export default function LiveTrackingScreen() {
     if (mountedRef.current) setRoutes(nextRoutes);
     return nextRoutes;
   }, []);
+
+  const loadNotificationSettings = useCallback(async () => {
+    if (!canUsePassengerFeatures) {
+      setArrivalSubs([]);
+      setDelaySubs([]);
+      setRouteChangeSubs([]);
+      return;
+    }
+
+    try {
+      const [arrival, delay, routeChange] = await Promise.all([
+        routeDiscoveryApi.getArrivalNotifications(),
+        routeDiscoveryApi.getDelayNotifications(),
+        routeDiscoveryApi.getRouteChangeNotifications(),
+      ]);
+      if (!mountedRef.current) return;
+      setArrivalSubs(arrival || []);
+      setDelaySubs(delay || []);
+      setRouteChangeSubs(routeChange || []);
+    } catch {
+      if (mountedRef.current) setActionMessage('Không thể tải cài đặt cảnh báo.');
+    }
+  }, [canUsePassengerFeatures]);
 
   const loadLive = useCallback(async (routeId: string, silent = false) => {
     if (!routeId) return;
@@ -369,7 +500,7 @@ export default function LiveTrackingScreen() {
       });
     } catch (err) {
       if (!mountedRef.current || requestSeq.current !== seq) return;
-      setError((err as { message?: string })?.message || 'Khong the tai tien trinh chuyen.');
+      setError((err as { message?: string })?.message || 'Không thể tải tiến trình chuyến.');
       setBuses([]);
     } finally {
       if (mountedRef.current && requestSeq.current === seq) {
@@ -389,7 +520,7 @@ export default function LiveTrackingScreen() {
         else if (mountedRef.current) setInitialLoading(false);
       } catch (err) {
         if (!mountedRef.current) return;
-        setError((err as { message?: string })?.message || 'Khong the tai danh sach tuyen.');
+        setError((err as { message?: string })?.message || 'Không thể tải danh sách tuyến.');
         setInitialLoading(false);
       }
     };
@@ -401,6 +532,10 @@ export default function LiveTrackingScreen() {
   }, [loadLive, loadRoutes]);
 
   useEffect(() => {
+    void loadNotificationSettings();
+  }, [loadNotificationSettings, user?.id]);
+
+  useEffect(() => {
     if (!autoRefresh || !selectedRouteId) return undefined;
     const timer = setInterval(() => {
       void loadLive(selectedRouteId, true);
@@ -409,6 +544,7 @@ export default function LiveTrackingScreen() {
   }, [autoRefresh, loadLive, selectedRouteId]);
 
   useEffect(() => {
+    sheetHeightRef.current = sheetHeights[sheetLevel];
     sheetAnim.setValue(sheetHeights[sheetLevel]);
   }, [sheetAnim, sheetHeights, sheetLevel]);
 
@@ -464,6 +600,68 @@ export default function LiveTrackingScreen() {
     setMapFocusTarget('stop');
   };
 
+  const requirePassenger = () => {
+    if (canUsePassengerFeatures) return true;
+    setActionMessage('Vui lòng đăng nhập tài khoản hành khách để dùng cảnh báo.');
+    return false;
+  };
+
+  const toggleRouteAlert = async (kind: 'delay' | 'routeChange') => {
+    if (!selectedRoute || !requirePassenger()) return;
+    const routeId = routeIdOf(selectedRoute);
+    const existing = kind === 'delay' ? routeDelaySub : routeChangeSub;
+    setSavingAlert(kind);
+    setActionMessage('');
+    try {
+      if (existing) {
+        if (kind === 'delay') await routeDiscoveryApi.removeDelayNotification(existing.subscriptionId);
+        else await routeDiscoveryApi.removeRouteChangeNotification(existing.subscriptionId);
+        setActionMessage(kind === 'delay' ? 'Đã tắt cảnh báo trễ chuyến.' : 'Đã tắt cảnh báo thay đổi tuyến.');
+      } else if (kind === 'delay') {
+        await routeDiscoveryApi.subscribeDelayNotification({ routeId, routeNumber: selectedRoute.routeNumber });
+        setActionMessage('Đã bật cảnh báo trễ chuyến.');
+      } else {
+        await routeDiscoveryApi.subscribeRouteChangeNotification({ routeId, routeNumber: selectedRoute.routeNumber });
+        setActionMessage('Đã bật cảnh báo thay đổi tuyến.');
+      }
+      await loadNotificationSettings();
+    } catch (err) {
+      setActionMessage(getErrorMessage(err, 'Không thể cập nhật cảnh báo.'));
+    } finally {
+      setSavingAlert('');
+    }
+  };
+
+  const toggleArrivalAlert = async () => {
+    if (!selectedRoute || !selectedStop || !requirePassenger()) return;
+    const routeId = routeIdOf(selectedRoute);
+    const stopId = notificationStopId(selectedRoute, selectedStop);
+    setSavingAlert('arrival');
+    setActionMessage('');
+    try {
+      if (selectedStopArrivalSub) {
+        await routeDiscoveryApi.removeArrivalNotification(selectedStopArrivalSub.subscriptionId);
+        setActionMessage('Đã tắt cảnh báo xe đến cho trạm đang chọn.');
+      } else {
+        await routeDiscoveryApi.subscribeArrivalNotification({
+          routeId,
+          routeNumber: selectedRoute.routeNumber,
+          stopId,
+          stopName: selectedStop.name,
+          order: selectedStop.order,
+          address: selectedStop.address || selectedStop.name,
+          etaThresholdMinutes: 5,
+        });
+        setActionMessage('Đã bật cảnh báo xe đến cho trạm đang chọn.');
+      }
+      await loadNotificationSettings();
+    } catch (err) {
+      setActionMessage(getErrorMessage(err, 'Không thể cập nhật cảnh báo xe đến.'));
+    } finally {
+      setSavingAlert('');
+    }
+  };
+
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <View style={styles.screen}>
@@ -497,6 +695,9 @@ export default function LiveTrackingScreen() {
           {!initialLoading && !error ? (
             <RouteChips routes={routes} selectedRoute={selectedRoute} selectedRouteId={selectedRouteId} onChooseRoute={chooseRoute} />
           ) : null}
+          {!initialLoading && !error && selectedRoute ? (
+            <SelectedRouteLegend route={selectedRoute} />
+          ) : null}
           {!initialLoading && !error ? (
             <FloatingMapButtons
               autoFollow={autoFollow}
@@ -513,7 +714,7 @@ export default function LiveTrackingScreen() {
         </View>
 
         {actionMessage ? (
-          <View style={[styles.messageToast, { bottom: bottomNavHeight + sheetHeights.collapsed + 8 }]}>
+          <View style={[styles.messageToast, { bottom: bottomNavHeight + 10 }]}>
             <MaterialCommunityIcons color={colors.secondary} name="information-outline" size={18} />
             <Text style={styles.messageText}>{actionMessage}</Text>
           </View>
@@ -523,19 +724,22 @@ export default function LiveTrackingScreen() {
           <TripBottomSheet
             autoFollow={autoFollow}
             autoRefresh={autoRefresh}
+            arrivalEnabled={Boolean(selectedStopArrivalSub)}
             bottomOffset={bottomNavHeight}
             buses={buses}
             completedCount={completedCount}
+            delayEnabled={Boolean(routeDelaySub)}
             filteredStops={filteredStops}
             panHandlers={panResponder.panHandlers}
             progressPercent={progressPercent}
             refreshing={refreshing}
+            routeChangeEnabled={Boolean(routeChangeSub)}
+            savingAlert={savingAlert}
             selectedBus={selectedBus}
             selectedRoute={selectedRoute}
             selectedStop={selectedStop}
             sheetAnim={sheetAnim}
             sheetLevel={sheetLevel}
-            snapSheet={snapSheet}
             stale={stale}
             stopSearch={stopSearch}
             stopStates={stopStates}
@@ -544,16 +748,37 @@ export default function LiveTrackingScreen() {
             onChooseBus={chooseBus}
             onChooseStop={chooseStop}
             onFocusBus={focusSelectedBus}
+            onPurchaseTicket={() => {
+              if (!selectedRoute) return;
+              router.push(`/buy-oneway-ticket?routeId=${encodeURIComponent(routeIdOf(selectedRoute))}`);
+            }}
             onRefresh={() => selectedRouteId && loadLive(selectedRouteId, true)}
             onSetAutoFollow={setAutoFollow}
             onSetAutoRefresh={setAutoRefresh}
             onSetStopSearch={setStopSearch}
+            onToggleArrivalAlert={toggleArrivalAlert}
+            onToggleDelayAlert={() => void toggleRouteAlert('delay')}
+            onToggleRouteChangeAlert={() => void toggleRouteAlert('routeChange')}
           />
         ) : null}
 
-        <PassengerBottomNav active="explore" />
+        <PassengerBottomNav active="tracking" />
       </View>
     </SafeAreaView>
+  );
+}
+
+function SelectedRouteLegend({ route }: { route: BusRoute }) {
+  return (
+    <View pointerEvents="none" style={styles.selectedRouteLegend}>
+      <View style={styles.legendTitleRow}>
+        <View style={styles.legendRouteBadge}>
+          <Text style={styles.legendRouteText}>{route.routeNumber}</Text>
+        </View>
+        <View style={styles.legendLine} />
+        <Text numberOfLines={1} style={styles.legendTitle}>Tuyến đường đã chọn</Text>
+      </View>
+    </View>
   );
 }
 
@@ -660,19 +885,22 @@ function FloatingMapButtons({
 function TripBottomSheet({
   autoFollow,
   autoRefresh,
+  arrivalEnabled,
   bottomOffset,
   buses,
   completedCount,
+  delayEnabled,
   filteredStops,
   panHandlers,
   progressPercent,
   refreshing,
+  routeChangeEnabled,
+  savingAlert,
   selectedBus,
   selectedRoute,
   selectedStop,
   sheetAnim,
   sheetLevel,
-  snapSheet,
   stale,
   stopSearch,
   stopStates,
@@ -681,26 +909,33 @@ function TripBottomSheet({
   onChooseBus,
   onChooseStop,
   onFocusBus,
+  onPurchaseTicket,
   onRefresh,
   onSetAutoFollow,
   onSetAutoRefresh,
   onSetStopSearch,
+  onToggleArrivalAlert,
+  onToggleDelayAlert,
+  onToggleRouteChangeAlert,
 }: {
   autoFollow: boolean;
   autoRefresh: boolean;
+  arrivalEnabled: boolean;
   bottomOffset: number;
   buses: LiveBus[];
   completedCount: number;
+  delayEnabled: boolean;
   filteredStops: ProgressStop[];
   panHandlers: PanHandlers;
   progressPercent: number;
   refreshing: boolean;
+  routeChangeEnabled: boolean;
+  savingAlert: string;
   selectedBus: LiveBus | null;
   selectedRoute: BusRoute | null;
   selectedStop: ProgressStop | null;
   sheetAnim: Animated.Value;
   sheetLevel: SheetLevel;
-  snapSheet: (level: SheetLevel) => void;
   stale: boolean;
   stopSearch: string;
   stopStates: ProgressStop[];
@@ -709,29 +944,62 @@ function TripBottomSheet({
   onChooseBus: (bus: LiveBus) => void;
   onChooseStop: (stop: ProgressStop) => void;
   onFocusBus: () => void;
+  onPurchaseTicket: () => void;
   onRefresh: () => void;
   onSetAutoFollow: (value: boolean) => void;
   onSetAutoRefresh: (value: boolean) => void;
   onSetStopSearch: (value: string) => void;
+  onToggleArrivalAlert: () => void;
+  onToggleDelayAlert: () => void;
+  onToggleRouteChangeAlert: () => void;
 }) {
   return (
     <Animated.View style={[styles.bottomSheet, { bottom: bottomOffset, height: sheetAnim }]}>
-      <Pressable {...panHandlers} onPress={() => snapSheet(sheetLevel === 'collapsed' ? 'half' : sheetLevel === 'half' ? 'full' : 'collapsed')} style={styles.sheetHandleWrap}>
+      <View {...panHandlers} accessibilityLabel="Kéo để mở rộng hoặc thu gọn bảng thông tin" style={styles.sheetHandleWrap}>
         <View style={styles.sheetHandle} />
-      </Pressable>
+      </View>
       <View style={styles.sheetContent}>
-        <BusInfoCard
-          completedCount={completedCount}
-          progressPercent={progressPercent}
-          selectedBus={selectedBus}
-          selectedRoute={selectedRoute}
-          stopCount={stopStates.length}
-          tripStatus={tripStatus}
-          updatedAt={updatedAt}
-        />
+        {sheetLevel === 'collapsed' ? (
+          <BusInfoCard
+            compact
+            completedCount={completedCount}
+            progressPercent={progressPercent}
+            selectedBus={selectedBus}
+            selectedRoute={selectedRoute}
+            stopCount={stopStates.length}
+            tripStatus={tripStatus}
+            updatedAt={updatedAt}
+          />
+        ) : null}
 
         {sheetLevel !== 'collapsed' ? (
-          <>
+          <ScrollView
+            contentContainerStyle={styles.sheetScrollContent}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={false}
+            style={styles.sheetScroll}
+          >
+            <RouteSyncPanel
+              arrivalEnabled={arrivalEnabled}
+              delayEnabled={delayEnabled}
+              routeChangeEnabled={routeChangeEnabled}
+              savingAlert={savingAlert}
+              selectedRoute={selectedRoute}
+              selectedStop={selectedStop}
+              onPurchaseTicket={onPurchaseTicket}
+              onToggleArrivalAlert={onToggleArrivalAlert}
+              onToggleDelayAlert={onToggleDelayAlert}
+              onToggleRouteChangeAlert={onToggleRouteChangeAlert}
+            />
+            <BusInfoCard
+              completedCount={completedCount}
+              progressPercent={progressPercent}
+              selectedBus={selectedBus}
+              selectedRoute={selectedRoute}
+              stopCount={stopStates.length}
+              tripStatus={tripStatus}
+              updatedAt={updatedAt}
+            />
             <View style={styles.sheetActions}>
               <Pressable onPress={() => onSetAutoRefresh(!autoRefresh)} style={[styles.actionButton, autoRefresh && styles.actionButtonActive]}>
                 <MaterialCommunityIcons color={autoRefresh ? colors.white : colors.secondary} name={autoRefresh ? 'pause-circle' : 'play-circle'} size={17} />
@@ -739,7 +1007,7 @@ function TripBottomSheet({
               </Pressable>
               <Pressable onPress={() => onSetAutoFollow(!autoFollow)} style={[styles.actionButton, autoFollow && styles.actionButtonActive]}>
                 <MaterialCommunityIcons color={autoFollow ? colors.white : colors.secondary} name="navigation-variant" size={17} />
-                <Text style={[styles.actionText, autoFollow && styles.actionTextActive]}>{autoFollow ? 'Auto follow' : 'Tự do xem'}</Text>
+                <Text style={[styles.actionText, autoFollow && styles.actionTextActive]}>{autoFollow ? 'Tự theo dõi' : 'Tự do xem'}</Text>
               </Pressable>
               <Pressable onPress={onFocusBus} style={styles.actionButton}>
                 <MaterialCommunityIcons color={colors.secondary} name="crosshairs-gps" size={17} />
@@ -757,52 +1025,265 @@ function TripBottomSheet({
               </View>
             ) : null}
             {buses.length ? <BusSelector buses={buses} selectedBus={selectedBus} onChooseBus={onChooseBus} /> : <EmptyState icon="bus-alert" title="Chưa có xe đang hoạt động" detail="Thử làm mới hoặc chọn tuyến khác." />}
-          </>
-        ) : null}
 
-        {sheetLevel === 'full' ? (
-          <View style={styles.fullContent}>
-            <StopSearch stopSearch={stopSearch} onSetStopSearch={onSetStopSearch} />
-            <StopTimeline
-              filteredStops={filteredStops}
-              selectedStop={selectedStop}
-              stopStates={stopStates}
-              onChooseStop={onChooseStop}
-            />
-          </View>
+            {sheetLevel === 'full' ? (
+              <View style={styles.fullContent}>
+                <StopSearch stopSearch={stopSearch} onSetStopSearch={onSetStopSearch} />
+                <StopTimeline
+                  filteredStops={filteredStops}
+                  selectedStop={selectedStop}
+                  stopStates={stopStates}
+                  onChooseStop={onChooseStop}
+                />
+              </View>
+            ) : null}
+          </ScrollView>
         ) : null}
       </View>
     </Animated.View>
   );
 }
 
-function BusInfoCard({ completedCount, progressPercent, selectedBus, selectedRoute, stopCount, tripStatus, updatedAt }: { completedCount: number; progressPercent: number; selectedBus: LiveBus | null; selectedRoute: BusRoute | null; stopCount: number; tripStatus: ReturnType<typeof tripStatusDisplay>; updatedAt?: string }) {
+function RouteSyncPanel({
+  arrivalEnabled,
+  delayEnabled,
+  routeChangeEnabled,
+  savingAlert,
+  selectedRoute,
+  selectedStop,
+  onPurchaseTicket,
+  onToggleArrivalAlert,
+  onToggleDelayAlert,
+  onToggleRouteChangeAlert,
+}: {
+  arrivalEnabled: boolean;
+  delayEnabled: boolean;
+  routeChangeEnabled: boolean;
+  savingAlert: string;
+  selectedRoute: BusRoute | null;
+  selectedStop: ProgressStop | null;
+  onPurchaseTicket: () => void;
+  onToggleArrivalAlert: () => void;
+  onToggleDelayAlert: () => void;
+  onToggleRouteChangeAlert: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<RoutePanelTab>('info');
+  const departurePreview = selectedRoute ? buildDeparturePreview(selectedRoute) : [];
+  const hasScheduleConfig = Boolean(
+    selectedRoute?.operatingHours?.firstDeparture
+    && selectedRoute.operatingHours?.lastDeparture
+    && selectedRoute.operatingHours?.frequencyMinutes
+  );
+  const tabs: Array<{ key: RoutePanelTab; label: string }> = [
+    { key: 'info', label: 'Thông tin' },
+    { key: 'schedule', label: 'Lịch chạy' },
+    { key: 'alerts', label: 'Cảnh báo' },
+  ];
+
+  if (!selectedRoute) return null;
+
+  return (
+    <View style={styles.routeSyncPanel}>
+      <View style={styles.routeSummaryHeader}>
+        <View style={styles.routeCodeSmall}>
+          <Text style={styles.routeCodeSmallText}>{selectedRoute.routeNumber}</Text>
+        </View>
+        <View style={styles.routeSummaryCopy}>
+          <Text numberOfLines={1} style={styles.routeSummaryTitle}>{selectedRoute.name}</Text>
+          <Text numberOfLines={1} style={styles.routeSummaryMeta}>{selectedRoute.origin} đến {selectedRoute.destination}</Text>
+        </View>
+        <StatusPill label={selectedRoute.status || 'Đang hoạt động'} tone="success" />
+      </View>
+
+      <View style={styles.detailTabs}>
+        {tabs.map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <Pressable key={tab.key} onPress={() => setActiveTab(tab.key)} style={[styles.detailTab, active && styles.detailTabActive]}>
+              <Text style={[styles.detailTabText, active && styles.detailTabTextActive]}>{tab.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {activeTab === 'info' ? (
+        <>
+          <View style={styles.routeMetricGrid}>
+            <InfoBlock icon="clock-outline" label="Thời gian" value={`${selectedRoute.estimatedDurationMinutes || '?'} phút`} />
+            <InfoBlock icon="map-marker-distance" label="Quãng đường" value={`${selectedRoute.distanceKm || '?'} km`} />
+          </View>
+          <View style={styles.ticketPanel}>
+            <View style={styles.ticketCopy}>
+              <Text style={styles.ticketTitle}>Vé xe buýt</Text>
+              <Text style={styles.ticketText}>Mua vé một lượt cho tuyến đang chọn.</Text>
+            </View>
+            <Text style={styles.fareBadge}>{formatFare(selectedRoute.fare)}</Text>
+          </View>
+          <Pressable onPress={onPurchaseTicket} style={styles.buyTicketButton}>
+            <MaterialCommunityIcons color={colors.white} name="ticket-confirmation-outline" size={18} />
+            <Text style={styles.buyTicketText}>Mua vé</Text>
+          </Pressable>
+        </>
+      ) : null}
+
+      {activeTab === 'schedule' ? (
+        <View style={styles.schedulePanel}>
+          <View style={styles.scheduleGrid}>
+            <ScheduleStatCard icon="clock-start" label="Chuyến đầu" value={selectedRoute.operatingHours?.firstDeparture || '--:--'} />
+            <ScheduleStatCard icon="clock-end" label="Chuyến cuối" value={selectedRoute.operatingHours?.lastDeparture || '--:--'} />
+            <ScheduleStatCard icon="timer-outline" label="Tần suất" value={selectedRoute.operatingHours?.frequencyMinutes ? `${selectedRoute.operatingHours.frequencyMinutes} phút` : 'Chưa có'} />
+            <ScheduleStatCard icon="map-clock-outline" label="Thời lượng" value={`${selectedRoute.estimatedDurationMinutes || '?'} phút`} />
+          </View>
+
+          <View style={styles.departureCard}>
+            <View style={styles.departureHeader}>
+              <View>
+                <Text style={styles.departureTitle}>Khung giờ khởi hành</Text>
+                <Text style={styles.departureMeta}>{formatRouteHours(selectedRoute)}</Text>
+              </View>
+              <MaterialCommunityIcons color={colors.accent} name="calendar-clock" size={20} />
+            </View>
+            {departurePreview.length ? (
+              <View style={styles.departureTimes}>
+                {departurePreview.map((time) => (
+                  <Text key={time} style={styles.departureTimePill}>{time}</Text>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.scheduleEmptyRow}>
+                <MaterialCommunityIcons color={colors.secondary} name="calendar-remove-outline" size={18} />
+                <Text style={styles.scheduleEmptyText}>Tuyến này chưa có đủ cấu hình giờ chạy để hiển thị danh sách giờ.</Text>
+              </View>
+            )}
+          </View>
+
+          <View style={[styles.scheduleNote, !hasScheduleConfig && styles.scheduleWarningNote]}>
+            <MaterialCommunityIcons color={hasScheduleConfig ? colors.secondary : '#8a5a00'} name={hasScheduleConfig ? 'information-outline' : 'alert-circle-outline'} size={18} />
+            <Text style={[styles.scheduleNoteText, !hasScheduleConfig && styles.scheduleWarningText]}>
+              {hasScheduleConfig
+                ? 'Lịch chạy được lấy từ cấu hình tuyến trên hệ thống BusDN. Giờ thực tế có thể thay đổi theo điều hành.'
+                : 'Thiếu cấu hình giờ chạy. Vui lòng kiểm tra lại phần vận hành tuyến trên hệ thống quản trị.'}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {activeTab === 'alerts' ? (
+        <View style={styles.notificationPanel}>
+          <View style={styles.notificationPanelHeader}>
+            <MaterialCommunityIcons color={colors.accent} name="bell-outline" size={18} />
+            <Text style={styles.notificationPanelTitle}>Cài đặt cảnh báo chuyến đi</Text>
+          </View>
+          <AlertSettingRow
+            detail={selectedStop ? `Nhận cảnh báo khi xe gần đến ${selectedStop.name}.` : 'Chọn một trạm trong lộ trình để bật cảnh báo xe đến.'}
+            disabled={!selectedStop || savingAlert !== ''}
+            label="Cảnh báo xe buýt đến"
+            loading={savingAlert === 'arrival'}
+            onValueChange={onToggleArrivalAlert}
+            value={arrivalEnabled}
+          />
+          <AlertSettingRow
+            detail="Thông báo khi xe buýt trên tuyến này trễ ngoài lịch trình dự kiến."
+            disabled={savingAlert !== ''}
+            label="Cảnh báo trễ"
+            loading={savingAlert === 'delay'}
+            onValueChange={onToggleDelayAlert}
+            value={delayEnabled}
+          />
+          <AlertSettingRow
+            detail="Thông báo khi tuyến có đổi đường, đổi trạm hoặc cập nhật tạm thời."
+            disabled={savingAlert !== ''}
+            label="Cảnh báo thay đổi tuyến"
+            loading={savingAlert === 'routeChange'}
+            onValueChange={onToggleRouteChangeAlert}
+            value={routeChangeEnabled}
+          />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function AlertSettingRow({
+  detail,
+  disabled,
+  label,
+  loading,
+  onValueChange,
+  value,
+}: {
+  detail: string;
+  disabled?: boolean;
+  label: string;
+  loading: boolean;
+  onValueChange: () => void;
+  value: boolean;
+}) {
+  return (
+    <View style={styles.alertSettingRow}>
+      <View style={styles.alertSettingCopy}>
+        <Text style={styles.alertSettingLabel}>{label}</Text>
+        <Text style={styles.alertSettingDetail}>{detail}</Text>
+      </View>
+      {loading ? (
+        <ActivityIndicator color={colors.primary} />
+      ) : (
+        <Switch disabled={disabled} onValueChange={onValueChange} value={value} />
+      )}
+    </View>
+  );
+}
+
+function ScheduleStatCard({ icon, label, value }: { icon: MaterialIconName; label: string; value: string }) {
+  return (
+    <View style={styles.scheduleStatCard}>
+      <View style={styles.scheduleStatIcon}>
+        <MaterialCommunityIcons color={colors.secondary} name={icon} size={16} />
+      </View>
+      <View style={styles.scheduleStatCopy}>
+        <Text style={styles.scheduleStatLabel}>{label}</Text>
+        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78} style={styles.scheduleStatValue}>{value}</Text>
+      </View>
+    </View>
+  );
+}
+
+function BusInfoCard({ compact = false, completedCount, progressPercent, selectedBus, selectedRoute, stopCount, tripStatus, updatedAt }: { compact?: boolean; completedCount: number; progressPercent: number; selectedBus: LiveBus | null; selectedRoute: BusRoute | null; stopCount: number; tripStatus: ReturnType<typeof tripStatusDisplay>; updatedAt?: string }) {
   const currentStop = selectedBus?.tripProgress?.currentStop || 'Chưa xác định';
   const nextStop = selectedBus?.tripProgress?.nextStop || selectedBus?.nextStop || 'Chưa xác định';
   return (
-    <View style={styles.busInfoCard}>
+    <View style={[styles.busInfoCard, compact && styles.busInfoCardCompact]}>
       <View style={styles.tripHeader}>
-        <View style={styles.busIcon}>
-          <MaterialCommunityIcons color={colors.primary} name="bus" size={22} />
+        <View style={[styles.busIcon, compact && styles.busIconCompact]}>
+          <MaterialCommunityIcons color={colors.primary} name="bus" size={compact ? 18 : 22} />
         </View>
         <View style={styles.tripCopy}>
-          <Text numberOfLines={1} style={styles.tripTitle}>{selectedBus?.busId || 'Chưa có xe đang chạy'}</Text>
-          <Text numberOfLines={1} style={styles.tripMeta}>{selectedRoute ? `${selectedRoute.origin} đến ${selectedRoute.destination}` : 'Chọn tuyến để theo dõi'}</Text>
+          <Text numberOfLines={1} style={[styles.tripTitle, compact && styles.tripTitleCompact]}>{selectedBus?.busId || 'Chưa có xe đang chạy'}</Text>
+          <Text numberOfLines={1} style={[styles.tripMeta, compact && styles.tripMetaCompact]}>{selectedRoute ? `${selectedRoute.origin} đến ${selectedRoute.destination}` : 'Chọn tuyến để theo dõi'}</Text>
         </View>
         <StatusPill label={tripStatus.label} tone={tripStatus.tone} />
       </View>
-      <View style={styles.progressLine}>
-        <Text style={styles.progressTitle}>{progressPercent}%</Text>
-        <Text style={styles.progressMeta}>{completedCount}/{stopCount} stops</Text>
-        <Text style={styles.lastUpdated}>{formatTime(updatedAt)}</Text>
+      <View style={[styles.progressLine, compact && styles.progressLineCompact]}>
+        <Text style={[styles.progressTitle, compact && styles.progressTitleCompact]}>{progressPercent}%</Text>
+        <Text style={[styles.progressMeta, compact && styles.progressMetaCompact]}>{completedCount}/{stopCount} trạm</Text>
+        <Text style={[styles.lastUpdated, compact && styles.lastUpdatedCompact]}>{formatTime(updatedAt)}</Text>
       </View>
-      <View style={styles.progressTrack}>
+      <View style={[styles.progressTrack, compact && styles.progressTrackCompact]}>
         <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
       </View>
-      <View style={styles.sheetGrid}>
-        <InfoBlock icon="near-me" label="Trạm hiện tại" value={currentStop} />
-        <InfoBlock icon="map-marker-path" label="Trạm tiếp theo" value={nextStop} />
-      </View>
+      {compact ? (
+        <View style={styles.compactStopLine}>
+          <MaterialCommunityIcons color={colors.secondary} name="near-me" size={15} />
+          <Text numberOfLines={1} style={styles.compactStopText}>Hiện tại: {currentStop}</Text>
+          <MaterialCommunityIcons color={colors.secondary} name="map-marker-path" size={15} />
+          <Text numberOfLines={1} style={styles.compactStopText}>Tiếp theo: {nextStop}</Text>
+        </View>
+      ) : (
+        <View style={styles.sheetGrid}>
+          <InfoBlock icon="near-me" label="Trạm hiện tại" value={currentStop} />
+          <InfoBlock icon="map-marker-path" label="Trạm tiếp theo" value={nextStop} />
+        </View>
+      )}
     </View>
   );
 }
@@ -832,7 +1313,7 @@ function StopSearch({ stopSearch, onSetStopSearch }: { stopSearch: string; onSet
     <View style={styles.searchBox}>
       <MaterialCommunityIcons color={colors.secondary} name="magnify" size={20} />
       <TextInput
-        accessibilityLabel="Tim tram trong chuyen"
+        accessibilityLabel="Tìm trạm trong chuyến"
         editable
         onChangeText={onSetStopSearch}
         placeholder="Tìm trạm trong lộ trình..."
@@ -842,7 +1323,7 @@ function StopSearch({ stopSearch, onSetStopSearch }: { stopSearch: string; onSet
         value={stopSearch}
       />
       {stopSearch ? (
-        <Pressable accessibilityLabel="Xoa tu khoa tim kiem" hitSlop={8} onPress={() => onSetStopSearch('')}>
+        <Pressable accessibilityLabel="Xóa từ khóa tìm kiếm" hitSlop={8} onPress={() => onSetStopSearch('')}>
           <MaterialCommunityIcons color={colors.secondary} name="close-circle" size={20} />
         </Pressable>
       ) : null}
@@ -854,7 +1335,7 @@ function StopTimeline({ filteredStops, selectedStop, stopStates, onChooseStop }:
   return (
     <View style={styles.timelineCard}>
       <View style={styles.timelineHeader}>
-        <Text style={styles.sectionTitle}>Trip Stops</Text>
+        <Text style={styles.sectionTitle}>Danh sách trạm</Text>
         <Text style={styles.timelineCount}>{filteredStops.length}/{stopStates.length}</Text>
       </View>
       {!stopStates.length ? <EmptyState icon="map-marker-off-outline" title="Tuyến chưa có danh sách trạm" detail="Không thể hiển thị tiến trình nếu tuyến thiếu trạm." /> : null}
@@ -939,8 +1420,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(242,252,248,0.97)',
     flexDirection: 'row',
-    gap: 12,
-    height: 76,
+    gap: 10,
+    height: 68,
     paddingHorizontal: 16,
     zIndex: 20,
   },
@@ -948,18 +1429,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.white,
     borderColor: colors.outline,
-    borderRadius: 24,
+    borderRadius: 21,
     borderWidth: 1,
-    height: 48,
+    height: 42,
     justifyContent: 'center',
-    width: 48,
+    width: 42,
   },
   headerCopy: {
     flex: 1,
   },
   headerTitle: {
     color: colors.primary,
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '900',
   },
   headerSubtitle: {
@@ -970,25 +1451,25 @@ const styles = StyleSheet.create({
   },
   routeScroller: {
     left: 0,
-    maxHeight: 48,
+    maxHeight: 42,
     position: 'absolute',
     right: 0,
-    top: 12,
+    top: 10,
     zIndex: 24,
   },
   routeStrip: {
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
+    gap: 7,
+    paddingHorizontal: 12,
   },
   routeChip: {
     alignItems: 'center',
     backgroundColor: 'rgba(216,232,255,0.96)',
-    borderRadius: 18,
-    height: 38,
+    borderRadius: 16,
+    height: 34,
     justifyContent: 'center',
-    minWidth: 72,
-    paddingHorizontal: 14,
+    minWidth: 66,
+    paddingHorizontal: 12,
   },
   routeChipActive: {
     backgroundColor: colors.primaryContainer,
@@ -1000,6 +1481,61 @@ const styles = StyleSheet.create({
   },
   routeChipTextActive: {
     color: colors.white,
+  },
+  selectedRouteLegend: {
+    ...shadow,
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    borderColor: 'rgba(15,23,42,0.08)',
+    borderRadius: 999,
+    borderWidth: 1,
+    left: 14,
+    maxWidth: 258,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    position: 'absolute',
+    top: 58,
+    zIndex: 23,
+  },
+  legendTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7,
+  },
+  legendRouteBadge: {
+    backgroundColor: colors.accent,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  legendRouteText: {
+    color: colors.white,
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  legendTitle: {
+    color: colors.primary,
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  legendLineRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  legendLine: {
+    backgroundColor: '#34d399',
+    borderColor: colors.primary,
+    borderRadius: 999,
+    borderWidth: 2,
+    height: 7,
+    width: 34,
+  },
+  legendLineText: {
+    color: colors.secondary,
+    fontSize: 11,
+    fontWeight: '800',
   },
   mapShell: {
     backgroundColor: '#ccdbf4',
@@ -1032,14 +1568,14 @@ const styles = StyleSheet.create({
   mapTopOverlay: {
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.92)',
-    borderRadius: 18,
+    borderRadius: 16,
     flexDirection: 'row',
-    gap: 8,
-    left: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    gap: 7,
+    left: 14,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
     position: 'absolute',
-    top: 66,
+    top: 100,
   },
   liveDot: {
     backgroundColor: colors.accent,
@@ -1052,14 +1588,14 @@ const styles = StyleSheet.create({
   },
   mapTopText: {
     color: colors.primary,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '900',
   },
   floatingButtons: {
     gap: 10,
     position: 'absolute',
-    right: 16,
-    top: 122,
+    right: 14,
+    top: 158,
     zIndex: 25,
   },
   mapFab: {
@@ -1067,11 +1603,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.white,
     borderColor: 'rgba(0,26,15,0.08)',
-    borderRadius: 24,
+    borderRadius: 22,
     borderWidth: 1,
-    height: 48,
+    height: 44,
     justifyContent: 'center',
-    width: 48,
+    width: 44,
   },
   mapFabPrimary: {
     backgroundColor: colors.primaryContainer,
@@ -1083,22 +1619,22 @@ const styles = StyleSheet.create({
     ...shadow,
     alignItems: 'center',
     alignSelf: 'center',
-    backgroundColor: colors.white,
-    borderColor: colors.outline,
-    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.97)',
+    borderColor: 'rgba(0,26,15,0.12)',
+    borderRadius: 999,
     borderWidth: 1,
     flexDirection: 'row',
-    gap: 8,
-    maxWidth: '88%',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    gap: 7,
+    maxWidth: '92%',
+    paddingHorizontal: 13,
+    paddingVertical: 9,
     position: 'absolute',
     zIndex: 30,
   },
   messageText: {
     color: colors.primary,
     flexShrink: 1,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
   },
   errorLayer: {
@@ -1122,9 +1658,9 @@ const styles = StyleSheet.create({
   },
   bottomSheet: {
     ...shadow,
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    backgroundColor: '#fbfffd',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     left: 0,
     overflow: 'hidden',
     position: 'absolute',
@@ -1133,26 +1669,330 @@ const styles = StyleSheet.create({
   },
   sheetHandleWrap: {
     alignItems: 'center',
-    paddingBottom: 8,
-    paddingTop: 10,
+    paddingBottom: 7,
+    paddingTop: 8,
   },
   sheetHandle: {
     backgroundColor: colors.outline,
     borderRadius: 3,
     height: 5,
-    width: 48,
+    width: 44,
   },
   sheetContent: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingBottom: 14,
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+  },
+  sheetScroll: {
+    flex: 1,
+  },
+  sheetScrollContent: {
+    gap: 10,
+    paddingBottom: 18,
+  },
+  routeSyncPanel: {
+    gap: 9,
+    marginTop: 4,
+  },
+  routeSummaryHeader: {
+    alignItems: 'center',
+    backgroundColor: '#f8fffb',
+    borderColor: '#d9e8e0',
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 9,
+    padding: 10,
+  },
+  routeCodeSmall: {
+    alignItems: 'center',
+    backgroundColor: colors.primaryContainer,
+    borderRadius: 13,
+    minWidth: 48,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  routeCodeSmallText: {
+    color: colors.white,
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  routeSummaryCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  routeSummaryTitle: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  routeSummaryMeta: {
+    color: colors.secondary,
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 3,
+  },
+  routeMetricGrid: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  detailTabs: {
+    backgroundColor: colors.surfaceHigh,
+    borderRadius: 14,
+    flexDirection: 'row',
+    gap: 4,
+    padding: 3,
+  },
+  detailTab: {
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderRadius: 11,
+    flex: 1,
+    minHeight: 34,
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  detailTabActive: {
+    backgroundColor: colors.primaryContainer,
+  },
+  detailTabText: {
+    color: colors.secondary,
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  detailTabTextActive: {
+    color: colors.white,
+  },
+  scheduleNote: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceLow,
+    borderRadius: 14,
+    flexDirection: 'row',
+    gap: 9,
+    padding: 11,
+  },
+  schedulePanel: {
+    gap: 9,
+  },
+  scheduleGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  scheduleStatCard: {
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderColor: '#d9e8e0',
+    borderRadius: 15,
+    borderWidth: 1,
+    flexBasis: '48%',
+    flexDirection: 'row',
+    flexGrow: 1,
+    gap: 8,
+    minHeight: 58,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  scheduleStatIcon: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceLow,
+    borderRadius: 15,
+    height: 30,
+    justifyContent: 'center',
+    width: 30,
+  },
+  scheduleStatCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  scheduleStatLabel: {
+    color: colors.secondary,
+    fontSize: 9,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  scheduleStatValue: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '900',
+    marginTop: 3,
+  },
+  departureCard: {
+    backgroundColor: '#f8fffb',
+    borderColor: '#d9e8e0',
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 11,
+  },
+  departureHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  departureTitle: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  departureMeta: {
+    color: colors.secondary,
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 3,
+  },
+  departureTimes: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7,
+    marginTop: 10,
+  },
+  departureTimePill: {
+    backgroundColor: colors.white,
+    borderColor: colors.outline,
+    borderRadius: 999,
+    borderWidth: 1,
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '900',
+    overflow: 'hidden',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  scheduleEmptyRow: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceLow,
+    borderRadius: 13,
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+    padding: 10,
+  },
+  scheduleEmptyText: {
+    color: colors.secondary,
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  scheduleWarningNote: {
+    backgroundColor: '#fff7df',
+  },
+  scheduleWarningText: {
+    color: '#8a5a00',
+  },
+  scheduleNoteText: {
+    color: colors.secondary,
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  ticketPanel: {
+    alignItems: 'flex-start',
+    backgroundColor: '#f8fffb',
+    borderColor: '#d9e8e0',
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+    padding: 11,
+  },
+  ticketCopy: {
+    flex: 1,
+  },
+  ticketTitle: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  ticketText: {
+    color: colors.secondary,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginTop: 3,
+  },
+  fareBadge: {
+    backgroundColor: '#d8f6e7',
+    borderRadius: 8,
+    color: colors.primaryContainer,
+    fontSize: 11,
+    fontWeight: '900',
+    overflow: 'hidden',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  buyTicketButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primaryContainer,
+    borderRadius: 16,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    minHeight: 46,
+  },
+  buyTicketText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  notificationPanel: {
+    backgroundColor: '#f8fffb',
+    borderColor: '#d9e8e0',
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  notificationPanelHeader: {
+    alignItems: 'center',
+    borderBottomColor: '#edf3ef',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 8,
+    padding: 11,
+  },
+  notificationPanelTitle: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  alertSettingRow: {
+    alignItems: 'flex-start',
+    borderBottomColor: '#edf3ef',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 10,
+    padding: 11,
+  },
+  alertSettingCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  alertSettingLabel: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  alertSettingDetail: {
+    color: colors.secondary,
+    fontSize: 10,
+    fontWeight: '700',
+    lineHeight: 15,
+    marginTop: 3,
   },
   busInfoCard: {
     backgroundColor: colors.surfaceLow,
     borderColor: '#d9e8e0',
-    borderRadius: 20,
+    borderRadius: 18,
     borderWidth: 1,
-    padding: 13,
+    padding: 11,
+  },
+  busInfoCardCompact: {
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
   },
   tripHeader: {
     alignItems: 'center',
@@ -1162,53 +2002,82 @@ const styles = StyleSheet.create({
   busIcon: {
     alignItems: 'center',
     backgroundColor: '#baf8d9',
-    borderRadius: 20,
-    height: 40,
+    borderRadius: 18,
+    height: 36,
     justifyContent: 'center',
-    width: 40,
+    width: 36,
+  },
+  busIconCompact: {
+    borderRadius: 15,
+    height: 30,
+    width: 30,
   },
   tripCopy: {
     flex: 1,
   },
   tripTitle: {
     color: colors.primary,
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '900',
+  },
+  tripTitleCompact: {
+    fontSize: 15,
   },
   tripMeta: {
     color: colors.secondary,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     marginTop: 2,
+  },
+  tripMetaCompact: {
+    fontSize: 10,
+    marginTop: 1,
   },
   progressLine: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
-    marginTop: 14,
+    marginTop: 12,
+  },
+  progressLineCompact: {
+    gap: 7,
+    marginTop: 7,
   },
   progressTitle: {
     color: colors.primary,
-    fontSize: 30,
+    fontSize: 28,
     fontWeight: '900',
+  },
+  progressTitleCompact: {
+    fontSize: 24,
   },
   progressMeta: {
     color: colors.secondary,
     flex: 1,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
+  },
+  progressMetaCompact: {
+    fontSize: 12,
   },
   lastUpdated: {
     color: colors.muted,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
+  },
+  lastUpdatedCompact: {
+    fontSize: 10,
   },
   progressTrack: {
     backgroundColor: colors.surfaceHigh,
     borderRadius: 999,
-    height: 9,
+    height: 8,
     marginTop: 8,
     overflow: 'hidden',
+  },
+  progressTrackCompact: {
+    height: 6,
+    marginTop: 6,
   },
   progressFill: {
     backgroundColor: colors.accent,
@@ -1217,43 +2086,55 @@ const styles = StyleSheet.create({
   },
   sheetGrid: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 12,
+    gap: 8,
+    marginTop: 10,
   },
   infoBlock: {
     alignItems: 'center',
     backgroundColor: colors.white,
     borderColor: '#d9e8e0',
-    borderRadius: 16,
+    borderRadius: 15,
     borderWidth: 1,
     flex: 1,
     flexDirection: 'row',
-    gap: 8,
-    minHeight: 66,
-    padding: 10,
+    gap: 7,
+    minHeight: 60,
+    padding: 9,
   },
   infoIcon: {
     alignItems: 'center',
     backgroundColor: colors.surfaceLow,
-    borderRadius: 16,
-    height: 32,
+    borderRadius: 15,
+    height: 30,
     justifyContent: 'center',
-    width: 32,
+    width: 30,
   },
   infoCopy: {
     flex: 1,
   },
   infoLabel: {
     color: colors.secondary,
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '900',
     textTransform: 'uppercase',
   },
   infoValue: {
     color: colors.primary,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '900',
     marginTop: 3,
+  },
+  compactStopLine: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 5,
+    marginTop: 7,
+  },
+  compactStopText: {
+    color: colors.secondary,
+    flex: 1,
+    fontSize: 10,
+    fontWeight: '800',
   },
   sheetActions: {
     flexDirection: 'row',
@@ -1303,20 +2184,20 @@ const styles = StyleSheet.create({
   },
   busStrip: {
     gap: 8,
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   busChip: {
     alignItems: 'center',
     backgroundColor: colors.surfaceLow,
     borderColor: '#d9e8e0',
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
     flexDirection: 'row',
-    gap: 8,
-    minHeight: 52,
-    minWidth: 138,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    gap: 7,
+    minHeight: 48,
+    minWidth: 128,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
   },
   busChipActive: {
     backgroundColor: colors.primaryContainer,
@@ -1327,7 +2208,7 @@ const styles = StyleSheet.create({
   },
   busChipText: {
     color: colors.primary,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '900',
   },
   busChipMeta: {
@@ -1341,17 +2222,17 @@ const styles = StyleSheet.create({
   },
   fullContent: {
     flex: 1,
-    marginTop: 4,
+    marginTop: 2,
   },
   searchBox: {
     alignItems: 'center',
     backgroundColor: colors.surfaceLow,
     borderColor: colors.outline,
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
     flexDirection: 'row',
     gap: 8,
-    minHeight: 46,
+    minHeight: 44,
     paddingHorizontal: 12,
   },
   searchInput: {
@@ -1364,10 +2245,10 @@ const styles = StyleSheet.create({
   timelineCard: {
     backgroundColor: colors.white,
     borderColor: '#d9e8e0',
-    borderRadius: 24,
+    borderRadius: 18,
     borderWidth: 1,
-    marginTop: 12,
-    padding: 16,
+    marginTop: 10,
+    padding: 12,
   },
   timelineHeader: {
     alignItems: 'center',
@@ -1377,21 +2258,21 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: colors.primary,
-    fontSize: 24,
+    fontSize: 19,
     fontWeight: '900',
   },
   timelineCount: {
     color: colors.secondary,
-    fontSize: 19,
+    fontSize: 15,
     fontWeight: '900',
   },
   timelineScroll: {
-    height: 300,
+    height: 282,
   },
   stopRow: {
-    borderRadius: 20,
+    borderRadius: 16,
     flexDirection: 'row',
-    minHeight: 82,
+    minHeight: 70,
     paddingRight: 8,
   },
   stopRowActive: {
@@ -1399,7 +2280,7 @@ const styles = StyleSheet.create({
   },
   stopRail: {
     alignItems: 'center',
-    width: 50,
+    width: 44,
   },
   railLine: {
     backgroundColor: '#d4e0da',
@@ -1417,12 +2298,12 @@ const styles = StyleSheet.create({
   stopNode: {
     alignItems: 'center',
     borderColor: colors.white,
-    borderRadius: 22,
+    borderRadius: 18,
     borderWidth: 3,
-    height: 44,
+    height: 36,
     justifyContent: 'center',
-    marginTop: 16,
-    width: 44,
+    marginTop: 14,
+    width: 36,
     zIndex: 2,
   },
   stopCopy: {
@@ -1440,14 +2321,14 @@ const styles = StyleSheet.create({
   stopTitle: {
     color: colors.primary,
     flex: 1,
-    fontSize: 22,
+    fontSize: 17,
     fontWeight: '900',
   },
   stopBadge: {
     backgroundColor: colors.surfaceHigh,
     borderRadius: 10,
     color: colors.secondary,
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: '900',
     overflow: 'hidden',
     paddingHorizontal: 8,
@@ -1459,7 +2340,7 @@ const styles = StyleSheet.create({
   },
   stopMeta: {
     color: colors.secondary,
-    fontSize: 17,
+    fontSize: 12,
     fontWeight: '700',
     marginTop: 4,
   },

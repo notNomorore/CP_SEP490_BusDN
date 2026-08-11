@@ -18,6 +18,7 @@ import passengerApi, {
   type NotificationRecord,
   type NotificationSubscriptionRecord,
 } from '@/api/passenger.api';
+import profileApi from '@/api/profile.api';
 import { EmptyState, LoadingState, PassengerLayout } from '@/components/passenger/PassengerLayout';
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
@@ -364,7 +365,15 @@ export default function NotificationsScreen() {
         return;
       }
 
-      await passengerApi.updateNotificationEnabled(user, enabled);
+      const profile = await profileApi.getMyProfile();
+      const phoneNumber = profile.phoneNumber || profile.phone;
+
+      if (!profile.email || !phoneNumber) {
+        Alert.alert('Hồ sơ chưa đầy đủ', 'Vui lòng cập nhật email và số điện thoại trước khi đổi cài đặt thông báo.');
+        return;
+      }
+
+      await passengerApi.updateNotificationEnabled({ ...profile, phoneNumber }, enabled);
       await refreshUser();
     } catch (err) {
       setPermission(previousPermission);
