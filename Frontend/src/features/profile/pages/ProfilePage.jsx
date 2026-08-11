@@ -69,7 +69,8 @@ const getAvatarSource = (avatar) => {
     return avatar;
   }
 
-  return resolveBackendUrl(avatar);
+  const apiUrl = import.meta.env.VITE_API_URL?.trim() || 'https://cp-sep490-busdn.onrender.com';
+  return `${apiUrl.replace(/\/$/, '')}${avatar.startsWith('/') ? avatar : `/${avatar}`}`;
 };
 
 const formatDateValue = (value) => {

@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 
-const STATUSES = ['active', 'idle', 'paused', 'delayed', 'incident', 'lost_signal'];
+const FLEET_STATUSES = ['available', 'active', 'idle', 'paused', 'delayed', 'incident', 'maintenance', 'lost_signal'];
+const TRIP_STATUSES = ['active', 'idle', 'paused', 'delayed', 'incident', 'lost_signal'];
 const DELAY_SEVERITIES = ['minor', 'moderate', 'severe', 'critical'];
 const NOTIFY_TARGETS = ['driver', 'assistant', 'passenger', 'admin'];
 const SORTS = [
@@ -25,7 +26,7 @@ export const validateFleetLocationQuery = (query = {}) => {
     errors.routeId = 'Invalid routeId';
   }
 
-  if (query.status && !STATUSES.includes(query.status)) {
+  if (query.status && !FLEET_STATUSES.includes(query.status)) {
     errors.status = 'Invalid fleet status';
   }
 
@@ -45,7 +46,7 @@ export const validateActiveTripQuery = (query = {}) => {
     }
   });
 
-  if (query.status && !STATUSES.includes(query.status)) {
+  if (query.status && !TRIP_STATUSES.includes(query.status)) {
     errors.status = 'Invalid trip status';
   }
 

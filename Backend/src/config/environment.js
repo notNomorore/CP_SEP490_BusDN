@@ -45,16 +45,11 @@ const serverPort = toNumber(getEnv('PORT'), 3000);
 const serverHost = getEnv('HOST', isProduction ? '0.0.0.0' : 'localhost');
 
 const createCorsOrigin = () => {
-  const configuredOrigins = toList(getEnv('CORS_ORIGIN'), []);
-  const frontendOrigins = toList(getEnv('FRONTEND_URL'), []);
-  const vercelOrigins = toList(getEnv('VERCEL_FRONTEND_URL') || getEnv('VERCEL_URL'), [])
-    .map((origin) => (origin.startsWith('http') ? origin : `https://${origin}`));
-  const allowedOrigins = [
-    ...configuredOrigins,
-    ...frontendOrigins,
-    ...vercelOrigins,
-    ...(isDevelopment ? ['http://localhost:5173'] : []),
-  ];
+  const allowedOrigins = toList(getEnv('CORS_ORIGIN'), [
+    'http://localhost:5173',
+    'https://cp-sep-490-bus-dn.vercel.app',
+  ]);
+  const isDevelopment = getEnv('NODE_ENV', 'development') === 'development';
   const localDevOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
   const vercelOriginPattern = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i;
 

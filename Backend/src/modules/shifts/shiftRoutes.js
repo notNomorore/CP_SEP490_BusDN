@@ -14,6 +14,7 @@ router.post('/rosters/auto-generate', RosterController.autoGenerate);
 router.post('/rosters/validate', RosterController.validate);
 router.post('/rosters/publish', RosterController.publish);
 router.post('/rosters/reopen', RosterController.reopen);
+router.delete('/rosters/weekly', RosterController.cancelAll);
 
 router.get('/scheduling/overview', SchedulingController.overview);
 router.get('/scheduling/staffing-demand', SchedulingController.staffingDemand);
@@ -39,7 +40,9 @@ router.get('/shifts/available-drivers', ShiftController.listAvailableDrivers);
 router.get('/shifts/available-assistants', ShiftController.listAvailableAssistants);
 router.get('/shifts/available-vehicles', ShiftController.listAvailableVehicles);
 router.post('/shifts/:shiftId/assign-driver', ShiftController.assignDriverToSelectedShift);
+router.delete('/shifts/:shiftId/driver-assignment', ShiftController.removeDriverFromSelectedShift);
 router.post('/shifts/:shiftId/assign-assistant', ShiftController.assignAssistantToSelectedShift);
+router.delete('/shifts/:shiftId/assistant-assignment', ShiftController.removeAssistantFromSelectedShift);
 router.post('/shifts/:shiftId/assign-vehicle', ShiftController.assignVehicleToSelectedShift);
 router.post('/shifts/:shiftId/assign-trip', ShiftController.assignTripToSelectedShift);
 router.get('/shifts/:shiftId/assignments', ShiftController.listShiftAssignments);

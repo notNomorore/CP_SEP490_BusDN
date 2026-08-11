@@ -223,6 +223,26 @@ export default class ShiftController {
     }
   }
 
+  static async removeDriverFromSelectedShift(req, res, _next) {
+    try {
+      const result = await ShiftService.removeDriverFromShift(req.params.shiftId, req.user?.userId);
+      return res.json({ success: true, message: 'Đã gỡ ca của tài xế.', ...result });
+    } catch (error) {
+      logger.error('Remove driver from selected shift error:', error);
+      return res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Không thể gỡ ca của tài xế.' });
+    }
+  }
+
+  static async removeAssistantFromSelectedShift(req, res, _next) {
+    try {
+      const result = await ShiftService.removeAssistantFromShift(req.params.shiftId, req.user?.userId);
+      return res.json({ success: true, message: 'Đã gỡ ca của phụ xe.', ...result });
+    } catch (error) {
+      logger.error('Remove assistant from selected shift error:', error);
+      return res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Không thể gỡ ca của phụ xe.' });
+    }
+  }
+
   static async assignAssistantToSelectedShift(req, res, _next) {
     try {
       const assignment = await ShiftService.assignAssistantToShift(req.params.shiftId, { ...req.body, actorId: req.user?.userId });

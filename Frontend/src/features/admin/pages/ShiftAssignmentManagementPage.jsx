@@ -1161,7 +1161,7 @@ const ShiftAssignmentManagementPage = () => {
           <div className="grid gap-2 md:grid-cols-2">
             <button type="button" onClick={() => setActiveView('ROSTER')} className={`rounded-xl border px-4 py-3 text-left transition ${activeView === 'ROSTER' ? 'border-emerald-300 bg-emerald-100 text-emerald-950' : 'border-transparent bg-slate-50 text-slate-600 hover:border-emerald-200'}`}>
               <span className="flex items-center gap-2"><CalendarDays size={19} /><strong>Lịch tuần</strong></span>
-              <span className="mt-1 block text-xs">Roster sáng/chiều và ngày OFF.</span>
+              <span className="mt-1 block text-xs">Lịch sáng/chiều và ngày nghỉ.</span>
             </button>
             <button type="button" onClick={() => setActiveView('ASSIGN')} className={`rounded-xl border px-4 py-3 text-left transition ${activeView === 'ASSIGN' ? 'border-emerald-300 bg-emerald-100 text-emerald-950' : 'border-transparent bg-slate-50 text-slate-600 hover:border-emerald-200'}`}>
               <span className="flex items-center gap-2"><UserRoundCheck size={19} /><strong>Phân ca nhân sự</strong></span>
@@ -1175,7 +1175,10 @@ const ShiftAssignmentManagementPage = () => {
         </div>
 
         <div className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
-          <div className="grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
+          {activeView === 'ROSTER' ? <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+            <label className="space-y-2"><span className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Chọn một ngày trong tuần</span><input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold" /><span className="block text-xs text-slate-500">Hệ thống tự động hiển thị trọn tuần từ Thứ Hai đến Chủ Nhật.</span></label>
+            <div className="flex items-start gap-2 lg:pt-6"><button type="button" onClick={() => setRangePreset('DAY')} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-black">Tuần hiện tại</button><button type="button" onClick={() => setFromDate(addDays(fromDate, -7))} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-black">← Tuần trước</button><button type="button" onClick={() => setFromDate(addDays(fromDate, 7))} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-black">Tuần sau →</button></div>
+          </div> : <div className="grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
             <label className="space-y-2">
               <span className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Từ ngày</span>
               <input type="date" value={fromDate} max={toDate || undefined} onChange={(event) => setFromDate(event.target.value)} className="h-10 w-full rounded-xl border border-slate-200 px-3 font-bold" />
@@ -1189,7 +1192,7 @@ const ShiftAssignmentManagementPage = () => {
               <button type="button" onClick={() => setRangePreset('WEEK')} className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-black">Tuần</button>
               <button type="button" onClick={() => setRangePreset('MONTH')} className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-black">Tháng</button>
             </div>
-          </div>
+          </div>}
           {dateRangeError ? (
             <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
               {dateRangeError}
