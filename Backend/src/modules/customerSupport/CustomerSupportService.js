@@ -1009,6 +1009,7 @@ export class CustomerSupportService {
           data: {
             caseId: String(supportCase._id),
             referenceNumber: supportCase.referenceNumber,
+            passengerName: passenger.fullName || '',
             supportCaseType: supportCase.type,
             status,
             statusLabel: this.formatStatusLabel(status),
@@ -1031,12 +1032,18 @@ export class CustomerSupportService {
 
         if (channels.email) {
           const emailDelivery = notificationDoc.metadata?.emailDelivery || {};
+          const emailSent = Number(emailDelivery.sentCount || 0) > 0;
+          const emailAttempted = Number(emailDelivery.attemptedCount || 0) > 0;
           const delivery = {
             channel: 'EMAIL',
             recipient: hasValidEmail(email) ? email : 'NO_EMAIL',
-            status: hasValidEmail(email) && emailDelivery.failedCount === 0 ? 'SENT' : 'FAILED',
+            status: emailSent && Number(emailDelivery.failedCount || 0) === 0 ? 'SENT' : 'FAILED',
             sentAt: new Date(),
-            errorMessage: hasValidEmail(email) ? undefined : 'Passenger does not have a valid email address',
+            errorMessage: emailSent
+              ? undefined
+              : (hasValidEmail(email) && emailAttempted
+                ? 'Email delivery failed'
+                : 'Passenger does not have a valid email address'),
           };
           this.recordDelivery(supportCase, delivery);
           results.push(delivery);

@@ -9,6 +9,10 @@ const escapeHtml = (value) => String(value ?? '')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;');
 
+const getSenderAddress = () => config.emailFrom.email || config.smtp.user;
+
+const buildSender = () => `"${config.emailFrom.name || 'BusDN'}" <${getSenderAddress()}>`;
+
 /**
  * Email Service - Handles sending emails via SMTP
  */
@@ -23,6 +27,11 @@ class EmailService {
    */
   initializeTransporter() {
     try {
+      if (!config.smtp.host || !config.smtp.user || !config.smtp.password) {
+        logger.error('Email transporter is not configured. SMTP_HOST, SMTP_USER, and SMTP_PASSWORD are required.');
+        return;
+      }
+
       this.transporter = nodemailer.createTransport({
         host: config.smtp.host,
         port: config.smtp.port,
@@ -43,6 +52,12 @@ class EmailService {
       });
     } catch (error) {
       logger.error('Failed to initialize email transporter:', error);
+    }
+  }
+
+  assertReady() {
+    if (!this.transporter) {
+      throw new Error('Email transporter is not configured');
     }
   }
 
@@ -109,7 +124,7 @@ class EmailService {
       `;
 
       const mailOptions = {
-        from: `"${config.emailFrom.name || 'BusDN'}" <${config.smtp.user}>`,
+        from: buildSender(),
         to: email,
         subject: 'BusDN Account Verification - Your OTP Code',
         html,
@@ -200,7 +215,7 @@ class EmailService {
       `;
 
       const mailOptions = {
-        from: `"${config.emailFrom.name || 'BusDN'}" <${config.smtp.user}>`,
+        from: buildSender(),
         to: email,
         subject: 'BusDN Password Reset - Your OTP Code',
         html,
@@ -276,7 +291,7 @@ class EmailService {
       `;
 
       const mailOptions = {
-        from: `"${config.emailFrom.name || 'BusDN'}" <${config.smtp.user}>`,
+        from: buildSender(),
         to: email,
         subject: 'Welcome to BusDN - Your Account is Ready!',
         html,
@@ -341,7 +356,7 @@ class EmailService {
       `;
 
       const mailOptions = {
-        from: `"${config.emailFrom.name || 'BusDN'}" <${config.smtp.user}>`,
+        from: buildSender(),
         to: email,
         subject: `BusDN - Complaint ${complaintCode} Update`,
         html,
@@ -419,7 +434,7 @@ class EmailService {
       `;
 
       const mailOptions = {
-        from: `"${config.emailFrom.name || 'BusDN'}" <${config.smtp.user}>`,
+        from: buildSender(),
         to: email,
         subject: title,
         html,
@@ -440,6 +455,36 @@ class EmailService {
       return true;
     } catch (error) {
       logger.error(`Failed to send notification email to ${email}:`, error);
+      throw error;
+    }
+  }
+
+  async sendTemplatedNotificationEmail({
+    email,
+    subject,
+    html,
+    text,
+  }) {
+    try {
+      this.assertReady();
+
+      const info = await this.transporter.sendMail({
+        from: buildSender(),
+        to: email,
+        subject,
+        html,
+        text,
+      });
+      logger.info('Notification email sent', {
+        recipient: email,
+        messageId: info.messageId,
+      });
+      return true;
+    } catch (error) {
+      logger.error('Failed to send notification email', {
+        recipient: email,
+        message: error.message,
+      });
       throw error;
     }
   }

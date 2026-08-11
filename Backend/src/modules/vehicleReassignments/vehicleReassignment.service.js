@@ -410,7 +410,9 @@ export class VehicleReassignmentService {
         },
         data: {
           oldVehicleId: oldVehicle?._id ? String(oldVehicle._id) : '',
+          oldVehicleLabel: getVehicleLabel(oldVehicle),
           replacementVehicleId: replacement?._id ? String(replacement._id) : '',
+          replacementVehicleLabel: getVehicleLabel(replacement),
           reason: payload.reason,
         },
         deduplicationKey: `vehicle-reassignment:${tripId}:${replacement._id}:staff`,
@@ -433,7 +435,9 @@ export class VehicleReassignmentService {
         data: {
           routeId: String(target.routeId),
           oldVehicleId: oldVehicle?._id ? String(oldVehicle._id) : '',
+          oldVehicleLabel: getVehicleLabel(oldVehicle),
           replacementVehicleId: replacement?._id ? String(replacement._id) : '',
+          replacementVehicleLabel: getVehicleLabel(replacement),
         },
         deduplicationKey: `vehicle-reassignment:${tripId}:${replacement._id}:passengers`,
       }, adminId, io));

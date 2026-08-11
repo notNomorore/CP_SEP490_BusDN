@@ -2022,6 +2022,8 @@ export class TicketService {
       await notifyTicketPaymentSuccess({
         ticket,
         paymentOrder,
+        passenger: user,
+        route,
       });
     }
 
@@ -2052,9 +2054,16 @@ export class TicketService {
         monthlyPassExpireDate: monthlyPass.expiryDate,
       });
 
+      const [passenger, route] = await Promise.all([
+        User.findById(monthlyPass.passenger),
+        monthlyPass.routeId ? this.findRoute(monthlyPass.routeId) : null,
+      ]);
+
       await notifyMonthlyPassPaymentSuccess({
         monthlyPass,
         paymentOrder,
+        passenger,
+        route,
       });
     }
 

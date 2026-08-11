@@ -3,6 +3,16 @@ import notificationService from '../notification.service.js';
 
 const normalizeId = (value) => (value ? String(value) : '');
 
+const getPassengerName = (passenger) => passenger?.fullName || passenger?.name || '';
+
+const getRouteName = (route, fallback = '') => (
+  route?.routeName
+  || route?.name
+  || route?.routeCode
+  || route?.routeNumber
+  || fallback
+);
+
 const runNotificationSideEffect = async (eventName, task) => {
   try {
     return await task();
@@ -47,6 +57,7 @@ export const notifyFeedbackResponse = async ({
     },
     data: {
       caseId: normalizeId(supportCase._id),
+      passengerName: getPassengerName(supportCase.passenger),
       referenceNumber: supportCase.referenceNumber || '',
       feedbackType: supportCase.type || '',
     },
@@ -66,11 +77,7 @@ export const notifyTripDelay = async ({ trip, io = null, actorId = null }) => {
       type: 'ROUTE_PASSENGERS',
       routeId: trip.routeId,
     },
-    channels: {
-      inApp: true,
-      email: false,
-      push: false,
-    },
+    channels: { inApp: true, push: false },
     priority: trip.delayMinutes >= 15 ? 'high' : 'normal',
     source: {
       module: 'trip',
@@ -78,7 +85,9 @@ export const notifyTripDelay = async ({ trip, io = null, actorId = null }) => {
     },
     data: {
       tripId: normalizeId(trip._id),
+      tripCode: trip.tripCode || trip.scheduleCode || '',
       routeId: normalizeId(trip.routeId),
+      routeName: getRouteName(trip.route),
       delayMinutes: trip.delayMinutes || 0,
       status: trip.status || '',
     },
@@ -100,11 +109,7 @@ export const notifyIncidentCreated = async ({ incident, io = null, actorId = nul
       type: 'ROUTE_PASSENGERS',
       routeId: incident.routeId,
     },
-    channels: {
-      inApp: true,
-      email: false,
-      push: false,
-    },
+    channels: { inApp: true, push: false },
     priority: incident.severity === 'CRITICAL' ? 'urgent' : 'high',
     source: {
       module: 'incident',
@@ -113,6 +118,7 @@ export const notifyIncidentCreated = async ({ incident, io = null, actorId = nul
     data: {
       incidentId: normalizeId(incident._id),
       routeId: normalizeId(incident.routeId),
+      routeName: getRouteName(incident.route),
       tripId: normalizeId(incident.tripId),
       severity: incident.severity || '',
       incidentType: incident.incidentType || '',
@@ -122,22 +128,23 @@ export const notifyIncidentCreated = async ({ incident, io = null, actorId = nul
   }, { createdBy: actorId, io }));
 };
 
-export const notifyTicketPaymentSuccess = async ({ ticket, paymentOrder = null }) => {
+export const notifyTicketPaymentSuccess = async ({
+  ticket,
+  paymentOrder = null,
+  passenger = null,
+  route = null,
+}) => {
   if (!ticket?._id || !ticket?.passenger) return null;
 
   return runNotificationSideEffect('ticket_payment_success', () => notificationService.send({
-    type: 'PAYMENT_SUCCESS',
-    title: 'Thanh toán thành công',
-    message: `Vé ${ticket.ticketCode || ''} đã được thanh toán thành công.`,
+    type: 'TICKET_PURCHASED',
+    title: 'Mua vé thành công',
+    message: `Vé ${ticket.ticketCode || ''} đã được mua thành công.`,
     target: {
       type: 'USER',
       userId: ticket.passenger,
     },
-    channels: {
-      inApp: true,
-      email: false,
-      push: false,
-    },
+    channels: { inApp: true, push: false },
     priority: 'normal',
     actionUrl: `/tickets/${ticket._id}`,
     source: {
@@ -147,16 +154,32 @@ export const notifyTicketPaymentSuccess = async ({ ticket, paymentOrder = null }
     data: {
       ticketId: normalizeId(ticket._id),
       ticketCode: ticket.ticketCode || '',
+      passengerName: getPassengerName(passenger || ticket.passenger),
       routeId: normalizeId(ticket.routeId),
+      routeName: getRouteName(route, ticket.routeNumber || ticket.routeCode),
+      routeNumber: ticket.routeNumber || '',
+      routeCode: ticket.routeCode || '',
       tripId: normalizeId(ticket.tripId),
+      boardingStop: ticket.departureLocation || '',
+      destinationStop: ticket.destinationLocation || '',
+      departureTime: ticket.departureTime || '',
+      departureDateTime: ticket.validFrom || '',
+      amount: ticket.ticketPrice,
+      paymentStatus: ticket.paymentStatus,
+      paymentMethod: ticket.paymentMethod || paymentOrder?.paymentMethod || '',
       orderCode: paymentOrder?.orderCode || '',
     },
-    deduplicationKey: `payment-success:ticket:${ticket._id}`,
+    deduplicationKey: `ticket-purchased:${ticket._id}`,
     createdBy: ticket.passenger,
   }));
 };
 
-export const notifyMonthlyPassPaymentSuccess = async ({ monthlyPass, paymentOrder = null }) => {
+export const notifyMonthlyPassPaymentSuccess = async ({
+  monthlyPass,
+  paymentOrder = null,
+  passenger = null,
+  route = null,
+}) => {
   if (!monthlyPass?._id || !monthlyPass?.passenger) return null;
 
   return runNotificationSideEffect('monthly_pass_payment_success', () => notificationService.send({
@@ -167,11 +190,7 @@ export const notifyMonthlyPassPaymentSuccess = async ({ monthlyPass, paymentOrde
       type: 'USER',
       userId: monthlyPass.passenger,
     },
-    channels: {
-      inApp: true,
-      email: false,
-      push: false,
-    },
+    channels: { inApp: true, push: false },
     priority: 'normal',
     actionUrl: '/tickets/monthly-passes',
     source: {
@@ -181,7 +200,18 @@ export const notifyMonthlyPassPaymentSuccess = async ({ monthlyPass, paymentOrde
     data: {
       monthlyPassId: normalizeId(monthlyPass._id),
       passCode: monthlyPass.passCode || '',
+      passengerName: getPassengerName(passenger || monthlyPass.passenger),
       routeId: normalizeId(monthlyPass.routeId),
+      routeName: getRouteName(route, monthlyPass.routeCode),
+      routeCode: monthlyPass.routeCode || '',
+      amount: monthlyPass.passPrice,
+      passPrice: monthlyPass.passPrice,
+      paymentStatus: monthlyPass.paymentStatus,
+      paymentMethod: monthlyPass.paymentMethod || paymentOrder?.paymentMethod || '',
+      validFrom: monthlyPass.validFrom || monthlyPass.startDate,
+      validUntil: monthlyPass.validUntil || monthlyPass.expiryDate,
+      startDate: monthlyPass.startDate,
+      expiryDate: monthlyPass.expiryDate,
       orderCode: paymentOrder?.orderCode || '',
     },
     deduplicationKey: `payment-success:monthly-pass:${monthlyPass._id}`,
@@ -196,4 +226,3 @@ export default {
   notifyTicketPaymentSuccess,
   notifyMonthlyPassPaymentSuccess,
 };
-
