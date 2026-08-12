@@ -72,6 +72,7 @@ apiClient.interceptors.response.use(
     const responseData = error.response?.data;
     const isPublicAuthRequest = [
       '/auth/login',
+      '/auth/google',
       '/auth/register',
       '/auth/verify-otp',
       '/auth/resend-otp',

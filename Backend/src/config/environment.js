@@ -197,6 +197,10 @@ export const config = {
     apiKey: getEnv('GOOGLE_MAPS_API_KEY'),
   },
 
+  googleAuth: {
+    clientId: getEnv('GOOGLE_CLIENT_ID'),
+  },
+
   serpApi: {
     apiKey: getEnv('SERPAPI_KEY'),
   },

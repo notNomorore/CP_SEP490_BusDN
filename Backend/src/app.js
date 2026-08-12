@@ -97,6 +97,7 @@ export const createApp = () => {
 
   app.use('/api/', limiter);
   app.use('/api/auth/login', authLimiter);
+  app.use('/api/auth/google', authLimiter);
   app.use('/api/auth/register', authLimiter);
 
   // Session middleware

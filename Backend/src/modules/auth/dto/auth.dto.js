@@ -71,6 +71,21 @@ export const LoginDTO = {
 };
 
 /**
+ * DTO for Google login
+ */
+export const GoogleLoginDTO = {
+  validate: (body) => {
+    const errors = {};
+
+    if (!body.credential || typeof body.credential !== 'string') {
+      errors.credential = 'Google credential is required';
+    }
+
+    return Object.keys(errors).length === 0 ? null : errors;
+  },
+};
+
+/**
  * DTO for OTP verification
  */
 export const VerifyOtpDTO = {

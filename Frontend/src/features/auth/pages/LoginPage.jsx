@@ -1,4 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AuthShell from '../components/AuthShell';
 import authService from '../services/authService.js';
@@ -39,28 +44,88 @@ const getErrorMessage = (error) => {
   return 'Unable to complete sign in.';
 };
 
+const GOOGLE_IDENTITY_SCRIPT_SRC = 'https://accounts.google.com/gsi/client';
+let googleIdentityScriptPromise;
+
+const loadGoogleIdentityScript = () => {
+  if (window.google?.accounts?.id) {
+    return Promise.resolve();
+  }
+
+  if (googleIdentityScriptPromise) {
+    return googleIdentityScriptPromise;
+  }
+
+  googleIdentityScriptPromise = new Promise((resolve, reject) => {
+    const existingScript = document.querySelector(`script[src="${GOOGLE_IDENTITY_SCRIPT_SRC}"]`);
+
+    if (existingScript) {
+      existingScript.addEventListener('load', () => resolve(), { once: true });
+      existingScript.addEventListener('error', () => reject(new Error('Unable to load Google login.')), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = GOOGLE_IDENTITY_SCRIPT_SRC;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Unable to load Google login.'));
+    document.head.appendChild(script);
+  });
+
+  return googleIdentityScriptPromise;
+};
+
 const LoginPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const {
     requestPasswordReset,
     resetPassword,
+    loginWithGoogle,
     isLoading,
     error,
     clearError,
   } = useAuthStore();
+  const googleButtonRef = useRef(null);
   const [showPassword, setShowPassword] = useState(false);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
   const [submitError, setSubmitError] = useState('');
   const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
+  const [isSubmittingGoogle, setIsSubmittingGoogle] = useState(false);
+  const [isGoogleButtonReady, setIsGoogleButtonReady] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [resetIdentifier, setResetIdentifier] = useState('');
   const [resetToken, setResetToken] = useState('');
   const [resetOtp, setResetOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
+
+  const handleGoogleCredential = useCallback(async (response) => {
+    clearError();
+    setSubmitError('');
+    setMessage('');
+
+    if (!response?.credential) {
+      setSubmitError('Google login failed. Please try again.');
+      return;
+    }
+
+    setIsSubmittingGoogle(true);
+
+    try {
+      const result = await loginWithGoogle(response.credential);
+      navigate(getRoleLandingPath(result.user), { replace: true });
+    } catch (googleError) {
+      setSubmitError(getErrorMessage(googleError) || 'Google login failed. Please try again.');
+    } finally {
+      setIsSubmittingGoogle(false);
+    }
+  }, [clearError, loginWithGoogle, navigate]);
 
   useEffect(() => {
     if (searchParams.get('registered') === '1') {
@@ -77,6 +142,48 @@ const LoginPage = () => {
   }, []);
 
   useEffect(() => () => clearError(), [clearError]);
+
+  useEffect(() => {
+    if (authMode !== 'login' || !googleClientId || !googleButtonRef.current) {
+      return undefined;
+    }
+
+    let isCancelled = false;
+
+    loadGoogleIdentityScript()
+      .then(() => {
+        if (isCancelled || !googleButtonRef.current) {
+          return;
+        }
+
+        window.google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: handleGoogleCredential,
+          ux_mode: 'popup',
+        });
+
+        googleButtonRef.current.innerHTML = '';
+        window.google.accounts.id.renderButton(googleButtonRef.current, {
+          type: 'standard',
+          theme: 'outline',
+          size: 'large',
+          text: 'continue_with',
+          shape: 'pill',
+          logo_alignment: 'left',
+          width: Math.min(400, googleButtonRef.current.offsetWidth || 360),
+        });
+        setIsGoogleButtonReady(true);
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setSubmitError('Unable to load Google login. Please try again.');
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [authMode, googleClientId, handleGoogleCredential]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -311,6 +418,40 @@ const LoginPage = () => {
                 {isSubmittingLogin ? 'Signing In...' : 'Sign In'}
               </button>
             </form>
+
+            <div className="flex items-center gap-4" aria-hidden="true">
+              <span className="h-px flex-1 bg-outline-variant/60" />
+              <span className="text-xs font-bold uppercase tracking-[0.18em] text-outline">
+                Or
+              </span>
+              <span className="h-px flex-1 bg-outline-variant/60" />
+            </div>
+
+            {googleClientId ? (
+              <div className="flex min-h-[44px] justify-center">
+                {!isGoogleButtonReady && (
+                  <button
+                    type="button"
+                    disabled
+                    className="w-full rounded-full border border-outline-variant/60 bg-white px-6 py-3 text-base font-bold text-on-surface opacity-70"
+                  >
+                    {isSubmittingGoogle ? 'Signing in with Google...' : 'Continue with Google'}
+                  </button>
+                )}
+                <div
+                  ref={googleButtonRef}
+                  className={isGoogleButtonReady ? 'w-full [&>div]:mx-auto' : 'hidden'}
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled
+                className="w-full rounded-full border border-outline-variant/60 bg-white px-6 py-4 text-base font-bold text-on-surface opacity-60"
+              >
+                Continue with Google
+              </button>
+            )}
 
             <p className="text-center text-body-md text-on-surface-variant">
               New to Veridian Transit?{' '}
