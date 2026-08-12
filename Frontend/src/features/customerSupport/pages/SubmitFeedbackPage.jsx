@@ -25,6 +25,20 @@ const initialForm = {
   ratingScore: '',
 };
 
+const FEEDBACK_TRIP_WINDOW_DAYS = 7;
+const FEEDBACK_TRIP_WINDOW_MS = FEEDBACK_TRIP_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+const getTripTime = (record) => {
+  const rawValue = record.arrivalTime || record.boardingTime || record.travelDate;
+  const date = rawValue ? new Date(rawValue) : null;
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+};
+
+const isFeedbackEligibleTrip = (record) => {
+  const tripTime = getTripTime(record);
+  return Boolean(tripTime && Date.now() - tripTime.getTime() <= FEEDBACK_TRIP_WINDOW_MS);
+};
+
 const formatTripLabel = (record) => {
   const date = record.travelDate ? format(new Date(record.travelDate), 'dd/MM/yyyy') : 'Ngày đi';
   return `${record.routeNumber} - ${record.boardingStop} đến ${record.destinationStop} (${date})`;
@@ -66,6 +80,17 @@ const SubmitFeedbackPage = () => {
   const selectedTrip = useMemo(() => travelRecords.find((record) => (
     record.tripId === form.relatedTripId || record.ticketId === form.relatedTripId
   )), [form.relatedTripId, travelRecords]);
+  const feedbackTripOptions = useMemo(() => travelRecords.filter(isFeedbackEligibleTrip), [travelRecords]);
+
+  useEffect(() => {
+    if (!form.relatedTripId || isLoadingTrips) return;
+    const stillEligible = feedbackTripOptions.some((record) => (
+      record.tripId === form.relatedTripId || record.ticketId === form.relatedTripId
+    ));
+    if (!stillEligible) {
+      setForm((current) => ({ ...current, relatedTripId: '' }));
+    }
+  }, [feedbackTripOptions, form.relatedTripId, isLoadingTrips]);
 
   const validateForm = () => {
     const nextErrors = {};
@@ -87,9 +112,11 @@ const SubmitFeedbackPage = () => {
       nextErrors.ratingScore = 'Điểm đánh giá phải từ 1 đến 5.';
     }
     if (!form.relatedTripId) {
-      nextErrors.relatedTripId = 'Vui long chon mot chuyen/tuyen lien quan truoc khi gui gop y.';
+      nextErrors.relatedTripId = 'Vui lòng chọn một chuyến còn trong hạn góp ý.';
     } else if (!selectedTrip) {
-      nextErrors.relatedTripId = 'Chuyen/tuyen da chon khong hop le. Vui long chon lai.';
+      nextErrors.relatedTripId = 'Chuyến/tuyến đã chọn không hợp lệ. Vui lòng chọn lại.';
+    } else if (!isFeedbackEligibleTrip(selectedTrip)) {
+      nextErrors.relatedTripId = `Chỉ được gửi góp ý trong vòng ${FEEDBACK_TRIP_WINDOW_DAYS} ngày từ thời gian đi xe.`;
     }
     if (attachments.length > 5) {
       nextErrors.attachments = 'Bạn chỉ có thể tải lên tối đa 5 tệp đính kèm.';
@@ -243,15 +270,15 @@ const SubmitFeedbackPage = () => {
                   className={fieldClassName}
                   disabled={isLoadingTrips}
                 >
-                  <option value="" disabled>{isLoadingTrips ? 'Dang tai danh sach chuyen...' : 'Chon mot chuyen/tuyen lien quan'}</option>
-                  {travelRecords.map((record) => (
+                  <option value="" disabled>{isLoadingTrips ? 'Đang tải danh sách chuyến...' : 'Chọn một chuyến/tuyến liên quan'}</option>
+                  {feedbackTripOptions.map((record) => (
                     <option key={record.id} value={record.tripId || record.ticketId}>
                       {formatTripLabel(record)}
                     </option>
                   ))}
                 </select>
-                {travelRecords.length === 0 && !isLoadingTrips ? (
-                  <p className="text-sm font-semibold text-red-700">Tai khoan chua co lich su chuyen di nen chua the gui gop y dich vu.</p>
+                {feedbackTripOptions.length === 0 && !isLoadingTrips ? (
+                  <p className="text-sm font-semibold text-red-700">Bạn chỉ có thể gửi góp ý cho chuyến đã đi trong vòng {FEEDBACK_TRIP_WINDOW_DAYS} ngày gần nhất.</p>
                 ) : null}
                 {errors.relatedTripId ? <p className="text-sm font-semibold text-red-700">{errors.relatedTripId}</p> : null}
               </label>
@@ -321,7 +348,7 @@ const SubmitFeedbackPage = () => {
               <div className="flex flex-col gap-3">
                 <button
                   type="submit"
-                  disabled={isSubmitting || isLoadingTrips || travelRecords.length === 0}
+                  disabled={isSubmitting || isLoadingTrips || feedbackTripOptions.length === 0}
                   className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-black text-white hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isSubmitting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
