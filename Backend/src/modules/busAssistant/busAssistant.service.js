@@ -17,6 +17,7 @@ import Transaction from './Transaction.js';
 import QRCode from 'qrcode';
 import PayOSService from '../tickets/PayOSService.js';
 import { config } from '../../config/environment.js';
+import { assertTripHasCapacity, getTripCapacity } from '../tickets/tripCapacity.service.js';
 
 const ACTIVE_TICKET_STATUSES = ['ACTIVE', 'VALID', 'PAID', 'CONFIRMED'];
 const USED_TICKET_STATUSES = ['USED', 'BOARDED', 'CONSUMED'];
@@ -26,11 +27,19 @@ const toObjectId = (value) => new mongoose.Types.ObjectId(value);
 const idText = (value) => value ? String(value._id || value) : '';
 const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const todayRange = (value = new Date()) => {
-  const start = new Date(value);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(value);
-  end.setHours(23, 59, 59, 999);
-  return { start, end };
+  const explicitDate = String(value || '').match(/^(\d{4}-\d{2}-\d{2})/i)?.[1];
+  const dateKey = explicitDate || new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(value));
+
+  return {
+    start: new Date(`${dateKey}T00:00:00+07:00`),
+    end: new Date(`${dateKey}T23:59:59.999+07:00`),
+    dateKey,
+  };
 };
 
 const createCode = (prefix) => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`.toUpperCase();
@@ -311,6 +320,7 @@ export class BusAssistantService {
     if (!shiftContext) {
       throw new CustomError('Trip is not assigned to this bus assistant', HTTP_STATUS.FORBIDDEN);
     }
+    await assertTripHasCapacity(trip, passengerQuantity);
 
     const ticket = await Ticket.findOne({
       $or: [
@@ -484,6 +494,14 @@ export class BusAssistantService {
       metadata: { transactionId: transaction._id, totalAmount: fare.totalAmount },
     });
 
+    const availability = await getTripCapacity({
+      scheduleId: trip._id,
+      routeId: trip.routeId,
+      serviceDate: trip.serviceDate,
+      departureTime: trip.departureTime,
+      direction: trip.direction,
+    });
+
     return {
       ticketData: ticket.toObject(),
       transactionData: transaction.toObject(),
@@ -493,6 +511,7 @@ export class BusAssistantService {
       requiresPaymentConfirmation: isBankTransfer,
       cashReceived: isBankTransfer ? null : cashReceived,
       changeAmount: isBankTransfer ? 0 : changeAmount,
+      availability,
       message: 'Walk-in ticket created successfully',
     };
   }
@@ -512,6 +531,9 @@ export class BusAssistantService {
     if (String(paymentInfo?.status || '').toUpperCase() !== 'PAID') {
       throw new CustomError('Bank transfer has not been completed', HTTP_STATUS.CONFLICT);
     }
+    const trip = await findTrip(ticket.tripId);
+    if (!trip) throw new CustomError('Assigned trip was not found', HTTP_STATUS.NOT_FOUND);
+    await assertTripHasCapacity(trip, ticket.passengerCount);
     ticket.status = 'COMPLETED';
     ticket.collectedAmount = ticket.totalAmount;
     await ticket.save();
@@ -534,11 +556,11 @@ export class BusAssistantService {
   }
 
   static async getWalkInTicketHistory(query, actor) {
-    const selectedDate = query.date ? new Date(`${query.date}T00:00:00`) : new Date();
-    if (Number.isNaN(selectedDate.getTime())) {
+    const selectedDate = query.date || new Date();
+    if (query.date && !/^\d{4}-\d{2}-\d{2}$/.test(query.date)) {
       throw new CustomError('Invalid history date', HTTP_STATUS.BAD_REQUEST);
     }
-    const { start, end } = todayRange(selectedDate);
+    const { start, end, dateKey } = todayRange(selectedDate);
     const tickets = await WalkInTicket.find({
       busAssistantId: actor.userId,
       issuedAt: { $gte: start, $lte: end },
@@ -550,7 +572,7 @@ export class BusAssistantService {
       .lean();
 
     return {
-      date: start.toISOString().slice(0, 10),
+      date: dateKey,
       count: tickets.length,
       totalRevenue: tickets.filter((ticket) => ticket.status === 'COMPLETED').reduce((sum, ticket) => sum + number(ticket.collectedAmount), 0),
       tickets: tickets.map((ticket) => ({
@@ -581,6 +603,9 @@ export class BusAssistantService {
 
     const paymentInfo = await PayOSService.getPaymentLinkInformation(transaction.orderCode);
     if (String(paymentInfo?.status || '').toUpperCase() === 'PAID') {
+      const trip = await findTrip(ticket.tripId);
+      if (!trip) throw new CustomError('Assigned trip was not found', HTTP_STATUS.NOT_FOUND);
+      await assertTripHasCapacity(trip, ticket.passengerCount);
       ticket.status = 'COMPLETED';
       ticket.collectedAmount = ticket.totalAmount;
       transaction.status = 'COMPLETED';

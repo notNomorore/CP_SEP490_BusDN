@@ -30,6 +30,13 @@ const formatAssignedTripTime = (start, end, language) => {
   return endTime ? `${startTime} - ${endTime}` : startTime;
 };
 
+const getVietnamDate = (value = new Date()) => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Ho_Chi_Minh',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+}).format(value);
+
 const text = {
   vi: {
     title: 'Bán vé tại xe', subtitle: 'Tạo vé nhanh cho hành khách chưa đặt trước.', trip: 'Chuyến được phân công',
@@ -66,12 +73,14 @@ const CreateWalkInTicketPage = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingTrips, setLoadingTrips] = useState(true);
-  const [historyDate, setHistoryDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [historyDate, setHistoryDate] = useState(() => getVietnamDate());
   const [history, setHistory] = useState({ tickets: [], count: 0, totalRevenue: 0 });
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [resumingId, setResumingId] = useState('');
 
   const selectedTrip = useMemo(() => assignments.find((item) => String(item.tripId) === form.tripId), [assignments, form.tripId]);
+  const remainingSeats = Number(selectedTrip?.capacity?.remainingSeats ?? 25);
+  const isTripFull = Boolean(selectedTrip?.capacity?.isFull) || remainingSeats <= 0;
   const stops = selectedTrip?.route?.stops || [];
   const calculatedFare = useMemo(() => {
     const fares = selectedTrip?.route?.fareConfig || {};
@@ -87,6 +96,7 @@ const CreateWalkInTicketPage = () => {
 
   const selectTrip = (tripId, source = assignments) => {
     const assignment = source.find((item) => String(item.tripId) === tripId);
+    if (assignment?.capacity?.isFull) return;
     const routeStops = assignment?.route?.stops || [];
     setForm((current) => ({
       ...current,
@@ -105,7 +115,9 @@ const CreateWalkInTicketPage = () => {
       const payload = await scheduleOperationsService.getAssignedTrips();
       const available = (payload.trips || []).filter((item) => !['COMPLETED', 'CANCELLED'].includes(item.tripStatus));
       setAssignments(available);
-      if (available.length) selectTrip(String(available[0].tripId), available);
+      const firstAvailable = available.find((item) => !item.capacity?.isFull);
+      if (firstAvailable) selectTrip(String(firstAvailable.tripId), available);
+      else setForm((current) => ({ ...current, tripId: '', routeId: '', fromStopId: '', toStopId: '' }));
     } catch (err) {
       setError(translateBusAssistantError(err, language, 'Could not load assigned trips'));
     } finally {
@@ -131,6 +143,14 @@ const CreateWalkInTicketPage = () => {
   const submit = async (event) => {
     event.preventDefault();
     if (!form.tripId || !form.fromStopId || !form.toStopId) return;
+    if (isTripFull) {
+      setError('Chuyến xe đã hết chỗ (25/25). Vui lòng chọn giờ khác.');
+      return;
+    }
+    if (Number(form.passengerQuantity) > remainingSeats) {
+      setError(`Chuyến xe chỉ còn ${remainingSeats} chỗ. Vui lòng giảm số hành khách hoặc chọn giờ khác.`);
+      return;
+    }
     setLoading(true); setError(''); setResult(null);
     try {
       const data = await busAssistantService.createWalkInTicket({
@@ -141,6 +161,7 @@ const CreateWalkInTicketPage = () => {
         changeAmount: form.paymentMethod === 'CASH' ? changeAmount : undefined,
       });
       setResult(data);
+      await loadTrips();
       await loadHistory(historyDate);
     } catch (err) {
       setError(translateBusAssistantError(err, language, 'Could not create walk-in ticket'));
@@ -188,18 +209,22 @@ const CreateWalkInTicketPage = () => {
               {assignments.map((item) => {
                 const assignedTime = formatAssignedTripTime(item.scheduledStart, item.scheduledEnd, language);
                 return (
-                  <option key={item.id} value={item.tripId}>
-                    {assignedTime ? `${assignedTime} · ` : ''}{item.tripCode} · {item.route?.routeNumber} · {item.route?.origin} → {item.route?.destination}
+                  <option key={item.id} value={item.tripId} disabled={item.capacity?.isFull}>
+                    {assignedTime ? `${assignedTime} · ` : ''}{item.tripCode} · {item.route?.routeNumber} · {item.route?.origin} → {item.route?.destination} · {item.capacity?.isFull ? 'HẾT CHỖ 25/25' : `Còn ${item.capacity?.remainingSeats ?? 25}/25 chỗ`}
                   </option>
                 );
               })}
             </select>
           </Field>
-          <div className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900"><strong>{selectedTrip?.route?.routeNumber || '—'}</strong><p className="mt-1 text-xs">{selectedTrip?.vehicle?.plateNumber || selectedTrip?.vehicle?.code || '—'}</p></div>
+          <div className={`grid min-h-[48px] grid-cols-[auto_1fr_auto] items-center gap-4 rounded-xl px-4 py-3 text-sm ${isTripFull ? 'bg-red-50 text-red-800' : 'bg-emerald-50 text-emerald-900'}`}>
+            <strong className="whitespace-nowrap">{selectedTrip?.route?.routeNumber || '—'}</strong>
+            <strong className="whitespace-nowrap text-center">{selectedTrip?.vehicle?.plateNumber || selectedTrip?.vehicle?.code || '—'}</strong>
+            {selectedTrip ? <strong className="whitespace-nowrap text-right">{isTripFull ? 'Hết chỗ 25/25' : `Còn ${remainingSeats}/25 chỗ`}</strong> : null}
+          </div>
           <Field label={t.boarding}><select className={inputClass} value={form.fromStopId} onChange={update('fromStopId')}>{stops.map((stop) => <option key={stop.stationId || stop.id} value={stop.stationId || stop.id}>{stop.stopName || stop.address}</option>)}</select></Field>
           <Field label={t.dropping}><select className={inputClass} value={form.toStopId} onChange={update('toStopId')}>{stops.map((stop) => <option key={stop.stationId || stop.id} value={stop.stationId || stop.id}>{stop.stopName || stop.address}</option>)}</select></Field>
           <Field label={t.passenger}><select className={inputClass} value={form.passengerType} onChange={update('passengerType')}><option value="ADULT">{t.adult}</option><option value="STUDENT">{t.student}</option><option value="CHILD">{t.child}</option><option value="SENIOR">{t.senior}</option></select></Field>
-          <Field label={t.quantity}><input className={inputClass} type="number" min="1" max="20" value={form.passengerQuantity} onChange={update('passengerQuantity')} /></Field>
+          <Field label={t.quantity}><input className={inputClass} type="number" min="1" max={Math.max(remainingSeats, 1)} value={form.passengerQuantity} onChange={update('passengerQuantity')} disabled={isTripFull} /></Field>
           <div className="md:col-span-2"><p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">{t.payment}</p><div className="grid gap-3 sm:grid-cols-2">{[['CASH', t.cash, Banknote], ['BANK_TRANSFER', t.transfer, QrCode]].map(([value, label, Icon]) => <button key={value} type="button" onClick={() => setForm((current) => ({ ...current, paymentMethod: value }))} className={`flex items-center gap-3 rounded-xl border p-4 text-left font-semibold ${form.paymentMethod === value ? 'border-emerald-500 bg-emerald-50 text-emerald-900 ring-2 ring-emerald-100' : 'border-slate-200'}`}><Icon size={20} />{label}</button>)}</div></div>
           {form.paymentMethod === 'CASH' ? <div className="md:col-span-2 grid gap-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 sm:grid-cols-2">
             <Field label={t.cashReceived}><input className={inputClass} type="number" min="0" step="1000" value={form.cashReceived} onChange={update('cashReceived')} placeholder="0" /></Field>
@@ -207,7 +232,7 @@ const CreateWalkInTicketPage = () => {
           </div> : null}
           {error ? <div className="md:col-span-2"><Alert type="error">{error}</Alert></div> : null}
           {!assignments.length && !loadingTrips ? <div className="md:col-span-2"><Alert type="error">{t.noTrips}</Alert></div> : null}
-          <button disabled={loading || !form.tripId || !form.fromStopId || !form.toStopId || cashInsufficient} className="md:col-span-2 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-emerald-900 px-5 font-bold text-white disabled:opacity-50">{loading ? <LoaderCircle className="animate-spin" size={18} /> : form.paymentMethod === 'CASH' ? <Banknote size={18} /> : <QrCode size={18} />}{form.paymentMethod === 'CASH' ? t.createCash : t.createQr}</button>
+          <button disabled={loading || !form.tripId || !form.fromStopId || !form.toStopId || cashInsufficient || isTripFull || Number(form.passengerQuantity) > remainingSeats} className="md:col-span-2 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-emerald-900 px-5 font-bold text-white disabled:opacity-50">{loading ? <LoaderCircle className="animate-spin" size={18} /> : form.paymentMethod === 'CASH' ? <Banknote size={18} /> : <QrCode size={18} />}{isTripFull ? 'Chuyến đã hết chỗ' : form.paymentMethod === 'CASH' ? t.createCash : t.createQr}</button>
         </form>
       </section>
 

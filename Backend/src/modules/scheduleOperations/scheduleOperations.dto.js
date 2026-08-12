@@ -239,6 +239,7 @@ export const ShiftAssignmentResponseDTO = {
     dutyStart: addMinutes(scheduledStart, -30),
     checkInDeadline: addMinutes(scheduledStart, -15),
     dutyEnd: addMinutes(scheduledEnd, 15),
+    capacity: assignment.capacity || null,
     reportLocation: trip.routeName || '',
     dutyInstructions: resolvedActorRole === 'DRIVER'
       ? [
