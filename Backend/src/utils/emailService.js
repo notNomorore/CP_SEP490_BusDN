@@ -464,6 +464,7 @@ class EmailService {
     subject,
     html,
     text,
+    attachments = [],
   }) {
     try {
       this.assertReady();
@@ -474,6 +475,7 @@ class EmailService {
         subject,
         html,
         text,
+        attachments,
       });
       logger.info('Notification email sent', {
         recipient: email,

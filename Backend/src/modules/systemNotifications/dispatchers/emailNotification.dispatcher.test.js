@@ -33,6 +33,7 @@ const notification = {
     amount: 12000,
     paymentStatus: 'PAID',
     paymentMethod: 'PAYOS',
+    qrCodeImage: 'data:image/png;base64,aGVsbG8=',
   },
 };
 
@@ -55,6 +56,11 @@ describe('EmailNotificationDispatcher', () => {
       subject: 'BusDN - Xác nhận mua vé thành công',
       html: expect.stringContaining('TKT-1'),
       text: expect.stringContaining('TKT-1'),
+      attachments: [expect.objectContaining({
+        filename: 'BusDN-TKT-1-QR.png',
+        cid: 'busdn-ticket-qr',
+        contentType: 'image/png',
+      })],
     }));
     expect(result).toMatchObject({
       attemptedCount: 1,

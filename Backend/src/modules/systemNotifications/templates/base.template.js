@@ -39,6 +39,7 @@ export const renderNotificationEmailLayout = ({
   intro,
   rows = [],
   body = '',
+  extraHtml = '',
   actionUrl = '',
   footer = 'Cảm ơn bạn đã tin tưởng và ủng hộ BusDN.',
 }) => {
@@ -104,6 +105,7 @@ export const renderNotificationEmailLayout = ({
         ${intro ? `<p>${safeIntro}</p>` : ''}
         ${body ? `<p>${safeBody}</p>` : ''}
         ${detailsMarkup}
+        ${extraHtml}
         ${actionMarkup}
         <p>${safeFooter}</p>
         <p class="footer">Đây là email tự động từ BusDN. Vui lòng không trả lời email này.</p>
