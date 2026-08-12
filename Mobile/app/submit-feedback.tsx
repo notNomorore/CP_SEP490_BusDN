@@ -11,8 +11,15 @@ import { feedbackCategories } from '@/utils/feedbackDisplay';
 
 type FormErrors = Partial<Record<'category' | 'title' | 'description' | 'ratingScore' | 'relatedTripId', string>>;
 
+const feedbackTripWindowDays = 7;
+const feedbackTripWindowMs = feedbackTripWindowDays * 24 * 60 * 60 * 1000;
 const tripValueOf = (record: TravelHistoryRecord) => record.tripId || record.ticketId || record.id || '';
 const countCharacters = (value: string) => value.trim().length;
+const tripTimeOf = (record: TravelHistoryRecord) => {
+  const rawValue = record.arrivalTime || record.boardingTime || record.travelDate;
+  const date = rawValue ? new Date(rawValue) : null;
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+};
 
 const formatTripLabel = (record: TravelHistoryRecord) => {
   const date = record.travelDate || record.boardingTime
@@ -24,7 +31,10 @@ const formatTripLabel = (record: TravelHistoryRecord) => {
 const isFeedbackEligibleTrip = (record: TravelHistoryRecord) => {
   const routeNumber = record.routeNumber?.trim().toUpperCase();
   if (routeNumber === 'DN10') return false;
-  return !formatTripLabel(record).trim().toUpperCase().startsWith('DN10 ');
+  if (formatTripLabel(record).trim().toUpperCase().startsWith('DN10 ')) return false;
+  const tripTime = tripTimeOf(record);
+  if (!tripTime) return false;
+  return Date.now() - tripTime.getTime() <= feedbackTripWindowMs;
 };
 
 export default function SubmitFeedbackScreen() {
@@ -68,6 +78,13 @@ export default function SubmitFeedbackScreen() {
   }, [travelRecords]);
   const selectedTrip = useMemo(() => tripOptions.find((record) => tripValueOf(record) === relatedTripId), [relatedTripId, tripOptions]);
 
+  useEffect(() => {
+    if (isLoadingTrips || !relatedTripId) return;
+    if (!selectedTrip) {
+      setRelatedTripId('');
+    }
+  }, [isLoadingTrips, relatedTripId, selectedTrip]);
+
   const validate = () => {
     const nextErrors: FormErrors = {};
     if (!feedbackCategories.some((item) => item.value === category)) {
@@ -87,7 +104,7 @@ export default function SubmitFeedbackScreen() {
     if (isLoadingTrips) {
       nextErrors.relatedTripId = 'Đang tải lịch sử chuyến, vui lòng chờ.';
     } else if (!relatedTripId || !selectedTrip) {
-      nextErrors.relatedTripId = 'Feedback dịch vụ bắt buộc chọn một chuyến đã đi.';
+      nextErrors.relatedTripId = `Feedback dịch vụ chỉ được gửi trong vòng ${feedbackTripWindowDays} ngày từ thời gian đi xe.`;
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -161,7 +178,7 @@ export default function SubmitFeedbackScreen() {
       <Text style={styles.label}>Chuyến liên quan</Text>
       {isLoadingTrips ? <LoadingState label="Đang tải lịch sử chuyến" /> : null}
       {!isLoadingTrips && !tripOptions.length ? (
-        <EmptyState title="Chưa có chuyến phù hợp" detail="Bạn cần có lịch sử chuyến đi trước khi gửi feedback dịch vụ." />
+        <EmptyState title="Chưa có chuyến phù hợp" detail={`Bạn chỉ có thể gửi góp ý cho chuyến đã đi trong vòng ${feedbackTripWindowDays} ngày gần nhất.`} />
       ) : null}
       {!isLoadingTrips && tripOptions.length ? (
         <TripDropdown
@@ -191,7 +208,7 @@ export default function SubmitFeedbackScreen() {
 
       <View style={styles.rules}>
         <Text style={styles.rulesTitle}>Quy định gửi góp ý</Text>
-        <Text style={styles.rulesText}>Feedback dịch vụ phải gắn với một chuyến thật trong lịch sử của bạn. BusDN không nhận metadata admin từ ứng dụng hành khách.</Text>
+        <Text style={styles.rulesText}>Feedback dịch vụ phải gắn với một chuyến thật trong lịch sử của bạn và chỉ được gửi trong vòng {feedbackTripWindowDays} ngày từ thời gian đi xe.</Text>
       </View>
 
       <AppButton disabled={isSubmitting || isLoadingTrips} loading={isSubmitting} onPress={submit} title="Gửi góp ý" />

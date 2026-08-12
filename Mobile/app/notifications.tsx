@@ -85,6 +85,40 @@ const metadataValue = (item: NotificationRecord, keys: string[]) => {
   return '';
 };
 
+const pathIdFromActionUrl = (item: NotificationRecord, pathKeys: string[]) => {
+  const path = stringOf(item.actionUrl).split('?')[0];
+  if (!path) return '';
+  const segments = path.split('/').filter(Boolean);
+  for (const key of pathKeys) {
+    const index = segments.indexOf(key);
+    if (index >= 0 && segments[index + 1]) return decodeURIComponent(segments[index + 1]);
+  }
+  return '';
+};
+
+const supportNotificationKind = (item: NotificationRecord): 'lostItem' | 'feedback' | '' => {
+  const raw = [
+    item.sourceType,
+    item.actionUrl,
+    item.metadata?.supportCaseType,
+    item.metadata?.feedbackType,
+    item.metadata?.reportType,
+    item.title,
+    item.message,
+    item.body,
+  ].map(stringOf).join(' ').toLowerCase();
+
+  if (raw.includes('lost_item') || raw.includes('lost item') || raw.includes('lost-items') || raw.includes('lost-item')) return 'lostItem';
+  if (raw.includes('service_feedback') || raw.includes('feedback') || raw.includes('complaint')) return 'feedback';
+  return '';
+};
+
+const supportCaseIdOf = (item: NotificationRecord) => (
+  metadataValue(item, ['caseId', 'supportCaseId', 'reportId', 'lostItemCaseId', 'feedbackId'])
+  || stringOf(item.sourceId)
+  || pathIdFromActionUrl(item, ['lost-items', 'feedback'])
+);
+
 const classifyNotification = (item: NotificationRecord): keyof typeof typeConfig => {
   const raw = `${item.type || ''} ${item.metadata?.type || ''} ${item.metadata?.notificationType || ''}`.toLowerCase();
   if (raw.includes('arrival') || raw.includes('eta')) return 'arrival';
@@ -132,6 +166,10 @@ const translateNotificationTitle = (title: string) => {
   const normalized = title.trim().toLowerCase();
   if (!normalized) return '';
   if (normalized === 'feedback response received') return 'Đã nhận phản hồi góp ý';
+  if (normalized === 'complaint update') return 'Cập nhật góp ý';
+  if (normalized === 'lost item update') return 'Cập nhật đồ thất lạc';
+  if (normalized === 'lost item report submitted') return 'Đã gửi báo mất đồ';
+  if (normalized === 'new lost item report') return 'Báo mất đồ mới';
   if (normalized.includes('promotion')) return 'Khuyến mãi';
   if (normalized.includes('bus approaching')) return 'Xe buýt sắp đến';
   if (normalized.includes('route change')) return 'Thay đổi tuyến';
@@ -146,6 +184,38 @@ const translateNotificationMessage = (message: string) => {
   next = next.replace(
     /Your feedback has received a response from the administrator\.?/gi,
     'Góp ý của bạn đã có phản hồi từ quản trị viên.'
+  );
+  next = next.replace(
+    /Good news! Your reported lost item has been found\. Please check the BusDN app for pickup information\.?/gi,
+    'Tin tốt! Đồ thất lạc bạn báo đã được tìm thấy. Vui lòng mở ứng dụng BusDN để xem thông tin nhận lại.'
+  );
+  next = next.replace(
+    /BusDN is searching for the lost item reported in case ([A-Z0-9-]+)\. We will update you when there is new information\.?/gi,
+    'BusDN đang tìm kiếm đồ thất lạc trong hồ sơ $1. Chúng tôi sẽ cập nhật khi có thông tin mới.'
+  );
+  next = next.replace(
+    /Your lost item report ([A-Z0-9-]+) was submitted and is waiting for matching\.?/gi,
+    'Hồ sơ báo mất đồ $1 đã được gửi và đang chờ đối chiếu.'
+  );
+  next = next.replace(
+    /Your lost item report ([A-Z0-9-]+) has been marked as returned\. Thank you for using BusDN\.?/gi,
+    'Hồ sơ đồ thất lạc $1 đã được đánh dấu là đã trả lại. Cảm ơn bạn đã sử dụng BusDN.'
+  );
+  next = next.replace(
+    /BusDN is arranging pickup or return for your lost item report ([A-Z0-9-]+)\. Please check the app for details\.?/gi,
+    'BusDN đang sắp xếp nhận hoặc trả đồ cho hồ sơ $1. Vui lòng mở ứng dụng để xem chi tiết.'
+  );
+  next = next.replace(
+    /Your lost item report ([A-Z0-9-]+) has been updated\. Please check the BusDN app for details\.?/gi,
+    'Hồ sơ đồ thất lạc $1 đã được cập nhật. Vui lòng mở ứng dụng BusDN để xem chi tiết.'
+  );
+  next = next.replace(
+    /Your complaint ([A-Z0-9-]+) has been resolved\. Please check the app for the resolution details\.?/gi,
+    'Góp ý $1 đã được xử lý. Vui lòng mở ứng dụng để xem kết quả.'
+  );
+  next = next.replace(
+    /Your complaint ([A-Z0-9-]+) has been updated\. Please check the BusDN app for details\.?/gi,
+    'Góp ý $1 đã được cập nhật. Vui lòng mở ứng dụng BusDN để xem chi tiết.'
   );
   next = next.replace(
     /Use code ([A-Z0-9_-]+) to get ([0-9.,]+)\s*VND off your next BusDN ticket\. Valid until ([0-9/.-]+)\.?/gi,
@@ -305,10 +375,26 @@ export default function NotificationsScreen() {
   const openNotification = async (item: NotificationRecord) => {
     await markRead(item);
     const kind = classifyNotification(item);
+    const supportKind = supportNotificationKind(item);
+    const supportCaseId = supportCaseIdOf(item);
     const routeId = metadataValue(item, ['routeId']) || stringOf(item.routeId);
     const tripId = metadataValue(item, ['tripId']) || stringOf(item.tripId);
     const vehicleId = metadataValue(item, ['vehicleId', 'busId']);
     const stopId = metadataValue(item, ['stopId']);
+
+    if (supportKind === 'lostItem') {
+      router.push(supportCaseId
+        ? ({ pathname: '/lost-items/[caseId]', params: { caseId: supportCaseId } } as unknown as Href)
+        : ('/my-lost-items' as Href));
+      return;
+    }
+
+    if (supportKind === 'feedback') {
+      router.push(supportCaseId
+        ? ({ pathname: '/feedback/[feedbackId]', params: { feedbackId: supportCaseId } } as unknown as Href)
+        : ('/my-feedback' as Href));
+      return;
+    }
 
     if ((kind === 'arrival' || kind === 'delay') && routeId) {
       const params = new URLSearchParams({ routeId });

@@ -24,6 +24,8 @@ const FEEDBACK_STATUS_ALIASES = SUPPORT_CASE_STATUS_ALIASES;
 
 const FEEDBACK_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'ratingScore', 'priority', 'status']);
 const FEEDBACK_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'CRITICAL'];
+const FEEDBACK_TRIP_WINDOW_DAYS = 7;
+const FEEDBACK_TRIP_WINDOW_MS = FEEDBACK_TRIP_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 const SLA_HOURS_BY_PRIORITY = {
   LOW: 48,
   NORMAL: 24,
@@ -264,20 +266,25 @@ export class CustomerSupportService {
 
     if (!passengerId) return;
 
-    const email = supportCase.passenger?.email || supportCase.contactEmail || '';
-    const notification = await notifyFeedbackResponse({
-      supportCase,
-      adminId,
-      channels: {
-        inApp: true,
-        email: hasValidEmail(email),
-      },
-      emailRecipients: hasValidEmail(email)
-        ? [{ email, fullName: supportCase.passenger?.fullName || 'Passenger' }]
-        : [],
-    });
-
-    if (!notification) {
+    try {
+      await createBroadcastNotification({
+        title: 'Đã nhận phản hồi góp ý',
+        message: 'Góp ý của bạn đã có phản hồi từ quản trị viên.',
+        type: 'general',
+        priority: 'normal',
+        targetAudience: 'specific_users',
+        userIds: [passengerId],
+        actionUrl: `/feedback/${supportCase._id}`,
+        sourceType: 'SupportCase',
+        sourceId: supportCase._id,
+        metadata: {
+          caseId: String(supportCase._id),
+          referenceNumber: supportCase.referenceNumber,
+          feedbackType: supportCase.type,
+          supportCaseType: supportCase.type,
+        },
+      }, adminId);
+    } catch (error) {
       // Reply persistence must not fail just because notification delivery fails.
       await this.recordUserNotification(
         passengerId,
@@ -350,7 +357,7 @@ export class CustomerSupportService {
     }));
   }
 
-  static async validateRelatedTrip(userId, relatedTripId) {
+  static async validateRelatedTrip(userId, relatedTripId, { enforceFeedbackWindow = false } = {}) {
     if (!relatedTripId?.trim()) return null;
 
     const user = await User.findById(userId).select('travelHistory').lean();
@@ -364,6 +371,27 @@ export class CustomerSupportService {
       throw error;
     }
 
+    if (enforceFeedbackWindow) {
+      const tripTimeValue = relatedTrip.arrivedAt
+        || relatedTrip.boardedAt
+        || relatedTrip.arrivalTime
+        || relatedTrip.boardingTime
+        || relatedTrip.travelDate;
+      const tripTime = tripTimeValue ? new Date(tripTimeValue) : null;
+
+      if (!tripTime || Number.isNaN(tripTime.getTime())) {
+        const error = new Error('Selected trip is missing travel time information');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      if (Date.now() - tripTime.getTime() > FEEDBACK_TRIP_WINDOW_MS) {
+        const error = new Error(`Feedback can only be submitted within ${FEEDBACK_TRIP_WINDOW_DAYS} days after the trip`);
+        error.statusCode = 400;
+        throw error;
+      }
+    }
+
     return relatedTrip;
   }
 
@@ -372,7 +400,9 @@ export class CustomerSupportService {
       throw createBusinessError('Related trip or route is required for service feedback', 400);
     }
 
-    const relatedTrip = await this.validateRelatedTrip(userId, data.relatedTripId);
+    const relatedTrip = await this.validateRelatedTrip(userId, data.relatedTripId, {
+      enforceFeedbackWindow: data.type === 'SERVICE_FEEDBACK',
+    });
     await this.assertNoRecentDuplicate(userId, data);
     const priorityClassification = data.type === 'SERVICE_FEEDBACK'
       ? this.determineFeedbackPriority({
@@ -893,28 +923,28 @@ export class CustomerSupportService {
     const normalizedStatus = normalizeFeedbackStatus(status);
 
     const templates = {
-      [FEEDBACK_STATUS.IN_REVIEW]: `BusDN has received your complaint ${code} and our team is reviewing it. We will keep you updated when there is new information.`,
-      [FEEDBACK_STATUS.INVESTIGATING]: `BusDN is currently investigating your complaint regarding ${routeText}. We will provide an update when the review is completed.`,
-      [FEEDBACK_STATUS.WAITING_FOR_INFORMATION]: `BusDN needs additional information from you to continue processing complaint ${code}. Please check the app for more details.`,
-      [FEEDBACK_STATUS.ACTION_REQUIRED]: 'Your complaint has been reviewed and the necessary action is being taken by our operations team.',
-      [FEEDBACK_STATUS.RESOLVED]: `Your complaint ${code} has been resolved. Please check the app for the resolution details.`,
-      [FEEDBACK_STATUS.CLOSED]: `Your complaint ${code} has been closed. Thank you for helping BusDN improve our service.`,
-      [FEEDBACK_STATUS.REOPENED]: `Your complaint ${code} has been reopened for further review.`,
+      [FEEDBACK_STATUS.IN_REVIEW]: `BusDN đã nhận góp ý ${code} và đang xem xét. Chúng tôi sẽ cập nhật khi có thông tin mới.`,
+      [FEEDBACK_STATUS.INVESTIGATING]: `BusDN đang xác minh góp ý liên quan đến ${routeText}. Chúng tôi sẽ phản hồi khi hoàn tất kiểm tra.`,
+      [FEEDBACK_STATUS.WAITING_FOR_INFORMATION]: `BusDN cần bạn bổ sung thông tin cho góp ý ${code}. Vui lòng mở ứng dụng để xem chi tiết.`,
+      [FEEDBACK_STATUS.ACTION_REQUIRED]: 'Góp ý của bạn đã được xem xét và bộ phận vận hành đang xử lý.',
+      [FEEDBACK_STATUS.RESOLVED]: `Góp ý ${code} đã được xử lý. Vui lòng mở ứng dụng để xem kết quả.`,
+      [FEEDBACK_STATUS.CLOSED]: `Góp ý ${code} đã được đóng. Cảm ơn bạn đã giúp BusDN cải thiện dịch vụ.`,
+      [FEEDBACK_STATUS.REOPENED]: `Góp ý ${code} đã được mở lại để tiếp tục xem xét.`,
     };
 
-    return templates[normalizedStatus] || `Your complaint ${code} has been updated. Please check the BusDN app for details.`;
+    return templates[normalizedStatus] || `Góp ý ${code} đã được cập nhật. Vui lòng mở ứng dụng BusDN để xem chi tiết.`;
   }
 
   static buildLostItemNotificationMessage(supportCase, recoveryStatus = supportCase.lostItem?.recoveryStatus) {
     const code = supportCase.referenceNumber || `#${supportCase._id}`;
     const templates = {
-      FOUND: 'Good news! Your reported lost item has been found. Please check the BusDN app for pickup information.',
-      RETURNED: `Your lost item report ${code} has been marked as returned. Thank you for using BusDN.`,
-      SEARCHING: `BusDN is searching for the lost item reported in case ${code}. We will update you when there is new information.`,
-      RETURN_IN_PROGRESS: `BusDN is arranging pickup or return for your lost item report ${code}. Please check the app for details.`,
+      FOUND: 'Tin tốt! Đồ thất lạc bạn báo đã được tìm thấy. Vui lòng mở ứng dụng BusDN để xem thông tin nhận lại.',
+      RETURNED: `Hồ sơ đồ thất lạc ${code} đã được đánh dấu là đã trả lại. Cảm ơn bạn đã sử dụng BusDN.`,
+      SEARCHING: `BusDN đang tìm kiếm đồ thất lạc trong hồ sơ ${code}. Chúng tôi sẽ cập nhật khi có thông tin mới.`,
+      RETURN_IN_PROGRESS: `BusDN đang sắp xếp nhận hoặc trả đồ cho hồ sơ ${code}. Vui lòng mở ứng dụng để xem chi tiết.`,
     };
 
-    return templates[recoveryStatus] || `Your lost item report ${code} has been updated. Please check the BusDN app for details.`;
+    return templates[recoveryStatus] || `Hồ sơ đồ thất lạc ${code} đã được cập nhật. Vui lòng mở ứng dụng BusDN để xem chi tiết.`;
   }
 
   static buildNotificationPreview(supportCase, eventStatus = supportCase.status) {
@@ -929,7 +959,7 @@ export class CustomerSupportService {
       shouldNotify: isLostItem
         ? CUSTOMER_VISIBLE_LOST_ITEM_STATUSES.has(eventStatus)
         : IMPORTANT_FEEDBACK_STATUSES.has(normalizeFeedbackStatus(eventStatus)),
-      title: isLostItem ? 'Lost item update' : 'Complaint update',
+      title: isLostItem ? 'Cập nhật đồ thất lạc' : 'Cập nhật góp ý',
       message,
       status: eventStatus,
       channels: {
@@ -1179,14 +1209,9 @@ export class CustomerSupportService {
     }
 
     const hasMessage = Boolean(data.message?.trim());
-    const hasResolution = Boolean(data.resolutionSummary?.trim() || supportCase.resolutionSummary?.trim());
     const hasWaitingReason = Boolean(data.waitingForInformationReason?.trim() || supportCase.waitingForInformationReason?.trim() || hasMessage);
     const incomingCorrectiveAction = data.correctiveAction || null;
     const incomingCorrectiveDescription = String(incomingCorrectiveAction?.description || data.actionDescription || '').trim();
-    const hasCorrectiveAction = Boolean(
-      incomingCorrectiveDescription
-      || (supportCase.correctiveActions || []).length
-    );
     const nextStatus = data.status ? assertFeedbackTransition(supportCase.status, data.status) : supportCase.status;
 
     if (data.priority && !FEEDBACK_PRIORITIES.includes(data.priority)) {
@@ -1197,16 +1222,12 @@ export class CustomerSupportService {
       throw createBusinessError('Waiting for information requires a reason or passenger-facing request', 422);
     }
 
-    if (nextStatus === FEEDBACK_STATUS.ACTION_REQUIRED && !hasCorrectiveAction) {
-      throw createBusinessError('Action required status requires an action description or corrective action', 422);
+    if (nextStatus === FEEDBACK_STATUS.ACTION_REQUIRED && !hasMessage) {
+      throw createBusinessError('Action required status requires a passenger-facing response', 422);
     }
 
-    if (nextStatus === FEEDBACK_STATUS.RESOLVED && !hasResolution) {
-      throw createBusinessError('Resolution summary is required before resolving feedback', 422);
-    }
-
-    if (nextStatus === FEEDBACK_STATUS.RESOLVED && !hasCorrectiveAction) {
-      throw createBusinessError('Record a corrective action or outcome before resolving feedback', 422);
+    if (nextStatus === FEEDBACK_STATUS.RESOLVED && !hasMessage) {
+      throw createBusinessError('A passenger-facing response is required before resolving feedback', 422);
     }
 
     if (

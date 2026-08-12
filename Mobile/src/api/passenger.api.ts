@@ -276,6 +276,8 @@ export type NotificationRecord = {
   readAt?: string | null;
   isRead?: boolean;
   actionUrl?: string;
+  sourceType?: string;
+  sourceId?: string | null;
   routeId?: string | null;
   tripId?: string | null;
   deliverySummary?: { sentAt?: string };

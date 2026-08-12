@@ -102,9 +102,6 @@ const CaseDetailModal = ({ supportCase, onClose }) => {
               <DetailRow label="Mã hồ sơ thất lạc" value={formatCaseCode(supportCase.caseId)} />
               <DetailRow label="Tên đồ vật" value={supportCase.lostItem?.itemName} />
               <DetailRow label="Loại đồ vật" value={getCategoryLabel(supportCase.lostItem?.itemCategory)} />
-              <DetailRow label="Màu sắc" value={supportCase.lostItem?.color} />
-              <DetailRow label="Thương hiệu" value={supportCase.lostItem?.brand} />
-              <DetailRow label="Dấu hiệu riêng" value={supportCase.lostItem?.identifyingDetails} />
               <DetailRow label="Ngày gửi báo cáo" value={formatDate(supportCase.createdAt, 'dd/MM/yyyy HH:mm')} />
               <DetailRow label="Thời gian dự kiến bị mất" value={formatDate(supportCase.lostItem?.lostAt, 'dd/MM/yyyy HH:mm')} />
               <DetailRow label="Thông tin tuyến" value={supportCase.routeName} />
