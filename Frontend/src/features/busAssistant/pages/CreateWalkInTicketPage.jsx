@@ -11,6 +11,25 @@ const initialForm = {
   passengerQuantity: 1, ticketType: 'SINGLE_RIDE', paymentMethod: 'CASH', amount: 0, cashReceived: '',
 };
 
+const formatAssignedTripTime = (start, end, language) => {
+  const formatTime = (value) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+
+    return date.toLocaleTimeString(language === 'vi' ? 'vi-VN' : 'en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  };
+
+  const startTime = formatTime(start);
+  const endTime = formatTime(end);
+  if (!startTime) return '';
+  return endTime ? `${startTime} - ${endTime}` : startTime;
+};
+
 const text = {
   vi: {
     title: 'Bán vé tại xe', subtitle: 'Tạo vé nhanh cho hành khách chưa đặt trước.', trip: 'Chuyến được phân công',
@@ -166,7 +185,14 @@ const CreateWalkInTicketPage = () => {
           <Field label={t.trip}>
             <select className={inputClass} value={form.tripId} onChange={(event) => selectTrip(event.target.value)} disabled={loadingTrips}>
               <option value="">{loadingTrips ? t.loading : t.chooseTrip}</option>
-              {assignments.map((item) => <option key={item.id} value={item.tripId}>{item.tripCode} · {item.route?.routeNumber} · {item.route?.origin} → {item.route?.destination}</option>)}
+              {assignments.map((item) => {
+                const assignedTime = formatAssignedTripTime(item.scheduledStart, item.scheduledEnd, language);
+                return (
+                  <option key={item.id} value={item.tripId}>
+                    {assignedTime ? `${assignedTime} · ` : ''}{item.tripCode} · {item.route?.routeNumber} · {item.route?.origin} → {item.route?.destination}
+                  </option>
+                );
+              })}
             </select>
           </Field>
           <div className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900"><strong>{selectedTrip?.route?.routeNumber || '—'}</strong><p className="mt-1 text-xs">{selectedTrip?.vehicle?.plateNumber || selectedTrip?.vehicle?.code || '—'}</p></div>
