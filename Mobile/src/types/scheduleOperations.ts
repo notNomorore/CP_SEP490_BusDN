@@ -120,6 +120,7 @@ export type AssignedTrip = {
   shiftStatus?: string;
   acceptanceStatus?: string;
   tripStatus?: string;
+  capacity?: { capacity: number; soldSeats: number; remainingSeats: number; isFull: boolean } | null;
   inspection?: VehicleInspection;
   dutyInstructions?: string[];
   rejectionReason?: string;

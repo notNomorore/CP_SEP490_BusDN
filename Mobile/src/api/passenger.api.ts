@@ -255,6 +255,10 @@ export type PurchasableTripSchedule = {
   expectedArrivalTime?: string;
   status?: string;
   statusLabel?: string;
+  capacity?: number;
+  soldSeats?: number;
+  remainingSeats?: number;
+  isFull?: boolean;
   vehicle?: {
     busId?: string;
     busCode?: string;
