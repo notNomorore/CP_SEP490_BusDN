@@ -23,6 +23,7 @@ import {
   getMonthlyPassSettings,
 } from '../fareOperations/fareOperations.service.js';
 import { config } from '../../config/environment.js';
+import { assertTripHasCapacity, getTripCapacity } from './tripCapacity.service.js';
 
 const getFrontendUrl = () => {
   if (!config.frontend.url) {
@@ -449,8 +450,19 @@ export class TicketService {
       return serviceDateText > todayText || String(schedule.departureTime || '') >= serverTime;
     });
 
+    const schedulesWithCapacity = await Promise.all(purchasable.map(async (schedule) => ({
+      ...formatPurchasableSchedule(schedule),
+      ...await getTripCapacity({
+        scheduleId: schedule._id,
+        routeId: schedule.routeId,
+        serviceDate: schedule.serviceDate,
+        departureTime: schedule.departureTime,
+        direction: schedule.direction,
+      }),
+    })));
+
     return {
-      schedules: purchasable.map(formatPurchasableSchedule),
+      schedules: schedulesWithCapacity,
       count: purchasable.length,
       serverTime: now.toISOString(),
       serverClock: serverTime,
@@ -978,12 +990,11 @@ export class TicketService {
     }
 
     const departureTime = String(payload.departureTime).trim();
-    const { departureDate, serviceDateText } = await this.findPurchasableTripSchedule(route, {
+    const { schedule, departureDate, serviceDateText } = await this.findPurchasableTripSchedule(route, {
       serviceDate: payload.serviceDate,
       departureTime,
       direction,
     });
-
     const serviceDate = buildStoredServiceDate(payload.serviceDate);
     if (!serviceDate) {
       throw new CustomError('Ngày đi không hợp lệ', HTTP_STATUS.BAD_REQUEST);
@@ -1044,6 +1055,8 @@ export class TicketService {
     if (existingPendingTicket) {
       return existingPendingTicket;
     }
+
+    await assertTripHasCapacity(schedule, 1);
 
     const ticketCode = await this.generateUniqueTicketCode();
     const ticket = new Ticket({
@@ -1976,6 +1989,21 @@ export class TicketService {
         paymentOrder.completedAt = paymentOrder.completedAt || new Date();
         await paymentOrder.save();
         return;
+      }
+
+      if (ticket.paymentStatus !== 'PAID' || ticket.bookingStatus !== 'SUCCESS') {
+        const ticketServiceDate = getVietnamDateString(ticket.serviceDate);
+        const { start, end } = toVietnamDayBounds(ticketServiceDate);
+        const schedule = await TripSchedule.findOne({
+          routeId: ticket.routeId,
+          direction: ticket.direction,
+          serviceDate: { $gte: start, $lte: end },
+          departureTime: ticket.departureTime,
+        }).lean();
+        if (!schedule) {
+          throw new CustomError('Không tìm thấy lịch chuyến để xác nhận chỗ.', HTTP_STATUS.NOT_FOUND);
+        }
+        await assertTripHasCapacity(schedule, 1);
       }
 
       ticket.paymentMethod = 'PAYOS';

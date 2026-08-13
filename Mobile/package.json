@@ -13,7 +13,7 @@
   "dependencies": {
     "@expo/vector-icons": "^15.1.1",
     "axios": "^1.13.2",
-    "expo": "~54.0.35",
+    "expo": "~54.0.36",
     "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.13",
     "expo-document-picker": "~14.0.8",

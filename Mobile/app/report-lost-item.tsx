@@ -195,7 +195,7 @@ export default function ReportLostItemScreen() {
         label="Mô tả đồ thất lạc"
         multiline
         onChangeText={setItemDescription}
-        placeholder="Màu sắc, thương hiệu, kích thước, dấu hiệu nhận biết..."
+        placeholder="Mô tả hình dáng, kích thước, vật bên trong hoặc chi tiết giúp nhận diện..."
         value={itemDescription}
       />
 

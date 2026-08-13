@@ -14,9 +14,10 @@ import type { WalkInTicketHistory, WalkInTicketResult } from '@/types/busAssista
 import type { AssignedTrip } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
 import {
-  getAssignedTripsRange,
   getTripDepartureTimeLabel,
+  getTripPlannedEndDate,
   getTripPlannedStartDate,
+  getTodayRange,
   isTripToday,
   toDateInput,
 } from '@/utils/scheduleOperations';
@@ -93,9 +94,11 @@ export default function WalkInTicketScreen() {
   const isAutoConfirmingRef = useRef(false);
 
   const selectedTrip = useMemo(
-    () => trips.find((trip) => trip.id === selectedTripId) || trips[0] || null,
+    () => trips.find((trip) => trip.id === selectedTripId) || null,
     [selectedTripId, trips],
   );
+  const remainingSeats = Number(selectedTrip?.capacity?.remainingSeats ?? 25);
+  const isTripFull = Boolean(selectedTrip?.capacity?.isFull) || remainingSeats <= 0;
   const stops = selectedTrip?.route?.stops || [];
   const optionLabels = useMemo<Record<string, string>>(() => ({
     ADULT: t.assistant.walkin.options.adult,
@@ -107,7 +110,7 @@ export default function WalkInTicketScreen() {
   }), [t]);
   const stopOptions = stops.map((stop) => ({ value: objectId(stop.stationId || stop.id), label: stop.stopName || t.assistant.walkin.stopFallback }));
   const changeQuantity = (delta: number) => {
-    const next = Math.min(20, Math.max(1, (Number.parseInt(quantity, 10) || 1) + delta));
+    const next = Math.min(Math.max(remainingSeats, 1), Math.max(1, (Number.parseInt(quantity, 10) || 1) + delta));
     setQuantity(String(next));
   };
   const unitFare = useMemo(() => {
@@ -135,9 +138,14 @@ export default function WalkInTicketScreen() {
 
   const loadTrips = useCallback(async () => {
     try {
-      const payload = await scheduleOperationsApi.getAssignedTrips(getAssignedTripsRange());
+      const payload = await scheduleOperationsApi.getAssignedTrips(getTodayRange());
+      const now = new Date();
       const usableTrips = (payload.trips || [])
-        .filter((trip) => !['COMPLETED', 'CANCELLED'].includes(String(trip.tripStatus || '').toUpperCase()))
+        .filter((trip) => (
+          isTripToday(trip)
+          && !['COMPLETED', 'CANCELLED'].includes(String(trip.tripStatus || '').toUpperCase())
+          && (getTripPlannedEndDate(trip)?.getTime() || 0) > now.getTime()
+        ))
         .sort((left, right) => {
           const leftToday = isTripToday(left) ? 0 : 1;
           const rightToday = isTripToday(right) ? 0 : 1;
@@ -145,11 +153,14 @@ export default function WalkInTicketScreen() {
           return (getTripPlannedStartDate(left)?.getTime() || 0) - (getTripPlannedStartDate(right)?.getTime() || 0);
         });
       setTrips(usableTrips);
-      const first = usableTrips[0];
-      setSelectedTripId((current) => current || first?.id || '');
-      const firstStops = first?.route?.stops || [];
-      setFromStopId((current) => current || objectId(firstStops[0]?.stationId || firstStops[0]?.id));
-      setToStopId((current) => current || objectId(firstStops[firstStops.length - 1]?.stationId || firstStops[firstStops.length - 1]?.id));
+      const first = usableTrips.find((trip) => !trip.capacity?.isFull);
+      setSelectedTripId((current) => (
+        usableTrips.some((trip) => trip.id === current && !trip.capacity?.isFull) ? current : first?.id || ''
+      ));
+      if (!first) {
+        setFromStopId('');
+        setToStopId('');
+      }
     } catch (error) {
       if (isPermissionError(error)) {
         setTrips([]);
@@ -183,6 +194,14 @@ export default function WalkInTicketScreen() {
       Alert.alert(t.assistant.walkin.alerts.missingTripTitle, t.assistant.walkin.alerts.missingTripMessage);
       return;
     }
+    if (isTripFull) {
+      Alert.alert('Chuyến đã hết chỗ', 'Chuyến xe đã hết chỗ (25/25). Vui lòng chọn giờ khác.');
+      return;
+    }
+    if ((Number.parseInt(quantity, 10) || 1) > remainingSeats) {
+      Alert.alert('Không đủ chỗ', `Chuyến xe chỉ còn ${remainingSeats}/25 chỗ. Vui lòng giảm số lượng vé hoặc chọn giờ khác.`);
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -200,6 +219,7 @@ export default function WalkInTicketScreen() {
         changeAmount: paymentMethod === 'CASH' ? changeAmount : undefined,
       });
       setResult(data);
+      await loadTrips();
       await loadHistory(historyDate);
       Alert.alert(
         paymentMethod === 'CASH' ? t.assistant.walkin.alerts.cashCreatedTitle : t.assistant.walkin.alerts.qrCreatedTitle,
@@ -220,6 +240,7 @@ export default function WalkInTicketScreen() {
     try {
       const data = await busAssistantApi.confirmWalkInPayment(ticketId);
       setResult((current) => current ? { ...current, ...data, requiresPaymentConfirmation: false, paymentCompleted: true, confirmed: true } : data);
+      await loadTrips();
       await loadHistory(historyDate);
       Alert.alert(t.assistant.walkin.alerts.paidTitle, t.assistant.walkin.alerts.paidMessage);
     } catch (error) {
@@ -251,7 +272,10 @@ export default function WalkInTicketScreen() {
     try {
       const data = await busAssistantApi.resumeWalkInPayment(ticketId);
       setResult(data);
-      if (data.paymentCompleted) await loadHistory(historyDate);
+      if (data.paymentCompleted) {
+        await loadTrips();
+        await loadHistory(historyDate);
+      }
     } catch (error) {
       Alert.alert(t.assistant.walkin.alerts.resumeTitle, getErrorMessage(error, t.assistant.walkin.alerts.resumeFallback));
     } finally {
@@ -281,9 +305,10 @@ export default function WalkInTicketScreen() {
           </View>
           <View style={styles.optionColumn}>
             {trips.length ? trips.map((trip) => (
-              <Pressable key={trip.id} onPress={() => setSelectedTripId(trip.id)} style={[styles.tripChip, selectedTrip?.id === trip.id && styles.tripChipActive]}>
+              <Pressable key={trip.id} disabled={trip.capacity?.isFull} onPress={() => setSelectedTripId(trip.id)} style={[styles.tripChip, selectedTrip?.id === trip.id && styles.tripChipActive, trip.capacity?.isFull && styles.tripChipDisabled]}>
                 <Text style={[styles.tripTitle, selectedTrip?.id === trip.id && styles.tripTextActive]}>{trip.route?.routeNumber || trip.tripCode || t.assistant.validate.tripFallback}</Text>
                 <Text style={[styles.tripMeta, selectedTrip?.id === trip.id && styles.tripTextActive]}>{getTripDepartureTimeLabel(trip)} - {trip.vehicle?.code || trip.vehicle?.plateNumber || t.assistant.validate.noVehicle}</Text>
+                <Text style={[styles.tripCapacity, selectedTrip?.id === trip.id && styles.tripTextActive, trip.capacity?.isFull && styles.tripCapacityFull]}>{trip.capacity?.isFull ? 'Hết chỗ 25/25 · Vui lòng chọn giờ khác' : `Còn ${trip.capacity?.remainingSeats ?? 25}/25 chỗ`}</Text>
               </Pressable>
             )) : <Text style={styles.emptyText}>{t.assistant.walkin.activeTripEmpty}</Text>}
           </View>
@@ -336,8 +361,8 @@ export default function WalkInTicketScreen() {
             </View>
           ) : null}
           <AppButton
-            disabled={!selectedTrip || !fromStopId || !toStopId || cashInsufficient}
-            title={paymentMethod === 'CASH' ? t.assistant.walkin.createCash : t.assistant.walkin.createQr}
+            disabled={!selectedTrip || !fromStopId || !toStopId || cashInsufficient || isTripFull || (Number.parseInt(quantity, 10) || 1) > remainingSeats}
+            title={isTripFull ? 'Chuyến đã hết chỗ' : paymentMethod === 'CASH' ? t.assistant.walkin.createCash : t.assistant.walkin.createQr}
             loading={isSubmitting}
             onPress={createTicket}
           />
@@ -425,8 +450,11 @@ const styles = StyleSheet.create({
   optionColumn: { gap: 10 },
   tripChip: { borderRadius: 18, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surfaceLow, padding: 14 },
   tripChipActive: { borderColor: colors.primary, backgroundColor: colors.primary },
+  tripChipDisabled: { opacity: .55, backgroundColor: '#fff1f1' },
   tripTitle: { color: colors.primary, fontSize: 15, fontWeight: '900' },
   tripMeta: { marginTop: 3, color: colors.muted, fontSize: 12, fontWeight: '700' },
+  tripCapacity: { marginTop: 5, color: colors.accent, fontSize: 12, fontWeight: '900' },
+  tripCapacityFull: { color: '#b42318' },
   tripTextActive: { color: colors.white },
   fieldLabel: { color: colors.secondary, fontSize: 12, fontWeight: '900' },
   dropdownGroup: { gap: 7 },

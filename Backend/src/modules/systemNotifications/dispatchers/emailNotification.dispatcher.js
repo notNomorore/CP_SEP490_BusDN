@@ -65,6 +65,7 @@ export class EmailNotificationDispatcher {
           subject: rendered.subject,
           html: rendered.html,
           text: rendered.text,
+          attachments: rendered.attachments || [],
         });
         results.push({
           userId: normalizeId(recipient._id),

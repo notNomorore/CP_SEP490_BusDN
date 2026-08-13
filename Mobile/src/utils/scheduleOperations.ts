@@ -129,6 +129,19 @@ export const getTripPlannedStartDate = (trip?: AssignedTrip | null) => {
   return parseScheduleDate(`${serviceDate}T${departureTime}:00`);
 };
 
+export const getTripPlannedEndDate = (trip?: AssignedTrip | null) => {
+  const serviceDate = getTripServiceDateKey(trip);
+  const arrivalTime = getTripArrivalTimeLabel(trip);
+  if (serviceDate === 'unknown' || !/^\d{2}:\d{2}$/.test(arrivalTime)) {
+    return trip?.scheduledEnd ? new Date(trip.scheduledEnd) : null;
+  }
+
+  const end = parseScheduleDate(`${serviceDate}T${arrivalTime}:00`);
+  const start = getTripPlannedStartDate(trip);
+  if (start && end < start) end.setDate(end.getDate() + 1);
+  return end;
+};
+
 export const getTripRouteLabel = (trip: AssignedTrip) => (
   trip.route?.routeNumber || trip.route?.name || trip.tripCode || 'Unassigned route'
 );

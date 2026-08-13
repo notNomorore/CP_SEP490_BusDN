@@ -144,6 +144,7 @@ const TicketPurchasePage = () => {
     return roundFare(Math.max(proportionalFare, minimumFare));
   }, [arrivalStop, departureStop, selectedRoute]);
   const selectedDepartureSchedule = departureSchedules.find((schedule) => schedule.departureTime === form.departureTime);
+  const selectedTripIsFull = Boolean(selectedDepartureSchedule?.isFull) || Number(selectedDepartureSchedule?.remainingSeats) <= 0;
   const activeQuote = appliedPromotion || priceQuote;
   const baseEstimatedPrice = activeQuote?.originalPrice ?? activeQuote?.originalAmount ?? (mode === 'MONTHLY_PASS' ? 0 : oneWayEstimatedPrice);
   const estimatedPrice = activeQuote?.finalPrice ?? activeQuote?.finalAmount ?? baseEstimatedPrice;
@@ -179,7 +180,7 @@ const TicketPurchasePage = () => {
         if (!isMounted) return;
         setDepartureSchedules(result.schedules || []);
         setForm((current) => (
-          (result.schedules || []).some((schedule) => schedule.departureTime === current.departureTime)
+          (result.schedules || []).some((schedule) => schedule.departureTime === current.departureTime && !schedule.isFull)
             ? current
             : { ...current, departureTime: '' }
         ));
@@ -366,6 +367,11 @@ const TicketPurchasePage = () => {
         setError('Vui long chon mot chuyen khoi hanh dang mo ban.');
         return;
       }
+
+      if (selectedTripIsFull) {
+        setError('Chuyến xe đã hết chỗ (25/25). Vui lòng chọn giờ khác.');
+        return;
+      }
     }
 
     if (mode === 'MONTHLY_PASS') {
@@ -486,12 +492,13 @@ const TicketPurchasePage = () => {
                     >
                       <option value="">{isLoadingSchedules ? 'Đang tải chuyến...' : 'Chọn chuyến khởi hành'}</option>
                       {departureSchedules.map((schedule) => (
-                        <option key={schedule.scheduleId || schedule.id || `${schedule.departureTime}-${schedule.scheduleCode}`} value={schedule.departureTime}>
-                          {schedule.departureTime}{schedule.expectedArrivalTime ? ` - ${schedule.expectedArrivalTime}` : ''} {schedule.scheduleCode ? `(${schedule.scheduleCode})` : ''}
+                        <option key={schedule.scheduleId || schedule.id || `${schedule.departureTime}-${schedule.scheduleCode}`} value={schedule.departureTime} disabled={schedule.isFull}>
+                          {schedule.departureTime}{schedule.expectedArrivalTime ? ` - ${schedule.expectedArrivalTime}` : ''} {schedule.scheduleCode ? `(${schedule.scheduleCode})` : ''} · {schedule.isFull ? 'HẾT CHỖ 25/25' : `Còn ${schedule.remainingSeats ?? 25}/25 chỗ`}
                         </option>
                       ))}
                     </select>
                     {scheduleError ? <p className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{scheduleError}</p> : null}
+                    {selectedDepartureSchedule ? <p className={`mt-2 rounded-xl px-3 py-2 text-xs font-bold ${selectedTripIsFull ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{selectedTripIsFull ? 'Chuyến xe đã hết chỗ (25/25). Vui lòng chọn giờ khác.' : `Chuyến này còn ${selectedDepartureSchedule.remainingSeats ?? 25}/25 chỗ.`}</p> : null}
                     {!isLoadingSchedules && !scheduleError && selectedRoute && !departureSchedules.length ? (
                       <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">Không có chuyến hợp lệ trong ngày đã chọn.</p>
                     ) : null}

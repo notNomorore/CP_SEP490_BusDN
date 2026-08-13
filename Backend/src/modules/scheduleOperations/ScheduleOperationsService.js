@@ -16,6 +16,7 @@ import Vehicle from '../fleetOperations/Vehicle.js';
 import LiveTrip from '../fleetOperations/Trip.js';
 import VehicleLocationLog from '../fleetOperations/VehicleLocationLog.js';
 import StorageService from '../../services/storage/storage.service.js';
+import { getTripCapacity } from '../tickets/tripCapacity.service.js';
 
 
 const TRAFFIC_CATEGORIES = [
@@ -552,6 +553,15 @@ export class ScheduleOperationsService {
 
     const assignments = schedules.map((schedule) => buildTripScheduleAssignment(schedule, role));
     await this.attachInspectionRecords(assignments);
+    await Promise.all(assignments.map(async (assignment) => {
+      assignment.capacity = await getTripCapacity({
+        scheduleId: assignment.trip._id,
+        routeId: assignment.trip.routeId?._id || assignment.trip.routeId,
+        serviceDate: assignment.trip.serviceDate,
+        departureTime: assignment.trip.departureTime,
+        direction: assignment.trip.direction,
+      });
+    }));
 
     return assignments
       .filter((assignment) => isScheduleAssignedToActor(assignment.trip, userId, role))
