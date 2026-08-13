@@ -29,13 +29,13 @@ const TerminalPicker = ({
   const [isFocused, setIsFocused] = React.useState(false);
   const searchText = normalizeSearch(query);
   const options = stations
-    .filter((station) => searchText && [
+    .filter((station) => !searchText || [
       station.stationName,
       station.stationCode,
       station.address,
       station.district,
     ].some((value) => normalizeSearch(value).includes(searchText)))
-    .slice(0, 8);
+    .slice(0, 50);
 
   React.useEffect(() => {
     if (!isFocused) {
@@ -71,7 +71,7 @@ const TerminalPicker = ({
         ) : null}
       </div>
 
-      {isFocused && query.trim() ? (
+      {isFocused ? (
         <div className="mt-2 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
           {options.length ? options.map((station) => (
             <button
@@ -90,7 +90,7 @@ const TerminalPicker = ({
             </button>
           )) : (
             <div className="p-4 text-sm text-slate-500">
-              Không tìm thấy bến phù hợp.
+              Không tìm thấy trạm đầu/cuối phù hợp.
             </div>
           )}
         </div>
@@ -110,7 +110,39 @@ const CreateRouteStep = ({ inputClassName, panelClassName, routes, stations }) =
     .filter((station) => station.isActive !== false)
     .filter(isTerminalStation)
     .slice()
-    .sort((left, right) => (left.stationName || '').localeCompare(right.stationName || ''));
+    .sort((left, right) => {
+      const updatedDifference = new Date(right.updatedAt || right.createdAt || 0).getTime()
+        - new Date(left.updatedAt || left.createdAt || 0).getTime();
+      return updatedDifference || (left.stationName || '').localeCompare(right.stationName || '');
+    });
+  const suggestedRouteCode = React.useMemo(() => {
+    const highestRouteNumber = routes.reduce((highest, route) => {
+      const match = String(route.routeCode || '').trim().toUpperCase().match(/^DN-?(\d+)$/);
+      return match ? Math.max(highest, Number(match[1])) : highest;
+    }, 0);
+    return `DN-${String(highestRouteNumber + 1).padStart(2, '0')}`;
+  }, [routes]);
+
+  React.useEffect(() => {
+    if (draft.outboundRoute.orderedStops.length >= 2 || !draft.outboundRoute.startStation || !draft.outboundRoute.endStation) return;
+    const startId = draft.outboundRoute.startStation.stationId;
+    const endId = draft.outboundRoute.endStation.stationId;
+    const startStation = stations.find((item) => String(item._id) === String(startId));
+    const endStation = stations.find((item) => String(item._id) === String(endId));
+    if (startStation) setTerminal('start', startStation);
+    if (endStation) setTerminal('end', endStation);
+  }, [draft.outboundRoute.endStation, draft.outboundRoute.orderedStops.length, draft.outboundRoute.startStation, setTerminal, stations]);
+
+  React.useEffect(() => {
+    if (
+      !draft.routeCode.trim()
+      && draft.outboundRoute.startStation
+      && draft.outboundRoute.endStation
+    ) {
+      updateDraft({ routeCode: suggestedRouteCode });
+    }
+  }, [draft.outboundRoute.endStation, draft.outboundRoute.startStation, draft.routeCode, suggestedRouteCode, updateDraft]);
+
   const defaultRouteName = buildDefaultRouteName(
     draft.outboundRoute.startStation,
     draft.outboundRoute.endStation
@@ -124,16 +156,16 @@ const CreateRouteStep = ({ inputClassName, panelClassName, routes, stations }) =
     : null;
 
   return (
-    <section className={`rounded-2xl border p-6 ${panelClassName}`}>
+    <section className={`rounded-2xl border p-5 shadow-sm ${panelClassName}`}>
       <div className="max-w-4xl">
         <p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-500">Bước 1</p>
-        <h2 className="mt-3 text-3xl font-black">Tạo tuyến</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-500">
+        <h2 className="mt-1 text-2xl font-black">Tạo tuyến</h2>
+        <p className="mt-1 text-sm leading-6 text-slate-500">
           Nhập mã tuyến, chọn bến đầu và bến cuối. Nếu tên tuyến để trống, hệ thống tự đặt theo bến đầu - bến cuối.
         </p>
       </div>
 
-      <div className="mt-8 grid max-w-5xl gap-5 md:grid-cols-2">
+      <div className="mt-5 grid gap-4 md:grid-cols-2">
         <label>
           <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Mã tuyến</span>
           <input
@@ -142,6 +174,7 @@ const CreateRouteStep = ({ inputClassName, panelClassName, routes, stations }) =
             onChange={(event) => updateDraft({ routeCode: event.target.value.toUpperCase() })}
             placeholder="VD: DN-01"
           />
+          {!duplicateRoute && normalizedRouteCode ? <span className="mt-2 block text-xs font-semibold text-emerald-700">Mã tuyến có thể chỉnh sửa trước khi tiếp tục.</span> : null}
           {duplicateRoute ? <span className="mt-2 block text-xs font-bold text-rose-600">Mã tuyến {normalizedRouteCode} đã được sử dụng bởi tuyến {duplicateRoute.routeName}.</span> : null}
         </label>
         <label>
@@ -164,8 +197,8 @@ const CreateRouteStep = ({ inputClassName, panelClassName, routes, stations }) =
         />
       </div>
 
-      <div className="mt-8 flex justify-end">
-        <button type="button" disabled={!normalizedRouteCode || Boolean(duplicateRoute)} onClick={() => setActiveStep(1)} className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">
+      <div className="mt-5 flex justify-end">
+        <button type="button" title={!normalizedRouteCode ? 'Cần nhập mã tuyến' : duplicateRoute ? 'Mã tuyến đã tồn tại' : 'Sang bước dựng lộ trình'} disabled={!normalizedRouteCode || Boolean(duplicateRoute)} onClick={() => setActiveStep(1)} className="h-10 rounded-xl bg-emerald-500 px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40">
           Lưu và tiếp tục
         </button>
       </div>

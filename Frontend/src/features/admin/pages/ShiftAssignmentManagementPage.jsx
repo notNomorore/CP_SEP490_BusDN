@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
+  CalendarDays,
   CheckCircle2,
   Clock3,
   Edit3,
@@ -13,8 +14,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import adminService from '../services/adminService.js';
-import { splitTripsIntoNonOverlappingDuties } from '../utils/tripDutyPlanning.js';
-import OperationalPlanningPage from './OperationalPlanningPage.jsx';
+const WeeklyRosterPanel = React.lazy(() => import('./shifts/WeeklyRosterPanel.jsx'));
 
 const OPERATING_START = '05:30';
 const OPERATING_END = '18:30';
@@ -22,18 +22,20 @@ const MAX_DAYS = 31;
 const MAX_WORK_MINUTES_PER_DAY = 8 * 60;
 const TARGET_WORK_MINUTES_PER_DAY = 8 * 60;
 const TARGET_WORK_MINUTES_PER_WEEK = 40 * 60;
-const MIN_REST_MINUTES = 60;
+const MIN_REST_MINUTES = 10 * 60;
+// The weekly roster is now the primary scheduling view. Keep the legacy list
+// available in code for audit/backward compatibility, but do not expose it.
+const SHOW_LEGACY_SHIFT_LIST = false;
+const SHOW_SEPARATE_WORKLOAD_TAB = false;
 
 const shiftTemplates = [
-  { key: 'MORNING', label: 'Ca sáng', startTime: '05:30', endTime: '10:30', shiftType: 'MORNING' },
-  { key: 'MIDDAY', label: 'Ca trưa', startTime: '10:30', endTime: '13:30', shiftType: 'MIDDAY' },
-  { key: 'AFTERNOON', label: 'Ca chiều', startTime: '13:30', endTime: '18:30', shiftType: 'AFTERNOON' },
+  { key: 'MORNING', label: 'Ca nhân sự sáng', startTime: '05:30', endTime: '12:00', shiftType: 'MORNING' },
+  { key: 'AFTERNOON', label: 'Ca nhân sự chiều', startTime: '12:00', endTime: '18:30', shiftType: 'AFTERNOON' },
 ];
 
 const manualShiftTemplates = {
-  MORNING: { label: 'Ca sáng', startTime: '05:30', endTime: '10:30' },
-  MIDDAY: { label: 'Ca trưa', startTime: '10:30', endTime: '13:30' },
-  AFTERNOON: { label: 'Ca chiều', startTime: '13:30', endTime: '18:30' },
+  MORNING: { label: 'Ca nhân sự sáng', startTime: '05:30', endTime: '12:00' },
+  AFTERNOON: { label: 'Ca nhân sự chiều', startTime: '12:00', endTime: '18:30' },
 };
 
 const weekDays = [
@@ -122,92 +124,6 @@ const formatDate = (value) => {
 
 const getId = (value) => String(value?._id || value || '');
 
-const getTripShiftType = (departureTime) => {
-  const departure = Number.isFinite(departureTime) ? departureTime : minutesOf(departureTime);
-  if (departure < minutesOf('10:30')) return 'MORNING';
-  if (departure < minutesOf('13:30')) return 'MIDDAY';
-  return 'AFTERNOON';
-};
-
-const SHIFT_ORDER = { MORNING: 0, MIDDAY: 1, AFTERNOON: 2 };
-
-const evaluateTripGroupCompatibility = (selectedGroups, candidate) => {
-  if (selectedGroups.some((group) => group.key === candidate.key)) return { compatible: true, reason: '' };
-  if (candidate.outOfWindowTrips?.length) {
-    return { compatible: false, reason: `${candidate.outOfWindowTrips.length} chuyến vượt khung ${manualShiftTemplates[candidate.shiftType].startTime}–${manualShiftTemplates[candidate.shiftType].endTime}; cần điều chỉnh kế hoạch chuyến.` };
-  }
-  if (!selectedGroups.length) return { compatible: true, reason: '' };
-  if (selectedGroups.length >= 2) return { compatible: false, reason: 'Đã chọn tối đa hai ca.' };
-  const selected = selectedGroups[0];
-  if (selected.workDate !== candidate.workDate) return { compatible: false, reason: 'Hai ca phải cùng ngày làm việc.' };
-  if (selected.routeId !== candidate.routeId) return { compatible: false, reason: 'Khác tuyến; hiện chỉ cho ghép nhân sự trên cùng tuyến.' };
-  if (Math.abs(SHIFT_ORDER[selected.shiftType] - SHIFT_ORDER[candidate.shiftType]) !== 1) {
-    return { compatible: false, reason: 'Chỉ được ghép Sáng + Trưa hoặc Trưa + Chiều.' };
-  }
-  const [earlier, later] = SHIFT_ORDER[selected.shiftType] < SHIFT_ORDER[candidate.shiftType]
-    ? [selected, candidate]
-    : [candidate, selected];
-  if (String(earlier.endTime) > String(later.startTime)) {
-    return { compatible: false, reason: 'Chuyến trước chưa kết thúc khi chuyến tiếp theo bắt đầu.' };
-  }
-  const totalMinutes = durationMinutes(
-    manualShiftTemplates[earlier.shiftType].startTime,
-    manualShiftTemplates[earlier.shiftType].endTime,
-  ) + durationMinutes(
-    manualShiftTemplates[later.shiftType].startTime,
-    manualShiftTemplates[later.shiftType].endTime,
-  );
-  if (totalMinutes > MAX_WORK_MINUTES_PER_DAY) return { compatible: false, reason: 'Ghép ca sẽ vượt 8 giờ làm việc.' };
-  return { compatible: true, reason: 'Cùng tuyến, liền ca và không chồng chuyến.' };
-};
-
-const tripRouteShiftKey = (trip) => {
-  const shiftType = getTripShiftType(trip?.departureTime);
-  return `${toDateInput(trip?.serviceDate)}:${getId(trip?.routeId) || trip?.routeCode || 'UNASSIGNED'}:${shiftType}`;
-};
-
-const groupPendingTripsByRouteShift = (trips) => {
-  const groups = new Map();
-  trips.forEach((trip) => {
-    const key = tripRouteShiftKey(trip);
-    const current = groups.get(key) || {
-      key,
-      shiftType: getTripShiftType(trip.departureTime),
-      workDate: toDateInput(trip.serviceDate),
-      routeId: getId(trip.routeId),
-      routeCode: trip.routeCode,
-      routeName: trip.routeName,
-      trips: [],
-    };
-    current.trips.push(trip);
-    groups.set(key, current);
-  });
-  return [...groups.values()].map((group) => {
-    const sortedTrips = [...group.trips].sort((left, right) => String(left.departureTime || '').localeCompare(String(right.departureTime || '')));
-    const shiftWindow = manualShiftTemplates[group.shiftType];
-    const outOfWindowTrips = sortedTrips.filter((trip) => (
-      String(trip.departureTime || '') < shiftWindow.startTime
-      || String(trip.expectedArrivalTime || '') > shiftWindow.endTime
-    ));
-    const duties = splitTripsIntoNonOverlappingDuties(sortedTrips);
-    const assignedDriverIds = new Set(sortedTrips.map((trip) => getId(trip.driver?.userId)).filter(Boolean));
-    const assignedAssistantIds = new Set(sortedTrips.map((trip) => getId(trip.assistant?.userId)).filter(Boolean));
-    return {
-      ...group,
-      trips: sortedTrips,
-      duties,
-      shiftStartTime: shiftWindow.startTime,
-      shiftEndTime: shiftWindow.endTime,
-      outOfWindowTrips,
-      requiredTeams: duties.length,
-      missingDrivers: Math.max(0, duties.length - assignedDriverIds.size),
-      missingAssistants: Math.max(0, duties.length - assignedAssistantIds.size),
-      startTime: sortedTrips[0]?.departureTime || '',
-      endTime: sortedTrips.reduce((maximum, trip) => !maximum || String(trip.expectedArrivalTime) > maximum ? String(trip.expectedArrivalTime) : maximum, ''),
-    };
-  });
-};
-
 const getStaffName = (staff) => staff?.fullName || staff?.email || staff?.phoneNumber || 'Chưa gán';
 
 const assignmentStaff = (assignment, type) => {
@@ -221,7 +137,6 @@ const assignmentStaff = (assignment, type) => {
 const makeShiftName = ({ shiftType, startTime, endTime }) => {
   const label = {
     MORNING: 'Ca sáng',
-    MIDDAY: 'Ca trưa',
     AFTERNOON: 'Ca chiều',
   }[shiftType] || 'Ca làm việc';
   return `${label} ${startTime}-${endTime}`;
@@ -263,21 +178,6 @@ const restMinutesBetween = (first, second) => {
   return firstEnd <= secondStart ? secondStart - firstEnd : firstStart - secondEnd;
 };
 
-const formsValidEightHourBundle = (first, second) => {
-  const types = new Set([first?.shiftType, second?.shiftType]);
-  return types.size === 2
-    && types.has('MIDDAY')
-    && (types.has('MORNING') || types.has('AFTERNOON'))
-    && (first?.endTime === second?.startTime || second?.endTime === first?.startTime);
-};
-
-const defaultDemandSlots = [
-  { startTime: '05:30', endTime: '09:00', frequencyMinutes: 15, requiredVehicles: 1, requiredDrivers: 1, requiredAssistants: 1, demandLevel: 'HIGH' },
-  { startTime: '09:00', endTime: '12:30', frequencyMinutes: 20, requiredVehicles: 1, requiredDrivers: 1, requiredAssistants: 1, demandLevel: 'MEDIUM' },
-  { startTime: '12:30', endTime: '16:00', frequencyMinutes: 20, requiredVehicles: 1, requiredDrivers: 1, requiredAssistants: 1, demandLevel: 'MEDIUM' },
-  { startTime: '16:00', endTime: '18:30', frequencyMinutes: 10, requiredVehicles: 2, requiredDrivers: 2, requiredAssistants: 2, demandLevel: 'VERY_HIGH' },
-];
-
 const formatMinutes = (minutes) => `${Math.floor(Math.max(0, minutes) / 60)}h${String(Math.max(0, minutes) % 60).padStart(2, '0')}`;
 
 const getShiftDurationMinutes = (shift) => {
@@ -316,7 +216,7 @@ const statusClass = {
   CANCELLED: 'bg-rose-100 text-rose-700',
 };
 
-const coverageLabel = { FULL: 'Đã phân đủ', PARTIAL: 'Còn thiếu nhân sự', NONE: 'Chưa phân lịch' };
+const coverageLabel = { FULL: 'Đủ nhân sự ca', PARTIAL: 'Còn thiếu nhân sự', NONE: 'Chưa phân lịch' };
 const coverageClass = {
   FULL: 'bg-emerald-100 text-emerald-800',
   PARTIAL: 'bg-amber-100 text-amber-800',
@@ -343,14 +243,15 @@ const workloadLabels = {
 
 const ShiftAssignmentManagementPage = () => {
   const navigate = useNavigate();
-  const [activeView, setActiveView] = useState('ASSIGN');
+  const [activeView, setActiveView] = useState('ROSTER');
+  const [assignmentMode, setAssignmentMode] = useState('AUTO');
   const [fromDate, setFromDate] = useState(todayInput());
   const [toDate, setToDate] = useState(todayInput());
   const [rangeRefreshKey, setRangeRefreshKey] = useState(0);
   const [form, setForm] = useState({
     applyMode: 'DAY',
     startTime: OPERATING_START,
-    endTime: '13:30',
+    endTime: '12:00',
     shiftType: 'MORNING',
     routeId: '',
     driverId: '',
@@ -361,14 +262,12 @@ const ShiftAssignmentManagementPage = () => {
     description: '',
   });
   const [autoSelection, setAutoSelection] = useState({ driverIds: [], assistantIds: [] });
-  const [staffPriorities, setStaffPriorities] = useState({ drivers: [], assistants: [] });
-  const [prioritySort, setPrioritySort] = useState('SUITABILITY');
-  const [selectedTripIds, setSelectedTripIds] = useState([]);
   const [manualPreviewRows, setManualPreviewRows] = useState([]);
   const [staff, setStaff] = useState({ drivers: [], assistants: [] });
   const [routes, setRoutes] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [pendingTrips, setPendingTrips] = useState([]);
+  const [staffingDemand, setStaffingDemand] = useState([]);
   const [assignmentMap, setAssignmentMap] = useState({});
   const [selectedShift, setSelectedShift] = useState(null);
   const [editForm, setEditForm] = useState(null);
@@ -378,8 +277,6 @@ const ShiftAssignmentManagementPage = () => {
   const [coverageFilter, setCoverageFilter] = useState('ALL');
   const [shiftStatusFilter, setShiftStatusFilter] = useState('ALL');
   const [operatingOverview, setOperatingOverview] = useState(null);
-  const [demandRouteId, setDemandRouteId] = useState('');
-  const [demandSlots, setDemandSlots] = useState(defaultDemandSlots);
   const [eligibleManualDrivers, setEligibleManualDrivers] = useState([]);
   const [eligibleEditDrivers, setEligibleEditDrivers] = useState([]);
   const [cancelRequest, setCancelRequest] = useState(null);
@@ -420,9 +317,7 @@ const ShiftAssignmentManagementPage = () => {
     const hasTimeConflict = assignments.some(({ shift }) => shiftBlocksTemplate(shift, template));
     if (hasTimeConflict) return false;
 
-    if (role === 'driver' && assignments.some(({ shift }) => (
-      restMinutesBetween(shift, template) < MIN_REST_MINUTES && !formsValidEightHourBundle(shift, template)
-    ))) {
+    if (role === 'driver' && assignments.some(({ shift }) => restMinutesBetween(shift, template) < MIN_REST_MINUTES)) {
       return false;
     }
 
@@ -437,33 +332,13 @@ const ShiftAssignmentManagementPage = () => {
     dateRange.some((workDate) => shiftTemplates.some((template) => canStaffTakeSlot(staffId, role, workDate, template)))
   ), [canStaffTakeSlot, dateRange]);
 
-  const priorityMaps = useMemo(() => ({
-    drivers: new Map(staffPriorities.drivers.map((item) => [getId(item.staffId), item])),
-    assistants: new Map(staffPriorities.assistants.map((item) => [getId(item.staffId), item])),
-  }), [staffPriorities]);
+  const availableDrivers = useMemo(() => (
+    staff.drivers.filter((driver) => hasAnyFreeSlot(getId(driver), 'driver'))
+  ), [hasAnyFreeSlot, staff.drivers]);
 
-  const sortPrioritizedStaff = useCallback((items, kind) => [...items]
-    .map((item) => ({ ...item, priority: priorityMaps[kind].get(getId(item)) || null }))
-    .sort((left, right) => {
-      if (prioritySort === 'ROUTE_EXPERIENCE') {
-        return (right.priority?.routeExperienceCount || 0) - (left.priority?.routeExperienceCount || 0)
-          || (right.priority?.tripExperienceCount || 0) - (left.priority?.tripExperienceCount || 0)
-          || getStaffName(left).localeCompare(getStaffName(right), 'vi');
-      }
-      if (prioritySort === 'NAME') return getStaffName(left).localeCompare(getStaffName(right), 'vi');
-      return (right.priority?.suitabilityScore || 0) - (left.priority?.suitabilityScore || 0)
-        || getStaffName(left).localeCompare(getStaffName(right), 'vi');
-    }), [priorityMaps, prioritySort]);
-
-  const availableDrivers = useMemo(() => sortPrioritizedStaff(
-    staff.drivers.filter((driver) => hasAnyFreeSlot(getId(driver), 'driver')),
-    'drivers',
-  ), [hasAnyFreeSlot, sortPrioritizedStaff, staff.drivers]);
-
-  const availableAssistants = useMemo(() => sortPrioritizedStaff(
-    staff.assistants.filter((assistant) => hasAnyFreeSlot(getId(assistant), 'assistant')),
-    'assistants',
-  ), [hasAnyFreeSlot, sortPrioritizedStaff, staff.assistants]);
+  const availableAssistants = useMemo(() => (
+    staff.assistants.filter((assistant) => hasAnyFreeSlot(getId(assistant), 'assistant'))
+  ), [hasAnyFreeSlot, staff.assistants]);
 
   const editAvailableDrivers = useMemo(() => {
     if (!selectedShift || !editForm) return [];
@@ -622,19 +497,16 @@ const ShiftAssignmentManagementPage = () => {
     }
   }, [dateRangeError, fromDate, toDate]);
 
-  const loadStaffPriorities = useCallback(async () => {
-    const selectedGroups = groupPendingTripsByRouteShift(pendingTrips).filter((group) => selectedTripIds.includes(group.key));
-    const routeIds = selectedGroups.length
-      ? [...new Set(selectedGroups.map((group) => group.routeId).filter(Boolean))]
-      : [...new Set(pendingTrips.map((trip) => getId(trip.routeId)).filter(Boolean))];
+  const loadStaffingDemand = useCallback(async () => {
+    if (dateRangeError || !fromDate || !toDate) return setStaffingDemand([]);
     try {
-      const response = await adminService.getShiftStaffPriorities({ routeIds: routeIds.join(','), lookbackDays: 365 });
-      setStaffPriorities(response.priorities || { drivers: [], assistants: [] });
+      const response = await adminService.getStaffingDemand({ startDate: fromDate, endDate: toDate });
+      setStaffingDemand(response.demand?.days || []);
     } catch (error) {
-      setStaffPriorities({ drivers: [], assistants: [] });
-      toast.error(error?.message || 'Không thể tải xếp hạng kinh nghiệm nhân sự.');
+      setStaffingDemand([]);
+      toast.error(error?.message || 'Không thể tính nhu cầu nhân sự từ kế hoạch chuyến.');
     }
-  }, [pendingTrips, selectedTripIds]);
+  }, [dateRangeError, fromDate, toDate]);
 
   const loadOperatingOverview = useCallback(async () => {
     if (!fromDate || dateRangeError) return setOperatingOverview(null);
@@ -646,30 +518,6 @@ const ShiftAssignmentManagementPage = () => {
       toast.error(error?.message || 'Không thể tải kế hoạch vận hành theo tuyến.');
     }
   }, [dateRangeError, fromDate]);
-
-  const loadDemandConfig = useCallback(async (routeId) => {
-    setDemandRouteId(routeId);
-    if (!routeId || !fromDate) return setDemandSlots(defaultDemandSlots);
-    try {
-      const response = await adminService.getRouteOperatingConfigs({ routeId, date: fromDate });
-      setDemandSlots(response.configs?.length ? response.configs.map((item) => ({
-        startTime: item.startTime, endTime: item.endTime, frequencyMinutes: item.frequencyMinutes,
-        requiredVehicles: item.requiredVehicles, requiredDrivers: item.requiredDrivers,
-        requiredAssistants: item.requiredAssistants, demandLevel: item.demandLevel,
-      })) : defaultDemandSlots);
-    } catch (error) { toast.error(error?.message || 'Không thể tải nhu cầu tuyến.'); }
-  }, [fromDate]);
-
-  const saveDemandConfig = async () => {
-    if (!demandRouteId) return toast.error('Hãy chọn tuyến cần cấu hình.');
-    setSubmitting(true);
-    try {
-      await adminService.saveRouteOperatingConfigs({ routeId: demandRouteId, effectiveDate: fromDate, slots: demandSlots });
-      toast.success('Đã lưu nhu cầu vận hành riêng của tuyến.');
-      await loadOperatingOverview();
-    } catch (error) { toast.error(error?.message || 'Không thể lưu nhu cầu tuyến.'); }
-    finally { setSubmitting(false); }
-  };
 
   useEffect(() => {
     loadStaff().catch(() => toast.error('Không thể tải danh sách nhân sự.'));
@@ -684,12 +532,12 @@ const ShiftAssignmentManagementPage = () => {
   }, [loadPendingTrips, rangeRefreshKey]);
 
   useEffect(() => {
-    loadOperatingOverview();
-  }, [loadOperatingOverview, rangeRefreshKey]);
+    loadStaffingDemand();
+  }, [loadStaffingDemand, rangeRefreshKey]);
 
   useEffect(() => {
-    loadStaffPriorities();
-  }, [loadStaffPriorities]);
+    loadOperatingOverview();
+  }, [loadOperatingOverview, rangeRefreshKey]);
 
   useEffect(() => {
     if (!fromDate || !form.startTime || !form.endTime) return setEligibleManualDrivers([]);
@@ -762,22 +610,37 @@ const ShiftAssignmentManagementPage = () => {
       && template.startTime
       && template.endTime
       && (template.startTime !== form.startTime || template.endTime !== form.endTime);
-    const rows = targetDates.map((workDate, index) => ({
-      previewId: `${workDate}-${form.shiftType}-${form.startTime}-${form.endTime}-${index}`,
-      workDate,
-      startTime: form.startTime,
-      endTime: form.endTime,
-      shiftType: form.shiftType,
-      routeId: form.routeId,
-      shiftName: makeShiftName(form),
-      driverId: form.driverId,
-      assistantId: form.assistantId,
-      vehicleId: form.vehicleId,
-      requiresAssistant: Boolean(form.assistantId),
-      description: form.description || 'Ca được tạo từ màn hình phân công ca thủ công.',
-      warnings: [
-        standardTimeChanged ? 'Giờ ca chuẩn đã được điều chỉnh' : '',
-      ].filter(Boolean),
+    const selectedPeople = [
+      form.driverId ? { role: 'DRIVER', driverId: form.driverId, assistantId: '' } : null,
+      form.assistantId ? { role: 'ASSISTANT', driverId: '', assistantId: form.assistantId } : null,
+    ].filter(Boolean);
+    const rows = targetDates.flatMap((workDate, index) => selectedPeople.map((person) => {
+      const demand = staffingDemand.find((item) => item.workDate === workDate && item.shiftType === form.shiftType);
+      const affectedWindows = (demand?.coverageWindows || []).filter((window) => (
+        rangesOverlap(form.startTime, form.endTime, window.startTime, window.endTime)
+      ));
+      const shortageWindows = affectedWindows.filter((window) => window.missingDrivers > 0 || window.missingAssistants > 0);
+      return {
+        previewId: `${workDate}-${form.shiftType}-${form.startTime}-${form.endTime}-${person.role}-${index}`,
+        workDate,
+        startTime: form.startTime,
+        endTime: form.endTime,
+        shiftType: form.shiftType,
+        routeId: form.routeId,
+        shiftName: makeShiftName(form),
+        driverId: person.driverId,
+        assistantId: person.assistantId,
+        vehicleId: form.vehicleId,
+        requiresAssistant: false,
+        description: form.description || 'Ca được tạo từ màn hình phân công ca thủ công.',
+        coverageImpact: shortageWindows.length
+          ? `Bổ sung ${shortageWindows.map((window) => `${window.startTime}–${window.endTime}`).join(', ')}`
+          : (affectedWindows.length ? 'Khung giờ này hiện đã đủ nhân sự' : 'Không có chuyến cần vận hành trong khung giờ này'),
+        warnings: [
+          standardTimeChanged ? 'Ca tăng cường theo giờ thực tế' : '',
+          shortageWindows.length ? '' : 'Có nguy cơ bố trí dư nhân sự',
+        ].filter(Boolean),
+      };
     }));
     setMessage('');
     setManualPreviewRows(rows);
@@ -793,6 +656,7 @@ const ShiftAssignmentManagementPage = () => {
     try {
       for (const row of manualPreviewRows) {
         const { shift } = await createOrReuseShift({
+          shiftCode: buildAutoShiftCode({ workDate: row.workDate, templateKey: `MANUAL-${row.shiftType}`, driverId: row.driverId, assistantId: row.assistantId }),
           workDate: row.workDate,
           startTime: row.startTime,
           endTime: row.endTime,
@@ -811,7 +675,7 @@ const ShiftAssignmentManagementPage = () => {
       setManualPreviewRows([]);
       setMessage(`Đã lưu ${saved} ca nháp, gán nhân sự cho ${assigned} ca.`);
       toast.success('Đã lưu lịch nháp.');
-      await loadShifts();
+      await Promise.all([loadShifts(), loadStaffingDemand()]);
     } catch (error) {
       toast.error(error?.message || 'Không thể lưu lịch nháp.');
     } finally {
@@ -838,39 +702,38 @@ const ShiftAssignmentManagementPage = () => {
     }));
   };
 
-  const selectTripForAssignment = (tripGroup) => {
-    if (selectedTripIds.includes(tripGroup.key)) {
-      setSelectedTripIds((current) => current.filter((key) => key !== tripGroup.key));
-      return;
-    }
-    const selectedGroups = pendingTripGroups.filter((group) => selectedTripIds.includes(group.key));
-    const compatibility = evaluateTripGroupCompatibility(selectedGroups, tripGroup);
-    if (!compatibility.compatible) return toast.error(compatibility.reason);
-    const nextGroups = [...selectedGroups, tripGroup];
-    setSelectedTripIds(nextGroups.map((group) => group.key));
-    const requiredDrivers = Math.max(...nextGroups.map((group) => group.missingDrivers));
-    const requiredAssistants = Math.max(...nextGroups.map((group) => group.missingAssistants));
+  const selectRecommendedStaff = () => {
+    const pickForEveryDay = (field, missingField) => [...new Set(staffingDemand.flatMap((demand) => (
+      [...(demand[field] || [])]
+        .filter((candidate) => candidate.eligible)
+        .sort((left, right) => (right.score || 0) - (left.score || 0))
+        .slice(0, Math.max(0, demand[missingField] || 0))
+        .map(getId)
+    )))];
     setAutoSelection({
-      driverIds: availableDrivers.slice(0, requiredDrivers).map(getId),
-      assistantIds: availableAssistants.slice(0, requiredAssistants).map(getId),
+      driverIds: pickForEveryDay('driverCandidates', 'missingDrivers'),
+      assistantIds: pickForEveryDay('assistantCandidates', 'missingAssistants'),
     });
+    toast.success('Đã chọn nhân sự phù hợp riêng cho từng ngày và từng ca.');
   };
 
   const handleAutoGenerate = async () => {
     if (dateRangeError) return toast.error(dateRangeError);
     if (!dateRange.length) return toast.error('Khoảng ngày không hợp lệ.');
-    const activeTripGroups = pendingTripGroups.filter((group) => selectedTripIds.includes(group.key));
-    if (activeTripGroups.length === 2) {
-      const compatibility = evaluateTripGroupCompatibility([activeTripGroups[0]], activeTripGroups[1]);
-      if (!compatibility.compatible) return toast.error(compatibility.reason);
-    }
-    const requiredDrivers = activeTripGroups.length ? Math.max(...activeTripGroups.map((group) => group.missingDrivers)) : 0;
-    const requiredAssistants = activeTripGroups.length ? Math.max(...activeTripGroups.map((group) => group.missingAssistants)) : 0;
-    if (!activeTripGroups.length && !autoSelection.driverIds.length && !autoSelection.assistantIds.length) {
+    if (!autoSelection.driverIds.length && !autoSelection.assistantIds.length) {
       return toast.error('Vui lòng chọn ít nhất một tài xế hoặc phụ xe.');
     }
-    if (activeTripGroups.length && autoSelection.driverIds.length < requiredDrivers) return toast.error(`Cần chọn thêm ${requiredDrivers - autoSelection.driverIds.length} tài xế.`);
-    if (activeTripGroups.length && autoSelection.assistantIds.length < requiredAssistants) return toast.error(`Cần chọn thêm ${requiredAssistants - autoSelection.assistantIds.length} phụ xe.`);
+    const plannedTripCount = staffingDemand.reduce((total, item) => total + Number(item.tripCount || 0), 0);
+    const missingDriverCount = staffingDemand.reduce((total, item) => total + Number(item.missingDrivers || 0), 0);
+    const missingAssistantCount = staffingDemand.reduce((total, item) => total + Number(item.missingAssistants || 0), 0);
+    if (!plannedTripCount) {
+      setMessage('Khoảng ngày đã chọn chưa có kế hoạch chuyến. Hãy tạo chuyến trước, hoặc dùng “Tạo ca thủ công” nếu cần bố trí ca ngoại lệ.');
+      return toast('Chưa có kế hoạch chuyến để tính nhu cầu ca.');
+    }
+    if (!missingDriverCount && !missingAssistantCount) {
+      setMessage('Các ca hiện có đã bao phủ đủ nhu cầu chuyến trong khoảng ngày đã chọn. Hệ thống không sinh thêm để tránh thừa nhân sự.');
+      return toast('Nhu cầu nhân sự đã đủ, không cần sinh thêm ca.');
+    }
 
     setSubmitting(true);
     setMessage('');
@@ -884,70 +747,6 @@ const ShiftAssignmentManagementPage = () => {
       const selectedAssistants = autoSelection.assistantIds
         .map((id) => availableAssistants.find((assistant) => getId(assistant) === id))
         .filter(Boolean);
-
-      if (activeTripGroups.length) {
-        let totalCreatedDutyShifts = 0;
-        let totalSelectedTrips = 0;
-        for (const selectedGroup of activeTripGroups) {
-        const workDate = selectedGroup.workDate;
-        let driverCursor = 0;
-        let assistantCursor = 0;
-        const usedDriverIds = new Set();
-        const usedAssistantIds = new Set();
-        const createdDutyShifts = [];
-        for (let dutyIndex = 0; dutyIndex < selectedGroup.duties.length; dutyIndex += 1) {
-          const dutyTrips = selectedGroup.duties[dutyIndex];
-          const template = manualShiftTemplates[selectedGroup.shiftType];
-          const startTime = template.startTime;
-          const endTime = template.endTime;
-          const existingShift = selectedGroup.existingDutyShifts?.[dutyIndex];
-          const existingPair = existingShift ? assignmentMap[getId(existingShift)] || {} : {};
-          const shiftDriver = assignmentStaff(existingPair.driver, 'driver');
-          const shiftAssistant = assignmentStaff(existingPair.assistant, 'assistant');
-          const existingDriverTrip = dutyTrips.find((trip) => getId(trip.driver?.userId) && !usedDriverIds.has(getId(trip.driver.userId)));
-          const existingAssistantTrip = dutyTrips.find((trip) => getId(trip.assistant?.userId) && !usedAssistantIds.has(getId(trip.assistant.userId)));
-          const driver = shiftDriver || existingDriverTrip ? null : selectedDrivers[driverCursor++];
-          const assistant = shiftAssistant || existingAssistantTrip ? null : selectedAssistants[assistantCursor++];
-          const driverId = getId(shiftDriver) || getId(existingDriverTrip?.driver?.userId) || getId(driver);
-          const assistantId = getId(shiftAssistant) || getId(existingAssistantTrip?.assistant?.userId) || getId(assistant);
-          if (driverId) usedDriverIds.add(driverId);
-          if (assistantId) usedAssistantIds.add(assistantId);
-          if (!driverId) throw new Error(`Tổ ${dutyIndex + 1} chưa có tài xế.`);
-          if (!isValidWindow(startTime, endTime)) throw new Error(`Khung giờ tổ ${dutyIndex + 1} không hợp lệ.`);
-          const shiftResult = existingShift ? { shift: existingShift, created: false } : await createOrReuseShift({
-            shiftCode: `ROUTE-${String(selectedGroup.routeCode || selectedGroup.routeId.slice(-8)).replace(/[^a-z0-9-]/gi, '-').toUpperCase()}-${workDate.replaceAll('-', '')}-${selectedGroup.shiftType}-T${dutyIndex + 1}`,
-            workDate,
-            routeId: selectedGroup.routeId,
-            startTime,
-            endTime,
-            shiftType: selectedGroup.shiftType,
-            shiftName: `${selectedGroup.routeCode || 'Tuyến'} · Tổ ${dutyIndex + 1} · ${startTime}-${endTime}`,
-            description: `Tổ ${dutyIndex + 1}/${selectedGroup.requiredTeams}, gồm ${dutyTrips.length} lượt không chồng thời gian.`,
-            requiresAssistant: Boolean(assistantId),
-            status: 'PUBLISHED',
-            approvalStatus: 'PUBLISHED',
-          });
-          const { shift, created } = shiftResult;
-          try {
-            const currentAssignments = assignmentMap[getId(shift)] || {};
-            if (!currentAssignments.driver) await adminService.assignDriverToSelectedShift(shift._id, { driverId });
-            if (assistantId && !currentAssignments.assistant) await adminService.assignAssistantToSelectedShift(shift._id, { assistantId });
-            createdDutyShifts.push(shift);
-          } catch (error) {
-            if (created) await adminService.archiveShift(shift._id).catch(() => undefined);
-            throw error;
-          }
-        }
-          totalCreatedDutyShifts += createdDutyShifts.length;
-          totalSelectedTrips += selectedGroup.trips.length;
-        }
-        setMessage(`Đã tạo/phân ${totalCreatedDutyShifts} tổ nhân sự cho ${totalSelectedTrips} lượt trong ${activeTripGroups.length} ca đã chọn. Xe sẽ được phân ở bước riêng.`);
-        setSelectedTripIds([]);
-        setAutoSelection({ driverIds: [], assistantIds: [] });
-        toast.success(activeTripGroups.length === 2 ? 'Đã tạo gói hai ca đủ 8 giờ và phân bổ nhân sự.' : 'Đã tạo ca đơn và phân bổ nhân sự.');
-        await Promise.all([loadShifts(), loadPendingTrips()]);
-        return;
-      }
 
       const localBusy = {
         driver: new Map(),
@@ -981,77 +780,49 @@ const ShiftAssignmentManagementPage = () => {
 
       for (const workDate of dateRange) {
         for (const template of shiftTemplates) {
-          const demand = staffingDemand.find((item) => item.shiftType === template.shiftType);
-          const buildQueue = (items, role, limit) => items
-            .filter((item) => canUseStaff(getId(item), role, workDate, template))
+          const demand = staffingDemand.find((item) => item.workDate === workDate && item.shiftType === template.shiftType);
+          const buildQueue = (items, role, limit) => {
+            const candidateField = role === 'driver' ? 'driverCandidates' : 'assistantCandidates';
+            const scores = new Map((demand?.[candidateField] || []).map((candidate) => [getId(candidate), candidate.score || 0]));
+            return [...items]
+            .filter((item) => scores.has(getId(item)) && canUseStaff(getId(item), role, workDate, template))
+            .sort((left, right) => (scores.get(getId(right)) || 0) - (scores.get(getId(left)) || 0))
             .slice(0, Math.max(0, limit));
+          };
 
           const availableDriverQueue = buildQueue(selectedDrivers, 'driver', demand?.missingDrivers || 0);
           const availableAssistantQueue = buildQueue(selectedAssistants, 'assistant', demand?.missingAssistants || 0);
-          const pairCount = Math.max(availableDriverQueue.length, availableAssistantQueue.length);
-          totalCandidateRows += pairCount;
+          const independentPeople = [
+            ...availableDriverQueue.map((person) => ({ role: 'driver', person })),
+            ...availableAssistantQueue.map((person) => ({ role: 'assistant', person })),
+          ];
+          totalCandidateRows += independentPeople.length;
 
-          for (let staffIndex = 0; staffIndex < pairCount; staffIndex += 1) {
-            const driver = availableDriverQueue[staffIndex];
-            const assistant = availableAssistantQueue[staffIndex];
-            const driverId = getId(driver);
-            const assistantId = getId(assistant);
-
-            if (!driverId && !assistantId) {
-              skippedRows.push({
-                reason: 'Nhân sự đã kín ca hoặc vượt 8 giờ trong ngày.',
-                workDate,
-                driver: driver ? getStaffName(driver) : null,
-                assistant: assistant ? getStaffName(assistant) : null,
-                shift: template.label,
-              });
-              continue;
-            }
-
+          for (let staffIndex = 0; staffIndex < independentPeople.length; staffIndex += 1) {
+            const { role, person } = independentPeople[staffIndex];
+            const staffId = getId(person);
+            const driverId = role === 'driver' ? staffId : '';
+            const assistantId = role === 'assistant' ? staffId : '';
             const { shift, created } = await createOrReuseShift({
-              shiftCode: buildAutoShiftCode({ workDate, templateKey: template.key, driverId, assistantId }),
+              shiftCode: buildAutoShiftCode({ workDate, templateKey: `${template.key}-${role}`, driverId, assistantId }),
               workDate,
               startTime: template.startTime,
               endTime: template.endTime,
               shiftType: template.shiftType,
-              shiftName: `${template.label} ${template.startTime}-${template.endTime} #${staffIndex + 1}`,
-              description: 'Ca được hệ thống sinh tự động theo nhân sự đi làm trong ngày.',
-              requiresAssistant: Boolean(assistantId),
+              shiftName: `${template.label} · ${role === 'driver' ? 'Tài xế' : 'Phụ xe'} · ${getStaffName(person)}`,
+              description: 'Ca cá nhân được hệ thống sinh tự động theo nhu cầu vận hành.',
+              requiresAssistant: false,
               status: 'PUBLISHED',
               approvalStatus: 'PUBLISHED',
             });
-
-            let assignedPeople = 0;
-            const assignmentErrors = [];
-
-            if (driverId) {
-              try {
-                await adminService.assignDriverToSelectedShift(shift._id, { driverId });
-                assignedPeople += 1;
-                markBusy('driver', workDate, driverId, template);
-              } catch (error) {
-                assignmentErrors.push(error?.message || 'Không thể phân công tài xế.');
-              }
-            }
-
-            if (assistantId) {
-              try {
-                await adminService.assignAssistantToSelectedShift(shift._id, { assistantId });
-                assignedPeople += 1;
-                markBusy('assistant', workDate, assistantId, template);
-              } catch (error) {
-                assignmentErrors.push(error?.message || 'Không thể phân công phụ xe.');
-              }
-            }
-
-            if (assignedPeople === Number(Boolean(driverId)) + Number(Boolean(assistantId))) {
+            try {
+              if (role === 'driver') await adminService.assignDriverToSelectedShift(shift._id, { driverId });
+              else await adminService.assignAssistantToSelectedShift(shift._id, { assistantId });
+              markBusy(role, workDate, staffId, template);
               createdRows.push(shift);
-              if (assignmentErrors.length) {
-                skippedRows.push({ shift, reason: assignmentErrors.join(' ') });
-              }
-            } else {
+            } catch (error) {
               if (created) await adminService.archiveShift(shift._id).catch(() => undefined);
-              skippedRows.push({ shift, reason: assignmentErrors.join(' ') || 'Không phân công được nhân sự phù hợp.' });
+              skippedRows.push({ shift, reason: error?.message || 'Không phân công được nhân sự phù hợp.' });
             }
           }
         }
@@ -1059,7 +830,7 @@ const ShiftAssignmentManagementPage = () => {
 
       if (!createdRows.length) {
         setMessage('Không sinh ca mới vì toàn bộ nhân sự đã có ca hoặc không còn ai rảnh trong khoảng ngày đã chọn.');
-        toast('Không có ca mới để sinh.');
+        toast('Không còn nhân sự phù hợp để bổ sung vào các khung giờ đang thiếu.');
       } else {
         setMessage(`Đã sinh/phân công ${createdRows.length} ca cho ${dateRange.length} ngày. ${skippedRows.length ? `${skippedRows.length} trường hợp đã kín ca hoặc cần admin kiểm tra lại.` : 'Không có ca lỗi.'}`);
         toast.success('Đã sinh lịch phân ca.');
@@ -1081,7 +852,7 @@ const ShiftAssignmentManagementPage = () => {
     setEditForm({
       startTime: shift.startTime || OPERATING_START,
       endTime: shift.endTime || OPERATING_END,
-      shiftType: ['MORNING', 'MIDDAY', 'AFTERNOON'].includes(shift.shiftType) ? shift.shiftType : 'MORNING',
+      shiftType: ['MORNING', 'AFTERNOON'].includes(shift.shiftType) ? shift.shiftType : 'MORNING',
       status: shift.status || 'ACTIVE',
       description: shift.description || '',
       driverId: getId(assignmentMap[getId(shift)]?.driver?.driverId),
@@ -1177,39 +948,6 @@ const ShiftAssignmentManagementPage = () => {
     }
   };
 
-  const summary = useMemo(() => {
-    const assigned = shifts.filter((shift) => {
-      const item = assignmentMap[getId(shift)] || {};
-      return item.driver || item.assistant;
-    }).length;
-    return {
-      total: shifts.length,
-      assigned,
-      missing: shifts.length - assigned,
-      days: dateRange.length,
-    };
-  }, [assignmentMap, dateRange.length, shifts]);
-
-  const coverageSummary = useMemo(() => {
-    const initial = {
-      MORNING: { total: 0, staffed: 0 },
-      MIDDAY: { total: 0, staffed: 0 },
-      AFTERNOON: { total: 0, staffed: 0 },
-    };
-    shifts.forEach((shift) => {
-      if (!initial[shift.shiftType]) return;
-      const item = assignmentMap[getId(shift)] || {};
-      initial[shift.shiftType].total += 1;
-      if (item.driver && item.assistant) initial[shift.shiftType].staffed += 1;
-    });
-    const extraPairs = Math.min(availableDrivers.length, availableAssistants.length);
-    return {
-      ...initial,
-      extraPairs,
-      balanced: Math.abs(initial.MORNING.staffed - initial.AFTERNOON.staffed) <= Math.max(1, dateRange.length),
-    };
-  }, [assignmentMap, availableAssistants.length, availableDrivers.length, dateRange.length, shifts]);
-
   const shiftCoverage = useCallback((shift) => {
     const pair = assignmentMap[getId(shift)] || {};
     const hasDriver = Boolean(pair.driver);
@@ -1227,42 +965,17 @@ const ShiftAssignmentManagementPage = () => {
     if (shiftStatusFilter === 'CONFIRMED') return ['APPROVED', 'PUBLISHED', 'ACTIVE'].includes(shift.status);
     return shift.status === shiftStatusFilter;
   }), [coverageFilter, shiftCoverage, shiftStatusFilter, shifts]);
+  const individualShiftRows = useMemo(() => visibleShifts.flatMap((shift) => {
+    const assignments = assignmentMap[getId(shift)] || {};
+    const driver = assignmentStaff(assignments.driver, 'driver');
+    const assistant = assignmentStaff(assignments.assistant, 'assistant');
+    return [
+      driver ? { key: `${getId(shift)}-driver`, shift, person: driver, role: 'Tài xế' } : null,
+      assistant ? { key: `${getId(shift)}-assistant`, shift, person: assistant, role: 'Phụ xe' } : null,
+    ].filter(Boolean);
+  }), [assignmentMap, visibleShifts]);
 
   const routeById = useMemo(() => new Map(routes.map((route) => [getId(route), route])), [routes]);
-  const pendingTripGroups = useMemo(() => groupPendingTripsByRouteShift(pendingTrips).map((group) => {
-    const existingDutyShifts = shifts.filter((shift) => (
-      shift.status !== 'ARCHIVED'
-      && getId(shift.routeId) === group.routeId
-      && toDateInput(shift.workDate) === group.workDate
-      && shift.shiftType === group.shiftType
-      && shift.startTime < group.endTime
-      && shift.endTime > group.startTime
-    )).sort((left, right) => String(left.startTime).localeCompare(String(right.startTime)));
-    const assignedDriverIds = new Set(existingDutyShifts.map((shift) => getId(assignmentStaff(assignmentMap[getId(shift)]?.driver, 'driver'))).filter(Boolean));
-    const assignedAssistantIds = new Set(existingDutyShifts.map((shift) => getId(assignmentStaff(assignmentMap[getId(shift)]?.assistant, 'assistant'))).filter(Boolean));
-    return {
-      ...group,
-      existingDutyShifts,
-      missingDrivers: Math.max(0, group.requiredTeams - assignedDriverIds.size),
-      missingAssistants: Math.max(0, group.requiredTeams - assignedAssistantIds.size),
-    };
-  }), [assignmentMap, pendingTrips, shifts]);
-  const selectedTripGroups = useMemo(() => pendingTripGroups.filter((group) => selectedTripIds.includes(group.key)), [pendingTripGroups, selectedTripIds]);
-  const selectedTrip = selectedTripGroups[0] || null;
-  const selectedRequiredDrivers = selectedTripGroups.length ? Math.max(...selectedTripGroups.map((group) => group.missingDrivers)) : 0;
-  const selectedRequiredAssistants = selectedTripGroups.length ? Math.max(...selectedTripGroups.map((group) => group.missingAssistants)) : 0;
-  const pendingTripsByShift = useMemo(() => {
-    const groups = { MORNING: [], MIDDAY: [], AFTERNOON: [] };
-    pendingTripGroups.forEach((tripGroup) => {
-      if (tripGroup.missingDrivers === 0 && tripGroup.missingAssistants === 0) return;
-      groups[tripGroup.shiftType].push(tripGroup);
-    });
-    Object.values(groups).forEach((items) => items.sort((left, right) => (
-      left.workDate.localeCompare(right.workDate)
-      || String(left.startTime || '').localeCompare(String(right.startTime || ''))
-    )));
-    return groups;
-  }, [pendingTripGroups]);
   const pendingTripsByRoute = useMemo(() => {
     const groups = new Map();
     pendingTrips.forEach((trip) => {
@@ -1279,73 +992,33 @@ const ShiftAssignmentManagementPage = () => {
       )),
     }));
   }, [pendingTrips, routeById]);
-  const staffingDemand = useMemo(() => {
-    const cycleGroups = new Map();
-    pendingTrips.forEach((trip) => {
-      const date = toDateInput(trip.serviceDate);
-      const cycleKey = trip.operationCycleCode || getId(trip);
-      const key = `${date}:${getId(trip.routeId)}:${cycleKey}`;
-      const current = cycleGroups.get(key) || { date, starts: [], ends: [], tripCount: 0 };
-      current.starts.push(minutesOf(trip.departureTime));
-      current.ends.push(minutesOf(trip.expectedArrivalTime));
-      current.tripCount += 1;
-      cycleGroups.set(key, current);
+  const recommendedMissing = useMemo(() => {
+    const byDate = new Map();
+    staffingDemand.forEach((item) => {
+      const current = byDate.get(item.workDate) || { drivers: 0, assistants: 0 };
+      current.drivers += item.missingDrivers;
+      current.assistants += item.missingAssistants;
+      byDate.set(item.workDate, current);
     });
-    const buckets = new Map();
-    cycleGroups.forEach((cycle) => {
-      const start = Math.min(...cycle.starts.filter(Number.isFinite));
-      const end = Math.max(...cycle.ends.filter(Number.isFinite));
-      if (!Number.isFinite(start) || !Number.isFinite(end)) return;
-      const shiftType = getTripShiftType(start);
-      const key = `${cycle.date}:${shiftType}`;
-      const bucket = buckets.get(key) || { date: cycle.date, shiftType, cycles: [], tripCount: 0 };
-      bucket.cycles.push({ start, end });
-      bucket.tripCount += cycle.tripCount;
-      buckets.set(key, bucket);
+    return [...byDate.values()].reduce((result, item) => ({
+      drivers: Math.max(result.drivers, item.drivers),
+      assistants: Math.max(result.assistants, item.assistants),
+    }), { drivers: 0, assistants: 0 });
+  }, [staffingDemand]);
+  const staffPriority = useMemo(() => {
+    const result = { driver: new Map(), assistant: new Map() };
+    [['driver', 'driverCandidates'], ['assistant', 'assistantCandidates']].forEach(([role, field]) => {
+      const grouped = new Map();
+      staffingDemand.flatMap((item) => item[field] || []).forEach((candidate) => {
+        const current = grouped.get(getId(candidate)) || { ...candidate, scores: [], reasons: new Set() };
+        current.scores.push(candidate.score || 0);
+        (candidate.reasons || []).forEach((reason) => current.reasons.add(reason));
+        grouped.set(getId(candidate), current);
+      });
+      grouped.forEach((candidate, staffId) => result[role].set(staffId, { ...candidate, score: Math.round(candidate.scores.reduce((sum, score) => sum + score, 0) / candidate.scores.length), reasons: [...candidate.reasons] }));
     });
-    const demandFor = (shiftType) => {
-      const relevant = [...buckets.values()].filter((bucket) => bucket.shiftType === shiftType);
-      const routeGroups = new Map();
-      pendingTrips.filter((trip) => {
-        const start = minutesOf(trip.departureTime);
-        return Number.isFinite(start) && getTripShiftType(trip.departureTime) === shiftType;
-      }).forEach((trip) => {
-        const routeId = getId(trip.routeId) || trip.routeCode || 'UNASSIGNED';
-        const current = routeGroups.get(routeId) || {
-          routeId,
-          routeCode: trip.routeCode || routeById.get(routeId)?.routeCode || 'Chưa có mã',
-          routeName: trip.routeName || routeById.get(routeId)?.routeName || 'Chưa có tên tuyến',
-          tripCount: 0,
-          firstDeparture: trip.departureTime,
-          lastArrival: trip.expectedArrivalTime,
-        };
-        current.tripCount += 1;
-        if (String(trip.departureTime) < String(current.firstDeparture)) current.firstDeparture = trip.departureTime;
-        if (String(trip.expectedArrivalTime) > String(current.lastArrival)) current.lastArrival = trip.expectedArrivalTime;
-        routeGroups.set(routeId, current);
-      });
-      const days = relevant.map((bucket) => {
-        const events = bucket.cycles.flatMap((cycle) => [{ time: cycle.start, delta: 1 }, { time: cycle.end, delta: -1 }])
-          .sort((left, right) => left.time - right.time || left.delta - right.delta);
-        let concurrent = 0;
-        let peak = 0;
-        events.forEach((event) => { concurrent += event.delta; peak = Math.max(peak, concurrent); });
-        const matchingShifts = shifts.filter((shift) => toDateInput(shift.workDate) === bucket.date && shift.shiftType === shiftType && shift.status !== 'CANCELLED');
-        const assignedDrivers = matchingShifts.filter((shift) => assignmentMap[getId(shift)]?.driver).length;
-        const assignedAssistants = matchingShifts.filter((shift) => assignmentMap[getId(shift)]?.assistant).length;
-        return { ...bucket, required: peak, assignedDrivers, assignedAssistants, missingDrivers: Math.max(0, peak - assignedDrivers), missingAssistants: Math.max(0, peak - assignedAssistants) };
-      });
-      return {
-        shiftType,
-        tripCount: days.reduce((total, day) => total + day.tripCount, 0),
-        required: Math.max(0, ...days.map((day) => day.required)),
-        missingDrivers: Math.max(0, ...days.map((day) => day.missingDrivers)),
-        missingAssistants: Math.max(0, ...days.map((day) => day.missingAssistants)),
-        routes: [...routeGroups.values()].sort((left, right) => left.routeCode.localeCompare(right.routeCode, 'vi')),
-      };
-    };
-    return [demandFor('MORNING'), demandFor('MIDDAY'), demandFor('AFTERNOON')];
-  }, [assignmentMap, pendingTrips, routeById, shifts]);
+    return result;
+  }, [staffingDemand]);
   const routeCoverage = useMemo(() => {
     const groups = new Map();
     shifts.forEach((shift) => {
@@ -1386,7 +1059,7 @@ const ShiftAssignmentManagementPage = () => {
       if (dayMinutes > MAX_WORK_MINUTES_PER_DAY) warnings.push('Vượt 8 giờ/ngày');
       ordered.forEach((shift, index) => {
         if (ordered.slice(index + 1).some((next) => shiftBlocksTemplate(shift, next))) warnings.push('Trùng lịch');
-        if (ordered[index + 1] && restMinutesBetween(shift, ordered[index + 1]) < MIN_REST_MINUTES && !formsValidEightHourBundle(shift, ordered[index + 1])) warnings.push('Thiếu thời gian nghỉ');
+        if (ordered[index + 1] && restMinutesBetween(shift, ordered[index + 1]) < MIN_REST_MINUTES) warnings.push('Thiếu thời gian nghỉ');
       });
     });
     return { driver, items, totalMinutes, freeSlots, warnings: [...new Set(warnings)] };
@@ -1436,101 +1109,90 @@ const ShiftAssignmentManagementPage = () => {
     ...driverWorkloads.flatMap((item) => item.warnings.map((warning) => ({ key: `${getId(item.driver)}-${warning}`, text: `${getStaffName(item.driver)}: ${warning}.` }))),
   ], [dateRange.length, driverWorkloads, shiftCoverage, shifts]);
 
+  const demandDashboard = useMemo(() => {
+    const dayItems = staffingDemand.filter((item) => item.workDate === fromDate);
+    const totalTrips = dayItems.reduce((sum, item) => sum + Number(item.tripCount || 0), 0);
+    const requiredDrivers = dayItems.reduce((sum, item) => sum + Number(item.requiredDrivers || 0), 0);
+    const requiredAssistants = dayItems.reduce((sum, item) => sum + Number(item.requiredAssistants || 0), 0);
+    const assignedDrivers = dayItems.reduce((sum, item) => sum + Number(item.assignedDrivers || 0), 0);
+    const assignedAssistants = dayItems.reduce((sum, item) => sum + Number(item.assignedAssistants || 0), 0);
+    const sourceWindows = dayItems.flatMap((item) => item.coverageWindows || []);
+    const bands = [
+      ['05:30', '06:30', 'Bình thường'],
+      ['06:30', '08:30', 'Cao điểm sáng'],
+      ['08:30', '11:00', 'Bình thường'],
+      ['11:00', '13:00', 'Nhu cầu trung bình'],
+      ['13:00', '16:30', 'Bình thường'],
+      ['16:30', '18:30', 'Cao điểm chiều'],
+    ].map(([startTime, endTime, label]) => {
+      const matching = sourceWindows.filter((window) => rangesOverlap(startTime, endTime, window.startTime, window.endTime));
+      const peak = matching.sort((left, right) => Number(right.required || 0) - Number(left.required || 0))[0];
+      const required = Number(peak?.required || 0);
+      const assignedDriversInBand = Number(peak?.assignedDrivers || 0);
+      const assignedAssistantsInBand = Number(peak?.assignedAssistants || 0);
+      return { startTime, endTime, label, required, assignedDrivers: assignedDriversInBand, assignedAssistants: assignedAssistantsInBand, missingDrivers: Math.max(0, required - assignedDriversInBand), missingAssistants: Math.max(0, required - assignedAssistantsInBand) };
+    });
+    return { totalTrips, requiredDrivers, requiredAssistants, assignedDrivers, assignedAssistants, bands };
+  }, [fromDate, staffingDemand]);
+
   return (
     <div className="min-h-full bg-[#eef9f4] text-[#05231a]">
-      <section className="mx-auto max-w-[1600px] space-y-6 px-4 py-6 lg:px-8">
-        <div className="rounded-[28px] bg-[#062819] p-6 text-white shadow-2xl shadow-emerald-950/20">
+      <section className="mx-auto max-w-[1500px] space-y-4 px-4 py-4 lg:px-6">
+        <div className="rounded-2xl bg-[#062819] px-5 py-4 text-white shadow-lg shadow-emerald-950/15">
           <p className="text-xs font-black uppercase tracking-[0.35em] text-emerald-300">Quản lý ca làm</p>
-          <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="mt-2 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h1 className="text-3xl font-black">Phân ca nhân sự</h1>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-emerald-50/80">
-                Tạo và quản lý ca làm cho toàn bộ tài xế, phụ xe trong khoảng 05:30 - 18:30.
+              <h1 className="text-2xl font-black">Phân ca & quản lý giờ làm</h1>
+              <p className="mt-1 max-w-3xl text-sm text-emerald-50/80">
+                Lập ca theo nhu cầu chuyến, sau đó theo dõi lịch và thời lượng làm việc của tài xế, phụ xe.
               </p>
             </div>
             <button
               type="button"
               onClick={() => { loadShifts(); loadPendingTrips(); loadOperatingOverview(); }}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-5 text-sm font-black text-[#062819]"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-black text-[#062819]"
             >
               <RefreshCw size={17} /> Tải lại
             </button>
           </div>
         </div>
 
-        <div className="rounded-3xl border border-emerald-100 bg-white p-3 shadow-sm">
-          <div className="grid gap-3 md:grid-cols-2">
-            <button type="button" onClick={() => setActiveView('ASSIGN')} className={`rounded-2xl border p-5 text-left transition ${activeView === 'ASSIGN' ? 'border-emerald-300 bg-emerald-100 text-emerald-950 shadow-sm' : 'border-slate-100 bg-slate-50 text-slate-600 hover:border-emerald-200'}`}>
-              <span className="flex items-center gap-3"><UserRoundCheck size={22} /><strong className="text-lg">Phân ca nhân sự</strong></span>
-              <span className="mt-2 block text-sm">Tạo ca sáng hoặc ca chiều cho tài xế và phụ xe.</span>
+        <div className="rounded-2xl border border-emerald-100 bg-white p-2 shadow-sm">
+          <div className="grid gap-2 md:grid-cols-2">
+            <button type="button" onClick={() => setActiveView('ROSTER')} className={`rounded-xl border px-4 py-3 text-left transition ${activeView === 'ROSTER' ? 'border-emerald-300 bg-emerald-100 text-emerald-950' : 'border-transparent bg-slate-50 text-slate-600 hover:border-emerald-200'}`}>
+              <span className="flex items-center gap-2"><CalendarDays size={19} /><strong>Lịch tuần</strong></span>
+              <span className="mt-1 block text-xs">Lịch sáng/chiều và ngày nghỉ.</span>
             </button>
-            <button type="button" onClick={() => setActiveView('WORKLOAD')} className={`rounded-2xl border p-5 text-left transition ${activeView === 'WORKLOAD' ? 'border-emerald-300 bg-emerald-100 text-emerald-950 shadow-sm' : 'border-slate-100 bg-slate-50 text-slate-600 hover:border-emerald-200'}`}>
-              <span className="flex items-center gap-3"><Clock3 size={22} /><strong className="text-lg">Ca làm & hiệu suất</strong></span>
-              <span className="mt-2 block text-sm">Xem tổng giờ làm theo ngày, tuần hoặc tháng.</span>
+            <button type="button" onClick={() => setActiveView('ASSIGN')} className={`rounded-xl border px-4 py-3 text-left transition ${activeView === 'ASSIGN' ? 'border-emerald-300 bg-emerald-100 text-emerald-950' : 'border-transparent bg-slate-50 text-slate-600 hover:border-emerald-200'}`}>
+              <span className="flex items-center gap-2"><UserRoundCheck size={19} /><strong>Phân ca nhân sự</strong></span>
+              <span className="mt-1 block text-xs">Nhu cầu và tạo ca làm.</span>
             </button>
+            {SHOW_SEPARATE_WORKLOAD_TAB ? <button type="button" onClick={() => setActiveView('WORKLOAD')} className={`rounded-xl border px-4 py-3 text-left transition ${activeView === 'WORKLOAD' ? 'border-emerald-300 bg-emerald-100 text-emerald-950' : 'border-transparent bg-slate-50 text-slate-600 hover:border-emerald-200'}`}>
+              <span className="flex items-center gap-2"><Clock3 size={19} /><strong>Ca làm & hiệu suất</strong></span>
+              <span className="mt-1 block text-xs">Lịch, tổng giờ và trạng thái.</span>
+            </button> : null}
           </div>
         </div>
 
-        <div className="hidden grid gap-4 md:grid-cols-4">
-          {[
-            ['Số ngày', summary.days],
-            ['Tổng ca', summary.total],
-            ['Đã có nhân sự', summary.assigned],
-            ['Cần kiểm tra', summary.missing],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-              <p className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">{label}</p>
-              <p className="mt-3 text-3xl font-black">{value}</p>
-            </div>
-          ))}
-        </div>
-
-        {activeView === 'REMOVED' ? <div className="grid gap-4 lg:grid-cols-3">
-          {[
-            ['Ca sáng đủ người', `${coverageSummary.MORNING.staffed}/${coverageSummary.MORNING.total}`],
-            ['Ca chiều đủ người', `${coverageSummary.AFTERNOON.staffed}/${coverageSummary.AFTERNOON.total}`],
-            ['Có thể tạo thêm', `${coverageSummary.extraPairs} cặp tài xế/phụ xe`],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-              <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500">{label}</p>
-              <p className="mt-2 text-2xl font-black">{value}</p>
-            </div>
-          ))}
-          <div className={`rounded-2xl border p-5 shadow-sm lg:col-span-3 ${coverageSummary.balanced ? 'border-emerald-100 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
-            <p className="font-black">{coverageSummary.balanced ? 'Phân bổ ca đang tương đối cân bằng' : 'Phân bổ ca sáng/chiều đang lệch'}</p>
-            <p className="mt-1 text-sm">Chỉ số này kiểm tra độ phủ nhân sự theo ca. Để biết đủ chạy tuyến, cần đối chiếu thêm với số chuyến phát sinh trong “Tuyến và lịch chạy”.</p>
-          </div>
-        </div> : null}
-
-        <div className="hidden">
-          <div className="grid gap-3">
-            <button
-              type="button"
-              onClick={() => setActiveView('LIST')}
-              className={`rounded-2xl p-4 text-left transition ${activeView === 'LIST' ? 'bg-emerald-100 text-emerald-950' : 'bg-slate-50 text-slate-600'}`}
-            >
-              <p className="font-black">Ca làm</p>
-              <p className="mt-1 text-sm">Xem toàn bộ ca, đổi người, sửa giờ hoặc hủy ca phát sinh.</p>
-            </button>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-emerald-100 bg-white p-5 shadow-sm">
-          <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
+        <div className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
+          {activeView === 'ROSTER' ? <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+            <label className="space-y-2"><span className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Chọn một ngày trong tuần</span><input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold" /><span className="block text-xs text-slate-500">Hệ thống tự động hiển thị trọn tuần từ Thứ Hai đến Chủ Nhật.</span></label>
+            <div className="flex items-start gap-2 lg:pt-6"><button type="button" onClick={() => setRangePreset('DAY')} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-black">Tuần hiện tại</button><button type="button" onClick={() => setFromDate(addDays(fromDate, -7))} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-black">← Tuần trước</button><button type="button" onClick={() => setFromDate(addDays(fromDate, 7))} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-black">Tuần sau →</button></div>
+          </div> : <div className="grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
             <label className="space-y-2">
               <span className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Từ ngày</span>
-              <input type="date" value={fromDate} max={toDate || undefined} onChange={(event) => setFromDate(event.target.value)} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold" />
+              <input type="date" value={fromDate} max={toDate || undefined} onChange={(event) => setFromDate(event.target.value)} className="h-10 w-full rounded-xl border border-slate-200 px-3 font-bold" />
             </label>
             <label className="space-y-2">
               <span className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Đến ngày</span>
-              <input type="date" value={toDate} min={fromDate || undefined} onChange={(event) => setToDate(event.target.value)} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold" />
+              <input type="date" value={toDate} min={fromDate || undefined} onChange={(event) => setToDate(event.target.value)} className="h-10 w-full rounded-xl border border-slate-200 px-3 font-bold" />
             </label>
             <div className="flex items-end gap-2">
-              <button type="button" onClick={() => setRangePreset('DAY')} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-black">Hôm nay</button>
-              <button type="button" onClick={() => setRangePreset('WEEK')} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-black">Tuần này</button>
-              <button type="button" onClick={() => setRangePreset('MONTH')} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-black">Tháng</button>
+              <button type="button" onClick={() => setRangePreset('DAY')} className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-black">Hôm nay</button>
+              <button type="button" onClick={() => setRangePreset('WEEK')} className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-black">Tuần</button>
+              <button type="button" onClick={() => setRangePreset('MONTH')} className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-black">Tháng</button>
             </div>
-          </div>
+          </div>}
           {dateRangeError ? (
             <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
               {dateRangeError}
@@ -1538,61 +1200,28 @@ const ShiftAssignmentManagementPage = () => {
           ) : null}
         </div>
 
-        {activeView === 'ASSIGN' ? <section className="rounded-3xl border border-cyan-200 bg-cyan-50 p-6 shadow-sm">
-          <div>
-            <h2 className="text-xl font-black text-cyan-950">Chọn tuyến cần phân bổ nhân sự</h2>
-            <p className="mt-1 text-sm text-cyan-900/70">Các lượt cùng tuyến, cùng ngày và cùng buổi được gom vào một ô; tuyến khác sẽ nằm ở ô riêng để không trộn nhân sự.</p>
-          </div>
-          <div className="mt-5 grid gap-4 xl:grid-cols-2">
-            {[['MORNING', 'Ca sáng'], ['MIDDAY', 'Ca trưa'], ['AFTERNOON', 'Ca chiều']].map(([group, label]) => (
-              <div key={group} className="rounded-2xl border border-cyan-100 bg-white p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="font-black">{label}<span className="ml-2 text-xs font-bold text-slate-500">{manualShiftTemplates[group].startTime}–{manualShiftTemplates[group].endTime}</span></p>
-                  <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-black text-cyan-800">{pendingTripsByShift[group].length} tuyến/ngày</span>
-                </div>
-                <div className="mt-3 grid max-h-80 gap-2 overflow-y-auto pr-1">
-                  {pendingTripsByShift[group].map((tripGroup) => {
-                    const route = routeById.get(tripGroup.routeId);
-                    const isSelected = selectedTripIds.includes(tripGroup.key);
-                    const compatibility = evaluateTripGroupCompatibility(selectedTripGroups, tripGroup);
-                    const isDisabled = !isSelected && !compatibility.compatible;
-                    const missingDrivers = tripGroup.missingDrivers;
-                    const missingAssistants = tripGroup.missingAssistants;
-                    return (
-                      <button key={tripGroup.key} type="button" disabled={isDisabled} title={isDisabled ? compatibility.reason : ''} onClick={() => selectTripForAssignment(tripGroup)} className={`rounded-xl border p-3 text-left transition ${isSelected ? 'border-cyan-600 bg-cyan-50 ring-2 ring-cyan-200' : isDisabled ? 'cursor-not-allowed border-slate-200 bg-slate-100 opacity-55' : 'border-slate-200 bg-slate-50 hover:border-cyan-300 hover:bg-white'}`}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-black">{route?.routeCode || tripGroup.routeCode} · {route?.routeName || tripGroup.routeName}</p>
-                            <p className="mt-1 text-xs font-bold text-slate-500">{tripGroup.workDate} · Khung ca {tripGroup.shiftStartTime}–{tripGroup.shiftEndTime}</p>
-                            <p className="mt-1 text-xs text-slate-500">Giờ chuyến thực tế: {tripGroup.startTime}–{tripGroup.endTime}</p>
-                            <p className="mt-1 text-xs text-slate-500">{tripGroup.trips.length} lượt · cần {tripGroup.requiredTeams} tổ chạy song song trong {manualShiftTemplates[group].label.toLowerCase()}</p>
-                          </div>
-                          <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-black ${isSelected ? 'bg-cyan-700 text-white' : isDisabled ? 'bg-slate-200 text-slate-500' : 'bg-amber-100 text-amber-800'}`}>{isSelected ? 'Đang chọn' : isDisabled ? 'Không tương thích' : 'Chọn tuyến'}</span>
-                        </div>
-                        {isDisabled ? <p className="mt-2 rounded-lg bg-rose-50 px-2 py-1.5 text-[11px] font-bold text-rose-700">{compatibility.reason}</p> : null}
-                        {tripGroup.outOfWindowTrips.length ? <p className="mt-2 text-[11px] font-black text-rose-700">Vượt ca: {tripGroup.outOfWindowTrips.map((trip) => `${trip.scheduleCode || 'Chuyến'} ${trip.departureTime}–${trip.expectedArrivalTime}`).join(', ')}</p> : null}
-                        <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-black">
-                          <span className={`rounded-full px-2 py-1 ${missingDrivers ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>{missingDrivers ? `Thiếu ${missingDrivers} tài xế` : 'Đã đủ tài xế'}</span>
-                          <span className={`rounded-full px-2 py-1 ${missingAssistants ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>{missingAssistants ? `Thiếu ${missingAssistants} phụ xe` : 'Đã đủ phụ xe'}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                  {!pendingTripsByShift[group].length ? <p className="rounded-xl bg-slate-50 px-3 py-4 text-sm text-slate-500">Không có chuyến chờ phân bổ trong ca này.</p> : null}
-                </div>
-              </div>
-            ))}
-          </div>
-          {selectedTripGroups.length ? (
-            <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-cyan-300 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div><p className="font-black text-cyan-950">Đang chọn {selectedTripGroups.length} ca: {selectedTripGroups.map((group) => manualShiftTemplates[group.shiftType].label).join(' + ')}</p><p className="mt-1 text-sm text-slate-500">{selectedTripGroups.length === 2 ? 'Gói ca liền nhau có tổng thời lượng 8 giờ.' : 'Ca đơn được phép; có thể chọn thêm ca liền kề qua Ca trưa.'}</p></div>
-              <button type="button" onClick={() => setSelectedTripIds([])} className="h-10 shrink-0 rounded-xl border border-slate-200 px-4 text-sm font-black text-slate-600">Bỏ chọn</button>
-            </div>
-          ) : null}
-          {!pendingTripsByShift.MORNING.length && !pendingTripsByShift.MIDDAY.length && !pendingTripsByShift.AFTERNOON.length ? <p className="mt-4 rounded-xl bg-white px-4 py-3 text-sm font-bold text-emerald-700">Tất cả tuyến trong khoảng ngày này đã được phân đủ tài xế và phụ xe. Các chuyến vẫn được giữ lại để phân xe ở bước tiếp theo.</p> : null}
-        </section> : null}
+        {activeView === 'ROSTER' ? <React.Suspense fallback={<div className="rounded-2xl border border-emerald-100 bg-white p-8 text-center font-bold text-slate-500">Đang tải lịch tuần…</div>}><WeeklyRosterPanel weekStartDate={fromDate} /></React.Suspense> : null}
 
-        {activeView === 'REMOVED' ? <OperationalPlanningPage embedded /> : null}
+        {activeView === 'ASSIGN' ? <section className="grid gap-5 lg:grid-cols-[300px_1fr]">
+          <aside className="rounded-3xl bg-[#063c2f] p-5 text-white shadow-sm">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-300">Nhu cầu nhân sự</p>
+            <h2 className="mt-2 text-xl font-black">Theo kế hoạch chuyến</h2>
+            <p className="mt-2 text-xs leading-5 text-emerald-50/75">Hệ thống tính số nhân viên tối thiểu cần có mặt trong ngày {formatDate(fromDate)}.</p>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              {[['Tổng lượt', demandDashboard.totalTrips], ['Tài xế cần', demandDashboard.requiredDrivers], ['Phụ xe cần', demandDashboard.requiredAssistants], ['Còn thiếu', Math.max(0, demandDashboard.requiredDrivers - demandDashboard.assignedDrivers) + Math.max(0, demandDashboard.requiredAssistants - demandDashboard.assignedAssistants)]].map(([label, value]) => <div key={label} className="rounded-xl bg-white/10 p-3"><p className="text-xs text-emerald-100/75">{label}</p><p className="mt-1 text-2xl font-black">{value}</p></div>)}
+            </div>
+            <div className="mt-5"><div className="flex justify-between text-xs font-bold"><span>Đã bố trí ca</span><span>{demandDashboard.assignedDrivers + demandDashboard.assignedAssistants}/{demandDashboard.requiredDrivers + demandDashboard.requiredAssistants}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-white/20"><div className="h-full rounded-full bg-emerald-300" style={{ width: `${Math.min(100, Math.round(((demandDashboard.assignedDrivers + demandDashboard.assignedAssistants) / Math.max(1, demandDashboard.requiredDrivers + demandDashboard.requiredAssistants)) * 100))}%` }} /></div></div>
+            <button type="button" disabled={!recommendedMissing.drivers && !recommendedMissing.assistants} onClick={selectRecommendedStaff} className="mt-5 h-11 w-full rounded-xl bg-white font-black text-emerald-900 disabled:opacity-40">Chọn nhân sự còn thiếu</button>
+          </aside>
+          <div className="rounded-3xl border border-emerald-100 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-black">Timeline nhu cầu 05:30–18:30</h2><p className="text-sm text-slate-500">Đủ/thiếu được tính từ ca cá nhân hiện có, chưa ghép tài xế với phụ xe.</p></div><div className="flex gap-3 text-xs font-bold"><span className="text-emerald-700">● Đủ</span><span className="text-amber-700">● Thiếu nhẹ</span><span className="text-rose-700">● Thiếu nghiêm trọng</span></div></div>
+            <div className="mt-5 space-y-3">{demandDashboard.bands.map((band) => {
+              const missing = band.missingDrivers + band.missingAssistants;
+              const severe = missing >= 2;
+              return <div key={band.startTime} className={`grid gap-3 rounded-2xl border p-4 sm:grid-cols-[110px_1fr_auto] ${severe ? 'border-rose-200 bg-rose-50' : missing ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}><b>{band.startTime}–{band.endTime}</b><div><p className="font-black">{band.label}</p><p className="mt-1 text-xs text-slate-600">Cần {band.required} tài xế và {band.required} phụ xe · Đã có {band.assignedDrivers} tài xế và {band.assignedAssistants} phụ xe</p></div><span className={`h-fit rounded-full px-3 py-1 text-xs font-black ${severe ? 'bg-rose-100 text-rose-700' : missing ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>{severe ? `Thiếu ${band.missingDrivers} TX, ${band.missingAssistants} PX` : missing ? `Thiếu ${missing} người` : 'Đủ nhân sự'}</span></div>;
+            })}</div>
+          </div>
+        </section> : null}
 
         {activeView === 'REMOVED' ? <section className={`rounded-3xl border p-5 shadow-sm ${pendingTrips.length ? 'border-amber-200 bg-amber-50' : 'border-emerald-100 bg-white'}`}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1724,29 +1353,23 @@ const ShiftAssignmentManagementPage = () => {
           </section>
         </div> : null}
 
-        {activeView === 'WORKLOAD' ? <section className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
-          <div className="flex items-center gap-3"><Clock3 className="text-emerald-700" size={22} /><div><h2 className="text-xl font-black">Giờ làm và hiệu suất nhân sự</h2><p className="text-sm text-slate-500">Tài xế và phụ xe được theo dõi ở hai bảng riêng. Mục tiêu được tính 8 giờ cho mỗi ngày làm việc.</p></div></div>
-          <div className="mt-5 grid items-start gap-5 xl:grid-cols-2">
-            {[['driver', 'Tài xế', 'Danh sách tài xế'], ['assistant', 'Phụ xe', 'Danh sách phụ xe']].map(([role, title, description]) => {
-              const roleItems = staffWorkloads.filter((item) => item.role === role);
-              return <div key={role} className="overflow-hidden rounded-2xl border border-slate-200">
-                <div className={`flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-4 ${role === 'driver' ? 'bg-emerald-50' : 'bg-cyan-50'}`}>
-                  <div><h3 className="font-black">{title}</h3><p className="text-xs text-slate-500">{description} trong khoảng ngày đã chọn</p></div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-black ${role === 'driver' ? 'bg-emerald-100 text-emerald-800' : 'bg-cyan-100 text-cyan-800'}`}>{roleItems.length} người</span>
-                </div>
-                <div className="grid grid-cols-[1.15fr_0.55fr_1.3fr] bg-slate-50 px-4 py-3 text-xs font-black uppercase text-slate-500"><span>Nhân viên</span><span>Số ca</span><span>Thời lượng / đánh giá</span></div>
-                <div className="max-h-[620px] overflow-y-auto">
-                  {roleItems.map((item) => {
-                    const percent = Math.min(100, Math.round((item.totalMinutes / workloadTargetMinutes) * 100));
-                    const completed = item.totalMinutes >= workloadTargetMinutes;
-                    return <div key={`${item.role}-${getId(item.person)}`} className="grid grid-cols-[1.15fr_0.55fr_1.3fr] items-center border-t border-slate-100 px-4 py-4 text-sm">
-                      <span className="truncate pr-3 font-black">{getStaffName(item.person)}</span>
-                      <span>{item.items.length} ca</span>
-                      <span><b className={completed ? 'text-emerald-700' : 'text-amber-700'}>{formatMinutes(item.totalMinutes)} / {formatMinutes(workloadTargetMinutes)}</b><span className="mt-2 block h-2 overflow-hidden rounded-full bg-slate-100"><span className={`block h-full rounded-full ${completed ? 'bg-emerald-500' : 'bg-amber-400'}`} style={{ width: `${percent}%` }} /></span><small className={`mt-1 block font-bold ${completed ? 'text-emerald-700' : 'text-amber-700'}`}>{completed ? 'Đã đủ giờ' : `Chưa đủ giờ · ${percent}%`}</small></span>
-                    </div>;
-                  })}
-                  {!roleItems.length ? <p className="p-6 text-center text-sm text-slate-500">Chưa có {title.toLowerCase()} trong hệ thống.</p> : null}
-                </div>
+        {SHOW_SEPARATE_WORKLOAD_TAB && activeView === 'WORKLOAD' ? <section className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
+          <div className="flex items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-emerald-50"><Clock3 className="text-emerald-700" size={19} /></span><div><h2 className="text-lg font-black">Giờ làm và hiệu suất nhân sự</h2><p className="text-xs text-slate-500">Theo dõi tổng giờ trong kỳ đã chọn; mục tiêu 8 giờ cho mỗi ngày làm việc.</p></div></div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <div className="rounded-xl bg-slate-50 px-4 py-3"><p className="text-[11px] font-black uppercase text-slate-500">Tổng nhân sự</p><p className="mt-0.5 text-xl font-black">{staffWorkloads.length}</p></div>
+            <div className="rounded-xl bg-emerald-50 px-4 py-3"><p className="text-[11px] font-black uppercase text-emerald-700">Đã đạt mục tiêu</p><p className="mt-0.5 text-xl font-black text-emerald-900">{staffWorkloads.filter((item) => item.totalMinutes >= workloadTargetMinutes).length}</p></div>
+            <div className="rounded-xl bg-amber-50 px-4 py-3"><p className="text-[11px] font-black uppercase text-amber-700">Cần bổ sung giờ</p><p className="mt-0.5 text-xl font-black text-amber-900">{staffWorkloads.filter((item) => item.totalMinutes < workloadTargetMinutes).length}</p></div>
+          </div>
+          <div className="mt-4 max-h-[430px] overflow-auto rounded-xl border border-slate-200">
+            <div className="sticky top-0 z-10 grid min-w-[760px] grid-cols-[1.5fr_0.8fr_0.8fr_1.2fr] bg-slate-50 px-4 py-2.5 text-[11px] font-black uppercase text-slate-500"><span>Nhân viên</span><span>Vai trò</span><span>Số ca</span><span>Thời lượng / đánh giá</span></div>
+            {staffWorkloads.map((item) => {
+              const percent = Math.min(100, Math.round((item.totalMinutes / workloadTargetMinutes) * 100));
+              const completed = item.totalMinutes >= workloadTargetMinutes;
+              return <div key={`${item.role}-${getId(item.person)}`} className="grid min-w-[760px] grid-cols-[1.5fr_0.8fr_0.8fr_1.2fr] items-center border-t border-slate-100 px-4 py-3 text-sm hover:bg-emerald-50/40">
+                <span className="font-black">{getStaffName(item.person)}</span>
+                <span>{item.role === 'driver' ? 'Tài xế' : 'Phụ xe'}</span>
+                <span>{item.items.length} ca</span>
+                <span><b className={completed ? 'text-emerald-700' : 'text-amber-700'}>{formatMinutes(item.totalMinutes)} / {formatMinutes(workloadTargetMinutes)}</b><span className="mt-2 block h-2 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full bg-emerald-500" style={{ width: `${percent}%` }} /></span><small className={`mt-1 block font-bold ${completed ? 'text-emerald-700' : 'text-amber-700'}`}>{completed ? 'Đã đủ giờ' : `Chưa đủ giờ · ${percent}%`}</small></span>
               </div>;
             })}
           </div>
@@ -1754,13 +1377,20 @@ const ShiftAssignmentManagementPage = () => {
 
         {activeView === 'ASSIGN' ? (
           <div className="space-y-6">
-            <section className="hidden rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><h2 className="text-xl font-black">Nhu cầu vận hành theo tuyến</h2><p className="text-sm text-slate-500">Mỗi tuyến có tần suất và số nguồn lực riêng theo ngày; đây là đầu vào bắt buộc để đánh giá đủ/thiếu.</p></div><label className="min-w-80 space-y-2"><span className="text-xs font-black uppercase text-slate-500">Tuyến</span><select value={demandRouteId} onChange={(event) => loadDemandConfig(event.target.value)} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold"><option value="">Chọn tuyến hoạt động</option>{routes.filter((route) => route.status === 'PUBLISHED').map((route) => <option key={route._id} value={route._id}>{route.routeCode} · {route.routeName}</option>)}</select></label></div>
-              <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200"><table className="min-w-[900px] w-full text-left text-sm"><thead className="bg-slate-50 text-xs font-black uppercase text-slate-500"><tr>{['Khung giờ', 'Mức nhu cầu', 'Tần suất (phút)', 'Xe', 'Tài xế', 'Phụ xe'].map((item) => <th key={item} className="px-4 py-3">{item}</th>)}</tr></thead><tbody>{demandSlots.map((slot, index) => <tr key={`${slot.startTime}-${slot.endTime}`} className="border-t border-slate-100"><td className="px-4 py-3 font-black">{slot.startTime} - {slot.endTime}</td><td className="px-4 py-3"><select value={slot.demandLevel} onChange={(event) => setDemandSlots((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, demandLevel: event.target.value } : item))} className="h-10 rounded-lg border border-slate-200 px-2"><option value="LOW">Thấp</option><option value="MEDIUM">Trung bình</option><option value="HIGH">Cao</option><option value="VERY_HIGH">Rất cao</option></select></td>{['frequencyMinutes', 'requiredVehicles', 'requiredDrivers', 'requiredAssistants'].map((field) => <td key={field} className="px-4 py-3"><input type="number" min={field === 'requiredAssistants' ? 0 : 1} value={slot[field]} onChange={(event) => setDemandSlots((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: Number(event.target.value) } : item))} className="h-10 w-24 rounded-lg border border-slate-200 px-3 font-bold" /></td>)}</tr>)}</tbody></table></div>
-              <button type="button" disabled={submitting || !demandRouteId} onClick={saveDemandConfig} className="mt-4 h-11 rounded-xl bg-emerald-600 px-5 text-sm font-black text-white disabled:opacity-50">Lưu nhu cầu tuyến cho ngày {fromDate}</button>
+            <section className="rounded-3xl border border-emerald-100 bg-white p-3 shadow-sm">
+              <div className="grid gap-3 md:grid-cols-2">
+                <button type="button" onClick={() => setAssignmentMode('AUTO')} className={`rounded-2xl border p-4 text-left transition ${assignmentMode === 'AUTO' ? 'border-emerald-400 bg-emerald-50 text-emerald-950' : 'border-slate-200 bg-white text-slate-600'}`}>
+                  <span className="flex items-center gap-2 font-black"><Wand2 size={20} /> Gợi ý và sinh ca tự động</span>
+                  <span className="mt-1 block text-sm">Phù hợp khi cần bố trí đủ tổ vận hành và cân bằng giờ làm.</span>
+                </button>
+                <button type="button" onClick={() => setAssignmentMode('MANUAL')} className={`rounded-2xl border p-4 text-left transition ${assignmentMode === 'MANUAL' ? 'border-emerald-400 bg-emerald-50 text-emerald-950' : 'border-slate-200 bg-white text-slate-600'}`}>
+                  <span className="flex items-center gap-2 font-black"><UserRoundCheck size={20} /> Tạo ca thủ công</span>
+                  <span className="mt-1 block text-sm">Dùng khi điều chỉnh ngoại lệ hoặc chọn trực tiếp một nhân viên.</span>
+                </button>
+              </div>
             </section>
             <div className="grid gap-6">
-            <form onSubmit={handleCreateManual} className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
+            {assignmentMode === 'MANUAL' ? <form onSubmit={handleCreateManual} className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
               <div className="flex items-center gap-3">
                 <UserRoundCheck className="text-emerald-700" size={24} />
                 <div>
@@ -1821,7 +1451,6 @@ const ShiftAssignmentManagementPage = () => {
                     }));
                   }} className="h-12 w-full rounded-xl border border-slate-200 px-4 font-bold">
                     <option value="MORNING">Ca sáng</option>
-                    <option value="MIDDAY">Ca trưa</option>
                     <option value="AFTERNOON">Ca chiều</option>
                   </select>
                 </label>
@@ -1867,21 +1496,25 @@ const ShiftAssignmentManagementPage = () => {
                         <span>{row.startTime} - {row.endTime}</span>
                         <span>{row.driverId ? getStaffName(staff.drivers.find((driver) => getId(driver) === row.driverId)) : 'Chưa gán tài xế'}</span>
                         <span>{row.assistantId ? getStaffName(staff.assistants.find((assistant) => getId(assistant) === row.assistantId)) : 'Chưa gán phụ xe'}</span>
-                        <span className={row.warnings.length ? 'font-bold text-amber-700' : 'font-bold text-emerald-700'}>{row.warnings.length ? row.warnings.join(', ') : 'Hợp lệ'}</span>
+                        <span className={row.warnings.length ? 'font-bold text-amber-700' : 'font-bold text-emerald-700'}><b className="block">{row.coverageImpact}</b><small>{row.warnings.length ? row.warnings.join(', ') : 'Hợp lệ'}</small></span>
                       </div>
                     ))}
                   </div>
                 </div>
               ) : null}
-            </form>
+            </form> : null}
 
-            <div className="rounded-3xl border border-emerald-100 bg-white p-6 text-[#05231a] shadow-sm">
+            {assignmentMode === 'AUTO' ? <div className="rounded-3xl border border-emerald-100 bg-white p-6 text-[#05231a] shadow-sm">
               <div className="flex items-center gap-3">
                 <Wand2 className="text-emerald-700" size={25} />
                 <div>
-                  <h2 className="text-xl font-black">Phân bổ nhân sự cho chuyến</h2>
-                  <p className="text-sm text-slate-500">{selectedTripGroups.length ? `Đang phân ${selectedTripGroups.length} ca với ${selectedTripGroups.reduce((sum, group) => sum + group.trips.length, 0)} lượt. Hãy chọn đủ ${selectedRequiredDrivers} tài xế và ${selectedRequiredAssistants} phụ xe.` : 'Hãy chọn một ô tuyến theo ngày phía trên trước khi phân bổ; có thể chọn ca đơn hoặc một cặp ca liền nhau.'}</p>
+                  <h2 className="text-xl font-black">Sinh lịch phân ca tự động</h2>
+                  <p className="text-sm text-slate-500">Chọn danh sách tài xế, phụ xe; hệ thống ghép nhân sự và tạo ca sáng/chiều không trùng lịch.</p>
                 </div>
+              </div>
+              <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+                <b>Mỗi ca hiện kéo dài 6,5 giờ.</b>
+                <span className="ml-1">Ca sáng từ 05:30–12:00 và ca chiều từ 12:00–18:30. Một người không thể nhận cả hai ca cùng ngày vì sẽ thành 13 giờ, vượt giới hạn 8 giờ/ngày và không đủ 10 giờ nghỉ tối thiểu.</span>
               </div>
               <div className="mt-6 grid gap-3">
                 {shiftTemplates.map((template) => (
@@ -1898,39 +1531,30 @@ const ShiftAssignmentManagementPage = () => {
                       <p className="font-black">Tài xế đủ điều kiện</p>
                       <p className="text-xs text-slate-500">{autoSelection.driverIds.length}/{availableDrivers.length} người được chọn</p>
                     </div>
-                    {!selectedTrip ? <label className="flex items-center gap-2 text-xs font-black">
+                    <label className="flex items-center gap-2 text-xs font-black">
                       <input
                         type="checkbox"
                         checked={availableDrivers.length > 0 && autoSelection.driverIds.length === availableDrivers.length}
                         onChange={(event) => setAllAutoStaff('driver', event.target.checked)}
                       />
                       Tất cả
-                    </label> : <span className="text-xs font-black text-cyan-700">Cần chọn {selectedRequiredDrivers}</span>}
+                    </label>
                   </div>
-                  <select value={prioritySort} onChange={(event) => setPrioritySort(event.target.value)} className="mt-3 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700">
-                    <option value="SUITABILITY">Phù hợp nhất</option>
-                    <option value="ROUTE_EXPERIENCE">Nhiều kinh nghiệm tuyến nhất</option>
-                    <option value="NAME">Tên A–Z</option>
-                  </select>
                   <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
                     {!availableDrivers.length ? (
-                      <p className="rounded-xl bg-white px-3 py-2 text-sm text-slate-500">Không còn tài xế rảnh trong khoảng ngày này.</p>
+                      <p className="rounded-xl bg-white px-3 py-2 text-sm text-slate-600"><b className="block text-slate-800">Không có tài xế đủ điều kiện nhận thêm ca.</b>Tài xế đã có ca sáng sẽ không thể nhận tiếp ca chiều cùng ngày. Hãy chuyển ca trong “Lịch tuần”, chọn ngày khác hoặc bổ sung tài xế đang nghỉ cả ngày.</p>
                     ) : null}
-                    {availableDrivers.map((driver, index) => (
-                      <label key={driver._id} title={driver.priority?.reasons?.join(' · ')} className="flex items-center gap-3 rounded-xl bg-white px-3 py-2 text-sm">
+                    {availableDrivers.map((driver) => {
+                      const priority = staffPriority.driver.get(getId(driver));
+                      return <label key={driver._id} className="flex items-start gap-2 rounded-xl bg-white px-3 py-2 text-sm">
                         <input
                           type="checkbox"
                           checked={autoSelection.driverIds.includes(getId(driver))}
                           onChange={() => toggleAutoStaff('driver', getId(driver))}
                         />
-                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-black text-emerald-800">#{index + 1}</span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate font-bold">{getStaffName(driver)}</span>
-                          <span className="block text-[11px] text-slate-500">{driver.priority?.routeExperienceCount || 0} ca tuyến · {driver.priority?.tripExperienceCount || 0} lượt chạy</span>
-                        </span>
-                        <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-black ${(driver.priority?.suitabilityScore || 0) >= 80 ? 'bg-emerald-100 text-emerald-800' : (driver.priority?.suitabilityScore || 0) >= 60 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>{driver.priority?.suitabilityScore || 0}% phù hợp</span>
-                      </label>
-                    ))}
+                        <span><b className="block">{getStaffName(driver)}{priority ? ` · ${priority.score || 0}% phù hợp ca` : ''}</b><small className="text-slate-500">{priority?.reasons?.join(' · ') || 'Hiện chưa có nhu cầu ca cần bổ sung'}</small></span>
+                      </label>;
+                    })}
                   </div>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -1939,87 +1563,78 @@ const ShiftAssignmentManagementPage = () => {
                       <p className="font-black">Phụ xe đủ điều kiện</p>
                       <p className="text-xs text-slate-500">{autoSelection.assistantIds.length}/{availableAssistants.length} người được chọn</p>
                     </div>
-                    {!selectedTrip ? <label className="flex items-center gap-2 text-xs font-black">
+                    <label className="flex items-center gap-2 text-xs font-black">
                       <input
                         type="checkbox"
                         checked={availableAssistants.length > 0 && autoSelection.assistantIds.length === availableAssistants.length}
                         onChange={(event) => setAllAutoStaff('assistant', event.target.checked)}
                       />
                       Tất cả
-                    </label> : <span className="text-xs font-black text-cyan-700">Cần chọn {selectedRequiredAssistants}</span>}
+                    </label>
                   </div>
                   <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
                     {!availableAssistants.length ? (
                       <p className="rounded-xl bg-white px-3 py-2 text-sm text-slate-500">Không còn phụ xe rảnh trong khoảng ngày này.</p>
                     ) : null}
-                    {availableAssistants.map((assistant, index) => (
-                      <label key={assistant._id} title={assistant.priority?.reasons?.join(' · ')} className="flex items-center gap-3 rounded-xl bg-white px-3 py-2 text-sm">
+                    {availableAssistants.map((assistant) => {
+                      const priority = staffPriority.assistant.get(getId(assistant));
+                      return <label key={assistant._id} className="flex items-start gap-2 rounded-xl bg-white px-3 py-2 text-sm">
                         <input
                           type="checkbox"
                           checked={autoSelection.assistantIds.includes(getId(assistant))}
                           onChange={() => toggleAutoStaff('assistant', getId(assistant))}
                         />
-                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-cyan-100 text-xs font-black text-cyan-800">#{index + 1}</span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate font-bold">{getStaffName(assistant)}</span>
-                          <span className="block text-[11px] text-slate-500">{assistant.priority?.routeExperienceCount || 0} ca tuyến · {assistant.priority?.tripExperienceCount || 0} lượt chạy</span>
-                        </span>
-                        <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-black ${(assistant.priority?.suitabilityScore || 0) >= 80 ? 'bg-emerald-100 text-emerald-800' : (assistant.priority?.suitabilityScore || 0) >= 60 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>{assistant.priority?.suitabilityScore || 0}% phù hợp</span>
-                      </label>
-                    ))}
+                        <span><b className="block">{getStaffName(assistant)}{priority ? ` · ${priority.score || 0}% phù hợp ca` : ''}</b><small className="text-slate-500">{priority?.reasons?.join(' · ') || 'Hiện chưa có nhu cầu ca cần bổ sung'}</small></span>
+                      </label>;
+                    })}
                   </div>
                 </div>
               </div>
-              <button disabled={submitting || Boolean(dateRangeError) || (selectedTrip && (autoSelection.driverIds.length < selectedRequiredDrivers || autoSelection.assistantIds.length < selectedRequiredAssistants))} type="button" onClick={handleAutoGenerate} className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-black text-white disabled:opacity-60">
-                <Wand2 size={18} /> {selectedTrip ? `Tạo và phân bổ ${selectedTripGroups.length === 2 ? 'gói 8 giờ' : 'ca đơn'}` : 'Sinh ca tự động cho nhân sự đã chọn'}
+              <button disabled={submitting || Boolean(dateRangeError)} type="button" onClick={handleAutoGenerate} className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-black text-white disabled:opacity-60">
+                <Wand2 size={18} /> Sinh ca tự động cho nhân sự đã chọn
               </button>
-              {message ? <p className="mt-4 rounded-2xl bg-white/10 p-4 text-sm text-emerald-50">{message}</p> : null}
-            </div>
-            </div>
+              {message ? <p className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-900">{message}</p> : null}
+            </div> : null}
+          </div>
           </div>
         ) : null}
 
-        {activeView === 'WORKLOAD' ? (
-          <div className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
+        {SHOW_LEGACY_SHIFT_LIST && activeView === 'WORKLOAD' ? (
+          <div className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <h2 className="text-xl font-black">Lịch ca làm toàn hệ thống</h2>
-                <p className="text-sm text-slate-500">Admin có thể xem, đổi giờ, đổi tài xế/phụ xe hoặc hủy ca trong ngày/tuần đã chọn.</p>
+                <h2 className="text-lg font-black">Lịch ca làm</h2>
+                <p className="text-xs text-slate-500">Xem và điều chỉnh ca trong khoảng ngày đã chọn.</p>
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 {loading ? <span className="text-sm font-bold text-emerald-700">Đang tải...</span> : null}
-                <button type="button" disabled={submitting || Boolean(dateRangeError) || !dateRange.length} onClick={handleCancelShiftsInRange} className="inline-flex h-11 items-center gap-2 rounded-xl border border-rose-200 px-4 text-sm font-black text-rose-600 disabled:cursor-not-allowed disabled:opacity-50">
+                <button type="button" disabled={submitting || Boolean(dateRangeError) || !dateRange.length} onClick={handleCancelShiftsInRange} className="inline-flex h-10 items-center gap-2 rounded-xl border border-rose-200 px-3 text-xs font-black text-rose-600 disabled:cursor-not-allowed disabled:opacity-50">
                   <Trash2 size={17} /> Hủy ca trong khoảng ngày
                 </button>
               </div>
             </div>
 
-            <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
-              <div className="flex flex-wrap gap-2 border-b border-slate-200 p-3">{[['ALL', 'Tất cả'], ['DRAFT', 'Nháp'], ['MISSING', 'Thiếu nhân sự'], ['READY', 'Sẵn sàng'], ['CONFIRMED', 'Đã xác nhận'], ['IN_PROGRESS', 'Đang chạy'], ['COMPLETED', 'Hoàn thành'], ['CANCELLED', 'Đã hủy']].map(([value, label]) => <button key={value} type="button" onClick={() => setShiftStatusFilter(value)} className={`rounded-full px-3 py-2 text-xs font-black ${shiftStatusFilter === value ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{label}</button>)}</div>
-              <div className="grid grid-cols-[0.8fr_1.1fr_1fr_1fr_0.9fr_0.9fr_110px] bg-slate-50 px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-slate-500">
+            <div className="mt-4 max-h-[520px] overflow-auto rounded-xl border border-slate-200">
+              <div className="sticky top-0 z-20 flex flex-wrap gap-1.5 border-b border-slate-200 bg-white p-2.5">{[['ALL', 'Tất cả'], ['DRAFT', 'Nháp'], ['MISSING', 'Thiếu nhân sự'], ['READY', 'Sẵn sàng'], ['CONFIRMED', 'Đã xác nhận'], ['IN_PROGRESS', 'Đang chạy'], ['COMPLETED', 'Hoàn thành'], ['CANCELLED', 'Đã hủy']].map(([value, label]) => <button key={value} type="button" onClick={() => setShiftStatusFilter(value)} className={`rounded-full px-3 py-1.5 text-[11px] font-black ${shiftStatusFilter === value ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{label}</button>)}</div>
+              <div className="grid min-w-[880px] grid-cols-[0.8fr_1.2fr_1.4fr_0.8fr_0.9fr_110px] bg-slate-50 px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-slate-500">
                 <span>Ngày</span>
                 <span>Ca</span>
-                <span>Tài xế</span>
-                <span>Phụ xe</span>
+                <span>Nhân viên</span>
+                <span>Vai trò</span>
                 <span>Trạng thái</span>
-                <span>Độ phủ</span>
                 <span>Thao tác</span>
               </div>
-              {visibleShifts.length ? visibleShifts.map((shift) => {
-                const pair = assignmentMap[getId(shift)] || {};
-                const driver = assignmentStaff(pair.driver, 'driver');
-                const assistant = assignmentStaff(pair.assistant, 'assistant');
+              {individualShiftRows.length ? individualShiftRows.map(({ key, shift, person, role }) => {
                 return (
-                  <div key={shift._id} className="grid grid-cols-[0.8fr_1.1fr_1fr_1fr_0.9fr_0.9fr_110px] items-center border-t border-slate-100 px-4 py-4 text-sm">
+                  <div key={key} className="grid min-w-[880px] grid-cols-[0.8fr_1.2fr_1.4fr_0.8fr_0.9fr_110px] items-center border-t border-slate-100 px-4 py-3 text-sm hover:bg-emerald-50/40">
                     <span className="font-bold">{formatDate(shift.workDate)}</span>
                     <span>
                       <b>{shift.startTime} - {shift.endTime}</b>
                       <small className="mt-1 block text-slate-500">{shift.shiftName}</small>
                     </span>
-                    <span className="font-semibold">{driver ? getStaffName(driver) : 'Chưa gán'}</span>
-                    <span className="font-semibold">{assistant ? getStaffName(assistant) : 'Chưa gán'}</span>
+                    <span className="font-semibold">{getStaffName(person)}</span>
+                    <span className="font-semibold">{role}</span>
                     <span><span className={`rounded-full px-3 py-1 text-xs font-black ${statusClass[shift.status] || statusClass.ACTIVE}`}>{statusLabel[shift.status] || shift.status}</span></span>
-                    <span><span className={`rounded-full px-3 py-1 text-xs font-black ${coverageClass[shiftCoverage(shift)]}`}>{coverageLabel[shiftCoverage(shift)]}</span></span>
                     <span className="flex gap-2">
                       <button type="button" onClick={() => openEdit(shift)} className="rounded-xl border border-slate-200 p-2 text-emerald-700"><Edit3 size={17} /></button>
                       <button type="button" onClick={() => handleCancelShift(shift)} className="rounded-xl border border-rose-200 p-2 text-rose-600"><Trash2 size={17} /></button>

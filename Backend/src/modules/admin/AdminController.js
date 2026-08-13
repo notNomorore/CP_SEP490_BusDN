@@ -627,14 +627,25 @@ const isSmtpConfigured = () => Boolean(
   && config.smtp.password !== 'your_app_password'
 );
 
-const createMailTransport = () => nodemailer.createTransport({
-  host: config.smtp.host,
-  port: config.smtp.port,
-  secure: config.smtp.port === 465,
-  auth: config.smtp.user && config.smtp.password
-    ? { user: config.smtp.user, pass: config.smtp.password }
-    : undefined,
-});
+let sharedMailTransport = null;
+const createMailTransport = () => {
+  if (sharedMailTransport) return sharedMailTransport;
+  sharedMailTransport = nodemailer.createTransport({
+    host: config.smtp.host,
+    port: config.smtp.port,
+    secure: config.smtp.port === 465,
+    pool: true,
+    maxConnections: 4,
+    maxMessages: 100,
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
+    auth: config.smtp.user && config.smtp.password
+      ? { user: config.smtp.user, pass: config.smtp.password }
+      : undefined,
+  });
+  return sharedMailTransport;
+};
 
 const sendTemporaryPasswordMail = async ({ email, fullName, temporaryPassword }) => {
   const transporter = createMailTransport();
@@ -781,22 +792,25 @@ export class AdminController {
       const seenEmails = new Set();
       const seenPhones = new Set();
 
-      for (const row of rows) {
+      const importBatchSize = 4;
+      for (let offset = 0; offset < rows.length; offset += importBatchSize) {
+        const batch = rows.slice(offset, offset + importBatchSize);
+        await Promise.all(batch.map(async (row) => {
         const validationErrors = validateImportedUserPayload(row);
         if (validationErrors) {
           failed.push({ rowNumber: row.rowNumber, email: row.email, reason: Object.values(validationErrors).join('; ') });
-          continue;
+          return;
         }
 
         const normalizedEmail = normalizeEmail(row.email);
         const normalizedPhone = row.phone?.trim();
         if (seenEmails.has(normalizedEmail)) {
           failed.push({ rowNumber: row.rowNumber, email: row.email, reason: 'Duplicate email inside import file' });
-          continue;
+          return;
         }
         if (seenPhones.has(normalizedPhone)) {
           failed.push({ rowNumber: row.rowNumber, email: row.email, reason: 'Duplicate phone inside import file' });
-          continue;
+          return;
         }
         seenEmails.add(normalizedEmail);
         seenPhones.add(normalizedPhone);
@@ -804,7 +818,7 @@ export class AdminController {
         const existingUser = await AdminModel.findUserByIdentifier({ email: normalizedEmail, phone: normalizedPhone });
         if (existingUser) {
           failed.push({ rowNumber: row.rowNumber, email: row.email, reason: 'Email or phone already registered' });
-          continue;
+          return;
         }
 
         const temporaryPassword = generateTemporaryPassword();
@@ -848,6 +862,7 @@ export class AdminController {
           }
           failed.push({ rowNumber: row.rowNumber, email: row.email, reason: importError.message || 'Import failed' });
         }
+        }));
       }
 
       return res.status(201).json({
@@ -1376,8 +1391,10 @@ export class AdminController {
 
       const schedule = await AdminModel.findTripScheduleById(scheduleId);
       if (!schedule) return res.status(404).json({ success: false, message: 'Không tìm thấy ca làm.' });
-      if (['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(schedule.status)) {
-        return res.status(409).json({ success: false, message: 'Không thể xóa lịch chuyến đang chạy, đã hoàn thành hoặc đã hủy.' });
+      const hasEmbeddedAllocation = Boolean(schedule.driver?.userId || schedule.assistant?.userId || schedule.vehicle?.busId);
+      const hasAllocation = hasEmbeddedAllocation || await AdminModel.hasTripAllocation(scheduleId);
+      if (schedule.status !== 'PLANNED' || hasAllocation) {
+        return res.status(409).json({ success: false, message: 'Không thể xóa chuyến đã được phân bổ tài xế, phụ xe hoặc xe.' });
       }
 
       await AdminModel.deleteTripScheduleById(scheduleId);
@@ -1420,13 +1437,16 @@ export class AdminController {
       const deletableFilters = {
         $and: [
           filters,
-          { status: { $nin: ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'] } },
+          { status: 'PLANNED' },
+          { 'driver.userId': null },
+          { 'assistant.userId': null },
+          { 'vehicle.busId': null },
         ],
       };
       const protectedCount = await AdminModel.countTripSchedules({
         $and: [
           filters,
-          { status: { $in: ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'] } },
+          { status: { $ne: 'PLANNED' } },
         ],
       });
       const result = await AdminModel.deleteTripSchedules(deletableFilters);
@@ -1435,7 +1455,7 @@ export class AdminController {
         success: true,
         message: `Đã xóa ${result.deletedCount} lịch chuyến.`,
         ...result,
-        protectedCount,
+        protectedCount: protectedCount + Number(result.allocationProtectedCount || 0),
       });
     } catch (error) {
       logger.error('Delete trip schedules error:', error);

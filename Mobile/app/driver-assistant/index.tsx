@@ -13,7 +13,7 @@ import { useAuthStore } from '@/store/auth.store';
 import type { ShiftRevenue } from '@/types/busAssistant';
 import type { AssignedTrip, ShiftSchedule } from '@/types/scheduleOperations';
 import { isDriverAssistantRole, normalizeRole } from '@/utils/roleNavigation';
-import { getTodayRange, getTripDepartureTimeLabel, getTripStatus, getTripVehicleLabel, isTripCompleted, isTripToday } from '@/utils/scheduleOperations';
+import { getTodayRange, getTripDepartureTimeLabel, getTripStatus, getTripVehicleLabel, isTripCompleted, isTripDeparturePassed, isTripToday } from '@/utils/scheduleOperations';
 import { getErrorMessage, getErrorStatusCode, isPermissionError } from '@/utils/validation';
 
 const assignedTripsRoute = '/driver-assistant/assigned-trips' as Href;
@@ -69,6 +69,7 @@ const canAcceptTrip = (trip: AssignedTrip) => {
   const status = getTripStatus(trip);
   const acceptanceStatus = getAcceptanceStatus(trip);
   return !['ACCEPTED', 'REJECTED'].includes(acceptanceStatus)
+    && !isTripDeparturePassed(trip)
     && !['IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'DONE'].includes(status);
 };
 

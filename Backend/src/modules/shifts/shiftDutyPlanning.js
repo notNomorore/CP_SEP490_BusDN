@@ -1,4 +1,4 @@
-const id = (value) => String(value?._id || value || '');
+﻿const id = (value) => String(value?._id || value || '');
 const minutes = (value) => {
   const [hour, minute] = String(value || '').split(':').map(Number);
   return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : null;
@@ -26,9 +26,7 @@ export const splitRowsIntoCycleDuties = (sourceRows = []) => {
       shiftName: `Vòng D-V ${trips[0]?.operationCycleCode || index + 1}`,
       startTime,
       endTime,
-      shiftType: minutes(startTime) < 10 * 60 + 30
-        ? 'MORNING'
-        : minutes(startTime) < 13 * 60 + 30 ? 'MIDDAY' : 'AFTERNOON',
+      shiftType: minutes(startTime) < 12 * 60 ? 'MORNING' : 'AFTERNOON',
       trips,
       availableTrips: trips,
       tripIds: trips.map((trip) => trip._id),

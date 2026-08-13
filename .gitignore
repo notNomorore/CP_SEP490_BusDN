@@ -1,2 +1,5 @@
 UI/
 docs/
+.env
+.env.*
+!.env.example

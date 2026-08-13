@@ -2,7 +2,7 @@ export const OPERATING_START = '05:30';
 export const OPERATING_END = '18:30';
 export const MAX_DAILY_WORK_MINUTES = 8 * 60;
 export const TARGET_WEEKLY_WORK_MINUTES = 40 * 60;
-export const MIN_REST_MINUTES = 60;
+export const MIN_REST_MINUTES = 10 * 60;
 
 export const DEFAULT_TIME_SLOTS = [
   { startTime: '05:30', endTime: '09:00' },

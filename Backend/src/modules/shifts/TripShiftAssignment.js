@@ -12,6 +12,10 @@ const TripShiftAssignmentSchema = new mongoose.Schema(
       ref: 'Shift',
       required: true,
     },
+    assistantShiftId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Shift',
+    },
     driverId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

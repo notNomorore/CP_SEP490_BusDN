@@ -45,7 +45,7 @@ const typeConfig = {
     tone: 'success',
   },
   delay: {
-    label: 'Delay alert',
+    label: 'Chuyến trễ',
     title: 'Chuyến bị trễ',
     icon: 'clock-alert-outline',
     tone: 'danger',
@@ -124,13 +124,21 @@ const buildDelayLine = (item: NotificationRecord) => {
   const delayRaw = metadataValue(item, ['delayMinutes', 'delayDurationMinutes']);
   const delay = Number(delayRaw);
   if (!delayRaw || Number.isNaN(delay) || delay < 0) return '';
-  return `Delayed by ${delay} minutes.`;
+  return `Thời gian dự kiến trễ: ${delay} phút.`;
 };
 
 const displayMessage = (item: NotificationRecord) => {
   const kind = classifyNotification(item);
   if (kind === 'arrival') return buildEtaLine(item) || item.message || item.body || '';
-  if (kind === 'delay') return buildDelayLine(item) || item.message || item.body || '';
+  if (kind === 'delay') {
+    const adminMessage = item.message || item.body || '';
+    const delayLine = buildDelayLine(item);
+    return [adminMessage, delayLine]
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line, index, lines) => lines.indexOf(line) === index)
+      .join('\n');
+  }
   return item.message || item.body || '';
 };
 

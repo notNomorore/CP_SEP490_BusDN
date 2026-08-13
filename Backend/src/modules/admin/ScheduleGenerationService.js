@@ -650,6 +650,8 @@ export default class ScheduleGenerationService {
           expectedArrivalTime: row.expectedArrivalTime,
           turnaroundEndTime: row.turnaroundEndTime || addMinutesToClock(row.expectedArrivalTime, MIN_RESOURCE_BUFFER_MINUTES),
           shiftLabel: row.shiftLabel || getShiftLabel(toMinutes(row.departureTime)),
+          demandLevel: ['OFF_PEAK', 'MID_PEAK', 'PEAK'].includes(row.demandLevel) ? row.demandLevel : 'OFF_PEAK',
+          headwayMinutes: Math.max(5, Math.min(180, Number(row.headwayMinutes || 30))),
           status: row.vehicle?.busId && row.driver?.userId && row.assistant?.userId ? 'ASSIGNED' : 'PLANNED',
           vehicle: row.vehicle || {},
           driver: row.driver || {},

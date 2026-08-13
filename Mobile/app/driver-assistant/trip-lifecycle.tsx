@@ -583,14 +583,11 @@ export default function TripLifecycleScreen() {
   const [completedStopCount, setCompletedStopCount] = useState(0);
   const [incidentType, setIncidentType] = useState<DriverIncidentType | null>(null);
   const [incidentSeverity, setIncidentSeverity] = useState<IncidentSeverity>('MEDIUM');
-  const [incidentLocation, setIncidentLocation] = useState('');
   const [trafficCategory, setTrafficCategory] = useState('HEAVY_TRAFFIC');
   const [estimatedDelayMinutes, setEstimatedDelayMinutes] = useState('10');
   const [injuriesReported, setInjuriesReported] = useState(false);
   const [policeNotified, setPoliceNotified] = useState(false);
   const [breakdownType, setBreakdownType] = useState<BreakdownType>('ENGINE_FAILURE');
-  const [canVehicleContinue, setCanVehicleContinue] = useState(false);
-  const [requiresReplacementVehicle, setRequiresReplacementVehicle] = useState(true);
   const [incidentDescription, setIncidentDescription] = useState('');
   const [evidenceFiles, setEvidenceFiles] = useState<EvidenceFile[]>([]);
   const [routeInfo, setRouteInfo] = useState<RouteInstruction>({
@@ -688,8 +685,8 @@ export default function TripLifecycleScreen() {
   const canReportIncident = Boolean(
     incidentType
     && isTripInProgress
-    && (incidentType === 'VEHICLE_BREAKDOWN' || incidentLocation.trim().length >= 3)
     && incidentDescription.trim().length >= 10
+    && (!['TRAFFIC_CONGESTION', 'ACCIDENT'].includes(String(incidentType)) || Number(estimatedDelayMinutes) >= 1)
     && !processingAction
   );
 
@@ -897,10 +894,6 @@ export default function TripLifecycleScreen() {
       Alert.alert(t.lifecycle.incidentDescription, t.lifecycle.incidentPlaceholder);
       return;
     }
-    if (incidentType !== 'VEHICLE_BREAKDOWN' && incidentLocation.trim().length < 3) {
-      Alert.alert(t.lifecycle.locationRequiredTitle, t.lifecycle.locationRequiredMessage);
-      return;
-    }
     const autoLocation = currentGps?.latitude != null && currentGps?.longitude != null
       ? `${formatCoordinate(currentGps.latitude)}, ${formatCoordinate(currentGps.longitude)}`
       : trip?.route?.name || trip?.tripCode || t.common.currentGpsLocation;
@@ -909,9 +902,7 @@ export default function TripLifecycleScreen() {
       type: incidentType,
       severity: incidentType === 'ACCIDENT' && incidentSeverity === 'LOW' ? 'MEDIUM' : incidentSeverity,
       description,
-      locationText: incidentType === 'VEHICLE_BREAKDOWN'
-        ? (incidentLocation.trim() || autoLocation)
-        : incidentLocation.trim(),
+      locationText: autoLocation,
       latitude: currentGps?.latitude,
       longitude: currentGps?.longitude,
       evidenceFiles,
@@ -926,19 +917,19 @@ export default function TripLifecycleScreen() {
     if (incidentType === 'ACCIDENT') {
       payload.injuriesReported = injuriesReported;
       payload.policeNotified = policeNotified;
+      payload.estimatedDelayMinutes = Math.max(1, Number(estimatedDelayMinutes) || 10);
     }
 
     if (incidentType === 'VEHICLE_BREAKDOWN') {
       payload.breakdownType = breakdownType;
-      payload.canContinue = canVehicleContinue;
-      payload.requiresReplacementVehicle = requiresReplacementVehicle;
+      payload.canContinue = false;
+      payload.requiresReplacementVehicle = true;
     }
 
     setProcessingAction('incident');
     try {
       await scheduleOperationsApi.reportOperationIncident(assignmentId, payload);
       setIncidentDescription('');
-      setIncidentLocation('');
       setEvidenceFiles([]);
       setIncidentType(null);
       Alert.alert(t.lifecycle.reportIncident, t.lifecycle.incidentHint);
@@ -1077,7 +1068,6 @@ export default function TripLifecycleScreen() {
                     onPress={() => {
                       setIncidentType(option.type);
                       setIncidentSeverity(option.type === 'ACCIDENT' ? 'MEDIUM' : 'MEDIUM');
-                      setIncidentLocation(nextStop?.name || trip?.route?.name || '');
                     }}
                     style={({ pressed }) => [
                       styles.incidentTypeCard,
@@ -1137,21 +1127,9 @@ export default function TripLifecycleScreen() {
                 </View>
               </View>
 
-              <View style={styles.fieldGroup}>
-                <Text style={styles.fieldLabel}>{t.detail.currentLocation}</Text>
-                <TextInput
-                  editable={isTripInProgress && !Boolean(processingAction)}
-                  onChangeText={setIncidentLocation}
-                  placeholder={t.detail.currentLocation}
-                  placeholderTextColor={colors.muted}
-                  style={styles.singleLineInput}
-                  value={incidentLocation}
-                />
-              </View>
-
-              {incidentType === 'TRAFFIC_CONGESTION' ? (
+              {['TRAFFIC_CONGESTION', 'ACCIDENT'].includes(String(incidentType)) ? (
                 <>
-                  <View style={styles.fieldGroup}>
+                  {incidentType === 'TRAFFIC_CONGESTION' ? <View style={styles.fieldGroup}>
                     <Text style={styles.fieldLabel}>{t.lifecycle.traffic}</Text>
                     <View style={styles.optionWrap}>
                       {trafficCategoryOptions.map((category) => {
@@ -1168,7 +1146,7 @@ export default function TripLifecycleScreen() {
                         );
                       })}
                     </View>
-                  </View>
+                  </View> : null}
                   <View style={styles.fieldGroup}>
                     <Text style={styles.fieldLabel}>ETA</Text>
                     <TextInput
@@ -1216,25 +1194,9 @@ export default function TripLifecycleScreen() {
                       );
                     })}
                   </View>
-                  <View style={styles.checkboxGrid}>
-                    <Pressable
-                      disabled={!isTripInProgress || Boolean(processingAction)}
-                      onPress={() => setCanVehicleContinue((value) => !value)}
-                      style={styles.checkboxRow}
-                    >
-                      <MaterialCommunityIcons color={canVehicleContinue ? colors.error : colors.muted} name={canVehicleContinue ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} />
-                      <Text style={styles.checkboxText}>{t.lifecycle.vehicleCanContinue}</Text>
-                    </Pressable>
-                    <Pressable
-                      disabled={!isTripInProgress || Boolean(processingAction)}
-                      onPress={() => setRequiresReplacementVehicle((value) => !value)}
-                      style={styles.checkboxRow}
-                    >
-                      <MaterialCommunityIcons color={requiresReplacementVehicle ? colors.error : colors.muted} name={requiresReplacementVehicle ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} />
-                      <Text style={styles.checkboxText}>{t.lifecycle.replacementRequired}</Text>
-                    </Pressable>
-                  </View>
-                  <Text style={styles.fileHelp}>{t.lifecycle.replacementHelp}</Text>
+                  <Text style={styles.fileHelp}>
+                    Chuyến, xe, tài xế, GPS hiện tại và thời điểm báo cáo sẽ được đính kèm tự động. Admin sẽ tiếp nhận và điều phối xe thay thế.
+                  </Text>
                 </View>
               ) : null}
 

@@ -1,6 +1,6 @@
 import React from 'react';
 
-const DEFAULT_BACKEND_URL = 'http://localhost:3000';
+const DEFAULT_BACKEND_URL = 'https://cp-sep490-busdn.onrender.com';
 
 const getBackendBaseUrl = () => {
   const envApiUrl = import.meta.env.VITE_API_URL?.trim();

@@ -21,6 +21,7 @@ import { FleetOperationsPanel } from '../../pages/routes/RouteWorkflowPage.jsx';
 
 const DA_NANG_CENTER = [16.0544, 108.2022];
 const POLL_INTERVAL_MS = 20000;
+const LEGACY_API_FLEET_STATUSES = new Set(['active', 'idle', 'paused', 'delayed', 'incident', 'lost_signal']);
 
 const STATUS_META = {
   available: { label: 'Sẵn sàng', color: '#0891b2', icon: 'check_circle' },
@@ -252,7 +253,7 @@ const AdminFleetLocationPage = () => {
   const loadLocations = useCallback(async () => {
     const params = {
       routeId: filters.routeId || undefined,
-      status: filters.status || undefined,
+      status: LEGACY_API_FLEET_STATUSES.has(filters.status) ? filters.status : undefined,
       keyword: filters.keyword || undefined,
     };
     const result = await fleetMonitoringService.getLocations(params);

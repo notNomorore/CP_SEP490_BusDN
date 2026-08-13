@@ -109,6 +109,30 @@ export const validateEmergencyBreakdownDispatch = (body) => {
     errors.adminNote = 'Admin note must not exceed 2000 characters';
   }
 
+  const estimatedDelayMinutes = Number(body.estimatedDelayMinutes);
+  if (!Number.isInteger(estimatedDelayMinutes) || estimatedDelayMinutes < 1 || estimatedDelayMinutes > 1440) {
+    errors.estimatedDelayMinutes = 'Estimated delay must be an integer from 1 to 1440 minutes';
+  }
+
+  const staffNotificationMessage = String(body.staffNotificationMessage || '').trim();
+  const passengerNotificationMessage = String(body.passengerNotificationMessage || '').trim();
+  if (body.notifyStaff !== undefined && typeof body.notifyStaff !== 'boolean') {
+    errors.notifyStaff = 'notifyStaff must be boolean';
+  }
+  if (body.notifyPassengers !== undefined && typeof body.notifyPassengers !== 'boolean') {
+    errors.notifyPassengers = 'notifyPassengers must be boolean';
+  }
+  if (body.notifyStaff && !staffNotificationMessage) {
+    errors.staffNotificationMessage = 'Staff notification message is required';
+  } else if (staffNotificationMessage.length > 2000) {
+    errors.staffNotificationMessage = 'Staff notification message must not exceed 2000 characters';
+  }
+  if (body.notifyPassengers && !passengerNotificationMessage) {
+    errors.passengerNotificationMessage = 'Passenger notification message is required';
+  } else if (passengerNotificationMessage.length > 2000) {
+    errors.passengerNotificationMessage = 'Passenger notification message must not exceed 2000 characters';
+  }
+
   return errors;
 };
 

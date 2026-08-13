@@ -21,6 +21,9 @@ const ShiftSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Route',
     },
+    rosterId: { type: mongoose.Schema.Types.ObjectId, ref: 'Roster', default: null },
+    isLocked: { type: Boolean, default: false },
+    assignmentSource: { type: String, enum: ['AUTO', 'MANUAL'], default: 'MANUAL' },
     startTime: {
       type: String,
       required: true,
@@ -88,6 +91,7 @@ const ShiftSchema = new mongoose.Schema(
 ShiftSchema.index({ shiftCode: 1, workDate: 1 }, { unique: true });
 ShiftSchema.index({ status: 1, workDate: 1, startTime: 1 });
 ShiftSchema.index({ routeId: 1, workDate: 1, startTime: 1 });
+ShiftSchema.index({ rosterId: 1, workDate: 1, shiftType: 1 });
 ShiftSchema.index({ plannedStartDateTime: 1, plannedEndDateTime: 1, status: 1 });
 
 export default mongoose.model('Shift', ShiftSchema);

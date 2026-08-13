@@ -22,6 +22,10 @@ export const incidentReportService = {
     return apiClient.patch(`/admin/incidents/${id}/status`, payload);
   },
 
+  async sendNotification(id, payload) {
+    return apiClient.post(`/admin/incidents/${id}/notifications`, payload);
+  },
+
   async reassignAssistant(id, payload) {
     return apiClient.patch(`/admin/incidents/${id}/reassign-assistant`, payload);
   },

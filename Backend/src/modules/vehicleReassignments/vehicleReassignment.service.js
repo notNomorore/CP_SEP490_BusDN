@@ -10,6 +10,8 @@ import Trip from '../fleetOperations/Trip.js';
 import Vehicle from '../fleetOperations/Vehicle.js';
 import { SOCKET_EVENTS } from '../fleetOperations/fleetOperations.constants.js';
 import VehicleReassignmentLog from './VehicleReassignmentLog.js';
+import PassengerTicket from '../tickets/Ticket.js';
+import BoardingRecord from '../busAssistant/BoardingRecord.js';
 
 const ACTIVE_TRIP_STATUSES = ['scheduled', 'active', 'paused', 'delayed', 'incident'];
 const ACTIVE_SCHEDULE_STATUSES = ['PLANNED', 'ASSIGNED', 'IN_PROGRESS'];
@@ -21,6 +23,12 @@ const OLD_VEHICLE_MAINTENANCE_REASONS = new Set([
 ]);
 
 const normalizeId = (value) => String(value || '').trim();
+const operatingDateToken = (value) => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Ho_Chi_Minh',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+}).format(new Date(value));
 const toObjectId = (value, field = 'id') => {
   if (!mongoose.isValidObjectId(value)) {
     throw new CustomError(`Invalid ${field}`, HTTP_STATUS.BAD_REQUEST);
@@ -408,15 +416,57 @@ export class VehicleReassignmentService {
     }
 
     if (payload.notifyPassengers && target.routeId) {
-      notifications.push(await createBroadcastNotification({
-        title: 'Vehicle changed for your trip',
-        message: 'A replacement bus has been assigned to keep the trip operating. Please follow staff instructions at stops and onboard.',
-        type: 'service_interruption',
-        priority: target.kind === 'trip' && target.trip.status !== 'scheduled' ? 'high' : 'normal',
-        targetAudience: 'route_passengers',
-        routeId: target.routeId,
-        tripId,
-      }, adminId, io));
+      const schedule = target.schedule || (
+        target.trip?.scheduleId ? await TripSchedule.findById(target.trip.scheduleId).lean() : null
+      );
+      const passengerTicketTripId = schedule ? [
+        schedule.routeCode,
+        operatingDateToken(schedule.serviceDate),
+        schedule.departureTime,
+        schedule.direction,
+      ].filter(Boolean).join('-') : '';
+      const tripReferences = [
+        normalizeId(schedule?._id),
+        schedule?.scheduleCode,
+        passengerTicketTripId,
+      ].filter(Boolean);
+      const boardingTripIds = [target.trip?._id, schedule?._id].filter(Boolean);
+      const [tickets, boardingRecords] = await Promise.all([
+        PassengerTicket.find({
+          tripId: { $in: tripReferences },
+          paymentStatus: 'PAID',
+          bookingStatus: 'SUCCESS',
+          ticketStatus: { $in: ['ACTIVE', 'USED'] },
+        }).select('passenger').lean(),
+        BoardingRecord.find({
+          tripId: { $in: boardingTripIds },
+          validationStatus: 'VALIDATED',
+          passengerId: { $ne: null },
+        }).select('passengerId').lean(),
+      ]);
+      const passengerIds = [...new Set([
+        ...tickets.map((ticket) => normalizeId(ticket.passenger)),
+        ...boardingRecords.map((record) => normalizeId(record.passengerId)),
+      ].filter(Boolean))];
+
+      if (passengerIds.length) {
+        notifications.push(await createBroadcastNotification({
+          title: `Chuyến ${schedule?.scheduleCode || tripId} đã đổi xe`,
+          message: `Xe ${getVehicleLabel(oldVehicle)} đã được đổi sang xe ${getVehicleLabel(replacement)}. Vui lòng nhận diện xe mới khi lên xe hoặc tiếp tục hành trình theo hướng dẫn của nhân viên.`,
+          type: 'service_interruption',
+          priority: target.kind === 'trip' && target.trip.status !== 'scheduled' ? 'high' : 'normal',
+          targetAudience: 'specific_users',
+          userIds: passengerIds,
+          routeId: target.routeId,
+          tripId,
+          sourceType: 'TRIP_VEHICLE_REASSIGNED_PASSENGERS',
+          metadata: {
+            scheduleCode: schedule?.scheduleCode || '',
+            oldVehicle: getVehicleLabel(oldVehicle),
+            replacementVehicle: getVehicleLabel(replacement),
+          },
+        }, adminId, io));
+      }
     }
 
     return notifications;
@@ -449,6 +499,9 @@ export class VehicleReassignmentService {
             `Chuyến ${schedule?.scheduleCode || target.trip?.tripCode || tripId} tiếp tục vận hành bằng xe ${getVehicleLabel(replacement)}.`,
             `Xe cũ: ${getVehicleLabel(oldVehicle)}.`,
             payload.note ? `Ghi chú điều hành: ${payload.note}` : '',
+            Number(payload.estimatedDelayMinutes) > 0
+              ? `Thời gian dự kiến trễ: ${Number(payload.estimatedDelayMinutes)} phút.`
+              : '',
           ].filter(Boolean).join('\n'),
           category: 'EMERGENCY_INSTRUCTION',
           priority: 'CRITICAL',
@@ -469,6 +522,7 @@ export class VehicleReassignmentService {
             replacementVehicleId: replacement._id,
             scheduleCode: schedule?.scheduleCode || '',
             reason: payload.reason,
+            estimatedDelayMinutes: Math.max(0, Number(payload.estimatedDelayMinutes) || 0),
           },
         },
       },
@@ -536,14 +590,16 @@ export class VehicleReassignmentService {
       replacement,
       io,
     });
-    const staffOperationNotification = await this.notifyTripStaffVehicleReassigned({
+    const staffOperationNotification = payload.notifyStaff !== false
+      ? await this.notifyTripStaffVehicleReassigned({
       target,
       replacement,
       oldVehicle,
       payload,
       adminId,
       sourceId: log._id,
-    });
+      })
+      : null;
 
     const socketPayload = {
       tripId: target.trip?._id?.toString() || null,

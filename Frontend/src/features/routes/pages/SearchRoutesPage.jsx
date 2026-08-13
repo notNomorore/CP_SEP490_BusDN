@@ -1735,7 +1735,9 @@ const SearchRoutesPage = () => {
       )
     ));
 
-    const delayedBuses = liveBusData.buses.filter((bus) => bus.status === 'Delayed' && bus.delay);
+    const delayedBuses = liveBusData.buses.filter((bus) => (
+      ['Delayed', 'DELAYED'].includes(bus.status) && bus.delay
+    ));
     const nextAlerts = [];
     const nextNotifiedKeys = new Set(notifiedDelayKeys);
 

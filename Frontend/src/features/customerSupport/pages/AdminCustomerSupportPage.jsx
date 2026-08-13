@@ -60,7 +60,7 @@ const getAttachmentUrl = (attachment) => {
   if (/^https?:\/\//i.test(path)) return path;
 
   const apiBase = import.meta.env.VITE_API_BASE_URL || '';
-  const apiOrigin = apiBase.replace(/\/api\/?$/, '') || import.meta.env.VITE_API_URL || 'http://localhost:3000';
+  const apiOrigin = apiBase.replace(/\/api\/?$/, '') || import.meta.env.VITE_API_URL || 'https://cp-sep490-busdn.onrender.com';
   return `${apiOrigin.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
 };
 

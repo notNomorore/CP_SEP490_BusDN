@@ -842,10 +842,23 @@ export default class AdminModel {
     return schedule;
   }
 
+  static async hasTripAllocation(scheduleId) {
+    return Boolean(await TripShiftAssignment.exists({
+      tripId: scheduleId,
+      status: { $in: ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'] },
+    }));
+  }
+
   static async deleteTripSchedules(filters) {
     const schedules = await TripSchedule.find(filters).select('_id').lean();
-    const scheduleIds = schedules.map((schedule) => schedule._id);
-    if (!scheduleIds.length) return { deletedCount: 0, deletedAssignmentCount: 0 };
+    const candidateIds = schedules.map((schedule) => schedule._id);
+    const allocatedIds = candidateIds.length ? await TripShiftAssignment.distinct('tripId', {
+      tripId: { $in: candidateIds },
+      status: { $in: ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'] },
+    }) : [];
+    const allocatedSet = new Set(allocatedIds.map(String));
+    const scheduleIds = candidateIds.filter((scheduleId) => !allocatedSet.has(String(scheduleId)));
+    if (!scheduleIds.length) return { deletedCount: 0, deletedAssignmentCount: 0, allocationProtectedCount: allocatedSet.size };
 
     const [assignmentResult, scheduleResult] = await Promise.all([
       TripShiftAssignment.deleteMany({ tripId: { $in: scheduleIds } }),
@@ -855,6 +868,7 @@ export default class AdminModel {
     return {
       deletedCount: scheduleResult.deletedCount || 0,
       deletedAssignmentCount: assignmentResult.deletedCount || 0,
+      allocationProtectedCount: allocatedSet.size,
     };
   }
 }
