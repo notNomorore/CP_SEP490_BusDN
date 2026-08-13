@@ -202,8 +202,13 @@ const buildMapHtml = ({
     .filter((bus) => typeof bus.currentLocation?.latitude === 'number' && typeof bus.currentLocation?.longitude === 'number')
     .map((bus) => ({
       busId: escapeHtml(bus.busId),
+      plateNumber: escapeHtml(bus.plateNumber || ''),
+      tripCode: escapeHtml(bus.tripCode || bus.tripProgress?.tripCode || ''),
       status: normalizeStatus(bus.tripProgress?.tripStatus || bus.status),
+      currentStop: escapeHtml(bus.tripProgress?.currentStop || ''),
       nextStop: escapeHtml(bus.nextStop || bus.tripProgress?.nextStop || ''),
+      estimatedArrivalTime: escapeHtml(bus.estimatedArrivalTime || bus.tripProgress?.estimatedRemainingTime || ''),
+      lastUpdated: escapeHtml(bus.lastUpdated || ''),
       active: bus.busId === activeBusId,
       latitude: bus.currentLocation?.latitude,
       longitude: bus.currentLocation?.longitude,
@@ -280,9 +285,23 @@ const buildMapHtml = ({
       bounds.push(point);
       const delayed = ['DELAYED', 'PAUSED', 'INCIDENT'].includes(bus.status) ? ' delayed' : '';
       const active = bus.active ? ' active' : '';
-      L.marker(point, {
+      const marker = L.marker(point, {
         icon: L.divIcon({ className: '', html: '<div class="bus' + delayed + active + '">' + bus.busId + '</div>', iconSize: [56, 36], iconAnchor: [28, 18] })
-      }).addTo(map).bindPopup(bus.busId + '<br>' + bus.nextStop);
+      }).addTo(map);
+      const statusLabel = bus.status === 'IN_PROGRESS' ? 'Đang hoạt động' : bus.status;
+      const popup = '<div style="min-width:220px;line-height:1.45">'
+        + '<strong style="font-size:16px;color:#003980">' + bus.busId + '</strong>'
+        + '<div style="margin-top:5px"><b>Trạng thái:</b> ' + statusLabel + '</div>'
+        + (bus.plateNumber ? '<div><b>Biển số:</b> ' + bus.plateNumber + '</div>' : '')
+        + (bus.tripCode ? '<div><b>Mã chuyến:</b> ' + bus.tripCode + '</div>' : '')
+        + (bus.currentStop ? '<div><b>Trạm hiện tại:</b> ' + bus.currentStop + '</div>' : '')
+        + (bus.nextStop ? '<div><b>Trạm tiếp theo:</b> ' + bus.nextStop + '</div>' : '')
+        + (bus.estimatedArrivalTime ? '<div><b>Dự kiến:</b> ' + bus.estimatedArrivalTime + '</div>' : '')
+        + '<div><b>Tọa độ:</b> ' + Number(bus.latitude).toFixed(5) + ', ' + Number(bus.longitude).toFixed(5) + '</div>'
+        + (bus.lastUpdated ? '<div style="color:#60746b;font-size:11px;margin-top:4px">Cập nhật: ' + bus.lastUpdated + '</div>' : '')
+        + '</div>';
+      marker.bindPopup(popup, { closeButton: true, autoPan: true, maxWidth: 280 });
+      if (bus.active && ${JSON.stringify(focusTarget)} === 'bus') marker.openPopup();
     });
     if (userPoint) {
       const point = [userPoint.latitude, userPoint.longitude];
@@ -294,7 +313,9 @@ const buildMapHtml = ({
     if (bounds.length > 1) map.fitBounds(bounds, { padding: [34, 34], maxZoom: 15 });
     setTimeout(() => {
       map.invalidateSize();
-      if (${JSON.stringify(focusTarget)} !== 'route') map.setView([${center.latitude}, ${center.longitude}], 15);
+      if (${JSON.stringify(focusTarget)} !== 'route') {
+        map.setView([${center.latitude}, ${center.longitude}], 15);
+      }
     }, 120);
   </script>
 </body>

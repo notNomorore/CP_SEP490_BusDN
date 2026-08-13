@@ -2,7 +2,7 @@ import multer from 'multer';
 import { config } from '../config/environment.js';
 
 const storage = multer.memoryStorage();
-const imageMimeTypes = new Set(['image/jpeg', 'image/png', 'image/jpg', 'image/webp']);
+const imageMimeTypes = new Set(['image/jpeg', 'image/png', 'image/jpg', 'image/webp', 'image/heic', 'image/heif']);
 const feedbackMimeTypes = new Set([
   ...imageMimeTypes,
   'application/pdf',
@@ -17,7 +17,7 @@ export const avatarUpload = multer({
   },
   fileFilter: (req, file, cb) => {
     if (!imageMimeTypes.has(file.mimetype)) {
-      const error = new Error('Only JPG, JPEG, PNG, and WEBP avatar images are allowed');
+      const error = new Error('Only JPG, JPEG, PNG, WEBP, HEIC, and HEIF avatar images are allowed');
       error.statusCode = 400;
       return cb(error);
     }
@@ -34,7 +34,7 @@ export const feedbackUpload = multer({
   },
   fileFilter: (req, file, cb) => {
     if (!feedbackMimeTypes.has(file.mimetype)) {
-      const error = new Error('Only JPG, JPEG, PNG, WEBP, PDF, DOC, and DOCX attachments are allowed');
+      const error = new Error('Only JPG, JPEG, PNG, WEBP, HEIC, HEIF, PDF, DOC, and DOCX attachments are allowed');
       error.statusCode = 400;
       return cb(error);
     }

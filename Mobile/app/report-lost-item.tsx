@@ -109,7 +109,7 @@ export default function ReportLostItemScreen() {
       uri: asset.uri,
       name: asset.fileName || `lost-item-${Date.now()}-${index + 1}.jpg`,
       fileName: asset.fileName || `lost-item-${Date.now()}-${index + 1}.jpg`,
-      mimeType: asset.mimeType || 'image/jpeg',
+      mimeType: asset.mimeType,
     }));
     setAttachments((current) => [...current, ...nextAssets].slice(0, 5));
     setErrors((current) => ({ ...current, attachments: '' }));
@@ -228,7 +228,7 @@ export default function ReportLostItemScreen() {
       <Pressable disabled={attachments.length >= 5} onPress={pickImages} style={[styles.uploadBox, attachments.length >= 5 && styles.disabled]}>
         <MaterialCommunityIcons color={colors.secondary} name="image-plus" size={28} />
         <Text style={styles.uploadTitle}>{attachments.length ? `${attachments.length}/5 hình đã chọn` : 'Chọn hình ảnh'}</Text>
-        <Text style={styles.uploadText}>Hỗ trợ JPG, PNG, WEBP. Tối đa 5 hình.</Text>
+        <Text style={styles.uploadText}>Hỗ trợ JPG, PNG, WEBP, HEIC. Tối đa 5 hình.</Text>
       </Pressable>
       {errors.attachments ? <FieldError message={errors.attachments} /> : null}
       {attachments.length ? (

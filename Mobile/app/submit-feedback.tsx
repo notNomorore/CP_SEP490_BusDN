@@ -34,7 +34,8 @@ const isFeedbackEligibleTrip = (record: TravelHistoryRecord) => {
   if (formatTripLabel(record).trim().toUpperCase().startsWith('DN10 ')) return false;
   const tripTime = tripTimeOf(record);
   if (!tripTime) return false;
-  return Date.now() - tripTime.getTime() <= feedbackTripWindowMs;
+  const elapsedMs = Date.now() - tripTime.getTime();
+  return elapsedMs >= 0 && elapsedMs <= feedbackTripWindowMs;
 };
 
 export default function SubmitFeedbackScreen() {

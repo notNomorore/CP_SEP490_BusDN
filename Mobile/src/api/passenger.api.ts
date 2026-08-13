@@ -398,6 +398,46 @@ export type LostItemAttachmentAsset = {
   mimeType?: string;
 };
 
+const lostItemImageMimeByExtension: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+};
+
+const lostItemImageExtensionByMime: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+};
+
+const getFileExtension = (value?: string) => {
+  const match = value?.split('?')[0]?.match(/\.([a-zA-Z0-9]+)$/);
+  return match?.[1]?.toLowerCase() || '';
+};
+
+const inferLostItemImageMimeType = (asset: LostItemAttachmentAsset) => {
+  const explicitMimeType = asset.mimeType || (asset.type?.startsWith('image/') ? asset.type : '');
+  if (explicitMimeType) return explicitMimeType;
+
+  const extension = getFileExtension(asset.fileName || asset.name || asset.uri);
+  return lostItemImageMimeByExtension[extension] || 'image/jpeg';
+};
+
+const buildLostItemImageFileName = (asset: LostItemAttachmentAsset, index: number) => {
+  const mimeType = inferLostItemImageMimeType(asset);
+  const baseName = asset.fileName || asset.name || `lost-item-${index + 1}`;
+
+  if (getFileExtension(baseName)) return baseName;
+
+  return `${baseName}.${lostItemImageExtensionByMime[mimeType] || 'jpg'}`;
+};
+
 export type LostItemTimelineRecord = {
   label?: string;
   status?: string;
@@ -803,16 +843,16 @@ export const passengerApi = {
     if (payload.contactPhone) formData.append('contactPhone', payload.contactPhone.trim());
     if (payload.contactEmail) formData.append('contactEmail', payload.contactEmail.trim());
     (payload.attachments || []).forEach((asset, index) => {
+      const mimeType = inferLostItemImageMimeType(asset);
+
       formData.append('attachments', {
         uri: asset.uri,
-        name: asset.fileName || asset.name || `lost-item-${index + 1}.jpg`,
-        type: asset.mimeType || asset.type || 'image/jpeg',
+        name: buildLostItemImageFileName(asset, index),
+        type: mimeType,
       } as unknown as Blob);
     });
 
-    const response = await apiClient.post('/customer-support/cases', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }) as unknown;
+    const response = await apiClient.post('/customer-support/cases', formData) as unknown;
     return unwrap<LostItemCase>(response);
   },
 

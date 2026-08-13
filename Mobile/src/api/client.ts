@@ -21,9 +21,24 @@ export const apiClient = axios.create({
 
 apiClient.interceptors.request.use(async (requestConfig) => {
   const token = currentAuthToken || await authStorage.getItem(AUTH_TOKEN_KEY);
+  const isFormData = typeof FormData !== 'undefined' && requestConfig.data instanceof FormData;
 
   if (token) {
     requestConfig.headers.Authorization = `Bearer ${token}`;
+  }
+
+  if (isFormData && requestConfig.headers) {
+    const headers = requestConfig.headers as unknown as {
+      delete?: (header: string) => void;
+      [key: string]: unknown;
+    };
+
+    if (typeof headers.delete === 'function') {
+      headers.delete('Content-Type');
+    } else {
+      delete headers['Content-Type'];
+      delete headers['content-type'];
+    }
   }
 
   return requestConfig;

@@ -5,6 +5,7 @@ import LostAndFoundMatchingService from './LostAndFoundMatchingService.js';
 import OperationIncident from '../scheduleOperations/OperationIncident.js';
 import User from '../auth/User.js';
 import notificationService from '../systemNotifications/notification.service.js';
+import { createBroadcastNotification } from '../systemNotifications/systemNotification.service.js';
 import { notifyFeedbackResponse } from '../systemNotifications/triggers/notification.triggers.js';
 import StorageService from '../../services/storage/storage.service.js';
 import {
@@ -380,13 +381,14 @@ export class CustomerSupportService {
       const tripTime = tripTimeValue ? new Date(tripTimeValue) : null;
 
       if (!tripTime || Number.isNaN(tripTime.getTime())) {
-        const error = new Error('Selected trip is missing travel time information');
+        const error = new Error('Chuyến đã chọn không có thông tin thời gian hợp lệ');
         error.statusCode = 400;
         throw error;
       }
 
-      if (Date.now() - tripTime.getTime() > FEEDBACK_TRIP_WINDOW_MS) {
-        const error = new Error(`Feedback can only be submitted within ${FEEDBACK_TRIP_WINDOW_DAYS} days after the trip`);
+      const elapsedMs = Date.now() - tripTime.getTime();
+      if (elapsedMs < 0 || elapsedMs > FEEDBACK_TRIP_WINDOW_MS) {
+        const error = new Error(`Chỉ được gửi góp ý trong vòng ${FEEDBACK_TRIP_WINDOW_DAYS} ngày sau khi chuyến kết thúc`);
         error.statusCode = 400;
         throw error;
       }
