@@ -972,23 +972,30 @@ function DepartureTimeDropdown({
         <Pressable style={styles.modalScrim} onPress={onClose}>
           <View style={styles.monthMenu}>
             <Text style={styles.monthMenuTitle}>Chọn chuyến khởi hành</Text>
-            {schedules.map((schedule) => {
-              const key = schedule.scheduleId || schedule.id || `${schedule.departureTime}-${schedule.scheduleCode}`;
-              const active = schedule.departureTime === selected?.departureTime;
-              return (
-                <Pressable key={key} disabled={schedule.isFull} onPress={() => onSelect(schedule)} style={[styles.monthOption, active && styles.monthOptionActive, schedule.isFull && styles.monthOptionDisabled]}>
-                  <View style={styles.dropdownCopy}>
-                    <Text style={[styles.monthOptionText, active && styles.monthOptionTextActive]}>
-                      {schedule.departureTime}{schedule.expectedArrivalTime ? ` - ${schedule.expectedArrivalTime}` : ''}
-                    </Text>
-                    <Text style={[styles.dropdownMeta, active && styles.dropdownMetaActive]}>
-                      {[schedule.scheduleCode, schedule.isFull ? 'HẾT CHỖ 25/25' : `Còn ${schedule.remainingSeats ?? 25}/25 chỗ`].filter(Boolean).join(' · ')}
-                    </Text>
-                  </View>
-                  {active ? <MaterialCommunityIcons color={colors.white} name="check" size={18} /> : null}
-                </Pressable>
-              );
-            })}
+            <ScrollView
+              contentContainerStyle={styles.scheduleListContent}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+              style={styles.scheduleList}
+            >
+              {schedules.map((schedule) => {
+                const key = schedule.scheduleId || schedule.id || `${schedule.departureTime}-${schedule.scheduleCode}`;
+                const active = schedule.departureTime === selected?.departureTime;
+                return (
+                  <Pressable key={key} disabled={schedule.isFull} onPress={() => onSelect(schedule)} style={[styles.monthOption, active && styles.monthOptionActive, schedule.isFull && styles.monthOptionDisabled]}>
+                    <View style={styles.dropdownCopy}>
+                      <Text style={[styles.monthOptionText, active && styles.monthOptionTextActive]}>
+                        {schedule.departureTime}{schedule.expectedArrivalTime ? ` - ${schedule.expectedArrivalTime}` : ''}
+                      </Text>
+                      <Text style={[styles.dropdownMeta, active && styles.dropdownMetaActive]}>
+                        {[schedule.scheduleCode, schedule.isFull ? 'HẾT CHỖ 25/25' : `Còn ${schedule.remainingSeats ?? 25}/25 chỗ`].filter(Boolean).join(' · ')}
+                      </Text>
+                    </View>
+                    {active ? <MaterialCommunityIcons color={colors.white} name="check" size={18} /> : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </View>
         </Pressable>
       </Modal>
@@ -1122,8 +1129,10 @@ const styles = StyleSheet.create({
   dateField: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderRadius: 16, backgroundColor: colors.card, paddingHorizontal: 14 },
   dateValue: { flex: 1, color: colors.text, fontSize: 14, fontWeight: '900' },
   modalScrim: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.24)', padding: 22 },
-  monthMenu: { gap: 8, borderRadius: 20, backgroundColor: colors.card, padding: 16 },
+  monthMenu: { maxHeight: '78%', borderRadius: 20, backgroundColor: colors.card, padding: 16 },
   monthMenuTitle: { marginBottom: 4, color: colors.primary, fontSize: 15, fontWeight: '900' },
+  scheduleList: { marginTop: 8 },
+  scheduleListContent: { gap: 8, paddingBottom: 4 },
   monthOption: { minHeight: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 14, backgroundColor: colors.surfaceLow, paddingHorizontal: 14 },
   monthOptionActive: { backgroundColor: colors.primaryContainer },
   monthOptionDisabled: { opacity: .55, backgroundColor: '#fff1f1' },
