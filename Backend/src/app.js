@@ -37,6 +37,7 @@ import scheduleOperationsRoutes from './modules/scheduleOperations/scheduleOpera
 import operationChatRoutes from './modules/operationChat/operationChat.routes.js';
 import ticketRoutes from './modules/tickets/ticketRoutes.js';
 import busStopRoutes from './modules/busStops/busStopRoutes.js';
+import aiRoutes from './modules/ai/ai.routes.js';
 
 export const createApp = () => {
   const app = express();
@@ -146,6 +147,7 @@ export const createApp = () => {
   app.use('/api/fleet-operations', fleetOperationsRoutes);
   app.use('/api/tickets', ticketRoutes);
   app.use('/api/routes', routeRoutes);
+  app.use('/api/ai', aiRoutes);
   app.use('/api/schedule-operations', scheduleOperationsRoutes);
   app.use('/api/bus-stops', busStopRoutes);
   app.use('/api/operation-chat', operationChatRoutes);
