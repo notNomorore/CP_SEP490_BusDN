@@ -37,6 +37,12 @@ const getVietnamDate = (value = new Date()) => new Intl.DateTimeFormat('en-CA', 
   day: '2-digit',
 }).format(value);
 
+const hasTripEnded = (trip, now = new Date()) => {
+  if (!trip?.scheduledEnd) return false;
+  const scheduledEnd = new Date(trip.scheduledEnd);
+  return !Number.isNaN(scheduledEnd.getTime()) && scheduledEnd <= now;
+};
+
 const text = {
   vi: {
     title: 'Bán vé tại xe', subtitle: 'Tạo vé nhanh cho hành khách chưa đặt trước.', trip: 'Chuyến được phân công',
@@ -108,14 +114,19 @@ const CreateWalkInTicketPage = () => {
     }));
   };
 
-  const loadTrips = async () => {
+  const loadTrips = async ({ preserveSelection = false } = {}) => {
     setLoadingTrips(true);
     setError('');
     try {
       const payload = await scheduleOperationsService.getAssignedTrips();
-      const available = (payload.trips || []).filter((item) => !['COMPLETED', 'CANCELLED'].includes(item.tripStatus));
+      const available = (payload.trips || []).filter((item) => (
+        !['COMPLETED', 'CANCELLED'].includes(item.tripStatus) && !hasTripEnded(item)
+      ));
       setAssignments(available);
-      const firstAvailable = available.find((item) => !item.capacity?.isFull);
+      const selectedStillAvailable = preserveSelection
+        ? available.find((item) => String(item.tripId) === form.tripId && !item.capacity?.isFull)
+        : null;
+      const firstAvailable = selectedStillAvailable || available.find((item) => !item.capacity?.isFull);
       if (firstAvailable) selectTrip(String(firstAvailable.tripId), available);
       else setForm((current) => ({ ...current, tripId: '', routeId: '', fromStopId: '', toStopId: '' }));
     } catch (err) {
@@ -161,7 +172,7 @@ const CreateWalkInTicketPage = () => {
         changeAmount: form.paymentMethod === 'CASH' ? changeAmount : undefined,
       });
       setResult(data);
-      await loadTrips();
+      await loadTrips({ preserveSelection: true });
       await loadHistory(historyDate);
     } catch (err) {
       setError(translateBusAssistantError(err, language, 'Could not create walk-in ticket'));

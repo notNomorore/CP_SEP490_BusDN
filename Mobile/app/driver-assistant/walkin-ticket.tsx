@@ -14,9 +14,10 @@ import type { WalkInTicketHistory, WalkInTicketResult } from '@/types/busAssista
 import type { AssignedTrip } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
 import {
-  getAssignedTripsRange,
   getTripDepartureTimeLabel,
+  getTripPlannedEndDate,
   getTripPlannedStartDate,
+  getTodayRange,
   isTripToday,
   toDateInput,
 } from '@/utils/scheduleOperations';
@@ -135,9 +136,14 @@ export default function WalkInTicketScreen() {
 
   const loadTrips = useCallback(async () => {
     try {
-      const payload = await scheduleOperationsApi.getAssignedTrips(getAssignedTripsRange());
+      const payload = await scheduleOperationsApi.getAssignedTrips(getTodayRange());
+      const now = new Date();
       const usableTrips = (payload.trips || [])
-        .filter((trip) => !['COMPLETED', 'CANCELLED'].includes(String(trip.tripStatus || '').toUpperCase()))
+        .filter((trip) => (
+          isTripToday(trip)
+          && !['COMPLETED', 'CANCELLED'].includes(String(trip.tripStatus || '').toUpperCase())
+          && (getTripPlannedEndDate(trip)?.getTime() || 0) > now.getTime()
+        ))
         .sort((left, right) => {
           const leftToday = isTripToday(left) ? 0 : 1;
           const rightToday = isTripToday(right) ? 0 : 1;
@@ -146,10 +152,13 @@ export default function WalkInTicketScreen() {
         });
       setTrips(usableTrips);
       const first = usableTrips[0];
-      setSelectedTripId((current) => current || first?.id || '');
-      const firstStops = first?.route?.stops || [];
-      setFromStopId((current) => current || objectId(firstStops[0]?.stationId || firstStops[0]?.id));
-      setToStopId((current) => current || objectId(firstStops[firstStops.length - 1]?.stationId || firstStops[firstStops.length - 1]?.id));
+      setSelectedTripId((current) => (
+        usableTrips.some((trip) => trip.id === current) ? current : first?.id || ''
+      ));
+      if (!first) {
+        setFromStopId('');
+        setToStopId('');
+      }
     } catch (error) {
       if (isPermissionError(error)) {
         setTrips([]);
