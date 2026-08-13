@@ -19,7 +19,25 @@ export const apiClient = axios.create({
   },
 });
 
+const isFormDataPayload = (value: unknown): value is FormData => (
+  typeof FormData !== 'undefined' && value instanceof FormData
+);
+
+const removeContentTypeHeader = (headers?: Record<string, unknown> & {
+  delete?: (header: string) => void;
+}) => {
+  if (!headers) return;
+  headers.delete?.('Content-Type');
+  headers.delete?.('content-type');
+  delete headers['Content-Type'];
+  delete headers['content-type'];
+};
+
 apiClient.interceptors.request.use(async (requestConfig) => {
+  if (isFormDataPayload(requestConfig.data)) {
+    removeContentTypeHeader(requestConfig.headers);
+  }
+
   const token = currentAuthToken || await authStorage.getItem(AUTH_TOKEN_KEY);
 
   if (token) {

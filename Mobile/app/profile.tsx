@@ -1,4 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { router, type Href } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -108,6 +109,7 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const { language, toggleLanguage, t } = useDriverI18n();
 
   const displayUser = profile || storedUser || fallbackUser;
@@ -152,6 +154,44 @@ export default function ProfileScreen() {
     Alert.alert(title, `${title} hiện chưa có trên ứng dụng Mobile.`);
   };
 
+  const uploadAvatar = async () => {
+    if (isUploadingAvatar) return;
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Chưa có quyền truy cập ảnh', 'Vui lòng cấp quyền để chọn ảnh đại diện.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      mediaTypes: ['images'],
+      quality: 0.86,
+    });
+
+    if (result.canceled || !result.assets[0]?.uri) return;
+
+    const asset = result.assets[0];
+    setIsUploadingAvatar(true);
+    try {
+      const updatedProfile = await profileApi.uploadAvatar({
+        uri: asset.uri,
+        fileName: asset.fileName || `avatar-${Date.now()}.jpg`,
+        mimeType: asset.mimeType || 'image/jpeg',
+      });
+      setProfile(updatedProfile);
+      Alert.alert('Đã cập nhật ảnh', 'Ảnh đại diện của bạn đã được lưu.');
+    } catch (error) {
+      Alert.alert(
+        'Không thể tải ảnh',
+        (error as { message?: string })?.message || 'Vui lòng thử lại sau.',
+      );
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <View style={styles.screen}>
@@ -184,8 +224,17 @@ export default function ProfileScreen() {
                 )}
               </View>
               {isStaffProfile ? null : (
-                <Pressable accessibilityLabel="Đổi ảnh đại diện" onPress={() => unavailable('Ảnh đại diện')} style={styles.cameraButton}>
-                  <MaterialCommunityIcons color={colors.white} name="camera" size={18} />
+                <Pressable
+                  accessibilityLabel="Đổi ảnh đại diện"
+                  disabled={isUploadingAvatar}
+                  onPress={uploadAvatar}
+                  style={[styles.cameraButton, isUploadingAvatar && styles.disabledButton]}
+                >
+                  {isUploadingAvatar ? (
+                    <ActivityIndicator color={colors.white} size="small" />
+                  ) : (
+                    <MaterialCommunityIcons color={colors.white} name="camera" size={18} />
+                  )}
                 </Pressable>
               )}
             </View>
@@ -334,6 +383,7 @@ const styles = StyleSheet.create({
   avatarImage: { width: '100%', height: '100%' },
   avatarInitials: { color: colors.primaryContainer, fontSize: 35, fontWeight: '900' },
   cameraButton: { position: 'absolute', right: 2, bottom: 2, width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.surface, borderRadius: 18, backgroundColor: colors.accent, elevation: 5 },
+  disabledButton: { opacity: 0.64 },
   name: { color: colors.primary, fontSize: 23, fontWeight: '900', letterSpacing: -0.6 },
   contact: { marginTop: 5, color: colors.muted, fontSize: 13, fontWeight: '600' },
   phone: { marginTop: 3, color: '#65716c', fontSize: 12 },

@@ -20,11 +20,7 @@ export const profileService = {
     const formData = new FormData();
     formData.append('avatar', file);
 
-    const response = await apiClient.post('/profile/upload-avatar', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const response = await apiClient.post('/profile/upload-avatar', formData);
 
     return response.data;
   },
