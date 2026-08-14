@@ -137,6 +137,25 @@ export const getTripPlannedStartDate = (trip?: AssignedTrip | null) => {
   return parseScheduleDate(`${serviceDate}T${departureTime}:00`);
 };
 
+export const getTripPlannedEndDate = (trip?: AssignedTrip | null) => {
+  if ((trip?.incidentDelayMinutes || trip?.propagatedDelayMinutes) && trip?.scheduledEnd) {
+    return new Date(trip.scheduledEnd);
+  }
+
+  const serviceDate = getTripServiceDateKey(trip);
+  const arrivalTime = getTripArrivalTimeLabel(trip);
+  if (serviceDate === 'unknown' || !/^\d{2}:\d{2}$/.test(arrivalTime)) {
+    return trip?.scheduledEnd ? new Date(trip.scheduledEnd) : null;
+  }
+
+  const plannedEnd = parseScheduleDate(`${serviceDate}T${arrivalTime}:00`);
+  const plannedStart = getTripPlannedStartDate(trip);
+  if (plannedStart && plannedEnd.getTime() <= plannedStart.getTime()) {
+    plannedEnd.setDate(plannedEnd.getDate() + 1);
+  }
+  return plannedEnd;
+};
+
 export const isTripDeparturePassed = (trip?: AssignedTrip | null, now = new Date()) => {
   const departureAt = getTripPlannedStartDate(trip);
   return Boolean(

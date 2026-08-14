@@ -1,4 +1,4 @@
-import { FontAwesome, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -20,6 +20,32 @@ import { colors } from '@/constants/colors';
 const BRAND_GREEN = '#003120';
 const SOFT_MINT = '#ecf6f2';
 
+const DEMO_ACCOUNTS = [
+  {
+    role: 'Khách hàng',
+    icon: 'account' as const,
+    accounts: [
+      { email: 'vuker1212004@gmail.com', password: 'Vu@1212004' },
+      { email: 'huhuhichic64@gmail.com', password: '@Minh123' },
+    ],
+  },
+  {
+    role: 'Phụ xe',
+    icon: 'ticket-confirmation' as const,
+    accounts: [
+      { email: 'vunthde180740@fpt.edu.vn', password: 'Vu@1212004' },
+      { email: 'trinhminhhai1112@gmail.com', password: 'Tuyettnhy1403@' },
+    ],
+  },
+  {
+    role: 'Tài xế',
+    icon: 'bus' as const,
+    accounts: [
+      { email: 'haitmde180679@fpt.edu.vn', password: 'Tuyettnhy1403@' },
+    ],
+  },
+];
+
 export default function LoginScreen() {
   const {
     identifier,
@@ -32,9 +58,9 @@ export default function LoginScreen() {
     login,
     openRegister,
     showForgotPasswordUnavailable,
-    showGoogleLoginUnavailable,
   } = useLogin();
   const [showPassword, setShowPassword] = useState(false);
+  const [showDemoAccounts, setShowDemoAccounts] = useState(false);
   const [focusedField, setFocusedField] = useState<'identifier' | 'password' | null>(null);
   const { height } = useWindowDimensions();
   const compact = height < 760;
@@ -189,23 +215,63 @@ export default function LoginScreen() {
                 )}
               </Pressable>
 
-              <View style={styles.dividerRow}>
-                <View style={styles.divider} />
-                <Text style={styles.dividerText}>Or continue with</Text>
-                <View style={styles.divider} />
-              </View>
-
               <Pressable
                 accessibilityRole="button"
-                onPress={showGoogleLoginUnavailable}
-                style={({ pressed }) => [
-                  styles.googleButton,
-                  pressed ? styles.buttonPressed : null,
-                ]}
+                accessibilityState={{ expanded: showDemoAccounts }}
+                onPress={() => setShowDemoAccounts((visible) => !visible)}
+                style={({ pressed }) => [styles.demoToggle, pressed ? styles.buttonPressed : null]}
               >
-                <FontAwesome name="google" size={19} color="#4285f4" />
-                <Text style={styles.googleText}>Sign in with Google</Text>
+                <View style={styles.demoToggleLabel}>
+                  <MaterialCommunityIcons name="key-variant" size={20} color={BRAND_GREEN} />
+                  <Text style={styles.demoToggleText}>Tài khoản demo</Text>
+                </View>
+                <Ionicons
+                  name={showDemoAccounts ? 'chevron-up' : 'chevron-down'}
+                  size={19}
+                  color={BRAND_GREEN}
+                />
               </Pressable>
+
+              {showDemoAccounts ? (
+                <View style={styles.demoPanel}>
+                  <View style={styles.demoHeading}>
+                    <Text style={styles.demoTitle}>Đăng nhập nhanh để trải nghiệm</Text>
+                    <Text style={styles.demoSubtitle}>Chạm vào tài khoản để tự động điền.</Text>
+                  </View>
+                  {DEMO_ACCOUNTS.map((group) => (
+                    <View key={group.role} style={styles.demoGroup}>
+                      <View style={styles.demoRoleRow}>
+                        <View style={styles.demoRoleIcon}>
+                          <MaterialCommunityIcons name={group.icon} size={17} color={BRAND_GREEN} />
+                        </View>
+                        <Text style={styles.demoRole}>{group.role}</Text>
+                      </View>
+                      {group.accounts.map((account) => (
+                        <Pressable
+                          key={account.email}
+                          accessibilityLabel={`Dùng tài khoản ${group.role} ${account.email}`}
+                          accessibilityRole="button"
+                          onPress={() => {
+                            setIdentifier(account.email);
+                            setPassword(account.password);
+                            setShowDemoAccounts(false);
+                          }}
+                          style={({ pressed }) => [
+                            styles.demoAccount,
+                            pressed ? styles.demoAccountPressed : null,
+                          ]}
+                        >
+                          <View style={styles.demoAccountInfo}>
+                            <Text selectable style={styles.demoEmail}>{account.email}</Text>
+                            <Text selectable style={styles.demoPassword}>{account.password}</Text>
+                          </View>
+                          <Ionicons name="arrow-forward-circle" size={21} color={colors.accent} />
+                        </Pressable>
+                      ))}
+                    </View>
+                  ))}
+                </View>
+              ) : null}
             </View>
 
             <View style={styles.registerRow}>
@@ -429,33 +495,103 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
   },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  divider: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.outline,
-  },
-  dividerText: {
-    color: colors.muted,
-    fontSize: 12,
-  },
-  googleButton: {
+  demoToggle: {
     minHeight: 50,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 11,
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 49, 32, 0.15)',
     borderRadius: 25,
-    backgroundColor: colors.surfaceHigh,
+    backgroundColor: '#f1faf6',
+    paddingHorizontal: 18,
   },
-  googleText: {
-    color: colors.text,
+  demoToggleLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  demoToggleText: {
+    color: BRAND_GREEN,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
+  },
+  demoPanel: {
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 49, 32, 0.11)',
+    borderRadius: 18,
+    backgroundColor: '#f7fcfa',
+    padding: 12,
+  },
+  demoHeading: {
+    paddingHorizontal: 2,
+    paddingBottom: 2,
+  },
+  demoTitle: {
+    color: BRAND_GREEN,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  demoSubtitle: {
+    color: colors.muted,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  demoGroup: {
+    gap: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(193, 200, 195, 0.35)',
+    borderRadius: 14,
+    backgroundColor: colors.white,
+    padding: 10,
+  },
+  demoRoleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  demoRoleIcon: {
+    width: 27,
+    height: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+    backgroundColor: '#e8f7f0',
+  },
+  demoRole: {
+    color: BRAND_GREEN,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  demoAccount: {
+    minHeight: 51,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    borderRadius: 11,
+    backgroundColor: SOFT_MINT,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  demoAccountPressed: {
+    backgroundColor: '#d9f2e7',
+    transform: [{ scale: 0.99 }],
+  },
+  demoAccountInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  demoEmail: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  demoPassword: {
+    color: colors.secondary,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 11,
   },
   registerRow: {
     flexDirection: 'row',

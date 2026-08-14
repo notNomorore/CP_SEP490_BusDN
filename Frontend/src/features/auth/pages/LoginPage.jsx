@@ -1,7 +1,5 @@
 import React, {
-  useCallback,
   useEffect,
-  useRef,
   useState,
 } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -44,38 +42,39 @@ const getErrorMessage = (error) => {
   return 'Unable to complete sign in.';
 };
 
-const GOOGLE_IDENTITY_SCRIPT_SRC = 'https://accounts.google.com/gsi/client';
-let googleIdentityScriptPromise;
-
-const loadGoogleIdentityScript = () => {
-  if (window.google?.accounts?.id) {
-    return Promise.resolve();
-  }
-
-  if (googleIdentityScriptPromise) {
-    return googleIdentityScriptPromise;
-  }
-
-  googleIdentityScriptPromise = new Promise((resolve, reject) => {
-    const existingScript = document.querySelector(`script[src="${GOOGLE_IDENTITY_SCRIPT_SRC}"]`);
-
-    if (existingScript) {
-      existingScript.addEventListener('load', () => resolve(), { once: true });
-      existingScript.addEventListener('error', () => reject(new Error('Unable to load Google login.')), { once: true });
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = GOOGLE_IDENTITY_SCRIPT_SRC;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Unable to load Google login.'));
-    document.head.appendChild(script);
-  });
-
-  return googleIdentityScriptPromise;
-};
+const DEMO_ACCOUNTS = [
+  {
+    role: 'Admin',
+    icon: 'admin_panel_settings',
+    accounts: [
+      { email: 'hoangvu1212004@gmail.com', password: 'Vu@1212004' },
+      { email: 'nguyennhatminhnau@gmail.com', password: '@Minh123' },
+    ],
+  },
+  {
+    role: 'Khách hàng',
+    icon: 'person',
+    accounts: [
+      { email: 'vuker1212004@gmail.com', password: 'Vu@1212004' },
+      { email: 'huhuhichic64@gmail.com', password: '@Minh123' },
+    ],
+  },
+  {
+    role: 'Phụ xe',
+    icon: 'confirmation_number',
+    accounts: [
+      { email: 'vunthde180740@fpt.edu.vn', password: 'Vu@1212004' },
+      { email: 'trinhminhhai1112@gmail.com', password: 'Tuyettnhy1403@' },
+    ],
+  },
+  {
+    role: 'Tài xế',
+    icon: 'directions_bus',
+    accounts: [
+      { email: 'haitmde180679@fpt.edu.vn', password: 'Tuyettnhy1403@' },
+    ],
+  },
+];
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -83,49 +82,23 @@ const LoginPage = () => {
   const {
     requestPasswordReset,
     resetPassword,
-    loginWithGoogle,
     isLoading,
     error,
     clearError,
   } = useAuthStore();
-  const googleButtonRef = useRef(null);
   const [showPassword, setShowPassword] = useState(false);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
   const [submitError, setSubmitError] = useState('');
   const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
-  const [isSubmittingGoogle, setIsSubmittingGoogle] = useState(false);
-  const [isGoogleButtonReady, setIsGoogleButtonReady] = useState(false);
+  const [showDemoAccounts, setShowDemoAccounts] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [resetIdentifier, setResetIdentifier] = useState('');
   const [resetToken, setResetToken] = useState('');
   const [resetOtp, setResetOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
-
-  const handleGoogleCredential = useCallback(async (response) => {
-    clearError();
-    setSubmitError('');
-    setMessage('');
-
-    if (!response?.credential) {
-      setSubmitError('Google login failed. Please try again.');
-      return;
-    }
-
-    setIsSubmittingGoogle(true);
-
-    try {
-      const result = await loginWithGoogle(response.credential);
-      navigate(getRoleLandingPath(result.user), { replace: true });
-    } catch (googleError) {
-      setSubmitError(getErrorMessage(googleError) || 'Google login failed. Please try again.');
-    } finally {
-      setIsSubmittingGoogle(false);
-    }
-  }, [clearError, loginWithGoogle, navigate]);
 
   useEffect(() => {
     if (searchParams.get('registered') === '1') {
@@ -142,48 +115,6 @@ const LoginPage = () => {
   }, []);
 
   useEffect(() => () => clearError(), [clearError]);
-
-  useEffect(() => {
-    if (authMode !== 'login' || !googleClientId || !googleButtonRef.current) {
-      return undefined;
-    }
-
-    let isCancelled = false;
-
-    loadGoogleIdentityScript()
-      .then(() => {
-        if (isCancelled || !googleButtonRef.current) {
-          return;
-        }
-
-        window.google.accounts.id.initialize({
-          client_id: googleClientId,
-          callback: handleGoogleCredential,
-          ux_mode: 'popup',
-        });
-
-        googleButtonRef.current.innerHTML = '';
-        window.google.accounts.id.renderButton(googleButtonRef.current, {
-          type: 'standard',
-          theme: 'outline',
-          size: 'large',
-          text: 'continue_with',
-          shape: 'pill',
-          logo_alignment: 'left',
-          width: Math.min(400, googleButtonRef.current.offsetWidth || 360),
-        });
-        setIsGoogleButtonReady(true);
-      })
-      .catch(() => {
-        if (!isCancelled) {
-          setSubmitError('Unable to load Google login. Please try again.');
-        }
-      });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [authMode, googleClientId, handleGoogleCredential]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -286,6 +217,14 @@ const LoginPage = () => {
   };
 
   const visibleError = submitError || getErrorMessage(error);
+
+  const selectDemoAccount = (account) => {
+    setIdentifier(account.email);
+    setPassword(account.password);
+    setSubmitError('');
+    clearError();
+    setShowDemoAccounts(false);
+  };
 
   return (
     <AuthShell
@@ -419,39 +358,57 @@ const LoginPage = () => {
               </button>
             </form>
 
-            <div className="flex items-center gap-4" aria-hidden="true">
-              <span className="h-px flex-1 bg-outline-variant/60" />
-              <span className="text-xs font-bold uppercase tracking-[0.18em] text-outline">
-                Or
-              </span>
-              <span className="h-px flex-1 bg-outline-variant/60" />
-            </div>
-
-            {googleClientId ? (
-              <div className="flex min-h-[44px] justify-center">
-                {!isGoogleButtonReady && (
-                  <button
-                    type="button"
-                    disabled
-                    className="w-full rounded-full border border-outline-variant/60 bg-white px-6 py-3 text-base font-bold text-on-surface opacity-70"
-                  >
-                    {isSubmittingGoogle ? 'Signing in with Google...' : 'Continue with Google'}
-                  </button>
-                )}
-                <div
-                  ref={googleButtonRef}
-                  className={isGoogleButtonReady ? 'w-full [&>div]:mx-auto' : 'hidden'}
-                />
-              </div>
-            ) : (
+            <div className="space-y-3">
               <button
                 type="button"
-                disabled
-                className="w-full rounded-full border border-outline-variant/60 bg-white px-6 py-4 text-base font-bold text-on-surface opacity-60"
+                onClick={() => setShowDemoAccounts((value) => !value)}
+                aria-expanded={showDemoAccounts}
+                className="flex w-full items-center justify-between rounded-full border border-primary/20 bg-primary/5 px-6 py-3.5 text-sm font-bold text-primary transition hover:border-primary/40 hover:bg-primary/10"
               >
-                Continue with Google
+                <span className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[20px]">key</span>
+                  Tài khoản demo
+                </span>
+                <span className="material-symbols-outlined text-[20px] transition-transform duration-200" style={{ transform: showDemoAccounts ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                  expand_more
+                </span>
               </button>
-            )}
+
+              {showDemoAccounts && (
+                <div className="overflow-hidden rounded-3xl border border-outline-variant/60 bg-surface-container-lowest p-3 shadow-lg shadow-primary/5">
+                  <div className="mb-3 px-2">
+                    <p className="text-sm font-bold text-primary">Đăng nhập nhanh để trải nghiệm</p>
+                    <p className="mt-0.5 text-xs text-on-surface-variant">Chọn một tài khoản để tự động điền thông tin.</p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {DEMO_ACCOUNTS.map((group) => (
+                      <section key={group.role} className="rounded-2xl border border-outline-variant/40 bg-white p-3">
+                        <div className="mb-2 flex items-center gap-2 text-sm font-extrabold text-primary">
+                          <span className="material-symbols-outlined rounded-full bg-primary/5 p-1 text-[18px]">{group.icon}</span>
+                          {group.role}
+                        </div>
+                        <div className="space-y-2">
+                          {group.accounts.map((account) => (
+                            <button
+                              key={account.email}
+                              type="button"
+                              onClick={() => selectDemoAccount(account)}
+                              className="group w-full rounded-xl border border-transparent bg-surface-container-low px-3 py-2.5 text-left transition hover:border-on-tertiary-container/30 hover:bg-on-tertiary-container/10"
+                            >
+                              <span className="block break-all text-xs font-bold text-on-surface">{account.email}</span>
+                              <span className="mt-1 flex items-center justify-between gap-2 text-xs text-on-surface-variant">
+                                <span className="font-mono">{account.password}</span>
+                                <span className="font-bold text-on-tertiary-fixed-variant opacity-0 transition group-hover:opacity-100">Dùng</span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
 
             <p className="text-center text-body-md text-on-surface-variant">
               New to Veridian Transit?{' '}

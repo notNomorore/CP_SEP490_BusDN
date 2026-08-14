@@ -1,4 +1,4 @@
-automaticLocationTextimport { MaterialCommunityIcons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -23,7 +23,6 @@ import { EmptyState, LoadingState, PassengerLayout } from '@/components/passenge
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
 import { getErrorMessage } from '@/utils/validation';
-import { delay } from 'react-native/types_generated/Libraries/Animated/AnimatedExports';
 
 type FilterKey = 'all' | 'arrival' | 'delay' | 'routeChange' | 'system';
 type PermissionStatus = 'granted' | 'prompt' | 'denied' | 'unsupported';
