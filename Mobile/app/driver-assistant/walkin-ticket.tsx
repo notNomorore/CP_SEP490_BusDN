@@ -27,6 +27,14 @@ const passengerTypes = ['ADULT', 'STUDENT', 'CHILD', 'SENIOR'];
 const paymentMethods = ['CASH', 'BANK_TRANSFER'];
 const money = (value: number | string, locale = 'vi-VN') => new Intl.NumberFormat(locale, { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
 const objectId = (value?: string | null) => String(value || '');
+const getTripDirectionMarker = (trip: AssignedTrip) => {
+  const codeMarker = String(trip.tripCode || '').match(/-([DV])$/i)?.[1]?.toUpperCase();
+  if (codeMarker) return codeMarker;
+  const direction = String(trip.route?.direction || '').toUpperCase();
+  if (direction === 'OUTBOUND') return 'D';
+  if (direction === 'INBOUND') return 'V';
+  return '';
+};
 
 function DropdownSelect({
   label,
@@ -306,8 +314,9 @@ export default function WalkInTicketScreen() {
           <View style={styles.optionColumn}>
             {trips.length ? trips.map((trip) => (
               <Pressable key={trip.id} disabled={trip.capacity?.isFull} onPress={() => setSelectedTripId(trip.id)} style={[styles.tripChip, selectedTrip?.id === trip.id && styles.tripChipActive, trip.capacity?.isFull && styles.tripChipDisabled]}>
-                <Text style={[styles.tripTitle, selectedTrip?.id === trip.id && styles.tripTextActive]}>{trip.route?.routeNumber || trip.tripCode || t.assistant.validate.tripFallback}</Text>
-                <Text style={[styles.tripMeta, selectedTrip?.id === trip.id && styles.tripTextActive]}>{getTripDepartureTimeLabel(trip)} - {trip.vehicle?.code || trip.vehicle?.plateNumber || t.assistant.validate.noVehicle}</Text>
+                <Text adjustsFontSizeToFit minimumFontScale={.72} numberOfLines={1} style={[styles.tripTitle, selectedTrip?.id === trip.id && styles.tripTextActive]}>
+                  {trip.route?.routeNumber || trip.tripCode || t.assistant.validate.tripFallback} <Text style={styles.tripMetaInline}>{[getTripDepartureTimeLabel(trip), getTripDirectionMarker(trip), trip.vehicle?.code || trip.vehicle?.plateNumber || t.assistant.validate.noVehicle].filter(Boolean).join(' · ')}</Text>
+                </Text>
                 <Text style={[styles.tripCapacity, selectedTrip?.id === trip.id && styles.tripTextActive, trip.capacity?.isFull && styles.tripCapacityFull]}>{trip.capacity?.isFull ? 'Hết chỗ 25/25 · Vui lòng chọn giờ khác' : `Còn ${trip.capacity?.remainingSeats ?? 25}/25 chỗ`}</Text>
               </Pressable>
             )) : <Text style={styles.emptyText}>{t.assistant.walkin.activeTripEmpty}</Text>}
@@ -453,6 +462,7 @@ const styles = StyleSheet.create({
   tripChipDisabled: { opacity: .55, backgroundColor: '#fff1f1' },
   tripTitle: { color: colors.primary, fontSize: 15, fontWeight: '900' },
   tripMeta: { marginTop: 3, color: colors.muted, fontSize: 12, fontWeight: '700' },
+  tripMetaInline: { fontSize: 12, fontWeight: '800' },
   tripCapacity: { marginTop: 5, color: colors.accent, fontSize: 12, fontWeight: '900' },
   tripCapacityFull: { color: '#b42318' },
   tripTextActive: { color: colors.white },

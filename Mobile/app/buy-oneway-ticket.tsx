@@ -150,6 +150,8 @@ export default function BuyOneWayTicketScreen() {
   const [priceQuote, setPriceQuote] = useState<TicketPriceQuote | null>(null);
   const [payment, setPayment] = useState<PaymentOrder | null>(null);
   const pendingOrderRef = useRef<PaymentOrder | null>(null);
+  const paymentCheckInFlightRef = useRef(false);
+  const paymentSuccessNotifiedRef = useRef('');
   const [routeSelectorOpen, setRouteSelectorOpen] = useState(false);
   const [dateSelectorOpen, setDateSelectorOpen] = useState<null | 'ONE_WAY' | 'MONTHLY_PASS'>(null);
   const [routeQuery, setRouteQuery] = useState('');
@@ -466,27 +468,44 @@ export default function BuyOneWayTicketScreen() {
     }
   };
 
-  const checkPayment = useCallback(async (orderCode?: number | string) => {
+  const checkPayment = useCallback(async (orderCode?: number | string, silent = false) => {
     const code = orderCode || pendingOrderRef.current?.orderCode;
-    if (!code) return;
+    if (!code || paymentCheckInFlightRef.current) return;
+    paymentCheckInFlightRef.current = true;
     setCheckingPayment(true);
     try {
       const status = await passengerApi.getPaymentStatus(code);
       setPayment((current) => ({ ...(current || {}), ...status }));
       pendingOrderRef.current = { ...(pendingOrderRef.current || {}), ...status };
       if (status.status === 'PAID') {
-        Alert.alert('Thanh toán thành công', 'Vé đã được kích hoạt. Thông tin vé và mã QR đang được gửi đến Gmail của tài khoản.', [
-          { text: 'Xem vé', onPress: () => router.replace('/my-tickets') },
-        ]);
+        if (paymentSuccessNotifiedRef.current !== String(code)) {
+          paymentSuccessNotifiedRef.current = String(code);
+          Alert.alert('Thanh toán thành công', 'Vé đã được kích hoạt. Thông tin vé và mã QR đang được gửi đến Gmail của tài khoản.', [
+            { text: 'Xem vé', onPress: () => router.replace('/my-tickets') },
+          ]);
+        }
       } else if (status.status === 'CANCELLED' || status.status === 'FAILED') {
         setError('Thanh toán chưa hoàn tất hoặc đã bị hủy.');
       }
     } catch (err) {
-      setError((err as { message?: string })?.message || 'Không thể kiểm tra trạng thái thanh toán.');
+      if (!silent) setError((err as { message?: string })?.message || 'Không thể kiểm tra trạng thái thanh toán.');
     } finally {
+      paymentCheckInFlightRef.current = false;
       setCheckingPayment(false);
     }
   }, []);
+
+  useEffect(() => {
+    const orderCode = payment?.orderCode;
+    if (!orderCode || String(payment.status || 'PENDING').toUpperCase() !== 'PENDING') return undefined;
+
+    void checkPayment(orderCode, true);
+    const interval = setInterval(() => {
+      void checkPayment(orderCode, true);
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [checkPayment, payment?.orderCode, payment?.status]);
 
   useEffect(() => {
     const appSubscription = AppState.addEventListener('change', (state) => {
@@ -513,6 +532,7 @@ export default function BuyOneWayTicketScreen() {
       const nextPayment = await passengerApi.createPayment(payload);
       setPayment(nextPayment);
       pendingOrderRef.current = nextPayment;
+      paymentSuccessNotifiedRef.current = '';
       if (nextPayment.status === 'PAID') {
         Alert.alert('Thanh toán thành công', 'Vé đã được kích hoạt. Thông tin vé và mã QR đang được gửi đến Gmail của tài khoản.', [
           { text: 'Xem vé', onPress: () => router.replace('/my-tickets') },

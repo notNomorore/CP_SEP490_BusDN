@@ -674,7 +674,10 @@ export const passengerApi = {
   },
 
   getPaymentStatus: async (orderCode: number | string) => {
-    const response = await apiClient.get(`/tickets/payments/${encodeURIComponent(String(orderCode))}`) as unknown;
+    const response = await apiClient.get(
+      `/tickets/payments/${encodeURIComponent(String(orderCode))}`,
+      { timeout: 15000 },
+    ) as unknown;
     return unwrap<PaymentOrder>(response);
   },
 

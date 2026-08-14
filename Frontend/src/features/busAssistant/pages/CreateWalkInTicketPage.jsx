@@ -37,10 +37,13 @@ const getVietnamDate = (value = new Date()) => new Intl.DateTimeFormat('en-CA', 
   day: '2-digit',
 }).format(value);
 
-const hasTripEnded = (trip, now = new Date()) => {
-  if (!trip?.scheduledEnd) return false;
-  const scheduledEnd = new Date(trip.scheduledEnd);
-  return !Number.isNaN(scheduledEnd.getTime()) && scheduledEnd <= now;
+const isTripTodayAndUpcoming = (trip, now = new Date()) => {
+  if (!trip?.scheduledStart) return false;
+  const scheduledStart = new Date(trip.scheduledStart);
+  const scheduledEnd = new Date(trip.scheduledEnd || trip.scheduledStart);
+  if (Number.isNaN(scheduledStart.getTime()) || Number.isNaN(scheduledEnd.getTime())) return false;
+
+  return getVietnamDate(scheduledStart) === getVietnamDate(now) && scheduledEnd > now;
 };
 
 const text = {
@@ -120,7 +123,8 @@ const CreateWalkInTicketPage = () => {
     try {
       const payload = await scheduleOperationsService.getAssignedTrips();
       const available = (payload.trips || []).filter((item) => (
-        !['COMPLETED', 'CANCELLED'].includes(item.tripStatus) && !hasTripEnded(item)
+        !['COMPLETED', 'CANCELLED', 'DONE'].includes(String(item.tripStatus || '').toUpperCase())
+        && isTripTodayAndUpcoming(item)
       ));
       setAssignments(available);
       const selectedStillAvailable = preserveSelection
