@@ -1,10 +1,23 @@
-import ShiftService from './ShiftService.js';
+﻿import ShiftService from './ShiftService.js';
 import AutoGenerateShiftService from './AutoGenerateShiftService.js';
 import TripAllocationService from './TripAllocationService.js';
 import DriverAssignmentService from './DriverAssignmentService.js';
 import logger from '../../utils/logger.js';
 
 export default class ShiftController {
+  static async listStaffPriorities(req, res) {
+    try {
+      const priorities = await AutoGenerateShiftService.rankStaffPriorities(req.query);
+      return res.json({ success: true, priorities });
+    } catch (error) {
+      logger.error('List staff priorities error:', error);
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message || 'Không thể xếp hạng nhân sự.',
+      });
+    }
+  }
+
   static async tripAvailableDrivers(req, res) {
     try { return res.json({ success: true, ...(await DriverAssignmentService.availableDrivers(req.params.tripId)) }); }
     catch (error) { return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: error.message, details: error.details }); }

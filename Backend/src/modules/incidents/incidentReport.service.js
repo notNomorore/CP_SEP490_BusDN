@@ -9,6 +9,7 @@ import FleetBus from '../admin/FleetBus.js';
 import LiveTrip from '../fleetOperations/Trip.js';
 import Vehicle from '../fleetOperations/Vehicle.js';
 import User from '../auth/User.js';
+import { notifyAffectedTripPassengers } from '../scheduleOperations/ScheduleOperationsService.js';
 
 const toPositiveInteger = (value, fallback, max = Number.MAX_SAFE_INTEGER) => {
   const parsed = Number.parseInt(value, 10);
@@ -22,6 +23,21 @@ const endOfDay = (value) => {
   const date = new Date(value);
   date.setHours(23, 59, 59, 999);
   return date;
+};
+
+const operatingDateToken = (value = new Date()) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date).reduce((result, part) => {
+    result[part.type] = part.value;
+    return result;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
 };
 
 export const INCIDENT_REPORT_SCOPES = {
@@ -438,6 +454,49 @@ const createReporterStatusNotification = async ({
 };
 
 export class IncidentReportService {
+  static async sendTrafficNotification(id, payload, actor, io = null) {
+    const incident = await IncidentReport.findById(id).lean();
+    if (!incident) throw new CustomError('Incident report not found', HTTP_STATUS.NOT_FOUND);
+    if (!['TRAFFIC_CONGESTION', 'ACCIDENT'].includes(incident.incidentType)) {
+      throw new CustomError('Manual trip notifications are only available for traffic congestion and accident reports', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const audience = String(payload.audience || '').toUpperCase();
+    const message = String(payload.message || '').trim();
+    if (!['TRIP_STAFF', 'PASSENGERS'].includes(audience)) {
+      throw new CustomError('Invalid notification audience', HTTP_STATUS.BAD_REQUEST);
+    }
+    if (message.length < 5 || message.length > 2000) {
+      throw new CustomError('Notification message must contain between 5 and 2000 characters', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const [operationIncident, schedule] = await Promise.all([
+      OperationIncident.findById(incident.sourceId).lean(),
+      TripSchedule.findById(incident.tripId).lean(),
+    ]);
+    if (!operationIncident || !schedule) {
+      throw new CustomError('The operational trip linked to this report was not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const notification = await notifyAffectedTripPassengers({
+      schedule,
+      incident: operationIncident,
+      delayMinutes: Number(operationIncident.estimatedDelayMinutes) || 0,
+      userId: actor.userId,
+      io,
+      audience,
+      message,
+    });
+
+    return {
+      notificationId: notification?._id || null,
+      recipientCount: notification?.deliverySummary?.resolvedCount
+        || notification?.targetUsers?.length
+        || 0,
+      audience,
+    };
+  }
+
   static async syncOperationalSources() {
     const [operationIncidents] = await Promise.all([
       OperationIncident.find({
@@ -476,8 +535,66 @@ export class IncidentReportService {
     await IncidentReport.bulkWrite(operations, { ordered: false });
   }
 
+  static async resolveCompletedTripDelayReports() {
+    const reports = await IncidentReport.find({
+      status: { $ne: 'RESOLVED' },
+    }).select('_id tripId sourceId status createdAt').lean();
+    if (!reports.length) return;
+
+    const completedSchedules = await TripSchedule.find({
+      _id: { $in: reports.map((report) => report.tripId).filter(Boolean) },
+      status: 'COMPLETED',
+    }).select('_id actualEndAt').lean();
+    const completedById = new Map(completedSchedules.map((schedule) => [String(schedule._id), schedule]));
+    const today = operatingDateToken();
+    const completedReports = reports.filter((report) => (
+      completedById.has(String(report.tripId))
+      || (operatingDateToken(report.createdAt) && operatingDateToken(report.createdAt) < today)
+    ));
+    if (!completedReports.length) return;
+
+    await Promise.all(completedReports.map(async (report) => {
+      const schedule = completedById.get(String(report.tripId));
+      const resolvedAt = schedule?.actualEndAt || new Date();
+      const resolutionSummary = schedule
+        ? 'Chuyến xe đã hoàn thành nên báo cáo được tự động hoàn tất xử lý.'
+        : 'Báo cáo đã qua ngày nên được tự động hoàn tất xử lý.';
+      await Promise.all([
+        IncidentReport.updateOne(
+          { _id: report._id, status: { $ne: 'RESOLVED' } },
+          {
+            $set: {
+              status: 'RESOLVED',
+              resolutionSummary,
+              resolvedAt,
+              resolvedBy: null,
+            },
+          }
+        ),
+        report.sourceId ? OperationIncident.updateOne(
+          { _id: report.sourceId },
+          { $set: { status: 'RESOLVED', resolvedAt, acknowledgedAt: resolvedAt, adminNote: resolutionSummary } }
+        ) : Promise.resolve(),
+        OperationNotification.updateOne(
+          { sourceType: 'INCIDENT_REPORT_STATUS', sourceId: report._id },
+          {
+            $set: {
+              message: schedule
+                ? 'Chuyến đã hoàn thành. Báo cáo đã được tự động hoàn tất xử lý.'
+                : 'Báo cáo đã qua ngày và được tự động hoàn tất xử lý.',
+              activeFrom: resolvedAt,
+              'metadata.currentStatus': 'RESOLVED',
+              'metadata.currentStatusLabel': 'Hoàn tất xử lý',
+            },
+          }
+        ),
+      ]);
+    }));
+  }
+
   static async getIncidents(query) {
     await this.syncOperationalSources();
+    await this.resolveCompletedTripDelayReports();
 
     const page = toPositiveInteger(query.page, PAGINATION.DEFAULT_PAGE);
     const limit = toPositiveInteger(query.limit, PAGINATION.DEFAULT_LIMIT, PAGINATION.MAX_LIMIT);
@@ -573,7 +690,7 @@ export class IncidentReportService {
     };
   }
 
-  static async updateIncidentStatus(id, payload, actor) {
+  static async updateIncidentStatus(id, payload, actor, io = null) {
     const incident = await IncidentReport.findById(id);
 
     if (!incident) {
@@ -581,26 +698,41 @@ export class IncidentReportService {
     }
 
     const previousStatus = incident.status;
+    const isSimpleDelayIncident = ['TRAFFIC_CONGESTION', 'ACCIDENT'].includes(incident.incidentType);
     const adminNote = String(payload.adminNote || '').trim();
     const resolutionSummary = String(payload.resolutionSummary || '').trim();
     const handlingAction = payload.handlingAction || incident.handlingAction || 'TRIAGE_ONLY';
     const responsibleUnit = payload.responsibleUnit || incident.responsibleUnit || 'OPERATION_CENTER';
+
+    if (isSimpleDelayIncident && previousStatus === 'PENDING' && payload.status === 'IN_PROGRESS') {
+      throw new CustomError('Traffic congestion and accident reports move directly from pending to resolved', HTTP_STATUS.BAD_REQUEST);
+    }
+
+    if (
+      ['RESOLVED', 'REJECTED'].includes(payload.status)
+      && !isSimpleDelayIncident
+      && !resolutionSummary
+    ) {
+      throw new CustomError('Resolution summary is required when resolving or rejecting an incident', HTTP_STATUS.BAD_REQUEST);
+    }
 
     incident.status = payload.status;
     incident.adminNote = adminNote || incident.adminNote;
     incident.resolutionSummary = resolutionSummary || incident.resolutionSummary;
     incident.handlingAction = handlingAction;
     incident.responsibleUnit = responsibleUnit;
-    incident.statusHistory.push({
-      fromStatus: previousStatus,
-      toStatus: payload.status,
-      adminNote,
-      resolutionSummary,
-      handlingAction,
-      responsibleUnit,
-      changedBy: actor.userId,
-      changedAt: new Date(),
-    });
+    if (previousStatus !== payload.status) {
+      incident.statusHistory.push({
+        fromStatus: previousStatus,
+        toStatus: payload.status,
+        adminNote,
+        resolutionSummary,
+        handlingAction,
+        responsibleUnit,
+        changedBy: actor.userId,
+        changedAt: new Date(),
+      });
+    }
 
     if (payload.status === 'RESOLVED') {
       incident.resolvedBy = actor.userId;
@@ -626,15 +758,17 @@ export class IncidentReportService {
       });
     }
 
-    await createReporterStatusNotification({
-      incident,
-      previousStatus,
-      nextStatus: payload.status,
-      adminNote,
-      handlingAction,
-      resolutionSummary,
-      actorId: actor?.userId,
-    });
+    if (previousStatus !== payload.status) {
+      await createReporterStatusNotification({
+        incident,
+        previousStatus,
+        nextStatus: payload.status,
+        adminNote,
+        handlingAction,
+        resolutionSummary,
+        actorId: actor?.userId,
+      });
+    }
 
     await logAudit({
       action: 'INCIDENT_STATUS_UPDATED',

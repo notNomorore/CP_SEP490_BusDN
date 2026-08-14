@@ -1,4 +1,4 @@
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+automaticLocationTextimport { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -23,6 +23,7 @@ import { EmptyState, LoadingState, PassengerLayout } from '@/components/passenge
 import { colors } from '@/constants/colors';
 import { useAuthStore } from '@/store/auth.store';
 import { getErrorMessage } from '@/utils/validation';
+import { delay } from 'react-native/types_generated/Libraries/Animated/AnimatedExports';
 
 type FilterKey = 'all' | 'arrival' | 'delay' | 'routeChange' | 'system';
 type PermissionStatus = 'granted' | 'prompt' | 'denied' | 'unsupported';
@@ -46,7 +47,7 @@ const typeConfig = {
     tone: 'success',
   },
   delay: {
-    label: 'Trễ chuyến',
+    label: 'Chuyến trễ',
     title: 'Chuyến bị trễ',
     icon: 'clock-alert-outline',
     tone: 'danger',
@@ -234,9 +235,17 @@ const displayTitle = (item: NotificationRecord) => {
 
 const displayMessage = (item: NotificationRecord) => {
   const kind = classifyNotification(item);
-  if (kind === 'arrival') return buildEtaLine(item) || translateNotificationMessage(item.message || item.body || '');
-  if (kind === 'delay') return buildDelayLine(item) || translateNotificationMessage(item.message || item.body || '');
-  return translateNotificationMessage(item.message || item.body || '');
+  if (kind === 'arrival') return buildEtaLine(item) || item.message || item.body || '';
+  if (kind === 'delay') {
+    const adminMessage = item.message || item.body || '';
+    const delayLine = buildDelayLine(item);
+    return [adminMessage, delayLine]
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line, index, lines) => lines.indexOf(line) === index)
+      .join('\n');
+  }
+  return item.message || item.body || '';
 };
 
 const permissionStatus = (): PermissionStatus => {

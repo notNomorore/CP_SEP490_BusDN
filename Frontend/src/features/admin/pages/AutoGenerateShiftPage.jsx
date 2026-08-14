@@ -29,8 +29,9 @@ const initialForm = {
 };
 
 const shiftTimes = {
-  MORNING: ['05:30', '13:30'],
-  AFTERNOON: ['10:30', '18:30'],
+  MORNING: ['05:30', '10:30'],
+  MIDDAY: ['10:30', '13:30'],
+  AFTERNOON: ['13:30', '18:30'],
   EVENING: ['17:30', '22:00'],
   FULL_DAY: ['05:30', '18:30'],
 };
@@ -357,6 +358,7 @@ const AutoGenerateShiftPage = ({ embedded = false, onConfirmed }) => {
                 updateForm({ shiftType, ...(times ? { startTime: times[0], endTime: times[1] } : {}) });
               }}>
                 <option value="MORNING">Ca sáng</option>
+                <option value="MIDDAY">Ca trưa</option>
                 <option value="AFTERNOON">Ca chiều</option>
                 <option value="EVENING">Ca tối</option>
                 <option value="FULL_DAY">Cả ngày</option>

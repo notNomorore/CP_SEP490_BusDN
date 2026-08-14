@@ -4,13 +4,16 @@ import { CustomError } from '../../middleware/errorHandler.js';
 import FleetBus from '../admin/FleetBus.js';
 import TripSchedule from '../admin/TripSchedule.js';
 import Vehicle from '../fleetOperations/Vehicle.js';
+import Trip from '../fleetOperations/Trip.js';
 import PassengerTicket from '../tickets/Ticket.js';
+import BoardingRecord from '../busAssistant/BoardingRecord.js';
 import OperationIncident from '../scheduleOperations/OperationIncident.js';
 import { createBroadcastNotification } from '../systemNotifications/systemNotification.service.js';
 import notificationService from '../systemNotifications/notification.service.js';
 import VehicleReassignmentService from '../vehicleReassignments/vehicleReassignment.service.js';
 import VehicleIssue from './VehicleIssue.js';
 import MaintenanceTask from './MaintenanceTask.js';
+import { propagateIncidentDelay } from '../scheduleOperations/scheduleDelayPropagation.service.js';
 
 const DECISION_STATUS_MAP = {
   mark_reviewed: 'reviewed',
@@ -784,21 +787,45 @@ export class VehicleIssueService {
 
   static async resolveTripPassengerIds(issue) {
     const trip = await TripSchedule.findById(issue.tripId).lean();
+    const serviceDateToken = trip?.serviceDate
+      ? new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+      }).format(new Date(trip.serviceDate))
+      : '';
+    const passengerTicketTripId = trip ? [
+      trip.routeCode,
+      serviceDateToken,
+      trip.departureTime,
+      trip.direction,
+    ].filter(Boolean).join('-') : '';
     const tripKeys = [
       issue.tripId ? String(issue.tripId) : '',
       trip?.scheduleCode || '',
+      passengerTicketTripId,
     ].filter(Boolean);
 
     if (!tripKeys.length) return [];
 
-    const tickets = await PassengerTicket.find({
-      tripId: { $in: tripKeys },
-      bookingStatus: 'SUCCESS',
-      paymentStatus: 'PAID',
-      ticketStatus: { $nin: ['CANCELLED', 'REFUNDED'] },
-    }).select('passenger').lean();
+    const operationalTrips = await Trip.find({ scheduleId: issue.tripId }).select('_id').lean();
+    const boardingTripIds = [issue.tripId, ...operationalTrips.map((item) => item._id)].filter(Boolean);
+    const [tickets, boardingRecords] = await Promise.all([
+      PassengerTicket.find({
+        tripId: { $in: tripKeys },
+        bookingStatus: 'SUCCESS',
+        paymentStatus: 'PAID',
+        ticketStatus: { $in: ['ACTIVE', 'USED'] },
+      }).select('passenger').lean(),
+      BoardingRecord.find({
+        tripId: { $in: boardingTripIds },
+        validationStatus: 'VALIDATED',
+        passengerId: { $ne: null },
+      }).select('passengerId').lean(),
+    ]);
 
-    return [...new Set(tickets.map((ticket) => String(ticket.passenger)).filter(Boolean))];
+    return [...new Set([
+      ...tickets.map((ticket) => String(ticket.passenger || '')),
+      ...boardingRecords.map((record) => String(record.passengerId || '')),
+    ].filter(Boolean))];
   }
 
   static async dispatchStandbyBus(id, payload, actor, io = null) {
@@ -811,6 +838,18 @@ export class VehicleIssueService {
     if (!payload.standbyVehicleId || !mongoose.isValidObjectId(payload.standbyVehicleId)) {
       throw new CustomError('Standby vehicle is required', HTTP_STATUS.BAD_REQUEST);
     }
+    const estimatedDelayMinutes = Number(payload.estimatedDelayMinutes);
+    if (!Number.isInteger(estimatedDelayMinutes) || estimatedDelayMinutes < 1 || estimatedDelayMinutes > 1440) {
+      throw new CustomError('Estimated delay must be an integer from 1 to 1440 minutes', HTTP_STATUS.BAD_REQUEST);
+    }
+    const staffNotificationMessage = String(payload.staffNotificationMessage || '').trim();
+    const passengerNotificationMessage = String(payload.passengerNotificationMessage || '').trim();
+    if (payload.notifyStaff && !staffNotificationMessage) {
+      throw new CustomError('Staff notification message is required', HTTP_STATUS.BAD_REQUEST);
+    }
+    if (payload.notifyPassengers && !passengerNotificationMessage) {
+      throw new CustomError('Passenger notification message is required', HTTP_STATUS.BAD_REQUEST);
+    }
 
     const dispatchedVehicleId = await this.assignReplacementVehicle(
       issue,
@@ -819,20 +858,44 @@ export class VehicleIssueService {
       payload.adminNote || 'Standby bus dispatched for emergency breakdown.',
       {
         reason: 'breakdown',
-        note: payload.adminNote || 'Standby bus dispatched for emergency breakdown.',
-        notifyStaff: true,
+        note: staffNotificationMessage || 'Điều xe dự phòng cho sự cố khẩn cấp.',
+        notifyStaff: Boolean(payload.notifyStaff),
         notifyPassengers: false,
+        estimatedDelayMinutes,
       },
       io
     );
 
+    await Promise.all([
+      Trip.updateMany(
+        { scheduleId: issue.tripId, status: { $in: ['scheduled', 'active', 'paused', 'delayed', 'incident'] } },
+        { $set: { status: 'delayed', delayMinutes: estimatedDelayMinutes, delayReason: 'Xe hỏng khẩn cấp' } }
+      ),
+      issue.sourceIncidentId
+        ? OperationIncident.updateOne({ _id: issue.sourceIncidentId }, { $set: { estimatedDelayMinutes } })
+        : null,
+    ].filter(Boolean));
+
+    await propagateIncidentDelay({
+      scheduleId: issue.tripId,
+      delayMinutes: estimatedDelayMinutes,
+      reason: 'Xe hỏng khẩn cấp',
+      actorId: actor.userId,
+    });
+
     const passengerIds = await this.resolveTripPassengerIds(issue);
+    const standbyVehicle = await FleetBus.findById(dispatchedVehicleId || payload.standbyVehicleId)
+      .select('plateNumber busCode')
+      .lean();
+    const standbyVehicleLabel = standbyVehicle?.plateNumber
+      || standbyVehicle?.busCode
+      || String(dispatchedVehicleId || payload.standbyVehicleId);
     let notification = null;
-    if (passengerIds.length) {
+    if (payload.notifyPassengers && passengerIds.length) {
       notification = await createBroadcastNotification({
-        title: 'Xe dự phòng đã được điều phối',
-        message: 'Xe của bạn gặp sự cố kỹ thuật.\nXe dự phòng đã được điều phối và sẽ tiếp tục hành trình trong thời gian sớm nhất.\nBusDN xin lỗi vì sự bất tiện này.',
-        type: 'MAINTENANCE_REQUIRED',
+        title: 'Chuyến xe đã đổi xe do sự cố',
+        message: `${passengerNotificationMessage}\nXe thay thế: ${standbyVehicleLabel}. Chuyến dự kiến trễ ${estimatedDelayMinutes} phút.`,
+        type: 'emergency',
         priority: 'urgent',
         targetAudience: 'specific_users',
         userIds: passengerIds,
@@ -842,6 +905,8 @@ export class VehicleIssueService {
         metadata: {
           issueId: String(issue._id),
           standbyVehicleId: String(dispatchedVehicleId || payload.standbyVehicleId),
+          standbyVehicleLabel,
+          estimatedDelayMinutes,
         },
         deduplicationKey: `maintenance-standby:${issue._id}:passengers`,
       }, actor.userId, io);
@@ -851,6 +916,7 @@ export class VehicleIssueService {
     issue.emergencyBreakdown.standbyVehicleId = dispatchedVehicleId || payload.standbyVehicleId;
     issue.emergencyBreakdown.assignedDriverId = payload.assignedDriverId || null;
     issue.emergencyBreakdown.dispatchTime = new Date();
+    issue.emergencyBreakdown.estimatedDelayMinutes = estimatedDelayMinutes;
     issue.emergencyBreakdown.passengerNotificationId = notification?._id || null;
     issue.emergencyBreakdown.notificationSentAt = notification?.deliverySummary?.sentAt || (notification ? new Date() : null);
     issue.replacementVehicleId = dispatchedVehicleId || payload.standbyVehicleId;
@@ -901,6 +967,19 @@ export class VehicleIssueService {
       reviewedAt: new Date(),
     });
     await issue.save();
+
+    if (issue.sourceIncidentId || issue.emergencyBreakdown?.sourceIncidentId) {
+      await OperationIncident.updateOne(
+        { _id: issue.sourceIncidentId || issue.emergencyBreakdown.sourceIncidentId },
+        {
+          $set: {
+            status: 'RESOLVED',
+            canContinue: true,
+            requiresReplacementVehicle: false,
+          },
+        }
+      );
+    }
 
     const updated = await this.getIssueById(id, actor);
     io?.to('fleet:operations').emit('server:vehicleIssue:emergencyResolved', updated);

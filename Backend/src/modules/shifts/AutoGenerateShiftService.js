@@ -17,7 +17,7 @@ const MAX_WORK_MINUTES = 8 * 60;
 const MAX_WEEKLY_WORK_MINUTES = 40 * 60;
 const MIN_REST_MINUTES = 10 * 60;
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'];
-const SHIFT_TYPES = new Set(['MORNING', 'AFTERNOON', 'EVENING', 'FULL_DAY', 'CUSTOM']);
+const SHIFT_TYPES = new Set(['MORNING', 'MIDDAY', 'AFTERNOON', 'EVENING', 'FULL_DAY', 'CUSTOM']);
 
 const normalizeDate = (value) => {
   if (!value) return null;
@@ -292,13 +292,130 @@ const allocateDutyResources = (rows, body) => {
 
 const shiftNameFor = (shiftType) => ({
   MORNING: 'Ca sáng',
+  MIDDAY: 'Ca trưa',
   AFTERNOON: 'Ca chiều',
   EVENING: 'Ca tối',
   FULL_DAY: 'Ca cả ngày',
   CUSTOM: 'Ca tùy chỉnh',
 }[shiftType] || 'Ca tùy chỉnh');
 
+const priorityLabelFor = (score) => {
+  if (score >= 80) return 'HIGH';
+  if (score >= 60) return 'MEDIUM';
+  return 'NORMAL';
+};
+
+export const buildExperiencePriority = ({ staff, assignments, tripCountByShift, targetRouteIds }) => {
+  const routeCounts = new Map();
+  let completedShiftCount = 0;
+  let completedTripCount = 0;
+  let lastCompletedAt = null;
+
+  assignments.forEach((assignment) => {
+    const shift = assignment.shiftId;
+    if (!shift) return;
+    const routeId = getId(shift.routeId);
+    completedShiftCount += 1;
+    completedTripCount += tripCountByShift.get(getId(shift)) || 0;
+    if (routeId) routeCounts.set(routeId, (routeCounts.get(routeId) || 0) + 1);
+    const completedAt = assignment.updatedAt || shift.actualEndDateTime || shift.workDate;
+    if (completedAt && (!lastCompletedAt || new Date(completedAt) > new Date(lastCompletedAt))) {
+      lastCompletedAt = completedAt;
+    }
+  });
+
+  const relevantRouteCount = targetRouteIds.length
+    ? targetRouteIds.reduce((total, routeId) => total + (routeCounts.get(routeId) || 0), 0)
+    : completedShiftCount;
+  const relevantTripCount = targetRouteIds.length
+    ? assignments.reduce((total, assignment) => (
+      targetRouteIds.includes(getId(assignment.shiftId?.routeId))
+        ? total + (tripCountByShift.get(getId(assignment.shiftId)) || 0)
+        : total
+    ), 0)
+    : completedTripCount;
+  const recencyDays = lastCompletedAt
+    ? Math.max(0, Math.floor((Date.now() - new Date(lastCompletedAt).getTime()) / 86400000))
+    : null;
+  const experiencePoints = Math.min(30, relevantRouteCount * 3);
+  const tripPoints = Math.min(20, relevantTripCount * 2);
+  const generalPoints = Math.min(10, completedShiftCount);
+  const recencyPoints = recencyDays !== null && recencyDays <= 90 ? Math.max(0, 10 - Math.floor(recencyDays / 10)) : 0;
+  const score = Math.min(100, 30 + experiencePoints + tripPoints + generalPoints + recencyPoints);
+  const reasons = [];
+  if (relevantRouteCount) reasons.push(`Đã hoàn thành ${relevantRouteCount} ca trên tuyến đang cần`);
+  if (relevantTripCount) reasons.push(`Có kinh nghiệm ${relevantTripCount} lượt chạy liên quan`);
+  if (recencyDays !== null && recencyDays <= 30) reasons.push('Có kinh nghiệm vận hành gần đây');
+  if (!reasons.length) reasons.push('Đủ điều kiện nhưng chưa có lịch sử trên tuyến đang cần');
+
+  return {
+    staffId: getId(staff),
+    suitabilityScore: score,
+    priorityLevel: priorityLabelFor(score),
+    routeExperienceCount: relevantRouteCount,
+    tripExperienceCount: relevantTripCount,
+    completedShiftCount,
+    lastCompletedAt,
+    reasons,
+  };
+};
+
 export default class AutoGenerateShiftService {
+  static async rankStaffPriorities({ routeIds = '', lookbackDays = 365 } = {}) {
+    const targetRouteIds = String(routeIds || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter((value) => mongoose.Types.ObjectId.isValid(value));
+    const historyStart = new Date();
+    historyStart.setDate(historyStart.getDate() - Math.min(1095, Math.max(30, Number(lookbackDays) || 365)));
+    historyStart.setHours(0, 0, 0, 0);
+
+    const [drivers, assistants, completedDriverAssignments, completedAssistantAssignments] = await Promise.all([
+      User.find({ role: 'DRIVER', status: 'ACTIVE', 'accountLock.isLocked': { $ne: true } }).select('fullName email phoneNumber').lean(),
+      User.find({ role: { $in: ['CONDUCTOR', 'BUS_ASSISTANT'] }, status: 'ACTIVE', 'accountLock.isLocked': { $ne: true } }).select('fullName email phoneNumber').lean(),
+      DriverShiftAssignment.find({ status: 'COMPLETED', workDate: { $gte: historyStart } }).populate({ path: 'shiftId', select: 'routeId workDate actualEndDateTime' }).lean(),
+      AssistantShiftAssignment.find({ status: 'COMPLETED', workDate: { $gte: historyStart } }).populate({ path: 'shiftId', select: 'routeId workDate actualEndDateTime' }).lean(),
+    ]);
+
+    const completedShiftIds = [...new Set([
+      ...completedDriverAssignments.map((item) => getId(item.shiftId)),
+      ...completedAssistantAssignments.map((item) => getId(item.shiftId)),
+    ].filter(Boolean))];
+    const tripCounts = completedShiftIds.length
+      ? await TripShiftAssignment.aggregate([
+        { $match: { shiftId: { $in: completedShiftIds.map((id) => new mongoose.Types.ObjectId(id)) }, status: 'COMPLETED' } },
+        { $group: { _id: '$shiftId', count: { $sum: 1 } } },
+      ])
+      : [];
+    const tripCountByShift = new Map(tripCounts.map((item) => [getId(item._id), item.count]));
+    const groupByStaff = (rows, field) => rows.reduce((map, item) => {
+      const id = getId(item[field]);
+      map.set(id, [...(map.get(id) || []), item]);
+      return map;
+    }, new Map());
+    const driverHistory = groupByStaff(completedDriverAssignments, 'driverId');
+    const assistantHistory = groupByStaff(completedAssistantAssignments, 'assistantId');
+    const rank = (people, history) => people
+      .map((staff) => ({
+        ...publicAssistant(staff),
+        ...buildExperiencePriority({
+          staff,
+          assignments: history.get(getId(staff)) || [],
+          tripCountByShift,
+          targetRouteIds,
+        }),
+      }))
+      .sort((left, right) => right.suitabilityScore - left.suitabilityScore || left.fullName.localeCompare(right.fullName, 'vi'))
+      .map((item, index) => ({ ...item, rank: index + 1 }));
+
+    return {
+      routeIds: targetRouteIds,
+      lookbackDays: Math.min(1095, Math.max(30, Number(lookbackDays) || 365)),
+      drivers: rank(drivers, driverHistory),
+      assistants: rank(assistants, assistantHistory),
+    };
+  }
+
   static async populateDutyResources(rows, routeId) {
     return Promise.all(rows.map(async (row) => {
       const [availableDrivers, availableAssistants, availableVehicles] = await Promise.all([

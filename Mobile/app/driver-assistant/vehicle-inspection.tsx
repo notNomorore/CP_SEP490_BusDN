@@ -12,7 +12,7 @@ import { formatDriverStatus, useDriverI18n } from '@/i18n/driver';
 import { useAuthStore } from '@/store/auth.store';
 import type { AssignedTrip, VehicleInspection } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
-import { getTripDepartureTimeLabel, getTripStatus, getTripVehicleLabel, getVehicleLabel, hasVehicleReplacement } from '@/utils/scheduleOperations';
+import { findEarlierUnfinishedTrip, getAssignedTripsRange, getTripDepartureTimeLabel, getTripStatus, getTripVehicleLabel, getVehicleLabel, hasVehicleReplacement, isTripDeparturePassed } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
 type ChecklistKey = 'tires' | 'brakes' | 'lights' | 'fuelOrBattery' | 'safetyEquipment' | 'cleanliness';
@@ -39,6 +39,7 @@ export default function VehicleInspectionScreen() {
   const { t } = useDriverI18n();
   const initialTrip = useMemo(() => parseTripParam(params.trip), [params.trip]);
   const [trip, setTrip] = useState<AssignedTrip | null>(initialTrip);
+  const [assignedTrips, setAssignedTrips] = useState<AssignedTrip[]>(initialTrip ? [initialTrip] : []);
   const assignmentId = trip?.id || params.assignmentId || '';
   const [checklist, setChecklist] = useState<Record<ChecklistKey, boolean>>({
     ...emptyChecklist,
@@ -75,6 +76,8 @@ export default function VehicleInspectionScreen() {
         ...emptyChecklist,
         ...(updatedTrip.inspection?.checklist || {}),
       });
+      const payload = await scheduleOperationsApi.getAssignedTrips(getAssignedTripsRange()).catch(() => null);
+      if (payload) setAssignedTrips(payload.trips || []);
     } catch {
       // Keep the navigation payload visible when refresh is temporarily unavailable.
     }
@@ -93,7 +96,12 @@ export default function VehicleInspectionScreen() {
   const tripStatus = trip ? getTripStatus(trip) : 'SCHEDULED';
   const canOperateVehicle = user?.role === 'DRIVER';
   const tripAllowsInspection = tripStatus === 'SCHEDULED';
-  const canEdit = canOperateVehicle && tripAllowsInspection && !isReady && !isIssueReported;
+  const departurePassed = isTripDeparturePassed(trip);
+  const inspectionBlockedBy = useMemo(
+    () => (trip ? findEarlierUnfinishedTrip(trip, assignedTrips) : null),
+    [assignedTrips, trip]
+  );
+  const canEdit = canOperateVehicle && tripAllowsInspection && !departurePassed && !inspectionBlockedBy && !isReady && !isIssueReported;
   const canStart = canEdit && isNotStarted;
   const canInspect = canEdit && isInProgress;
   const canConfirmReady = canInspect && allChecked;
@@ -238,6 +246,14 @@ export default function VehicleInspectionScreen() {
             ) : null}
             {canOperateVehicle && !tripAllowsInspection ? (
               <Text style={styles.warningText}>{t.inspection.cannotInspect}</Text>
+            ) : null}
+            {canOperateVehicle && departurePassed ? (
+              <Text style={styles.warningText}>Chuyến đã qua giờ khởi hành nên không thể bắt đầu kiểm tra xe.</Text>
+            ) : null}
+            {canOperateVehicle && inspectionBlockedBy ? (
+              <Text style={styles.warningText}>
+                Phải hoàn tất chuyến {inspectionBlockedBy.tripCode} trước khi bắt đầu kiểm tra xe cho chuyến này.
+              </Text>
             ) : null}
             <View style={styles.explainBox}>
               <Text style={styles.helperText}>{t.inspection.explain}</Text>

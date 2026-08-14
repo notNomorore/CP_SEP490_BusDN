@@ -103,6 +103,11 @@ export type AssignedTrip = {
   busAssistant?: StaffMember;
   scheduledStart?: string | null;
   scheduledEnd?: string | null;
+  originalScheduledStart?: string | null;
+  originalScheduledEnd?: string | null;
+  incidentDelayMinutes?: number;
+  propagatedDelayMinutes?: number;
+  delayReason?: string;
   actualStartAt?: string | null;
   actualEndAt?: string | null;
   startLocation?: TripStartLocation | null;
@@ -138,6 +143,8 @@ export type ShiftSchedule = {
   shiftType?: string;
   startTime?: string;
   endTime?: string;
+  incidentDelayMinutes?: number;
+  propagatedDelayMinutes?: number;
   description?: string;
   notes?: string;
   route?: {

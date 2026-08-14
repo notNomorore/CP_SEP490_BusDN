@@ -41,7 +41,7 @@ const ShiftSchema = new mongoose.Schema(
     },
     shiftType: {
       type: String,
-      enum: ['MORNING', 'AFTERNOON'],
+      enum: ['MORNING', 'MIDDAY', 'AFTERNOON'],
       default: 'MORNING',
     },
     plannedStartDateTime: {

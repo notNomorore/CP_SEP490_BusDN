@@ -554,13 +554,14 @@ export default class ScheduleGenerationService {
     const ignoredReplacementIds = replaceScheduled
       ? (await TripSchedule.find(replaceFilter).select('_id').lean()).map((schedule) => schedule._id)
       : [];
-    const existingCode = await TripSchedule.findOne({
+    const existingCodes = await TripSchedule.find({
       scheduleCode: { $in: scheduleCodes },
       ...(ignoredReplacementIds.length ? { _id: { $nin: ignoredReplacementIds } } : {}),
     }).select('scheduleCode').lean();
-    if (existingCode) {
-      throw Object.assign(new Error(`Mã lịch ${existingCode.scheduleCode} đã tồn tại.`), { statusCode: 409 });
+    if (existingCodes.length && !planningOnly) {
+      throw Object.assign(new Error(`Mã lịch ${existingCodes[0].scheduleCode} đã tồn tại.`), { statusCode: 409 });
     }
+    const existingCodeSet = new Set(existingCodes.map((schedule) => String(schedule.scheduleCode || '').trim().toUpperCase()));
 
     for (const row of normalizedRows) {
       const internalConflict = normalizedRows.find((other) => (
@@ -636,6 +637,7 @@ export default class ScheduleGenerationService {
     try {
       if (replaceScheduled) await TripSchedule.deleteMany(replaceFilter);
       for (const row of normalizedRows) {
+        if (planningOnly && existingCodeSet.has(row.scheduleCode)) continue;
         const schedule = await TripSchedule.create({
           scheduleCode: row.scheduleCode,
           operationCycleCode: row.operationCycleCode || '',

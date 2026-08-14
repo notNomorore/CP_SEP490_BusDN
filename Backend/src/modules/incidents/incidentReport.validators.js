@@ -87,7 +87,8 @@ export const validateIncidentStatusUpdate = (body) => {
 
   if (
     ['RESOLVED', 'REJECTED'].includes(body.status)
-    && !String(body.resolutionSummary || body.adminNote || '').trim()
+    && !body.skipResolution
+    && !String(body.resolutionSummary || '').trim()
   ) {
     errors.resolutionSummary = 'Resolution summary is required when resolving or rejecting an incident';
   }

@@ -2,3 +2,7 @@ UI/
 docs/*
 !docs/notification-service.md
 webclient_secret.json
+docs/
+.env
+.env.*
+!.env.example

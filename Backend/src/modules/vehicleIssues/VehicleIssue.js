@@ -203,6 +203,7 @@ const VehicleIssueSchema = new mongoose.Schema(
         default: null,
       },
       dispatchTime: { type: Date, default: null },
+      estimatedDelayMinutes: { type: Number, min: 0, max: 1440, default: 0 },
       passengerNotificationId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Notification',

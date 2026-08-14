@@ -388,11 +388,8 @@ const DetailDrawer = ({ issue, isLoading, onClose, onAction }) => {
   const emergency = issue?.emergencyBreakdown?.isEmergency ? issue.emergencyBreakdown : null;
   const emergencyStatus = emergency?.incidentStatus;
   const isClosedVehicleIssue = ['resolved', 'dismissed'].includes(issue?.status);
-  const canReviewAgain = ['new', 'no_action_needed'].includes(issue?.status);
   const canRequireMaintenance = ['new', 'reviewed'].includes(issue?.status);
-  const canCloseAsNoAction = ['new', 'reviewed'].includes(issue?.status);
   const canResolveIssue = ['new', 'reviewed', 'maintenance_required', 'no_action_needed'].includes(issue?.status);
-  const canDismissIssue = ['new', 'reviewed', 'maintenance_required'].includes(issue?.status);
 
   return (
     <div className="fixed inset-0 z-[60] flex justify-end bg-black/35">
@@ -542,26 +539,11 @@ const DetailDrawer = ({ issue, isLoading, onClose, onAction }) => {
                 </>
               ) : !isClosedVehicleIssue ? (
                 <>
-                  {canReviewAgain ? (
-                    <button type="button" onClick={() => onAction('mark_reviewed')} className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-white">{tp('Mark reviewed')}</button>
-                  ) : null}
-                  {canCloseAsNoAction ? (
-                    <button type="button" onClick={() => onAction('no_action_needed')} className="rounded-full border px-4 py-2 text-sm font-bold">{tp('No action needed')}</button>
-                  ) : null}
-                  {canRequireMaintenance ? (
-                    <button type="button" onClick={() => onAction('create_maintenance_task')} className="rounded-full border px-4 py-2 text-sm font-bold">{tp('Create maintenance task')}</button>
-                  ) : null}
-                  {canRequireMaintenance ? (
-                    <button type="button" onClick={() => onAction('mark_vehicle_under_maintenance')} className="rounded-full border border-error/40 px-4 py-2 text-sm font-bold text-error">{tp('Mark vehicle under maintenance')}</button>
-                  ) : null}
                   {tripAffected && canRequireMaintenance ? (
                     <button type="button" onClick={() => onAction('assign_replacement_vehicle')} className="rounded-full border px-4 py-2 text-sm font-bold">{tp('Assign replacement vehicle')}</button>
                   ) : null}
                   {canResolveIssue ? (
                     <button type="button" onClick={() => onAction('resolved')} className="rounded-full bg-secondary px-4 py-2 text-sm font-bold text-white">{tp('Mark resolved')}</button>
-                  ) : null}
-                  {canDismissIssue ? (
-                    <button type="button" onClick={() => onAction('dismissed')} className="rounded-full border border-error/40 px-4 py-2 text-sm font-bold text-error">{tp('Dismiss issue')}</button>
                   ) : null}
                 </>
               ) : (
@@ -739,6 +721,11 @@ const VehicleIssuesPage = () => {
       const response = await vehicleIssueService.dispatchStandbyBus(selectedId, {
         standbyVehicleId: payload.replacementVehicleId,
         adminNote: payload.note,
+        estimatedDelayMinutes: payload.estimatedDelayMinutes,
+        staffNotificationMessage: payload.staffNotificationMessage,
+        passengerNotificationMessage: payload.passengerNotificationMessage,
+        notifyStaff: payload.notifyStaff,
+        notifyPassengers: payload.notifyPassengers,
       });
       setDetail(response.data);
       await loadIssues();
@@ -900,6 +887,7 @@ const VehicleIssuesPage = () => {
         tripId={detail?.tripId}
         requiredCapacity={detail?.vehicle?.capacity}
         title={detail?.emergencyBreakdown?.isEmergency ? tp('Dispatch Standby Bus') : tp('Assign Replacement Vehicle')}
+        requireDelayEstimate={Boolean(detail?.emergencyBreakdown?.isEmergency)}
         onClose={() => setReplacementModalOpen(false)}
         onConfirm={detail?.emergencyBreakdown?.isEmergency ? dispatchStandbyBus : submitIssueReplacement}
         onAssigned={() => {

@@ -24,6 +24,7 @@ const ReplacementVehicleModal = ({
   routeId,
   requiredCapacity,
   title = 'Assign Replacement Vehicle',
+  requireDelayEstimate = false,
   onConfirm,
   onClose,
   onAssigned,
@@ -34,8 +35,11 @@ const ReplacementVehicleModal = ({
   const [selectedVehicleId, setSelectedVehicleId] = useState('');
   const [reason, setReason] = useState('breakdown');
   const [note, setNote] = useState('');
+  const [staffNotificationMessage, setStaffNotificationMessage] = useState('');
+  const [passengerNotificationMessage, setPassengerNotificationMessage] = useState('');
   const [notifyStaff, setNotifyStaff] = useState(true);
   const [notifyPassengers, setNotifyPassengers] = useState(false);
+  const [estimatedDelayMinutes, setEstimatedDelayMinutes] = useState('');
 
   const candidates = useMemo(() => candidateResponse?.data?.candidates || [], [candidateResponse]);
   const message = candidateResponse?.data?.message || '';
@@ -60,29 +64,55 @@ const ReplacementVehicleModal = ({
     setSelectedVehicleId('');
     setReason('breakdown');
     setNote('');
-    setNotifyStaff(true);
+    setStaffNotificationMessage('');
+    setPassengerNotificationMessage('');
+    setNotifyStaff(!requireDelayEstimate);
     setNotifyPassengers(false);
+    setEstimatedDelayMinutes('');
     loadCandidates();
-  }, [open, tripId, routeId, requiredCapacity]);
+  }, [open, tripId, routeId, requiredCapacity, requireDelayEstimate]);
 
   if (!open) return null;
+
+  const hasValidDelayEstimate = Number.isInteger(Number(estimatedDelayMinutes))
+    && Number(estimatedDelayMinutes) >= 1
+    && Number(estimatedDelayMinutes) <= 1440;
+  const notificationMessagesAreValid = (!notifyStaff || Boolean(staffNotificationMessage.trim()))
+    && (!notifyPassengers || Boolean(passengerNotificationMessage.trim()));
 
   const submit = async () => {
     if (!selectedVehicleId) {
       toast.error('Select an eligible replacement vehicle');
       return;
     }
-    if (!note.trim()) {
+    if (!requireDelayEstimate && !note.trim()) {
       toast.error('Please enter the replacement note or reason');
+      return;
+    }
+    if (requireDelayEstimate && (!Number.isInteger(Number(estimatedDelayMinutes)) || Number(estimatedDelayMinutes) < 1 || Number(estimatedDelayMinutes) > 1440)) {
+      toast.error('Vui lòng nhập thời gian trễ từ 1 đến 1440 phút');
+      return;
+    }
+    if (requireDelayEstimate && notifyStaff && !staffNotificationMessage.trim()) {
+      toast.error('Vui lòng nhập thông báo cho tài xế và phụ xe');
+      return;
+    }
+    if (requireDelayEstimate && notifyPassengers && !passengerNotificationMessage.trim()) {
+      toast.error('Vui lòng nhập thông báo cho hành khách');
       return;
     }
 
     const payload = {
       replacementVehicleId: selectedVehicleId,
       reason,
-      note: note.trim(),
+      note: requireDelayEstimate ? (staffNotificationMessage.trim() || 'Điều xe dự phòng cho sự cố khẩn cấp') : note.trim(),
       notifyStaff,
       notifyPassengers,
+      ...(requireDelayEstimate ? {
+        estimatedDelayMinutes: Number(estimatedDelayMinutes),
+        staffNotificationMessage: staffNotificationMessage.trim(),
+        passengerNotificationMessage: passengerNotificationMessage.trim(),
+      } : {}),
     };
 
     setSaving(true);
@@ -177,34 +207,86 @@ const ReplacementVehicleModal = ({
           </div>
         </section>
 
-        <section className="mt-5 grid gap-4 lg:grid-cols-2">
+        <section className={`mt-5 grid gap-4 ${requireDelayEstimate ? '' : 'lg:grid-cols-2'}`}>
           <label className="space-y-2">
             <span className="text-sm font-semibold text-on-surface">Reason</span>
             <select value={reason} onChange={(event) => setReason(event.target.value)} className={fieldClassName}>
               {reasons.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </label>
-          <div className="space-y-3 rounded-2xl bg-surface-container-low p-4">
+          {!requireDelayEstimate ? <div className="space-y-3 rounded-2xl bg-surface-container-low p-4">
             <label className="flex items-center gap-3 text-sm font-semibold text-on-surface">
               <input type="checkbox" checked={notifyStaff} onChange={(event) => setNotifyStaff(event.target.checked)} />
               Notify driver and bus assistant
             </label>
             <label className="flex items-center gap-3 text-sm font-semibold text-on-surface">
-              <input type="checkbox" checked={notifyPassengers} onChange={(event) => setNotifyPassengers(event.target.checked)} />
+              <input
+                type="checkbox"
+                checked={notifyPassengers}
+                onChange={(event) => setNotifyPassengers(event.target.checked)}
+              />
               Notify affected passengers
             </label>
-          </div>
+          </div> : null}
         </section>
 
-        <label className="mt-4 block space-y-2">
-          <span className="text-sm font-semibold text-on-surface">Emergency note</span>
-          <textarea
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            className={`${fieldClassName} min-h-[120px] resize-none`}
-            placeholder="Describe why this replacement is needed and any operational instructions."
-          />
-        </label>
+        {requireDelayEstimate ? (
+          <label className="mt-4 block space-y-2">
+            <span className="text-sm font-semibold text-on-surface">Ước tính chuyến trễ (phút)</span>
+            <input
+              type="number"
+              min="1"
+              max="1440"
+              required
+              value={estimatedDelayMinutes}
+              onChange={(event) => setEstimatedDelayMinutes(event.target.value)}
+              className={fieldClassName}
+              placeholder="Ví dụ: 30"
+            />
+            <span className="block text-xs text-on-surface-variant">
+              Hệ thống sẽ cập nhật ETA và thông báo thời gian chờ thêm cho hành khách bị ảnh hưởng.
+            </span>
+          </label>
+        ) : null}
+
+        {requireDelayEstimate ? (
+          <section className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="rounded-2xl bg-surface-container-low p-4">
+              <label className="flex items-center gap-3 text-sm font-semibold text-on-surface">
+                <input type="checkbox" checked={notifyStaff} onChange={(event) => setNotifyStaff(event.target.checked)} />
+                Thông báo cho tài xế và phụ xe
+              </label>
+              {notifyStaff ? <textarea
+                value={staffNotificationMessage}
+                onChange={(event) => setStaffNotificationMessage(event.target.value)}
+                className={`${fieldClassName} mt-3 min-h-[120px] resize-none`}
+                placeholder="Nhập chỉ đạo điều hành gửi riêng cho tài xế và phụ xe..."
+              /> : null}
+            </div>
+            <div className="rounded-2xl bg-surface-container-low p-4">
+              <label className="flex items-center gap-3 text-sm font-semibold text-on-surface">
+                <input type="checkbox" checked={notifyPassengers} onChange={(event) => setNotifyPassengers(event.target.checked)} />
+                Thông báo cho hành khách bị ảnh hưởng
+              </label>
+              {notifyPassengers ? <textarea
+                value={passengerNotificationMessage}
+                onChange={(event) => setPassengerNotificationMessage(event.target.value)}
+                className={`${fieldClassName} mt-3 min-h-[120px] resize-none`}
+                placeholder="Nhập nội dung gửi cho hành khách trên xe và hành khách đang chờ tại trạm..."
+              /> : null}
+            </div>
+          </section>
+        ) : (
+          <label className="mt-4 block space-y-2">
+            <span className="text-sm font-semibold text-on-surface">Emergency note</span>
+            <textarea
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              className={`${fieldClassName} min-h-[120px] resize-none`}
+              placeholder="Describe why this replacement is needed and any operational instructions."
+            />
+          </label>
+        )}
 
         <div className="mt-6 flex justify-end gap-3">
           <button type="button" onClick={onClose} className="rounded-full border px-5 py-2.5 text-sm font-bold">
@@ -213,7 +295,12 @@ const ReplacementVehicleModal = ({
           <button
             type="button"
             onClick={submit}
-            disabled={saving || loading || !candidates.length}
+            disabled={
+              saving
+              || loading
+              || !candidates.length
+              || (requireDelayEstimate && (!hasValidDelayEstimate || !notificationMessagesAreValid))
+            }
             className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60"
           >
             {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}

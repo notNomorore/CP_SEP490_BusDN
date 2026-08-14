@@ -18,6 +18,11 @@ import VehicleLocationLog from '../fleetOperations/VehicleLocationLog.js';
 import StorageService from '../../services/storage/storage.service.js';
 import { getTripCapacity } from '../tickets/tripCapacity.service.js';
 
+import BusRoute from '../admin/BusRoute.js';
+import PassengerTicket from '../tickets/Ticket.js';
+import BoardingRecord from '../busAssistant/BoardingRecord.js';
+import { createBroadcastNotification } from '../systemNotifications/systemNotification.service.js';
+import { propagateIncidentDelay } from './scheduleDelayPropagation.service.js';
 
 const TRAFFIC_CATEGORIES = [
   'HEAVY_TRAFFIC',
@@ -54,6 +59,161 @@ const PASSENGER_VIOLATION_CATEGORIES = [
   'DISTURBANCE',
   'OTHER',
 ];
+
+const normalizeStopName = (value) => String(value || '').trim().toLocaleLowerCase('vi-VN');
+
+export const notifyAffectedTripPassengers = async ({
+  schedule,
+  incident,
+  delayMinutes,
+  userId,
+  io,
+  audience = 'PASSENGERS',
+  message = '',
+}) => {
+  if (!schedule?._id || !Number.isFinite(delayMinutes) || delayMinutes < 1) return null;
+
+  const liveTrip = await LiveTrip.findOne({ scheduleId: schedule._id })
+    .select('_id currentStopIndex')
+    .lean();
+  const route = await BusRoute.findById(getScheduleRouteId(schedule))
+    .select('outboundRoute.orderedStops inboundRoute.orderedStops')
+    .lean();
+  const stops = schedule.direction === 'INBOUND'
+    ? route?.inboundRoute?.orderedStops || []
+    : route?.outboundRoute?.orderedStops || [];
+  const currentStopIndex = Math.max(Number(liveTrip?.currentStopIndex) || 0, 0);
+  const upcomingStopNames = new Set(
+    stops.slice(currentStopIndex + 1).map((stop) => normalizeStopName(stop.stopName))
+  );
+  const passengerTicketTripId = [
+    schedule.routeCode,
+    operatingDateToken(schedule.serviceDate),
+    schedule.departureTime,
+    schedule.direction,
+  ].filter(Boolean).join('-');
+  const tripReferences = [
+    String(schedule._id),
+    schedule.scheduleCode,
+    passengerTicketTripId,
+  ].filter(Boolean);
+  const boardingTripIds = [schedule._id, liveTrip?._id].filter(Boolean);
+
+  const [boardedRecords, onlineTickets] = await Promise.all([
+    BoardingRecord.find({
+      tripId: { $in: boardingTripIds },
+      validationStatus: 'VALIDATED',
+      passengerId: { $ne: null },
+    }).select('passengerId').lean(),
+    PassengerTicket.find({
+      tripId: { $in: tripReferences },
+      paymentStatus: 'PAID',
+      bookingStatus: 'SUCCESS',
+      ticketStatus: { $in: ['ACTIVE', 'USED'] },
+    }).select('passenger departureLocation ticketStatus usedAt validatedTripId').lean(),
+  ]);
+
+  const boardedPassengerIds = [
+    ...boardedRecords.map((record) => String(record.passengerId)),
+    ...onlineTickets
+      .filter((ticket) => (
+        ticket.ticketStatus === 'USED'
+        || Boolean(ticket.usedAt)
+        || tripReferences.includes(String(ticket.validatedTripId || ''))
+      ))
+      .map((ticket) => String(ticket.passenger)),
+  ];
+  const waitingPassengerIds = onlineTickets
+    .filter((ticket) => (
+      ticket.ticketStatus === 'ACTIVE'
+      && !ticket.usedAt
+      && (
+        upcomingStopNames.size === 0
+          ? stops.length === 0
+          : upcomingStopNames.has(normalizeStopName(ticket.departureLocation))
+      )
+    ))
+    .map((ticket) => String(ticket.passenger));
+  const tripStaffIds = [schedule.driver?.userId, schedule.assistant?.userId]
+    .filter(Boolean)
+    .map(String);
+  const recipientIds = audience === 'TRIP_STAFF'
+    ? [...new Set(tripStaffIds)]
+    : [...new Set([...boardedPassengerIds, ...waitingPassengerIds])];
+
+  if (!recipientIds.length) return null;
+
+  if (audience === 'TRIP_STAFF') {
+    return OperationNotification.findOneAndUpdate(
+      { sourceType: 'INCIDENT_STAFF_MESSAGE', sourceId: incident._id },
+      {
+        $set: {
+          title: `Thông báo điều hành chuyến ${schedule.scheduleCode}`,
+          message,
+          category: 'EMERGENCY_INSTRUCTION',
+          priority: 'HIGH',
+          targetRoles: ['DRIVER', 'BUS_ASSISTANT'],
+          targetUsers: recipientIds,
+          route: getScheduleRouteId(schedule),
+          trip: schedule._id,
+          vehicle: getScheduleVehicleId(schedule),
+          activeFrom: new Date(),
+          expiresAt: null,
+          status: 'ACTIVE',
+          createdBy: userId,
+          metadata: {
+            notificationKind: 'INCIDENT_ADMIN_MESSAGE',
+            incidentId: String(incident._id),
+            incidentCode: incident.incidentCode,
+            scheduleCode: schedule.scheduleCode,
+            delayMinutes,
+          },
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+  }
+
+  return createBroadcastNotification({
+    title: `Chuyến ${schedule.scheduleCode} dự kiến trễ ${delayMinutes} phút`,
+    message,
+    type: 'delay_alert',
+    priority: 'high',
+    targetAudience: 'specific_users',
+    userIds: recipientIds,
+    routeId: getScheduleRouteId(schedule),
+    tripId: schedule._id,
+    actionUrl: '/routes/search',
+    sourceType: 'OPERATION_INCIDENT_DELAY',
+    sourceId: incident._id,
+    metadata: {
+      incidentId: String(incident._id),
+      scheduleCode: schedule.scheduleCode,
+      delayMinutes,
+      currentStopIndex,
+      onboardPassengerCount: new Set(boardedPassengerIds).size,
+      waitingPassengerCount: new Set(waitingPassengerIds).size,
+      tripStaffCount: new Set(tripStaffIds).size,
+      audience,
+    },
+  }, userId, io);
+};
+
+const OPERATING_TIME_ZONE = 'Asia/Ho_Chi_Minh';
+const operatingDateToken = (value = new Date()) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: OPERATING_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date).reduce((result, part) => {
+    result[part.type] = part.value;
+    return result;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
 
 const parseBoolean = (value) => {
   if (typeof value === 'boolean') return value;
@@ -166,6 +326,18 @@ const getShiftTypeFromClock = (timeValue = '') => {
   return Number.isFinite(hour) && hour >= 12 ? 'AFTERNOON' : 'MORNING';
 };
 
+const operationalClock = (dateValue, fallback = '') => {
+  if (!dateValue) return fallback;
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: OPERATING_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+};
+
 const buildShiftScheduleFromTripSchedule = (schedule, role) => {
   const acceptance = role === 'DRIVER'
     ? schedule.driverAcceptance || {}
@@ -185,8 +357,11 @@ const buildShiftScheduleFromTripSchedule = (schedule, role) => {
       shiftCode: `TRIP-${schedule.scheduleCode}`,
       shiftName: schedule.shiftLabel || `Chuyến ${schedule.scheduleCode}`,
       shiftType: getShiftTypeFromClock(schedule.departureTime),
-      startTime: schedule.departureTime || '',
-      endTime: schedule.expectedArrivalTime || schedule.turnaroundEndTime || '',
+      startTime: operationalClock(schedule.adjustedStartAt, schedule.departureTime || ''),
+      endTime: operationalClock(
+        schedule.adjustedEndAt,
+        schedule.expectedArrivalTime || schedule.turnaroundEndTime || ''
+      ),
       description: schedule.notes || `${schedule.routeCode || ''} ${schedule.routeName || ''}`.trim(),
       routeId: schedule.routeId && schedule.routeId._id
         ? schedule.routeId
@@ -211,6 +386,10 @@ const DRIVER_INCIDENT_TYPES = [
   'TRAFFIC_CONGESTION',
   'ACCIDENT',
   'VEHICLE_BREAKDOWN',
+];
+const DELAY_REQUIRED_INCIDENT_TYPES = [
+  'TRAFFIC_CONGESTION',
+  'ACCIDENT',
 ];
 const BUS_ASSISTANT_INCIDENT_TYPES = [
   'PASSENGER_VIOLATION',
@@ -264,7 +443,7 @@ const scheduleDateTime = (serviceDate, clock, fallback) => {
   return date;
 };
 
-const syncLiveFleetGps = async ({ schedule, gpsPayload, driverId, io, incidentType = '' }) => {
+const syncLiveFleetGps = async ({ schedule, gpsPayload, driverId, io, incidentType = '', estimatedDelayMinutes = 0 }) => {
   const location = gpsPayload?.startLocation;
   if (!schedule || !location || !isValidLatitude(location.latitude) || !isValidLongitude(location.longitude)) return null;
   const authoritativeSchedule = await TripSchedule.findById(schedule._id)
@@ -288,6 +467,12 @@ const syncLiveFleetGps = async ({ schedule, gpsPayload, driverId, io, incidentTy
   const recordedAt = location.capturedAt || new Date();
   const isBreakdown = incidentType === 'VEHICLE_BREAKDOWN';
   const hasIncident = ['TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN'].includes(incidentType);
+  const delayMinutes = hasIncident ? Math.max(0, Number(estimatedDelayMinutes) || 0) : 0;
+  const delayReason = {
+    TRAFFIC_CONGESTION: 'Kẹt xe',
+    ACCIDENT: 'Tai nạn',
+    VEHICLE_BREAKDOWN: 'Xe hỏng',
+  }[incidentType] || '';
   const vehicle = await Vehicle.findOneAndUpdate(
     { vehicleCode: fleetBus.busCode },
     {
@@ -333,6 +518,7 @@ const syncLiveFleetGps = async ({ schedule, gpsPayload, driverId, io, incidentTy
         plannedEndTime: scheduleDateTime(schedule.serviceDate, schedule.expectedArrivalTime, schedule.actualStartAt),
         actualStartTime: schedule.actualStartAt || new Date(),
         status: hasIncident ? 'incident' : 'active',
+        ...(hasIncident ? { delayMinutes, delayReason } : {}),
         lastGpsAt: recordedAt,
       },
     },
@@ -366,7 +552,8 @@ const syncLiveFleetGps = async ({ schedule, gpsPayload, driverId, io, incidentTy
     lastGpsAt: recordedAt,
     tripStatus: liveTrip.status,
     operationalStatus: isBreakdown ? 'maintenance' : hasIncident ? 'incident' : 'active',
-    delayMinutes: incidentType === 'TRAFFIC_CONGESTION' ? 1 : 0,
+    delayMinutes,
+    delayReason,
     openIncidentCount: hasIncident ? 1 : 0,
   };
   io?.to('fleet:operations').emit('server:fleet:locationUpdated', dto);
@@ -648,7 +835,7 @@ export class ScheduleOperationsService {
         },
       ],
     })
-      .sort({ priority: 1, activeFrom: -1, createdAt: -1 })
+      .sort({ activeFrom: -1, priority: 1, createdAt: -1 })
       .limit(100)
       .lean();
 
@@ -776,6 +963,59 @@ export class ScheduleOperationsService {
     }
   }
 
+  static assertTripNotPast(assignment) {
+    const serviceDate = assignment?.trip?.serviceDate || assignment?.scheduledStart;
+    const tripDate = operatingDateToken(serviceDate);
+    if (tripDate && tripDate < operatingDateToken()) {
+      const error = new Error('Past trips are locked and can no longer be accepted or operated');
+      error.statusCode = 409;
+      error.code = 'PAST_TRIP_LOCKED';
+      throw error;
+    }
+  }
+
+  static assertTripDepartureNotPassed(assignment) {
+    const departureAt = assignment?.trip?.adjustedStartAt
+      ? new Date(assignment.trip.adjustedStartAt)
+      : buildTimeOnServiceDate(assignment?.trip?.serviceDate, assignment?.trip?.departureTime);
+    if (departureAt && departureAt.getTime() < Date.now()) {
+      const error = new Error('The scheduled departure time has passed, so this trip can no longer be accepted');
+      error.statusCode = 409;
+      error.code = 'TRIP_DEPARTURE_PASSED';
+      throw error;
+    }
+  }
+
+  static async assertNoEarlierUnfinishedDriverTrip(userId, currentTrip) {
+    const currentStart = currentTrip.adjustedStartAt
+      ? new Date(currentTrip.adjustedStartAt)
+      : buildTimeOnServiceDate(currentTrip.serviceDate, currentTrip.departureTime);
+    const candidates = await TripSchedule.find({
+      _id: { $ne: currentTrip._id },
+      'driver.userId': userId,
+      'driverAcceptance.status': 'ACCEPTED',
+      status: { $in: ['PLANNED', 'ASSIGNED', 'IN_PROGRESS'] },
+    }).select('scheduleCode serviceDate departureTime expectedArrivalTime adjustedStartAt adjustedEndAt status').lean();
+    const blockingTrip = candidates.find((trip) => {
+      if (operatingDateToken(trip.serviceDate) < operatingDateToken()) return false;
+      const expectedEnd = trip.adjustedEndAt
+        ? new Date(trip.adjustedEndAt)
+        : buildTimeOnServiceDate(trip.serviceDate, trip.expectedArrivalTime || trip.departureTime);
+      if (expectedEnd && expectedEnd.getTime() < Date.now()) return false;
+      const tripStart = trip.adjustedStartAt
+        ? new Date(trip.adjustedStartAt)
+        : buildTimeOnServiceDate(trip.serviceDate, trip.departureTime);
+      return tripStart && currentStart && tripStart <= currentStart;
+    });
+
+    if (blockingTrip) {
+      const error = new Error(`Finish trip ${blockingTrip.scheduleCode} before starting inspection for another trip`);
+      error.statusCode = 409;
+      error.code = 'DRIVER_HAS_UNFINISHED_TRIP';
+      throw error;
+    }
+  }
+
   static async acceptAssignedTrip(userId, role, assignmentId) {
     if (!['DRIVER', 'BUS_ASSISTANT'].includes(role)) {
       const error = new Error('Only drivers or bus assistants can accept assigned trips');
@@ -784,6 +1024,8 @@ export class ScheduleOperationsService {
     }
 
     const assignment = await this.getActorAssignment(userId, role, assignmentId);
+    this.assertTripNotPast(assignment);
+    this.assertTripDepartureNotPassed(assignment);
     const trip = assignment.trip;
 
     if (['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(trip.status)) {
@@ -949,6 +1191,7 @@ export class ScheduleOperationsService {
     }
 
     const assignment = await this.getActorAssignment(userId, role, assignmentId);
+    this.assertTripNotPast(assignment);
     const trip = assignment.trip;
 
     if (['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(trip.status)) {
@@ -1081,7 +1324,7 @@ export class ScheduleOperationsService {
         });
       }
     } else {
-      await this.syncToAdminIncidentReport({
+      const adminIncidentReport = await this.syncToAdminIncidentReport({
         sourceType: 'OPERATION_TRIP_REJECTION',
         sourceId: incident._id,
         reporterId: userId,
@@ -1106,6 +1349,7 @@ export class ScheduleOperationsService {
   }
 
   static assertTripCanBeInspected(assignment) {
+    this.assertTripNotPast(assignment);
     const allowedScheduleStatuses = ['PLANNED', 'ASSIGNED'];
     const blockedShiftStatuses = ['COMPLETED', 'CANCELLED'];
 
@@ -1130,8 +1374,11 @@ export class ScheduleOperationsService {
     }
 
     const assignment = await this.getDriverAssignment(userId, assignmentId);
+    this.assertTripNotPast(assignment);
     this.assertTripAccepted(assignment);
     this.assertTripCanBeInspected(assignment);
+    this.assertTripDepartureNotPassed(assignment);
+    await this.assertNoEarlierUnfinishedDriverTrip(userId, assignment.trip);
     if (!getScheduleVehicleId(assignment.trip)) {
       const error = new Error('Assigned schedule does not have a vehicle');
       error.statusCode = 400;
@@ -1182,6 +1429,7 @@ export class ScheduleOperationsService {
     }
 
     const assignment = await this.getDriverAssignment(userId, assignmentId);
+    this.assertTripNotPast(assignment);
     this.assertTripAccepted(assignment);
     this.assertTripCanBeInspected(assignment);
     const checklist = {
@@ -1385,6 +1633,7 @@ export class ScheduleOperationsService {
     }
 
     const assignment = await this.getDriverAssignment(userId, assignmentId);
+    this.assertTripNotPast(assignment);
     this.assertTripAccepted(assignment);
     const trip = assignment.trip;
 
@@ -1440,6 +1689,7 @@ export class ScheduleOperationsService {
     }
 
     const assignment = await this.getDriverAssignment(userId, assignmentId);
+    this.assertTripNotPast(assignment);
     this.assertTripAccepted(assignment);
     const trip = assignment.trip;
 
@@ -1587,20 +1837,16 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    if (type !== 'VEHICLE_BREAKDOWN' && locationText.length < 3) {
-      const error = new Error('Incident location is required');
-      error.statusCode = 400;
-      throw error;
-    }
-
-    if (type === 'TRAFFIC_CONGESTION') {
+    if (DELAY_REQUIRED_INCIDENT_TYPES.includes(type)) {
       const estimatedDelayMinutes = Number(payload.estimatedDelayMinutes || 0);
       if (!Number.isFinite(estimatedDelayMinutes) || estimatedDelayMinutes < 1) {
-        const error = new Error('Estimated delay must be at least 1 minute for traffic congestion');
+        const error = new Error('Estimated delay must be at least 1 minute for traffic incidents');
         error.statusCode = 400;
         throw error;
       }
+    }
 
+    if (type === 'TRAFFIC_CONGESTION') {
       if (!TRAFFIC_CATEGORIES.includes(payload.trafficCategory)) {
         const error = new Error('Traffic congestion category is invalid');
         error.statusCode = 400;
@@ -1774,8 +2020,9 @@ export class ScheduleOperationsService {
         },
         { upsert: true, new: true }
       );
-    } catch {
-      return null;
+    } catch (error) {
+      error.message = `Failed to sync operation incident to admin reports: ${error.message}`;
+      throw error;
     }
   }
 
@@ -1833,15 +2080,20 @@ export class ScheduleOperationsService {
       throw error;
     }
 
-    const evidenceFiles = await this.buildIncidentEvidence(files, {
-      userId,
-      assignmentId,
-    });
+    const reportedLatitude = Number.isFinite(Number(payload.latitude))
+      ? Number(payload.latitude)
+      : assignment.trip.startLocation?.latitude;
+    const reportedLongitude = Number.isFinite(Number(payload.longitude))
+      ? Number(payload.longitude)
+      : assignment.trip.startLocation?.longitude;
+    const automaticLocationText = isValidLatitude(reportedLatitude) && isValidLongitude(reportedLongitude)
+      ? `GPS: ${reportedLatitude.toFixed(6)}, ${reportedLongitude.toFixed(6)}`
+      : 'GPS chưa khả dụng';
+    const delayMinutes = DELAY_REQUIRED_INCIDENT_TYPES.includes(type)
+      ? Number(payload.estimatedDelayMinutes)
+      : 0;
 
-    let incident;
-
-    try {
-      incident = await OperationIncident.create({
+    const incident = await OperationIncident.create({
       incidentCode: this.buildIncidentCode(assignment, type),
       type,
       severity,
@@ -1850,12 +2102,10 @@ export class ScheduleOperationsService {
       vehicle: getScheduleVehicleId(assignment.trip),
       driver: userId,
       reporterRole: role,
-      locationText,
-      latitude: Number.isFinite(Number(payload.latitude)) ? Number(payload.latitude) : null,
-      longitude: Number.isFinite(Number(payload.longitude)) ? Number(payload.longitude) : null,
-      estimatedDelayMinutes: type === 'TRAFFIC_CONGESTION'
-        ? Number(payload.estimatedDelayMinutes)
-        : 0,
+      locationText: automaticLocationText,
+      latitude: isValidLatitude(reportedLatitude) ? reportedLatitude : null,
+      longitude: isValidLongitude(reportedLongitude) ? reportedLongitude : null,
+      estimatedDelayMinutes: delayMinutes,
       trafficCategory,
       affectedDirection,
       description,
@@ -1893,7 +2143,7 @@ export class ScheduleOperationsService {
           color: String(payload.color || '').trim(),
           brand: String(payload.brand || '').trim(),
           identifyingDetails: String(payload.identifyingDetails || '').trim(),
-          foundLocation: String(payload.foundLocation || locationText).trim(),
+          foundLocation: String(payload.foundLocation || automaticLocationText).trim(),
           storageLocation: String(payload.storageLocation || payload.handedTo || '').trim(),
           storageReference: String(payload.storageReference || '').trim(),
           handedTo: String(payload.handedTo || '').trim(),
@@ -1908,13 +2158,39 @@ export class ScheduleOperationsService {
       throw error;
     }
 
+    if (DELAY_REQUIRED_INCIDENT_TYPES.includes(type)) {
+      await propagateIncidentDelay({
+        scheduleId: assignment.trip._id,
+        delayMinutes,
+        reason: type === 'ACCIDENT' ? 'Tai nạn' : 'Kẹt xe',
+        actorId: userId,
+      });
+    }
+
     if (role === 'DRIVER' && ['TRAFFIC_CONGESTION', 'ACCIDENT', 'VEHICLE_BREAKDOWN'].includes(type)) {
+      const delayReason = {
+        TRAFFIC_CONGESTION: 'Kẹt xe',
+        ACCIDENT: 'Tai nạn',
+        VEHICLE_BREAKDOWN: 'Xe hỏng',
+      }[type];
+      await LiveTrip.updateOne(
+        { scheduleId: assignment.trip._id },
+        { $set: { status: 'incident', delayMinutes, delayReason } }
+      );
       const incidentGpsPayload = normalizeStartGpsPayload({
-        latitude: Number.isFinite(Number(payload.latitude)) ? Number(payload.latitude) : assignment.trip.startLocation?.latitude,
-        longitude: Number.isFinite(Number(payload.longitude)) ? Number(payload.longitude) : assignment.trip.startLocation?.longitude,
+        latitude: reportedLatitude,
+        longitude: reportedLongitude,
         capturedAt: new Date(),
       }, new Date());
-      await syncLiveFleetGps({ schedule: assignment.trip, gpsPayload: incidentGpsPayload, driverId: userId, io, incidentType: type });
+      await syncLiveFleetGps({
+        schedule: assignment.trip,
+        gpsPayload: incidentGpsPayload,
+        driverId: userId,
+        io,
+        incidentType: type,
+        estimatedDelayMinutes: delayMinutes,
+      });
+
     }
 
     if (type === 'VEHICLE_BREAKDOWN') {
@@ -1954,9 +2230,8 @@ export class ScheduleOperationsService {
           `${role === 'BUS_ASSISTANT' ? 'Phụ xe' : 'Tài xế'} gửi báo cáo trong lúc vận hành chuyến.`,
           `Tuyến: ${this.buildRouteLabel(assignment.trip)}.`,
           `Xe: ${this.buildVehicleLabel(assignment.trip)}.`,
-          `Vị trí: ${locationText}.`,
-          type === 'TRAFFIC_CONGESTION'
-            ? `Ước tính trễ: ${Number(payload.estimatedDelayMinutes)} phút.`
+          DELAY_REQUIRED_INCIDENT_TYPES.includes(type)
+            ? `Ước tính trễ: ${delayMinutes} phút.`
             : '',
           type === 'TRAFFIC_CONGESTION' && trafficCategory
             ? `Loại kẹt xe: ${trafficCategory}.`
@@ -2008,12 +2283,43 @@ export class ScheduleOperationsService {
         routeId: getScheduleRouteId(assignment.trip),
         tripId: assignment.trip._id,
         vehicleId: getScheduleVehicleId(assignment.trip),
-        location: locationText,
-        latitude: Number.isFinite(Number(payload.latitude)) ? Number(payload.latitude) : null,
-        longitude: Number.isFinite(Number(payload.longitude)) ? Number(payload.longitude) : null,
+        location: automaticLocationText,
+        latitude: isValidLatitude(reportedLatitude) ? reportedLatitude : null,
+        longitude: isValidLongitude(reportedLongitude) ? reportedLongitude : null,
         severity,
         attachments: (incident.evidenceFiles || []).map((file) => file.url).filter(Boolean),
       });
+
+      if (['TRAFFIC_CONGESTION', 'ACCIDENT'].includes(type) && adminIncidentReport) {
+        await OperationNotification.findOneAndUpdate(
+          { sourceType: 'INCIDENT_REPORT_STATUS', sourceId: adminIncidentReport._id },
+          {
+            $set: {
+              title: `Phản hồi báo cáo: ${titleLabel} - ${assignment.trip.scheduleCode}`,
+              message: 'Đợi phản hồi từ ADMIN',
+              category: 'GENERAL',
+              priority: 'NORMAL',
+              targetRoles: [role],
+              targetUsers: [userId],
+              route: getScheduleRouteId(assignment.trip),
+              trip: assignment.trip._id,
+              vehicle: getScheduleVehicleId(assignment.trip),
+              activeFrom: new Date(),
+              expiresAt: null,
+              status: 'ACTIVE',
+              createdBy: null,
+              metadata: {
+                notificationKind: 'INCIDENT_RESPONSE',
+                incidentId: String(adminIncidentReport._id),
+                incidentType: type,
+                currentStatus: 'PENDING',
+                currentStatusLabel: 'Chưa xử lý',
+              },
+            },
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      }
     }
 
     if (type === 'FOUND_ITEM') {

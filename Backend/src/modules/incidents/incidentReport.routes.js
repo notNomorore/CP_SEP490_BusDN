@@ -33,6 +33,11 @@ router.patch(
   validateRequest(validateIncidentStatusUpdate),
   asyncHandler(IncidentReportController.updateIncidentStatus)
 );
+router.post(
+  '/:id/notifications',
+  validateRequest(validateIncidentIdParam, 'params'),
+  asyncHandler(IncidentReportController.sendTrafficNotification)
+);
 router.patch(
   '/:id/reassign-assistant',
   validateRequest(validateIncidentIdParam, 'params'),
