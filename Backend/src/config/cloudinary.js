@@ -22,6 +22,12 @@ if (config.cloudinary.cloudName === 'busdn') {
     'Invalid CLOUDINARY_CLOUD_NAME: "busdn" is the app/upload folder name, not a Cloudinary cloud name. Use the Cloud name shown in your Cloudinary dashboard.'
   );
 }
+console.log('[Cloudinary ENV CHECK]', {
+  cloudName: config.cloudinary.cloudName,
+  apiKeyPresent: Boolean(config.cloudinary.apiKey),
+  apiSecretPresent: Boolean(config.cloudinary.apiSecret),
+  uploadPreset: config.cloudinary.uploadPreset,
+});
 
 cloudinary.config({
   cloud_name: config.cloudinary.cloudName,
