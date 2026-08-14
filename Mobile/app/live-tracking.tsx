@@ -1340,7 +1340,12 @@ function StopTimeline({ filteredStops, selectedStop, stopStates, onChooseStop }:
       </View>
       {!stopStates.length ? <EmptyState icon="map-marker-off-outline" title="Tuyến chưa có danh sách trạm" detail="Không thể hiển thị tiến trình nếu tuyến thiếu trạm." /> : null}
       {stopStates.length > 0 && !filteredStops.length ? <EmptyState icon="magnify-close" title="Không tìm thấy trạm" detail="Xóa hoặc đổi từ khóa để xem lại danh sách trạm." /> : null}
-      <ScrollView style={styles.timelineScroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.timelineScrollContent}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator
+        style={styles.timelineScroll}
+      >
         {filteredStops.map((stop, index) => (
           <ProgressStopRow
             active={stop.key === selectedStop?.key}
@@ -2268,6 +2273,9 @@ const styles = StyleSheet.create({
   },
   timelineScroll: {
     height: 282,
+  },
+  timelineScrollContent: {
+    paddingBottom: 8,
   },
   stopRow: {
     borderRadius: 16,
