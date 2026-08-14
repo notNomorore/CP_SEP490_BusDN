@@ -381,7 +381,7 @@ export const aiOpenApiSpec = {
   },
   servers: [
     {
-      url: 'https://cp-sep490-busdn.onrender.com',
+      url: 'https://cp-sep490-busdn.onrender.com/api/ai',
       description: 'BusDN Render production backend',
     },
   ],
@@ -392,7 +392,7 @@ export const aiOpenApiSpec = {
     },
   ],
   paths: {
-    '/api/ai/routes/search': {
+    '/routes/search': {
       get: {
         tags: ['AI Routes'],
         operationId: 'searchAiRoutes',
@@ -413,7 +413,7 @@ export const aiOpenApiSpec = {
         },
       },
     },
-    '/api/ai/routes/suggestions': {
+    '/routes/suggestions': {
       get: {
         tags: ['AI Routes'],
         operationId: 'suggestAiRoutes',
@@ -444,7 +444,7 @@ export const aiOpenApiSpec = {
         },
       },
     },
-    '/api/ai/routes/nearby': {
+    '/routes/nearby': {
       get: {
         tags: ['AI Routes'],
         operationId: 'findNearbyAiRoutes',
@@ -499,7 +499,7 @@ export const aiOpenApiSpec = {
         },
       },
     },
-    '/api/ai/routes/{routeId}/eta': {
+    '/routes/{routeId}/eta': {
       get: {
         tags: ['AI Routes'],
         operationId: 'getAiRouteEta',
@@ -516,7 +516,7 @@ export const aiOpenApiSpec = {
         },
       },
     },
-    '/api/ai/routes/{routeId}/live': {
+    '/routes/{routeId}/live': {
       get: {
         tags: ['AI Routes'],
         operationId: 'getAiRouteLive',
