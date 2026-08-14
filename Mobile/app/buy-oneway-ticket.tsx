@@ -472,12 +472,16 @@ export default function BuyOneWayTicketScreen() {
     const code = orderCode || pendingOrderRef.current?.orderCode;
     if (!code || paymentCheckInFlightRef.current) return;
     paymentCheckInFlightRef.current = true;
-    setCheckingPayment(true);
+    if (!silent) {
+      setError('');
+      setCheckingPayment(true);
+    }
     try {
       const status = await passengerApi.getPaymentStatus(code);
       setPayment((current) => ({ ...(current || {}), ...status }));
       pendingOrderRef.current = { ...(pendingOrderRef.current || {}), ...status };
       if (status.status === 'PAID') {
+        setError('');
         if (paymentSuccessNotifiedRef.current !== String(code)) {
           paymentSuccessNotifiedRef.current = String(code);
           Alert.alert('Thanh toán thành công', 'Vé đã được kích hoạt. Thông tin vé và mã QR đang được gửi đến Gmail của tài khoản.', [
@@ -487,11 +491,13 @@ export default function BuyOneWayTicketScreen() {
       } else if (status.status === 'CANCELLED' || status.status === 'FAILED') {
         setError('Thanh toán chưa hoàn tất hoặc đã bị hủy.');
       }
-    } catch (err) {
-      if (!silent) setError((err as { message?: string })?.message || 'Không thể kiểm tra trạng thái thanh toán.');
+    } catch {
+      // Render may briefly be unavailable or waking from a cold start. Keep the
+      // order pending and let the background poll retry without exposing a
+      // technical network error to the passenger.
     } finally {
       paymentCheckInFlightRef.current = false;
-      setCheckingPayment(false);
+      if (!silent) setCheckingPayment(false);
     }
   }, []);
 
@@ -502,17 +508,21 @@ export default function BuyOneWayTicketScreen() {
     void checkPayment(orderCode, true);
     const interval = setInterval(() => {
       void checkPayment(orderCode, true);
-    }, 4000);
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [checkPayment, payment?.orderCode, payment?.status]);
 
   useEffect(() => {
     const appSubscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && pendingOrderRef.current?.orderCode) void checkPayment(pendingOrderRef.current.orderCode);
+      if (state === 'active' && pendingOrderRef.current?.orderCode) {
+        void checkPayment(pendingOrderRef.current.orderCode, true);
+      }
     });
     const linkSubscription = Linking.addEventListener('url', () => {
-      if (pendingOrderRef.current?.orderCode) void checkPayment(pendingOrderRef.current.orderCode);
+      if (pendingOrderRef.current?.orderCode) {
+        void checkPayment(pendingOrderRef.current.orderCode, true);
+      }
     });
     return () => {
       appSubscription.remove();
@@ -742,7 +752,7 @@ export default function BuyOneWayTicketScreen() {
                 <Text style={styles.paymentTitle}>Đơn PayOS #{payment.orderCode}</Text>
                 <StatusPill label={payment.status || 'PENDING'} tone={payment.status === 'PAID' ? 'success' : payment.status === 'CANCELLED' || payment.status === 'FAILED' ? 'danger' : 'warning'} />
               </View>
-              <Text style={styles.paymentText}>Ứng dụng sẽ kiểm tra trạng thái từ backend trước khi hiển thị vé.</Text>
+              <Text style={styles.paymentText}>Đang tự động xác nhận thanh toán. Bạn có thể tiếp tục sử dụng ứng dụng.</Text>
               <AppButton disabled={checkingPayment} loading={checkingPayment} onPress={() => void checkPayment(payment.orderCode)} title="Kiểm tra lại trạng thái" variant="secondary" />
             </View>
           ) : null}
