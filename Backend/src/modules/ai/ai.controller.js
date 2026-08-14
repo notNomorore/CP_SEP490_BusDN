@@ -1,6 +1,11 @@
 import AiService from './ai.service.js';
+import aiOpenApiSpec from './ai.openapi.js';
 
 export class AiController {
+  static async getOpenApiSpec(req, res) {
+    return res.json(aiOpenApiSpec);
+  }
+
   static async searchRoutes(req, res) {
     const result = await AiService.searchRoutes(req.query);
     return res.success(result, 'AI route search completed successfully');
