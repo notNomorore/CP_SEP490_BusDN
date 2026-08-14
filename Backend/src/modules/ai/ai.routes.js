@@ -11,6 +11,8 @@ import {
 
 const router = express.Router();
 
+router.get('/openapi.json', AiController.getOpenApiSpec);
+
 router.get(
   '/routes/search',
   validateRequest(validateRouteSearchQuery, 'query'),
