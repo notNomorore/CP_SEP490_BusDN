@@ -42,6 +42,44 @@ const todayRange = (value = new Date()) => {
   };
 };
 
+const getTripValidationWindow = (trip) => {
+  const { dateKey } = todayRange(trip.serviceDate || new Date());
+  const parseClock = (clock) => /^\d{2}:\d{2}$/.test(String(clock || ''))
+    ? new Date(`${dateKey}T${clock}:00+07:00`)
+    : null;
+  const adjustedStart = trip.adjustedStartAt ? new Date(trip.adjustedStartAt) : null;
+  const adjustedEnd = trip.adjustedEndAt ? new Date(trip.adjustedEndAt) : null;
+  const start = adjustedStart && !Number.isNaN(adjustedStart.getTime())
+    ? adjustedStart
+    : parseClock(trip.departureTime || trip.plannedStartTime);
+  let end = adjustedEnd && !Number.isNaN(adjustedEnd.getTime())
+    ? adjustedEnd
+    : parseClock(trip.expectedArrivalTime || trip.turnaroundEndTime || trip.plannedEndTime);
+
+  if (start && !end) end = new Date(start.getTime() + (2 * 60 * 60 * 1000));
+  if (start && end && end <= start) end.setDate(end.getDate() + 1);
+  return { start, end };
+};
+
+const assertTripCanValidateToday = (trip, now = new Date()) => {
+  const today = todayRange(now);
+  const tripDate = new Date(trip.serviceDate || trip.scheduledStart || trip.departureTime);
+  if (Number.isNaN(tripDate.getTime()) || tripDate < today.start || tripDate > today.end) {
+    throw new CustomError('Chỉ được quét vé cho chuyến của ngày hôm nay', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  const { start, end } = getTripValidationWindow(trip);
+  if (!start || !end) {
+    throw new CustomError('Không xác định được thời gian của chuyến', HTTP_STATUS.BAD_REQUEST);
+  }
+  if (now < new Date(start.getTime() - (15 * 60 * 1000))) {
+    throw new CustomError('Chỉ được quét vé từ 15 phút trước giờ khởi hành', HTTP_STATUS.BAD_REQUEST);
+  }
+  if (now >= end) {
+    throw new CustomError('Chuyến đã kết thúc, không thể quét vé', HTTP_STATUS.BAD_REQUEST);
+  }
+};
+
 const createCode = (prefix) => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`.toUpperCase();
 
 const isSameId = (left, right) => {
@@ -303,6 +341,7 @@ const buildRevenue = async ({ assistantId, shiftId, routeId, date, limit = 10 })
 export class BusAssistantService {
   static async validateETicket(payload, actor, req) {
     const trip = await assertActiveTrip(payload.tripId);
+    assertTripCanValidateToday(trip);
     const route = await findRoute(trip.routeId);
     let shiftContext = await findAssistantShift({
       assistantId: actor.userId,
@@ -320,8 +359,6 @@ export class BusAssistantService {
     if (!shiftContext) {
       throw new CustomError('Trip is not assigned to this bus assistant', HTTP_STATUS.FORBIDDEN);
     }
-    await assertTripHasCapacity(trip, passengerQuantity);
-
     const ticket = await Ticket.findOne({
       $or: [
         { qrCode: String(payload.qrCode).trim() },
@@ -331,6 +368,13 @@ export class BusAssistantService {
     });
 
     if (!ticket) throw new CustomError('Ticket not found', HTTP_STATUS.NOT_FOUND);
+
+    const ticketDateValue = ticket.serviceDate || ticket.validFrom;
+    const ticketDate = ticketDateValue ? new Date(ticketDateValue) : null;
+    const today = todayRange();
+    if (!ticketDate || Number.isNaN(ticketDate.getTime()) || ticketDate < today.start || ticketDate > today.end) {
+      throw new CustomError('Chỉ được quét vé có hiệu lực trong ngày hôm nay', HTTP_STATUS.BAD_REQUEST);
+    }
 
     const status = String(ticket.status || '').toUpperCase();
     if (USED_TICKET_STATUSES.includes(status) || ticket.usedAt) {

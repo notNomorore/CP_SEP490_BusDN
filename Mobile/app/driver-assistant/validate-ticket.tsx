@@ -14,7 +14,15 @@ import { useAuthStore } from '@/store/auth.store';
 import type { TicketValidationResult } from '@/types/busAssistant';
 import type { AssignedTrip } from '@/types/scheduleOperations';
 import { goBackOrReplace } from '@/utils/navigation';
-import { getTodayRange, getTripDepartureTimeLabel, getTripStatus, isTripCompleted, toDateInput } from '@/utils/scheduleOperations';
+import {
+  getTodayRange,
+  getTripDepartureTimeLabel,
+  getTripPlannedEndDate,
+  getTripPlannedStartDate,
+  getTripStatus,
+  isTripToday,
+  toDateInput,
+} from '@/utils/scheduleOperations';
 import { getErrorMessage, isPermissionError } from '@/utils/validation';
 
 type ValidationHistoryItem = TicketValidationResult & {
@@ -24,6 +32,14 @@ type ValidationHistoryItem = TicketValidationResult & {
 
 const money = (value?: number, locale = 'vi-VN') => new Intl.NumberFormat(locale, { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value) || 0);
 const tripIdOf = (trip?: AssignedTrip | null) => String(trip?.tripId || '');
+const getTripDirectionMarker = (trip: AssignedTrip) => {
+  const codeMarker = String(trip.tripCode || '').match(/-([DV])$/i)?.[1]?.toUpperCase();
+  if (codeMarker) return codeMarker;
+  const direction = String(trip.route?.direction || '').toUpperCase();
+  if (direction === 'OUTBOUND') return 'D';
+  if (direction === 'INBOUND') return 'V';
+  return '';
+};
 
 const formatDateTime = (value?: string | null, locale = 'vi-VN', emptyValue = 'N/A') => {
   if (!value) return emptyValue;
@@ -83,9 +99,11 @@ function TripChip({
 }) {
   return (
     <Pressable onPress={onPress} style={[styles.tripChip, active && styles.tripChipActive]}>
-      <Text style={[styles.tripChipCode, active && styles.tripChipTextActive]}>{trip.route?.routeNumber || trip.tripCode || tripFallback}</Text>
-      <Text numberOfLines={1} style={[styles.tripChipMeta, active && styles.tripChipTextActive]}>
-        {getTripDepartureTimeLabel(trip)} - {trip.vehicle?.code || trip.vehicle?.plateNumber || noVehicle}
+      <Text adjustsFontSizeToFit minimumFontScale={0.72} numberOfLines={1} style={[styles.tripChipCode, active && styles.tripChipTextActive]}>
+        {trip.route?.routeNumber || trip.tripCode || tripFallback} <Text style={[styles.tripChipMeta, active && styles.tripChipTextActive]}>{[getTripDepartureTimeLabel(trip), getTripDirectionMarker(trip), trip.vehicle?.code || trip.vehicle?.plateNumber || noVehicle].filter(Boolean).join(' · ')}</Text>
+      </Text>
+      <Text style={[styles.tripCapacity, active && styles.tripChipTextActive]}>
+        Còn {trip.capacity?.remainingSeats ?? 25}/25 chỗ
       </Text>
     </Pressable>
   );
@@ -104,7 +122,8 @@ export default function ValidateTicketScreen() {
   const { language, t } = useDriverI18n();
   const user = useAuthStore((state) => state.user);
   const locale = language === 'VN' ? 'vi-VN' : 'en-US';
-  const [trips, setTrips] = useState<AssignedTrip[]>([]);
+  const [assignedTrips, setAssignedTrips] = useState<AssignedTrip[]>([]);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [selectedTripId, setSelectedTripId] = useState('');
   const [qrCode, setQrCode] = useState('');
   const [result, setResult] = useState<TicketValidationResult | null>(null);
@@ -119,21 +138,43 @@ export default function ValidateTicketScreen() {
   const [error, setError] = useState('');
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
+  const trips = useMemo(() => assignedTrips.filter((trip) => {
+    const status = String(getTripStatus(trip)).toUpperCase();
+    const acceptanceStatus = String(trip.acceptanceStatus || '').toUpperCase();
+    const plannedEnd = getTripPlannedEndDate(trip);
+
+    return isTripToday(trip)
+      && (!acceptanceStatus || acceptanceStatus === 'ACCEPTED')
+      && !['COMPLETED', 'DONE', 'CANCELLED'].includes(status)
+      && Boolean(plannedEnd && !Number.isNaN(plannedEnd.getTime()) && plannedEnd.getTime() > nowMs);
+  }), [assignedTrips, nowMs]);
+
   const selectedTrip = useMemo(
     () => trips.find((trip) => trip.id === selectedTripId) || trips[0] || null,
     [selectedTripId, trips],
   );
+  const selectedTripStart = getTripPlannedStartDate(selectedTrip);
+  const selectedTripEnd = getTripPlannedEndDate(selectedTrip);
+  const scanOpensAt = selectedTripStart ? selectedTripStart.getTime() - (15 * 60 * 1000) : NaN;
+  const canScanSelectedTrip = Boolean(
+    selectedTrip
+    && Number.isFinite(scanOpensAt)
+    && selectedTripEnd
+    && nowMs >= scanOpensAt
+    && nowMs < selectedTripEnd.getTime()
+  );
+  const scanAvailabilityMessage = selectedTrip && !canScanSelectedTrip
+    ? `Chỉ được quét vé từ 15 phút trước giờ khởi hành (${getTripDepartureTimeLabel(selectedTrip)}).`
+    : '';
 
   const loadTrips = useCallback(async () => {
     setIsLoadingTrips(true);
     try {
       const payload = await scheduleOperationsApi.getAssignedTrips(getTodayRange());
-      const usableTrips = (payload.trips || []).filter((trip) => !isTripCompleted(trip));
-      setTrips(usableTrips);
-      setSelectedTripId((current) => current || usableTrips[0]?.id || '');
+      setAssignedTrips(payload.trips || []);
     } catch (error) {
       if (isPermissionError(error)) {
-        setTrips([]);
+        setAssignedTrips([]);
         setSelectedTripId('');
         return;
       }
@@ -147,6 +188,17 @@ export default function ValidateTicketScreen() {
   useEffect(() => {
     void loadTrips();
   }, [loadTrips]);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNowMs(Date.now()), 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    setSelectedTripId((current) => (
+      trips.some((trip) => trip.id === current) ? current : trips[0]?.id || ''
+    ));
+  }, [trips]);
 
   const loadHistory = useCallback(async (dateKey: string) => {
     setIsLoadingHistory(true);
@@ -165,6 +217,10 @@ export default function ValidateTicketScreen() {
   }, [historyDate, loadHistory]);
 
   const validateTicketCode = useCallback(async (rawCode: string) => {
+    if (!canScanSelectedTrip) {
+      Alert.alert('Chưa đến thời gian quét vé', scanAvailabilityMessage || 'Vui lòng chọn chuyến đang trong thời gian quét vé.');
+      return;
+    }
     const code = rawCode.trim();
     if (!code) {
       Alert.alert(t.assistant.validate.needCodeTitle, t.assistant.validate.needCodeMessage);
@@ -196,13 +252,17 @@ export default function ValidateTicketScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [historyDate, loadHistory, selectedTrip, t]);
+  }, [canScanSelectedTrip, historyDate, loadHistory, scanAvailabilityMessage, selectedTrip, t]);
 
   const validateTicket = () => {
     void validateTicketCode(qrCode);
   };
 
   const startCamera = async () => {
+    if (!canScanSelectedTrip) {
+      Alert.alert('Chưa đến thời gian quét vé', scanAvailabilityMessage || 'Vui lòng chọn chuyến đang trong thời gian quét vé.');
+      return;
+    }
     const permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
     if (!permission.granted) {
       Alert.alert(t.assistant.validate.cameraPermissionTitle, t.assistant.validate.cameraPermissionMessage);
@@ -241,6 +301,12 @@ export default function ValidateTicketScreen() {
             <Text style={styles.kicker}>{t.assistant.validate.kicker}</Text>
             <Text style={styles.title}>{t.assistant.validate.title}</Text>
           </View>
+          {scanAvailabilityMessage ? (
+            <View style={styles.scanNotice}>
+              <MaterialCommunityIcons color="#8a6400" name="clock-outline" size={18} />
+              <Text style={styles.scanNoticeText}>{scanAvailabilityMessage}</Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.panel}>
@@ -299,8 +365,8 @@ export default function ValidateTicketScreen() {
             value={qrCode}
           />
           <View style={styles.buttonRow}>
-            <AppButton title={t.assistant.validate.scanQr} disabled={cameraActive} onPress={startCamera} variant="secondary" style={styles.rowButton} />
-            <AppButton title={t.assistant.validate.check} loading={isSubmitting} onPress={validateTicket} style={styles.rowButton} />
+            <AppButton title={t.assistant.validate.scanQr} disabled={cameraActive || !canScanSelectedTrip} onPress={startCamera} variant="secondary" style={styles.rowButton} />
+            <AppButton title={t.assistant.validate.check} disabled={!canScanSelectedTrip} loading={isSubmitting} onPress={validateTicket} style={styles.rowButton} />
           </View>
           {cameraMessage ? (
             <View style={styles.successBox}>
@@ -399,8 +465,11 @@ const styles = StyleSheet.create({
   tripChipActive: { borderColor: colors.primary, backgroundColor: colors.primary },
   tripChipCode: { color: colors.primary, fontSize: 15, fontWeight: '900' },
   tripChipMeta: { marginTop: 3, color: colors.muted, fontSize: 12, fontWeight: '700' },
+  tripCapacity: { marginTop: 5, color: colors.accent, fontSize: 12, fontWeight: '800' },
   tripChipTextActive: { color: colors.white },
   scannerCard: { alignItems: 'center', gap: 14, borderRadius: 26, backgroundColor: '#e6f7ef', padding: 20, marginBottom: 14 },
+  scanNotice: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 14, backgroundColor: '#fff4cf', padding: 11 },
+  scanNoticeText: { flex: 1, color: '#765600', fontSize: 12, fontWeight: '800', lineHeight: 17 },
   scanPrompt: { width: '100%', alignItems: 'center', gap: 8, borderRadius: 22, backgroundColor: '#dff4e9', paddingVertical: 18 },
   scannerTitle: { color: colors.primary, fontSize: 20, fontWeight: '900' },
   scannerSubtitle: { color: colors.muted, fontSize: 12, fontWeight: '800' },
