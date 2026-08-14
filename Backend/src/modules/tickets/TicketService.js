@@ -2567,7 +2567,7 @@ export class TicketService {
     });
   }
 
-  static async validateMonthlyPassQR(validatorUserId, { signedPayload, passCode, routeId, routeCode }) {
+  static async validateMonthlyPassQR(validatorUserId, { signedPayload, passCode, routeCode }) {
     if (!passCode) {
       return buildValidationResult('INVALID_QR', 'QR payload is invalid.');
     }
@@ -2595,30 +2595,6 @@ export class TicketService {
       if (hasMismatch) {
         return buildValidationResult('INVALID_QR', 'QR content does not match monthly pass record.');
       }
-    }
-
-    if (routeId) {
-      const route = await this.findRoute(routeId);
-      if (monthlyPass.routeId && String(monthlyPass.routeId) !== String(route?._id)) {
-        return buildValidationResult('WRONG_ROUTE', 'Monthly pass is not valid for this route.', {
-          passCode: monthlyPass.passCode,
-          routeCode: monthlyPass.routeCode || 'ALL',
-          ...validationInfo,
-        });
-      }
-    }
-
-    if (
-      routeCode
-      && monthlyPass.routeCode
-      && monthlyPass.routeCode !== 'ALL'
-      && String(routeCode).toUpperCase() !== String(monthlyPass.routeCode).toUpperCase()
-    ) {
-      return buildValidationResult('WRONG_ROUTE', 'Monthly pass is not valid for this route.', {
-        passCode: monthlyPass.passCode,
-        routeCode: monthlyPass.routeCode,
-        ...validationInfo,
-      });
     }
 
     const now = new Date();

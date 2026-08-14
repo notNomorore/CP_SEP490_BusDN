@@ -302,12 +302,6 @@ export default function ValidateTicketScreen() {
             <Text style={styles.kicker}>{t.assistant.validate.kicker}</Text>
             <Text style={styles.title}>{t.assistant.validate.title}</Text>
           </View>
-          {scanAvailabilityMessage ? (
-            <View style={styles.scanNotice}>
-              <MaterialCommunityIcons color="#8a6400" name="clock-outline" size={18} />
-              <Text style={styles.scanNoticeText}>{scanAvailabilityMessage}</Text>
-            </View>
-          ) : null}
         </View>
 
         <View style={styles.panel}>
@@ -327,6 +321,12 @@ export default function ValidateTicketScreen() {
               />
             )) : <Text style={styles.emptyText}>{t.assistant.validate.noTrips}</Text>}
           </View>
+          {scanAvailabilityMessage ? (
+            <View style={styles.scanNotice}>
+              <MaterialCommunityIcons color="#8a6400" name="clock-outline" size={18} />
+              <Text style={styles.scanNoticeText}>{scanAvailabilityMessage}</Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.scannerCard}>
