@@ -2093,7 +2093,15 @@ export class ScheduleOperationsService {
       ? Number(payload.estimatedDelayMinutes)
       : 0;
 
-    const incident = await OperationIncident.create({
+    const evidenceFiles = await this.buildIncidentEvidence(files, {
+      userId,
+      assignmentId,
+    });
+
+    let incident;
+
+    try {
+      incident = await OperationIncident.create({
       incidentCode: this.buildIncidentCode(assignment, type),
       type,
       severity,
