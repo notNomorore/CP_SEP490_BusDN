@@ -113,7 +113,28 @@ export default class TripAllocationService {
       if (!trip.driver?.userId) missing.push('Tài xế');
       if (!trip.assistant?.userId) missing.push('Phụ xe');
       if (!trip.vehicle?.busId) missing.push('Xe');
-      return { _id: trip._id, scheduleCode: trip.scheduleCode, direction: trip.direction, departureTime: trip.departureTime, expectedArrivalTime: trip.expectedArrivalTime, status: trip.status, operationCycleCode: trip.operationCycleCode, driverName: trip.driver?.fullName || '', assistantName: trip.assistant?.fullName || '', vehicleLabel: trip.vehicle?.busCode || trip.vehicle?.plateNumber || '', missing, assigned: missing.length === 0 && trip.status !== 'PLANNED' };
+      return {
+        _id: trip._id,
+        scheduleCode: trip.scheduleCode,
+        serviceDate: trip.serviceDate,
+        routeId: trip.routeId,
+        direction: trip.direction,
+        departureTime: trip.departureTime,
+        expectedArrivalTime: trip.expectedArrivalTime,
+        shiftLabel: trip.shiftLabel || '',
+        status: trip.status,
+        operationCycleCode: trip.operationCycleCode,
+        driver: trip.driver || {},
+        assistant: trip.assistant || {},
+        vehicle: trip.vehicle || {},
+        isScheduleException: Boolean(trip.isScheduleException),
+        exceptionReason: trip.exceptionReason || '',
+        driverName: trip.driver?.fullName || '',
+        assistantName: trip.assistant?.fullName || '',
+        vehicleLabel: trip.vehicle?.busCode || trip.vehicle?.plateNumber || '',
+        missing,
+        assigned: missing.length === 0 && trip.status !== 'PLANNED',
+      };
     });
     return { trips: tripList, cycles, summary: { totalTrips: allTrips.length, unassignedTrips: tripList.filter((trip) => !trip.assigned).length, totalCycles: cycles.length, availableDrivers: drivers.length, availableAssistants: assistants.length, unstaffedCycles: cycles.filter((cycle) => !cycle.candidateDrivers.length || !cycle.candidateAssistants.length).length } };
   }
