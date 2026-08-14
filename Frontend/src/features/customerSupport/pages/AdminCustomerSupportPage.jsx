@@ -3,14 +3,11 @@ import toast from 'react-hot-toast';
 import Header from '../../../shared/components/navigation/Header.jsx';
 import Footer from '../../../shared/components/common/Footer.jsx';
 import customerSupportService, {
-  ASSIGNED_TEAMS,
   CASE_STATUSES,
   CASE_TYPES,
-  CORRECTIVE_ACTION_TYPES,
   FEEDBACK_CATEGORIES,
   FEEDBACK_STATUSES,
   PRIORITIES,
-  RECOVERY_STATUSES,
 } from '../services/customerSupportService.js';
 import { resolveBackendUrl } from '../../../shared/config/apiConfig.js';
 
@@ -44,6 +41,27 @@ const CUSTOMER_VISIBLE_STATUSES = new Set([
   'REOPENED',
 ]);
 
+const FEEDBACK_STATUS_ALIASES = {
+  PENDING: 'NEW',
+  SUBMITTED: 'NEW',
+  OPEN: 'NEW',
+  UNDER_REVIEW: 'IN_REVIEW',
+  IN_PROGRESS: 'INVESTIGATING',
+  RESPONDED: 'INVESTIGATING',
+  WAITING_FOR_PASSENGER: 'WAITING_FOR_INFORMATION',
+};
+
+const FEEDBACK_STATUS_TRANSITIONS = {
+  NEW: ['IN_REVIEW'],
+  IN_REVIEW: ['INVESTIGATING'],
+  INVESTIGATING: ['WAITING_FOR_INFORMATION', 'ACTION_REQUIRED', 'RESOLVED'],
+  WAITING_FOR_INFORMATION: ['INVESTIGATING', 'CLOSED'],
+  ACTION_REQUIRED: ['INVESTIGATING', 'RESOLVED'],
+  RESOLVED: ['CLOSED', 'REOPENED'],
+  REOPENED: ['IN_REVIEW', 'INVESTIGATING'],
+  CLOSED: [],
+};
+
 const TYPE_BADGE = {
   COMPLAINT: 'bg-purple-100 text-purple-800',
   LOST_ITEM: 'bg-orange-100 text-orange-900',
@@ -62,17 +80,31 @@ const PRIORITY_BADGE = {
 const formatDateTime = (value) => (
   value
     ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
-    : 'Chua co'
+    : 'Chưa có'
 );
 
 const getErrorMessage = (error) => {
-  if (!error) return 'Khong the xu ly yeu cau.';
+  if (!error) return 'Không thể xử lý yêu cầu.';
   if (typeof error === 'string') return error;
   if (error.errors && typeof error.errors === 'object') return Object.values(error.errors).join(' ');
-  return error.message || 'Khong the xu ly yeu cau.';
+  return error.message || 'Không thể xử lý yêu cầu.';
 };
 
-const getLabel = (items, value) => items.find((item) => item.value === value)?.label || value || 'Chua co';
+const getLabel = (items, value) => items.find((item) => item.value === value)?.label || value || 'Chưa có';
+
+const normalizeFeedbackStatus = (status) => FEEDBACK_STATUS_ALIASES[status] || status || 'NEW';
+
+const getAllowedFeedbackStatuses = (status) => {
+  const currentStatus = normalizeFeedbackStatus(status);
+  return [currentStatus, ...(FEEDBACK_STATUS_TRANSITIONS[currentStatus] || [])];
+};
+
+const getStartProcessingStatus = (status) => {
+  const currentStatus = normalizeFeedbackStatus(status);
+  if (currentStatus === 'NEW') return 'IN_REVIEW';
+  if (currentStatus === 'IN_REVIEW') return 'INVESTIGATING';
+  return '';
+};
 
 const getAttachmentUrl = (attachment) => {
   const path = attachment?.path || attachment?.url;
@@ -89,14 +121,11 @@ const isImageAttachment = (attachment) => String(attachment?.mimeType || '').sta
 const buildFeedbackPayload = ({
   message,
   status,
-  resolutionSummary,
   priority,
   waitingForInformationReason,
-  correctiveAction,
 }) => {
   const payload = {};
   const trimmedMessage = message.trim();
-  const trimmedResolution = resolutionSummary.trim();
   const trimmedWaitingReason = waitingForInformationReason.trim();
 
   if (status) {
@@ -107,10 +136,6 @@ const buildFeedbackPayload = ({
     payload.message = trimmedMessage;
   }
 
-  if (trimmedResolution) {
-    payload.resolutionSummary = trimmedResolution;
-  }
-
   if (priority) {
     payload.priority = priority;
   }
@@ -119,50 +144,28 @@ const buildFeedbackPayload = ({
     payload.waitingForInformationReason = trimmedWaitingReason;
   }
 
-  if (correctiveAction?.description?.trim()) {
-    payload.correctiveAction = {
-      actionType: correctiveAction.actionType || 'OTHER',
-      description: correctiveAction.description.trim(),
-    };
-  }
-
   return payload;
-};
-
-const getSlaDisplay = (supportCase) => {
-  if (!supportCase?.slaDueAt) return { label: 'Chua co', tone: 'text-on-surface' };
-  if (['RESOLVED', 'CLOSED'].includes(supportCase.status)) {
-    return { label: 'Completed', tone: 'text-emerald-700' };
-  }
-  const remainingMs = new Date(supportCase.slaDueAt).getTime() - Date.now();
-  if (remainingMs <= 0) return { label: 'SLA BREACHED', tone: 'text-red-700' };
-  const hours = Math.floor(remainingMs / 36e5);
-  const minutes = Math.floor((remainingMs % 36e5) / 60000);
-  return {
-    label: `SLA: ${hours}h ${minutes}m remaining`,
-    tone: remainingMs <= 2 * 36e5 ? 'text-orange-700' : 'text-emerald-700',
-  };
 };
 
 const getWorkflowHint = (supportCase) => {
   if (!supportCase) return '';
-  if (!supportCase.assignedTo) return 'Gan ticket cho admin truoc khi xu ly de tranh trung viec.';
-  if (supportCase.status === 'PENDING') return 'Bat dau xu ly bang cach doi trang thai sang Dang xu ly hoac hoi them thong tin.';
-  if (['WAITING_FOR_INFORMATION', 'WAITING_FOR_PASSENGER'].includes(supportCase.status)) return 'Dang cho hanh khach bo sung thong tin. Khi khach tra loi, ticket se quay lai Dang dieu tra.';
-  if (supportCase.status === 'RESOLVED') return 'Ticket da giai quyet. Co the dong ticket sau khi khong can trao doi them.';
-  if (supportCase.status === 'CLOSED') return 'Ticket da dong.';
-  return 'Cap nhat trang thai, gui phan hoi cho hanh khach, sau do giai quyet hoac dong ticket.';
+  if (!supportCase.assignedTo) return 'Nhận yêu cầu trước khi xử lý để tránh trùng việc.';
+  if (supportCase.status === 'PENDING') return 'Bắt đầu xử lý hoặc yêu cầu hành khách bổ sung thông tin.';
+  if (['WAITING_FOR_INFORMATION', 'WAITING_FOR_PASSENGER'].includes(supportCase.status)) return 'Đang chờ hành khách bổ sung thông tin.';
+  if (supportCase.status === 'RESOLVED') return 'Yêu cầu đã giải quyết. Có thể đóng nếu không cần trao đổi thêm.';
+  if (supportCase.status === 'CLOSED') return 'Yêu cầu đã đóng.';
+  return 'Cập nhật trạng thái và gửi phản hồi cho hành khách.';
 };
 
 const getReplyStatus = (supportCase) => (
   supportCase?.adminResponse
-    ? `Da phan hoi ${formatDateTime(supportCase.adminResponseAt)}`
-    : 'Chua phan hoi'
+    ? `Đã phản hồi ${formatDateTime(supportCase.adminResponseAt)}`
+    : 'Chưa phản hồi'
 );
 
 const AdminCustomerSupportPage = () => {
   const [filters, setFilters] = useState({
-    type: 'ALL',
+    type: 'SERVICE_FEEDBACK',
     status: 'ALL',
     priority: 'ALL',
     category: 'ALL',
@@ -178,15 +181,6 @@ const AdminCustomerSupportPage = () => {
   const [feedbackStatus, setFeedbackStatus] = useState('IN_PROGRESS');
   const [feedbackPriority, setFeedbackPriority] = useState('NORMAL');
   const [waitingReason, setWaitingReason] = useState('');
-  const [resolutionSummary, setResolutionSummary] = useState('');
-  const [internalNote, setInternalNote] = useState('');
-  const [correctiveAction, setCorrectiveAction] = useState({ actionType: 'OTHER', description: '' });
-  const [assignedTeam, setAssignedTeam] = useState('ADMIN');
-  const [responseMessage, setResponseMessage] = useState('');
-  const [nextStatus, setNextStatus] = useState('IN_PROGRESS');
-  const [lostItemNote, setLostItemNote] = useState('');
-  const [recoveryStatus, setRecoveryStatus] = useState('SEARCHING');
-  const [lostItemStatus, setLostItemStatus] = useState('IN_PROGRESS');
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -197,9 +191,6 @@ const AdminCustomerSupportPage = () => {
 
   const selectedType = selectedCase?.type;
   const isFeedback = selectedType === 'SERVICE_FEEDBACK';
-  const isComplaint = selectedType === 'COMPLAINT';
-  const isLostItem = selectedType === 'LOST_ITEM';
-
   const conversation = useMemo(() => (
     [...(selectedCase?.conversation?.length ? selectedCase.conversation : selectedCase?.responses || [])]
       .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
@@ -213,7 +204,7 @@ const AdminCustomerSupportPage = () => {
   const resetFilters = () => {
     setSelectedCase(null);
     setFilters({
-      type: 'ALL',
+      type: 'SERVICE_FEEDBACK',
       status: 'ALL',
       priority: 'ALL',
       category: 'ALL',
@@ -229,6 +220,7 @@ const AdminCustomerSupportPage = () => {
     try {
       const response = await customerSupportService.listAdminCases({
         ...filters,
+        type: 'SERVICE_FEEDBACK',
         assignedOnly: String(filters.assignedOnly),
       });
       setCases(response.data || []);
@@ -269,19 +261,10 @@ const AdminCustomerSupportPage = () => {
       setFeedbackStatus(['PENDING', 'OPEN'].includes(response.data?.status) ? 'IN_REVIEW' : response.data?.status || 'IN_REVIEW');
       setFeedbackPriority(['LOW', 'NORMAL', 'HIGH', 'CRITICAL'].includes(response.data?.priority) ? response.data.priority : 'NORMAL');
       setWaitingReason(response.data?.waitingForInformationReason || '');
-      setResolutionSummary(response.data?.resolutionSummary || '');
       setFeedbackMessage('');
-      setInternalNote('');
-      setCorrectiveAction({ actionType: 'OTHER', description: '' });
-      setAssignedTeam(response.data?.assignedTeam || 'ADMIN');
       setPendingUpdate(null);
       setNotificationDraft(null);
       setNotificationMessage('');
-      setNextStatus(response.data?.status === 'OPEN' ? 'IN_PROGRESS' : response.data?.status || 'IN_PROGRESS');
-      setRecoveryStatus(response.data?.lostItem?.recoveryStatus || 'SEARCHING');
-      setLostItemStatus(response.data?.status || 'IN_PROGRESS');
-      setLostItemNote('');
-      setResponseMessage('');
     } catch (error) {
       await handleMutationError(error);
     } finally {
@@ -311,9 +294,9 @@ const AdminCustomerSupportPage = () => {
     setIsSubmitting(true);
 
     try {
-      const response = await customerSupportService.assignFeedback(selectedCase.id, { assignedTeam });
+      const response = await customerSupportService.assignFeedback(selectedCase.id);
       await refreshAfterMutation(response.data);
-      toast.success('Feedback assignment updated.');
+      toast.success('Đã nhận xử lý góp ý.');
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
@@ -329,31 +312,24 @@ const AdminCustomerSupportPage = () => {
       status: feedbackStatus,
       priority: feedbackPriority !== selectedCase.priority ? feedbackPriority : '',
       waitingForInformationReason: waitingReason,
-      resolutionSummary,
-      correctiveAction,
     });
 
-    if (!payload.message && selectedCase.status === payload.status && !payload.resolutionSummary && !payload.priority && !payload.waitingForInformationReason && !payload.correctiveAction) {
-      toast.error('Hay nhap cap nhat, doi trang thai, muc do uu tien, hoac them ket qua xu ly.');
+    if (!payload.message && selectedCase.status === payload.status && !payload.priority && !payload.waitingForInformationReason) {
+      toast.error('Hãy nhập phản hồi, đổi trạng thái hoặc mức ưu tiên.');
       return;
     }
 
     if (payload.status === 'WAITING_FOR_INFORMATION' && !payload.message && !payload.waitingForInformationReason) {
-      toast.error('Trang thai cho bo sung thong tin can ly do hoac noi dung gui khach.');
+      toast.error('Trạng thái chờ bổ sung thông tin cần lý do hoặc nội dung gửi khách.');
       return;
     }
 
-    if (payload.status === 'RESOLVED' && !payload.resolutionSummary) {
-      toast.error('Can nhap tom tat ket qua truoc khi danh dau da giai quyet.');
+    if (payload.status === 'RESOLVED' && !payload.message) {
+      toast.error('Cần nhập phản hồi gửi khách trước khi đánh dấu đã giải quyết.');
       return;
     }
 
-    if (payload.status === 'RESOLVED' && !payload.correctiveAction && !(selectedCase.correctiveActions || []).length) {
-      toast.error('Can ghi nhan hanh dong khac phuc hoac ket qua dieu tra truoc khi giai quyet.');
-      return;
-    }
-
-    const customerVisible = CUSTOMER_VISIBLE_STATUSES.has(payload.status) || Boolean(payload.message) || Boolean(payload.resolutionSummary);
+    const customerVisible = CUSTOMER_VISIBLE_STATUSES.has(payload.status) || Boolean(payload.message);
 
     if (customerVisible) {
       try {
@@ -379,9 +355,8 @@ const AdminCustomerSupportPage = () => {
     try {
       const response = await customerSupportService.updateFeedback(selectedCase.id, payload);
       setFeedbackMessage('');
-      setCorrectiveAction({ actionType: 'OTHER', description: '' });
       await refreshAfterMutation(response.data);
-      toast.success('Feedback da duoc cap nhat.');
+      toast.success('Đã cập nhật góp ý.');
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
@@ -392,7 +367,7 @@ const AdminCustomerSupportPage = () => {
   const handleConfirmFeedbackUpdate = async () => {
     if (!selectedCase?.id || !pendingUpdate) return;
     if (!notificationChannels.inApp && !notificationChannels.email) {
-      const confirmed = window.confirm('No notification will be sent to the passenger. Continue?');
+      const confirmed = window.confirm('Không gửi thông báo cho hành khách. Bạn vẫn muốn tiếp tục?');
       if (!confirmed) return;
     }
 
@@ -404,54 +379,17 @@ const AdminCustomerSupportPage = () => {
         notification: {
           confirmSend: notificationChannels.inApp || notificationChannels.email,
           channels: notificationChannels,
-          title: notificationDraft?.title || 'Complaint update',
+          title: notificationDraft?.title || 'Cập nhật góp ý',
           message: notificationMessage,
         },
       });
       setFeedbackMessage('');
-      setCorrectiveAction({ actionType: 'OTHER', description: '' });
       setPendingUpdate(null);
       setNotificationDraft(null);
       await refreshAfterMutation(response.data);
       const results = response.data?.notificationResults || [];
       const emailFailed = results.some((item) => item.channel === 'EMAIL' && item.status === 'FAILED');
-      toast.success(emailFailed ? 'Complaint updated. Email notification failed.' : 'Complaint updated successfully.');
-    } catch (error) {
-      toast.error(getErrorMessage(error));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleAddInternalNote = async (event) => {
-    event.preventDefault();
-    if (!selectedCase?.id || !internalNote.trim()) return;
-    setIsSubmitting(true);
-
-    try {
-      const response = await customerSupportService.addInternalNote(selectedCase.id, {
-        message: internalNote,
-      });
-      setInternalNote('');
-      await refreshAfterMutation(response.data);
-      toast.success('Internal note saved.');
-    } catch (error) {
-      toast.error(getErrorMessage(error));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleAddCorrectiveAction = async (event) => {
-    event.preventDefault();
-    if (!selectedCase?.id || !correctiveAction.description.trim()) return;
-    setIsSubmitting(true);
-
-    try {
-      const response = await customerSupportService.addCorrectiveAction(selectedCase.id, correctiveAction);
-      setCorrectiveAction({ actionType: 'OTHER', description: '' });
-      await refreshAfterMutation(response.data);
-      toast.success('Corrective action recorded.');
+      toast.success(emailFailed ? 'Đã cập nhật góp ý, nhưng gửi email thất bại.' : 'Đã cập nhật và gửi thông báo cho hành khách.');
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
@@ -460,52 +398,15 @@ const AdminCustomerSupportPage = () => {
   };
 
   const handleQuickFeedbackStatus = async (status, defaultMessage = '') => {
+    if (!getAllowedFeedbackStatuses(selectedCase?.status).includes(status)) return;
     setFeedbackStatus(status);
     if (defaultMessage) {
       setFeedbackMessage(defaultMessage);
     }
   };
 
-  const handleRespondToComplaint = async (event) => {
-    event.preventDefault();
-    if (!selectedCase?.id) return;
-    setIsSubmitting(true);
-
-    try {
-      const response = await customerSupportService.respondToComplaint(selectedCase.id, {
-        message: responseMessage,
-        status: nextStatus,
-      });
-      setResponseMessage('');
-      await refreshAfterMutation(response.data);
-      toast.success('Complaint response saved.');
-    } catch (error) {
-      await handleMutationError(error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleUpdateLostItem = async (event) => {
-    event.preventDefault();
-    if (!selectedCase?.id) return;
-    setIsSubmitting(true);
-
-    try {
-      const response = await customerSupportService.updateLostItemCase(selectedCase.id, {
-        recoveryStatus,
-        status: lostItemStatus,
-        note: lostItemNote,
-      });
-      setLostItemNote('');
-      await refreshAfterMutation(response.data);
-      toast.success('Lost item case updated.');
-    } catch (error) {
-      await handleMutationError(error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  const allowedFeedbackStatuses = getAllowedFeedbackStatuses(selectedCase?.status);
+  const startProcessingStatus = getStartProcessingStatus(selectedCase?.status);
 
   return (
     <div className="min-h-screen bg-[#f0fdf4] text-on-surface">
@@ -514,10 +415,10 @@ const AdminCustomerSupportPage = () => {
         <section className="rounded-2xl border border-outline-variant/30 bg-white px-5 py-4 shadow-[0_4px_12px_rgba(51,65,85,0.08)]">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-on-tertiary-fixed-variant">Customer Support</p>
-              <h1 className="mt-1 text-2xl font-headline font-black text-on-surface">Feedback Management</h1>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-on-tertiary-fixed-variant">Chăm sóc khách hàng</p>
+              <h1 className="mt-1 text-2xl font-headline font-black text-on-surface">Quản lý góp ý</h1>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-on-surface-variant">
-                Theo dõi và xử lý phản hồi của hành khách từ lúc tiếp nhận đến khi phản hồi, giải quyết và đóng ticket.
+                Theo dõi và xử lý góp ý của hành khách từ lúc tiếp nhận đến khi phản hồi, giải quyết và đóng yêu cầu.
               </p>
             </div>
             <button
@@ -532,27 +433,26 @@ const AdminCustomerSupportPage = () => {
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Metric icon="forum" label="Total feedback" value={analytics?.totalFeedback ?? 0} tone="bg-blue-50 text-blue-600" />
-          <Metric icon="star" label="Average rating" value={`${analytics?.averageRating ?? 0}/5`} tone="bg-yellow-50 text-yellow-600" />
-          <Metric icon="task_alt" label="Resolution rate" value={`${analytics?.resolutionRate ?? 0}%`} tone="bg-emerald-50 text-emerald-600" />
-          <Metric icon="timer" label="Average response" value={`${analytics?.averageResponseHours ?? 0}h`} tone="bg-purple-50 text-purple-600" />
+          <Metric icon="forum" label="Tổng góp ý" value={analytics?.totalFeedback ?? 0} tone="bg-blue-50 text-blue-600" />
+          <Metric icon="star" label="Điểm trung bình" value={`${analytics?.averageRating ?? 0}/5`} tone="bg-yellow-50 text-yellow-600" />
+          <Metric icon="task_alt" label="Tỷ lệ xử lý" value={`${analytics?.resolutionRate ?? 0}%`} tone="bg-emerald-50 text-emerald-600" />
+          <Metric icon="timer" label="Thời gian phản hồi" value={`${analytics?.averageResponseHours ?? 0}h`} tone="bg-purple-50 text-purple-600" />
         </section>
 
         <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(360px,0.95fr)] 2xl:grid-cols-[minmax(0,1.75fr)_minmax(420px,0.95fr)]">
           <aside className="min-w-0 rounded-2xl border border-outline-variant/30 bg-white p-4 shadow-[0_4px_12px_rgba(51,65,85,0.08)]">
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-3 rounded-2xl border border-outline-variant/25 bg-surface-container-low/70 p-3">
-                <div className="grid gap-2 md:grid-cols-[minmax(220px,1fr)_repeat(3,minmax(120px,0.38fr))]">
+                <div className="grid gap-2 md:grid-cols-[minmax(220px,1fr)_repeat(2,minmax(120px,0.38fr))]">
                   <label className="relative min-w-0">
                     <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-on-surface-variant">search</span>
                     <input
                       value={filters.search}
                       onChange={(event) => updateFilter('search', event.target.value)}
                       className="h-10 w-full rounded-xl border-0 bg-white py-2 pl-10 pr-3 text-sm outline-none ring-1 ring-outline-variant/40 focus:ring-2 focus:ring-primary"
-                      placeholder="Tìm kiếm tiêu đề, nội dung, mã ticket"
+                      placeholder="Tìm kiếm tiêu đề, nội dung, mã yêu cầu"
                     />
                   </label>
-                  <FilterSelect value={filters.type} onChange={(value) => updateFilter('type', value)} label="All types" items={CASE_TYPES} />
                   <FilterSelect value={filters.status} onChange={(value) => updateFilter('status', value)} items={CASE_STATUSES} />
                   <FilterSelect value={filters.priority} onChange={(value) => updateFilter('priority', value)} items={PRIORITIES} />
                 </div>
@@ -562,7 +462,7 @@ const AdminCustomerSupportPage = () => {
                     onChange={(event) => updateFilter('category', event.target.value)}
                     className="h-10 min-w-0 rounded-xl border-0 bg-white px-3 text-sm outline-none ring-1 ring-outline-variant/40 focus:ring-2 focus:ring-primary"
                   >
-                    <option value="ALL">All feedback categories</option>
+                    <option value="ALL">Tất cả danh mục</option>
                     {FEEDBACK_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                   </select>
                   <select
@@ -570,8 +470,8 @@ const AdminCustomerSupportPage = () => {
                     onChange={(event) => updateFilter('rating', event.target.value)}
                     className="h-10 min-w-0 rounded-xl border-0 bg-white px-3 text-sm outline-none ring-1 ring-outline-variant/40 focus:ring-2 focus:ring-primary"
                   >
-                    <option value="ALL">All ratings</option>
-                    {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value} stars</option>)}
+                    <option value="ALL">Tất cả đánh giá</option>
+                    {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value} sao</option>)}
                   </select>
                   <label className="flex h-10 min-w-0 items-center gap-2 rounded-xl bg-white px-3 text-sm font-bold text-primary ring-1 ring-outline-variant/40">
                     <input
@@ -580,7 +480,7 @@ const AdminCustomerSupportPage = () => {
                       onChange={(event) => updateFilter('assignedOnly', event.target.checked)}
                       className="rounded border-outline-variant text-primary focus:ring-primary"
                     />
-                    <span className="truncate">View assigned tickets only</span>
+                    <span className="truncate">Chỉ xem yêu cầu của tôi</span>
                   </label>
                   <button
                     type="button"
@@ -594,17 +494,17 @@ const AdminCustomerSupportPage = () => {
 
               <div className="flex items-center justify-between gap-3 px-1">
                 <div>
-                  <h2 className="text-lg font-headline font-black text-primary">Feedback list</h2>
-                  <p className="text-xs font-semibold text-on-surface-variant">{meta.total || 0} tickets</p>
+                  <h2 className="text-lg font-headline font-black text-primary">Danh sách góp ý</h2>
+                  <p className="text-xs font-semibold text-on-surface-variant">{meta.total || 0} yêu cầu</p>
                 </div>
               </div>
             </div>
 
             <div className="mt-3 max-h-none space-y-3 overflow-visible pr-0 xl:max-h-[calc(100vh-306px)] xl:overflow-y-auto xl:pr-1">
               {isLoading ? (
-                <div className="rounded-xl bg-surface-container p-6 text-center text-on-surface-variant">Loading tickets...</div>
+                <div className="rounded-xl bg-surface-container p-6 text-center text-on-surface-variant">Đang tải yêu cầu...</div>
               ) : cases.length === 0 ? (
-                <div className="rounded-xl bg-surface-container p-6 text-center text-on-surface-variant">No matching tickets.</div>
+                <div className="rounded-xl bg-surface-container p-6 text-center text-on-surface-variant">Không có yêu cầu phù hợp.</div>
               ) : cases.map((supportCase) => (
                 <FeedbackListItem
                   key={supportCase.id}
@@ -618,9 +518,9 @@ const AdminCustomerSupportPage = () => {
 
           <section className="min-w-0 rounded-2xl border border-outline-variant/30 bg-white shadow-[0_4px_12px_rgba(51,65,85,0.08)] xl:sticky xl:top-0 xl:max-h-[calc(100vh-112px)] xl:overflow-hidden">
             {isDetailLoading ? (
-              <div className="rounded-xl bg-surface-container p-6 text-center text-on-surface-variant">Loading detail...</div>
+              <div className="rounded-xl bg-surface-container p-6 text-center text-on-surface-variant">Đang tải chi tiết...</div>
             ) : !selectedCase ? (
-              <div className="rounded-xl bg-surface-container p-6 text-center text-on-surface-variant">Select a ticket to start.</div>
+              <div className="rounded-xl bg-surface-container p-6 text-center text-on-surface-variant">Chọn một yêu cầu để xử lý.</div>
             ) : (
               <div className="flex h-full min-h-0 flex-col">
                 <div className="border-b border-outline-variant/25 p-5">
@@ -629,7 +529,7 @@ const AdminCustomerSupportPage = () => {
                     <p className="inline-flex rounded-lg bg-emerald-50 px-2 py-1 text-xs font-black uppercase tracking-[0.14em] text-primary">{selectedCase.referenceNumber}</p>
                     <h2 className="mt-3 text-xl font-headline font-black leading-tight text-on-surface [overflow-wrap:anywhere]">{selectedCase.title}</h2>
                     <p className="mt-2 text-sm text-on-surface-variant [overflow-wrap:anywhere]">
-                      {selectedCase.passenger?.fullName || 'Passenger'} - {selectedCase.passenger?.email || selectedCase.passenger?.phone || 'No contact'}
+                      {selectedCase.passenger?.fullName || 'Hành khách'} - {selectedCase.passenger?.email || selectedCase.passenger?.phone || 'Chưa có liên hệ'}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -642,28 +542,24 @@ const AdminCustomerSupportPage = () => {
 
                 <div className="min-h-0 flex-1 space-y-5 overflow-visible p-5 xl:overflow-y-auto">
                 <dl className="grid gap-3 md:grid-cols-2">
-                  <InfoRow label="Passenger email" value={selectedCase.passenger?.email || 'Chua co'} />
-                  <InfoRow label="Passenger phone" value={selectedCase.passenger?.phone || 'Chua co'} />
-                  <InfoRow label="Category" value={getLabel(FEEDBACK_CATEGORIES, selectedCase.category)} />
-                  <InfoRow label="Rating" value={selectedCase.ratingScore ? `${selectedCase.ratingScore}/5` : 'Chua co'} />
-                  <InfoRow label="Route / trip" value={selectedCase.routeName || selectedCase.tripCode || selectedCase.relatedTripId || 'Chua co'} />
-                  <InfoRow label="Assigned admin" value={selectedCase.assignedTo?.fullName || 'Not assigned'} />
-                  <InfoRow label="Assigned team" value={getLabel(ASSIGNED_TEAMS, selectedCase.assignedTeam || 'UNASSIGNED')} />
-                  <InfoRow label="Reply status" value={getReplyStatus(selectedCase)} />
-                  <InfoRow label="Priority" value={selectedCase.priority || 'LOW'} />
-                  <InfoRow label="Priority reason" value={selectedCase.priorityReason || 'Chua co'} />
-                  <InfoRow label="SLA" value={<span className={getSlaDisplay(selectedCase).tone}>{getSlaDisplay(selectedCase).label}</span>} />
-                  <InfoRow label="Submitted" value={formatDateTime(selectedCase.createdAt)} />
+                  <InfoRow label="Email hành khách" value={selectedCase.passenger?.email || 'Chưa có'} />
+                  <InfoRow label="Số điện thoại" value={selectedCase.passenger?.phone || 'Chưa có'} />
+                  <InfoRow label="Đánh giá" value={selectedCase.ratingScore ? `${selectedCase.ratingScore}/5` : 'Chưa có'} />
+                  <InfoRow label="Tuyến / chuyến" value={selectedCase.routeName || selectedCase.tripCode || selectedCase.relatedTripId || 'Chưa có'} />
+                  <InfoRow label="Admin xử lý" value={selectedCase.assignedTo?.fullName || 'Chưa phân công'} />
+                  <InfoRow label="Trạng thái phản hồi" value={getReplyStatus(selectedCase)} />
+                  <InfoRow label="Mức ưu tiên" value={getLabel(PRIORITIES, selectedCase.priority || 'LOW')} />
+                  <InfoRow label="Ngày gửi" value={formatDateTime(selectedCase.createdAt)} />
                 </dl>
 
                 <div className="rounded-xl bg-surface-container-low p-4">
-                  <p className="text-sm font-black text-primary">Passenger message</p>
+                  <p className="text-sm font-black text-primary">Nội dung hành khách gửi</p>
                   <p className="mt-2 text-sm leading-6 text-on-surface-variant [overflow-wrap:anywhere]">{selectedCase.description}</p>
                 </div>
 
                 {selectedCase.attachments?.length ? (
                   <section className="rounded-xl border border-outline-variant/30 bg-white p-4">
-                    <p className="text-sm font-black text-primary">Attachments</p>
+                    <p className="text-sm font-black text-primary">Tệp đính kèm</p>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {selectedCase.attachments.map((attachment) => {
                         const url = getAttachmentUrl(attachment);
@@ -676,9 +572,9 @@ const AdminCustomerSupportPage = () => {
                             className="overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container-low text-sm font-bold text-primary"
                           >
                             {isImageAttachment(attachment) ? (
-                              <img src={url} alt={attachment.originalName || 'Feedback attachment'} className="h-36 w-full object-cover" />
+                              <img src={url} alt={attachment.originalName || 'Tệp đính kèm góp ý'} className="h-36 w-full object-cover" />
                             ) : null}
-                            <span className="block truncate px-3 py-2">{attachment.originalName || attachment.fileName || 'Attachment'}</span>
+                            <span className="block truncate px-3 py-2">{attachment.originalName || attachment.fileName || 'Tệp đính kèm'}</span>
                           </a>
                         );
                       })}
@@ -687,26 +583,25 @@ const AdminCustomerSupportPage = () => {
                 ) : null}
 
                 <section className="rounded-xl border border-outline-variant/30 bg-surface-container-low p-4">
-                  <p className="text-sm font-black text-primary">Current admin response</p>
+                  <p className="text-sm font-black text-primary">Phản hồi hiện tại của admin</p>
                   {selectedCase.adminResponse ? (
                     <div className="mt-2 text-sm leading-6 text-on-surface-variant">
                       <p>{selectedCase.adminResponse}</p>
                       <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-on-surface-variant">
                         {selectedCase.adminResponseBy?.fullName || 'Admin'} - {formatDateTime(selectedCase.adminResponseAt)}
                       </p>
-                      {selectedCase.resolutionSummary ? <p className="mt-2"><strong>Resolution:</strong> {selectedCase.resolutionSummary}</p> : null}
                       {isFeedback ? (
                         <button
                           type="button"
                           onClick={() => setFeedbackMessage(selectedCase.adminResponse || '')}
                           className="mt-3 rounded-full border border-outline-variant px-4 py-2 text-xs font-black text-primary hover:bg-white"
                         >
-                          Edit response
+                          Sửa phản hồi
                         </button>
                       ) : null}
                     </div>
                   ) : (
-                    <p className="mt-2 text-sm text-on-surface-variant">No response from Admin yet.</p>
+                    <p className="mt-2 text-sm text-on-surface-variant">Admin chưa phản hồi.</p>
                   )}
                 </section>
 
@@ -714,227 +609,87 @@ const AdminCustomerSupportPage = () => {
                   <form onSubmit={handleUpdateFeedback} className="rounded-2xl border border-outline-variant/30 bg-white p-4">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                       <div>
-                        <h3 className="text-lg font-headline font-black text-primary">Feedback workflow</h3>
+                        <h3 className="text-lg font-headline font-black text-primary">Xử lý góp ý</h3>
                         <p className="mt-1 text-sm text-on-surface-variant">{getWorkflowHint(selectedCase)}</p>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <select
-                          value={assignedTeam}
-                          onChange={(event) => setAssignedTeam(event.target.value)}
-                          className="h-10 rounded-xl border border-outline-variant/70 px-3 text-sm"
-                        >
-                          {ASSIGNED_TEAMS.filter((item) => item.value !== 'UNASSIGNED').map((item) => (
-                            <option key={item.value} value={item.value}>{item.label}</option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={handleAssignToSelf}
-                          disabled={isSubmitting}
-                          className="rounded-full border border-outline-variant px-4 py-2 text-sm font-bold text-primary hover:bg-surface-container disabled:opacity-50"
-                        >
-                          {selectedCase.assignedTo ? 'Reassign to self' : 'Assign to self'}
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAssignToSelf}
+                        disabled={isSubmitting}
+                        className="rounded-full border border-outline-variant px-4 py-2 text-sm font-bold text-primary hover:bg-surface-container disabled:opacity-50"
+                      >
+                        {selectedCase.assignedTo ? 'Nhận lại xử lý' : 'Nhận xử lý'}
+                      </button>
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        onClick={() => handleQuickFeedbackStatus('IN_PROGRESS')}
-                        disabled={isSubmitting || !selectedCase.assignedTo || selectedCase.status === 'IN_PROGRESS'}
+                        onClick={() => handleQuickFeedbackStatus(startProcessingStatus)}
+                        disabled={isSubmitting || !selectedCase.assignedTo || !startProcessingStatus}
                         className="min-h-10 rounded-xl bg-primary px-4 py-2 text-sm font-black text-white hover:opacity-90 disabled:opacity-50"
                       >
-                        Start handling
+                        Bắt đầu xử lý
                       </button>
                       <button
                         type="button"
                         onClick={() => setFeedbackStatus('WAITING_FOR_INFORMATION')}
-                        disabled={isSubmitting || !selectedCase.assignedTo || selectedCase.status === 'WAITING_FOR_INFORMATION'}
+                        disabled={isSubmitting || !selectedCase.assignedTo || !allowedFeedbackStatuses.includes('WAITING_FOR_INFORMATION')}
                         className="min-h-10 rounded-xl border border-outline-variant/60 px-4 py-2 text-sm font-black text-primary hover:bg-surface-container disabled:opacity-50"
                       >
-                        Need passenger info
+                        Cần khách bổ sung
                       </button>
                       <button
                         type="button"
                         onClick={() => setFeedbackStatus('RESOLVED')}
-                        disabled={isSubmitting || !selectedCase.assignedTo || selectedCase.status === 'RESOLVED'}
+                        disabled={isSubmitting || !selectedCase.assignedTo || !allowedFeedbackStatuses.includes('RESOLVED')}
                         className="min-h-10 rounded-xl border border-outline-variant/60 px-4 py-2 text-sm font-black text-primary hover:bg-surface-container disabled:opacity-50"
                       >
-                        Mark resolved
+                        Đánh dấu đã xử lý
                       </button>
                       <button
                         type="button"
                         onClick={() => handleQuickFeedbackStatus('CLOSED')}
-                        disabled={isSubmitting || !selectedCase.assignedTo || selectedCase.status !== 'RESOLVED'}
+                        disabled={isSubmitting || !selectedCase.assignedTo || !allowedFeedbackStatuses.includes('CLOSED')}
                         className="min-h-10 rounded-xl border border-outline-variant/60 px-4 py-2 text-sm font-black text-primary hover:bg-surface-container disabled:opacity-50"
                       >
-                        Close ticket
+                        Đóng yêu cầu
                       </button>
                     </div>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
                       <label className="space-y-2">
-                        <span className="text-sm font-bold text-on-surface">Next status</span>
+                        <span className="text-sm font-bold text-on-surface">Trạng thái tiếp theo</span>
                         <select value={feedbackStatus} onChange={(event) => setFeedbackStatus(event.target.value)} className="w-full rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm">
-                          {FEEDBACK_STATUSES.filter((item) => item.value !== 'ALL' && !['PENDING', 'IN_PROGRESS', 'WAITING_FOR_PASSENGER', 'REJECTED'].includes(item.value)).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                          {FEEDBACK_STATUSES.filter((item) => allowedFeedbackStatuses.includes(item.value)).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                         </select>
                       </label>
                       <label className="space-y-2">
-                        <span className="text-sm font-bold text-on-surface">Priority</span>
+                        <span className="text-sm font-bold text-on-surface">Mức ưu tiên</span>
                         <select value={feedbackPriority} onChange={(event) => setFeedbackPriority(event.target.value)} className="w-full rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm">
                           {ENTERPRISE_PRIORITIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                         </select>
                       </label>
-                      <label className="space-y-2">
-                        <span className="text-sm font-bold text-on-surface">Resolution summary</span>
-                        <input value={resolutionSummary} onChange={(event) => setResolutionSummary(event.target.value)} maxLength={1000} className="w-full rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm" placeholder="Visible resolution note" />
-                      </label>
-                      <label className="space-y-2">
-                        <span className="text-sm font-bold text-on-surface">Waiting reason</span>
-                        <input value={waitingReason} onChange={(event) => setWaitingReason(event.target.value)} maxLength={1000} className="w-full rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm" placeholder="Required when waiting for information" />
-                      </label>
-                      <label className="space-y-2">
-                        <span className="text-sm font-bold text-on-surface">Action type</span>
-                        <select value={correctiveAction.actionType} onChange={(event) => setCorrectiveAction((current) => ({ ...current, actionType: event.target.value }))} className="w-full rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm">
-                          {CORRECTIVE_ACTION_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                        </select>
-                      </label>
-                      <label className="space-y-2">
-                        <span className="text-sm font-bold text-on-surface">Action description</span>
-                        <input value={correctiveAction.description} onChange={(event) => setCorrectiveAction((current) => ({ ...current, description: event.target.value }))} maxLength={1000} className="w-full rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm" placeholder="Required for action required or resolution" />
-                      </label>
+                      {feedbackStatus === 'WAITING_FOR_INFORMATION' ? (
+                        <label className="space-y-2">
+                          <span className="text-sm font-bold text-on-surface">Lý do cần bổ sung</span>
+                          <input value={waitingReason} onChange={(event) => setWaitingReason(event.target.value)} maxLength={1000} className="w-full rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm" placeholder="Ví dụ: Cần thêm hình ảnh hoặc thông tin chuyến" />
+                        </label>
+                      ) : null}
                       <label className="space-y-2 md:col-span-2">
-                        <span className="text-sm font-bold text-on-surface">Reply to passenger</span>
-                        <textarea value={feedbackMessage} onChange={(event) => setFeedbackMessage(event.target.value)} maxLength={2000} rows={4} className="w-full rounded-xl border border-outline-variant/70 px-4 py-3 text-sm" placeholder="Ask for more information, explain the decision, or confirm resolution." />
+                        <span className="text-sm font-bold text-on-surface">Phản hồi cho hành khách</span>
+                        <textarea value={feedbackMessage} onChange={(event) => setFeedbackMessage(event.target.value)} maxLength={2000} rows={4} className="w-full rounded-xl border border-outline-variant/70 px-4 py-3 text-sm" placeholder="Nhập nội dung phản hồi, yêu cầu bổ sung thông tin hoặc thông báo kết quả xử lý." />
                         <span className="block text-right text-xs font-semibold text-on-surface-variant">{feedbackMessage.length}/2000</span>
                       </label>
                     </div>
                     <button type="submit" disabled={isSubmitting || !selectedCase.assignedTo} className="mt-4 rounded-full bg-primary px-6 py-3 text-sm font-black text-white disabled:opacity-50">
-                      Update Complaint
+                      Cập nhật góp ý
                     </button>
                   </form>
                 ) : null}
 
-                {isComplaint ? (
-                  <form onSubmit={handleRespondToComplaint} className="rounded-2xl border border-outline-variant/30 bg-white p-5">
-                    <h3 className="text-lg font-headline font-black text-primary">Complaint response</h3>
-                    <textarea value={responseMessage} onChange={(event) => setResponseMessage(event.target.value)} rows={4} className="mt-4 w-full rounded-xl border border-outline-variant/70 px-4 py-3 text-sm" placeholder="Response message" />
-                    <select value={nextStatus} onChange={(event) => setNextStatus(event.target.value)} className="mt-3 rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm">
-                      {CASE_STATUSES.filter((item) => item.value !== 'ALL').map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                    </select>
-                    <button type="submit" disabled={isSubmitting || !responseMessage.trim()} className="mt-4 rounded-full bg-primary px-6 py-3 text-sm font-black text-white disabled:opacity-50">Save response</button>
-                  </form>
-                ) : null}
-
-                {isLostItem ? (
-                  <form onSubmit={handleUpdateLostItem} className="rounded-2xl border border-outline-variant/30 bg-white p-5">
-                    <h3 className="text-lg font-headline font-black text-primary">Lost item workflow</h3>
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <select value={recoveryStatus} onChange={(event) => setRecoveryStatus(event.target.value)} className="rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm">
-                        {RECOVERY_STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                      </select>
-                      <select value={lostItemStatus} onChange={(event) => setLostItemStatus(event.target.value)} className="rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm">
-                        {CASE_STATUSES.filter((item) => item.value !== 'ALL').map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                      </select>
-                      <textarea value={lostItemNote} onChange={(event) => setLostItemNote(event.target.value)} rows={3} className="rounded-xl border border-outline-variant/70 px-4 py-3 text-sm md:col-span-2" placeholder="Processing note" />
-                    </div>
-                    <button type="submit" disabled={isSubmitting} className="mt-4 rounded-full bg-primary px-6 py-3 text-sm font-black text-white disabled:opacity-50">Update lost item</button>
-                  </form>
-                ) : null}
-
-                {(isFeedback || isComplaint) ? (
-                  <section className="rounded-2xl border border-outline-variant/30 bg-white p-5">
-                    <h3 className="text-lg font-headline font-black text-primary">Investigation</h3>
-                    <form onSubmit={handleAddInternalNote} className="mt-4 space-y-3">
-                      <textarea
-                        value={internalNote}
-                        onChange={(event) => setInternalNote(event.target.value)}
-                        rows={3}
-                        maxLength={2000}
-                        className="w-full rounded-xl border border-outline-variant/70 px-4 py-3 text-sm"
-                        placeholder="Internal note, not visible to passenger"
-                      />
-                      <button type="submit" disabled={isSubmitting || !internalNote.trim()} className="rounded-full bg-primary px-5 py-2.5 text-sm font-black text-white disabled:opacity-50">
-                        Add Note
-                      </button>
-                    </form>
-                    <ul className="mt-4 space-y-3">
-                      {(selectedCase.responses || []).filter((item) => item.responseType === 'INTERNAL_NOTE' || item.visibleToPassenger === false).map((note) => (
-                        <li key={note._id || note.id || `${note.createdAt}-${note.message}`} className="rounded-xl bg-surface-container-low p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <p className="text-sm font-bold text-on-surface">{note.responder?.fullName || 'Admin'}</p>
-                            <span className="text-xs text-on-surface-variant">{formatDateTime(note.createdAt)}</span>
-                          </div>
-                          <p className="mt-2 text-sm leading-6 text-on-surface-variant">{note.message}</p>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ) : null}
-
-                {(isFeedback || isComplaint) ? (
-                  <section className="rounded-2xl border border-outline-variant/30 bg-white p-5">
-                    <h3 className="text-lg font-headline font-black text-primary">Corrective Action</h3>
-                    <form onSubmit={handleAddCorrectiveAction} className="mt-4 grid gap-3 md:grid-cols-[0.6fr_1fr_auto]">
-                      <select
-                        value={correctiveAction.actionType}
-                        onChange={(event) => setCorrectiveAction((current) => ({ ...current, actionType: event.target.value }))}
-                        className="rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm"
-                      >
-                        {CORRECTIVE_ACTION_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                      </select>
-                      <input
-                        value={correctiveAction.description}
-                        onChange={(event) => setCorrectiveAction((current) => ({ ...current, description: event.target.value }))}
-                        className="rounded-xl border border-outline-variant/70 px-3 py-2.5 text-sm"
-                        placeholder="Action description"
-                      />
-                      <button type="submit" disabled={isSubmitting || !correctiveAction.description.trim()} className="rounded-full bg-primary px-5 py-2.5 text-sm font-black text-white disabled:opacity-50">
-                        Save Action
-                      </button>
-                    </form>
-                    <ul className="mt-4 space-y-3">
-                      {(selectedCase.correctiveActions || []).map((action) => (
-                        <li key={action.id || action._id || `${action.createdAt}-${action.description}`} className="rounded-xl bg-surface-container-low p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <p className="text-sm font-black text-on-surface">{getLabel(CORRECTIVE_ACTION_TYPES, action.actionType)}</p>
-                            <span className="text-xs text-on-surface-variant">{formatDateTime(action.performedAt || action.createdAt)}</span>
-                          </div>
-                          <p className="mt-2 text-sm text-on-surface-variant">{action.description}</p>
-                          <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-on-surface-variant">
-                            {action.performedBy?.fullName || 'Admin'}
-                          </p>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ) : null}
-
                 <section className="rounded-2xl border border-outline-variant/30 bg-white p-5">
-                  <h3 className="text-lg font-headline font-black text-primary">Activity Timeline</h3>
-                  {(selectedCase.activityTimeline || selectedCase.publicTimeline || []).length === 0 ? (
-                    <p className="mt-3 rounded-xl bg-surface-container p-4 text-sm text-on-surface-variant">No activity yet.</p>
-                  ) : (
-                    <ol className="mt-3 space-y-3">
-                      {(selectedCase.activityTimeline || selectedCase.publicTimeline || []).map((entry) => (
-                        <li key={entry.id || `${entry.createdAt}-${entry.action}`} className="rounded-xl bg-surface-container-low p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <p className="text-sm font-black text-on-surface">{entry.action}</p>
-                            <span className="text-xs text-on-surface-variant">{formatDateTime(entry.createdAt)}</span>
-                          </div>
-                          <p className="mt-2 text-sm text-on-surface-variant">
-                            {entry.previousStatus && entry.newStatus ? `${entry.previousStatus} -> ${entry.newStatus}` : entry.message || 'Updated'}
-                          </p>
-                          {entry.message ? <p className="mt-1 text-xs text-on-surface-variant">{entry.message}</p> : null}
-                        </li>
-                      ))}
-                    </ol>
-                  )}
-                </section>
-
-                <section className="rounded-2xl border border-outline-variant/30 bg-white p-5">
-                  <h3 className="text-lg font-headline font-black text-primary">Conversation history</h3>
+                  <h3 className="text-lg font-headline font-black text-primary">Lịch sử trao đổi</h3>
                   {conversation.length === 0 ? (
-                    <p className="mt-3 rounded-xl bg-surface-container p-4 text-sm text-on-surface-variant">No messages yet.</p>
+                    <p className="mt-3 rounded-xl bg-surface-container p-4 text-sm text-on-surface-variant">Chưa có tin nhắn.</p>
                   ) : (
                     <ul className="mt-3 space-y-3">
                       {conversation.map((message) => (
@@ -960,9 +715,9 @@ const AdminCustomerSupportPage = () => {
           <section className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-xl font-headline font-black text-on-surface">Send update to passenger?</h2>
+                <h2 className="text-xl font-headline font-black text-on-surface">Gửi cập nhật cho hành khách?</h2>
                 <p className="mt-2 text-sm text-on-surface-variant">
-                  The complaint status has been changed to: <strong>{getLabel(FEEDBACK_STATUSES, pendingUpdate?.status)}</strong>
+                  Trạng thái góp ý sẽ được đổi thành: <strong>{getLabel(FEEDBACK_STATUSES, pendingUpdate?.status)}</strong>
                 </p>
               </div>
               <button
@@ -985,7 +740,7 @@ const AdminCustomerSupportPage = () => {
                   onChange={(event) => setNotificationChannels((current) => ({ ...current, inApp: event.target.checked }))}
                   className="rounded border-outline-variant text-primary focus:ring-primary"
                 />
-                In-app notification
+                Thông báo trong ứng dụng
               </label>
               <label className="flex items-center gap-3 text-sm font-bold text-on-surface">
                 <input
@@ -1002,12 +757,12 @@ const AdminCustomerSupportPage = () => {
               ) : null}
               {!notificationChannels.inApp && !notificationChannels.email ? (
                 <p className="rounded-lg bg-orange-50 px-3 py-2 text-xs font-bold text-orange-800">
-                  No notification will be sent to the passenger.
+                  Sẽ không gửi thông báo cho hành khách.
                 </p>
               ) : null}
             </div>
             <label className="mt-4 block space-y-2">
-              <span className="text-sm font-bold text-on-surface">Message</span>
+              <span className="text-sm font-bold text-on-surface">Nội dung thông báo</span>
               <textarea
                 value={notificationMessage}
                 onChange={(event) => setNotificationMessage(event.target.value)}
@@ -1025,7 +780,7 @@ const AdminCustomerSupportPage = () => {
                 }}
                 className="rounded-full border border-outline-variant px-5 py-2.5 text-sm font-black text-primary hover:bg-surface-container"
               >
-                Cancel
+                Hủy
               </button>
               <button
                 type="button"
@@ -1033,7 +788,7 @@ const AdminCustomerSupportPage = () => {
                 disabled={isSubmitting || !notificationMessage.trim()}
                 className="rounded-full bg-primary px-5 py-2.5 text-sm font-black text-white disabled:opacity-50"
               >
-                Confirm Update & Send
+                Cập nhật và gửi
               </button>
             </div>
           </section>
@@ -1059,7 +814,7 @@ const RatingStars = ({ value }) => {
   const rating = Number(value || 0);
 
   return (
-    <div className="flex items-center gap-0.5 text-yellow-400" aria-label={`${rating || '-'} out of 5 stars`}>
+    <div className="flex items-center gap-0.5 text-yellow-400" aria-label={`${rating || '-'} trên 5 sao`}>
       {[1, 2, 3, 4, 5].map((star) => (
         <span
           key={star}
@@ -1098,7 +853,7 @@ const FeedbackListItem = ({ supportCase, selected, onSelect }) => (
           {supportCase.title}
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-on-surface-variant">
-          <span className="max-w-[180px] truncate text-on-surface">{supportCase.passenger?.fullName || 'Passenger'}</span>
+          <span className="max-w-[180px] truncate text-on-surface">{supportCase.passenger?.fullName || 'Hành khách'}</span>
           <span className="inline-flex items-center gap-1">
             <span className="material-symbols-outlined text-[14px]" aria-hidden="true">calendar_today</span>
             {formatDateTime(supportCase.createdAt)}
@@ -1123,7 +878,7 @@ const FeedbackListItem = ({ supportCase, selected, onSelect }) => (
           {getLabel(CASE_STATUSES, supportCase.status)}
         </span>
         <span className={`rounded-full px-2.5 py-1 text-[10px] font-black ${supportCase.adminResponse ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>
-          {supportCase.adminResponse ? 'Replied' : 'No reply'}
+          {supportCase.adminResponse ? 'Đã phản hồi' : 'Chưa phản hồi'}
         </span>
       </div>
     </div>

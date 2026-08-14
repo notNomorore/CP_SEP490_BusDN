@@ -13,10 +13,8 @@ const dateLabel = (value?: string) => value ? new Date(value).toLocaleString('vi
 const displayStatus = (ticket: TicketRecord) => {
   const explicit = String(ticket.currentStatus || ticket.status || ticket.ticketStatus || '').toUpperCase();
   if (['CANCELLED', 'USED', 'REFUNDED'].includes(explicit)) return explicit;
-  const date = String(ticket.serviceDate || '').slice(0, 10);
-  const time = String(ticket.departureTime || '23:59');
-  const journey = new Date(`${date}T${time}:00+07:00`).getTime();
-  return Number.isFinite(journey) && journey <= Date.now() ? 'EXPIRED' : explicit || String(ticket.paymentStatus || 'PENDING').toUpperCase();
+  const journeyEnd = new Date(ticket.validUntil || ticket.expiresAt || '').getTime();
+  return Number.isFinite(journeyEnd) && journeyEnd <= Date.now() ? 'EXPIRED' : explicit || String(ticket.paymentStatus || 'PENDING').toUpperCase();
 };
 const isPending = (ticket: TicketRecord) => displayStatus(ticket) === 'PENDING' && String(ticket.paymentStatus).toUpperCase() === 'PENDING';
 const canViewQr = (ticket: TicketRecord) => String(ticket.paymentStatus).toUpperCase() === 'PAID' && displayStatus(ticket) === 'ACTIVE';

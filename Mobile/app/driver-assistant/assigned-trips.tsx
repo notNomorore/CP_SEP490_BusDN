@@ -15,6 +15,7 @@ import { goBackOrReplace } from '@/utils/navigation';
 import { normalizeRole } from '@/utils/roleNavigation';
 import {
   formatTime,
+  findEarlierUnfinishedTrip,
   getAssignedTripsRange,
   getTripArrivalTimeLabel,
   getTripDepartureTimeLabel,
@@ -24,6 +25,7 @@ import {
   hasVehicleReplacement,
   getTripStatus,
   isTripCompleted,
+  isTripDeparturePassed,
   isTripDelayed,
   isTripHistory,
   isTripToday,
@@ -89,6 +91,7 @@ const canDecideTrip = (trip: AssignedTrip) => {
   const status = getTripStatus(trip);
   const acceptanceStatus = getAcceptanceStatus(trip);
   return !['ACCEPTED', 'REJECTED'].includes(acceptanceStatus)
+    && !isTripDeparturePassed(trip)
     && !['IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'DONE'].includes(status);
 };
 
@@ -609,7 +612,16 @@ export default function AssignedTripsScreen() {
   };
 
   const openFreshInspection = async (trip: AssignedTrip) => {
-    openInspection(await refreshTrip(trip));
+    const updated = await refreshTrip(trip);
+    const blockingTrip = findEarlierUnfinishedTrip(updated, actorTrips);
+    if (blockingTrip) {
+      Alert.alert(
+        'Chưa thể kiểm tra xe',
+        `Phải hoàn tất chuyến ${blockingTrip.tripCode} trước khi bắt đầu kiểm tra xe cho chuyến này.`
+      );
+      return;
+    }
+    openInspection(updated);
   };
 
   const openLifecycle = (trip: AssignedTrip) => {
@@ -628,6 +640,15 @@ export default function AssignedTripsScreen() {
     try {
       const updated = await scheduleOperationsApi.acceptAssignedTrip(trip.id);
       if (isDriver) {
+        const blockingTrip = findEarlierUnfinishedTrip(updated, actorTrips);
+        if (blockingTrip) {
+          Alert.alert(
+            copy.acceptSuccessTitle,
+            `Đã tiếp nhận chuyến. Phải hoàn tất chuyến ${blockingTrip.tripCode} trước khi bắt đầu kiểm tra xe.`
+          );
+          await loadTrips();
+          return;
+        }
         openInspection(updated);
         return;
       }
@@ -757,6 +778,10 @@ export default function AssignedTripsScreen() {
             const isAccepted = getAcceptanceStatus(trip) === 'ACCEPTED';
             const isVehicleReady = trip.inspection?.status === 'READY';
             const showDecisionActions = canDecideTrip(trip);
+            const departurePassed = isTripDeparturePassed(trip);
+            const inspectionBlockedBy = isDriver && isAccepted
+              ? findEarlierUnfinishedTrip(trip, actorTrips)
+              : null;
 
             return (
               <View key={trip.id} style={styles.tripCard}>
@@ -784,6 +809,18 @@ export default function AssignedTripsScreen() {
                   <InfoLine label={t.common.assistantName} value={trip.busAssistant?.fullName} />
                 </View>
 
+                {(trip.incidentDelayMinutes || trip.propagatedDelayMinutes) ? (
+                  <View style={styles.delayNotice}>
+                    <MaterialCommunityIcons color="#9a6700" name="clock-alert-outline" size={20} />
+                    <View style={styles.replacementTextWrap}>
+                      <Text style={styles.delayTitle}>Lịch đã điều chỉnh do sự cố</Text>
+                      <Text style={styles.delayText}>
+                        Giờ gốc {formatTime(trip.originalScheduledStart)} - {formatTime(trip.originalScheduledEnd)}; giờ mới {getTripDepartureTimeLabel(trip)} - {getTripArrivalTimeLabel(trip)}. Dời {trip.propagatedDelayMinutes || 0} phút.
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+
                 {hasVehicleReplacement(trip) ? (
                   <View style={styles.replacementNotice}>
                     <MaterialCommunityIcons color={colors.primary} name="swap-horizontal-bold" size={18} />
@@ -793,6 +830,24 @@ export default function AssignedTripsScreen() {
                         {isDriver ? `${t.trips.oldVehicleMaintenance} ${t.trips.replacementPrefix} ${getVehicleLabel(trip.vehicleReplacement?.currentVehicle || trip.vehicle)}.` : `${t.assistant.trips.replacementTextPrefix} ${getVehicleLabel(trip.vehicleReplacement?.previousVehicle)} ${t.assistant.trips.replacementTextMiddle} ${getVehicleLabel(trip.vehicleReplacement?.currentVehicle || trip.vehicle)}.`}
                       </Text>
                     </View>
+                  </View>
+                ) : null}
+
+                {departurePassed && !isCompleted ? (
+                  <View style={styles.expiredNotice}>
+                    <MaterialCommunityIcons color="#9a3412" name="lock-clock" size={19} />
+                    <Text style={styles.expiredNoticeText}>
+                      Chuyến đã qua giờ khởi hành và đã được khóa. Không thể tiếp nhận hoặc kiểm tra xe.
+                    </Text>
+                  </View>
+                ) : null}
+
+                {inspectionBlockedBy ? (
+                  <View style={styles.expiredNotice}>
+                    <MaterialCommunityIcons color="#9a3412" name="progress-alert" size={19} />
+                    <Text style={styles.expiredNoticeText}>
+                      Phải hoàn tất chuyến {inspectionBlockedBy.tripCode} trước khi bắt đầu kiểm tra xe cho chuyến này.
+                    </Text>
                   </View>
                 ) : null}
 
@@ -817,9 +872,10 @@ export default function AssignedTripsScreen() {
                         style={styles.actionButton}
                       />
                     </>
-                  ) : isDriver && isAccepted && !isCompleted ? (
+                  ) : isDriver && isAccepted && !isCompleted && !departurePassed ? (
                     <AppButton
                       title={isVehicleReady ? copy.startAction : copy.prepareAction}
+                      disabled={!isVehicleReady && Boolean(inspectionBlockedBy)}
                       loading={processingId === trip.id}
                       onPress={() => void (isVehicleReady ? openFreshLifecycle(trip) : openFreshInspection(trip))}
                       style={styles.actionButton}
@@ -926,6 +982,11 @@ const styles = StyleSheet.create({
   replacementTextWrap: { flex: 1, gap: 3 },
   replacementTitle: { color: colors.primary, fontSize: 13, fontWeight: '900' },
   replacementText: { color: colors.muted, fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  delayNotice: { flexDirection: 'row', gap: 10, borderRadius: 16, borderWidth: 1, borderColor: '#f1d58a', backgroundColor: '#fff8df', padding: 12 },
+  expiredNotice: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 16, borderWidth: 1, borderColor: '#fed7aa', backgroundColor: '#fff7ed', padding: 12 },
+  expiredNoticeText: { flex: 1, color: '#9a3412', fontSize: 13, lineHeight: 19, fontWeight: '800' },
+  delayTitle: { color: '#805500', fontSize: 13, fontWeight: '900' },
+  delayText: { color: '#725a24', fontSize: 12, lineHeight: 18, fontWeight: '700' },
   actionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   actionButton: { flex: 1 },
   assistantNotice: {

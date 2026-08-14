@@ -40,6 +40,20 @@ const getStoredToken = () => {
   }
 };
 
+const isFormDataPayload = (value) => (
+  typeof FormData !== 'undefined' && value instanceof FormData
+);
+
+const removeContentTypeHeader = (headers) => {
+  if (!headers) return;
+  if (typeof headers.delete === 'function') {
+    headers.delete('Content-Type');
+    headers.delete('content-type');
+  }
+  delete headers['Content-Type'];
+  delete headers['content-type'];
+};
+
 const firstMessageFromDetails = (value) => {
   if (!value) return '';
   if (typeof value === 'string') return value;
@@ -54,6 +68,10 @@ const firstMessageFromDetails = (value) => {
 
 apiClient.interceptors.request.use(
   (config) => {
+    if (isFormDataPayload(config.data)) {
+      removeContentTypeHeader(config.headers);
+    }
+
     const token = getStoredToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -72,6 +90,7 @@ apiClient.interceptors.response.use(
     const responseData = error.response?.data;
     const isPublicAuthRequest = [
       '/auth/login',
+      '/auth/google',
       '/auth/register',
       '/auth/verify-otp',
       '/auth/resend-otp',

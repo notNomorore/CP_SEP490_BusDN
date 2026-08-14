@@ -4,6 +4,7 @@ import AuthService from './AuthService.js';
 import {
   RegisterDTO,
   LoginDTO,
+  GoogleLoginDTO,
   VerifyOtpDTO,
   ResendOtpDTO,
   ForgotPasswordDTO,
@@ -14,6 +15,16 @@ import {
 } from './dto/auth.dto.js';
 import logger from '../../utils/logger.js';
 import { createAuditLog } from '../systemMonitoring/auditLogger.js';
+
+const generateAuthToken = (user) => jwt.sign(
+  {
+    userId: user._id,
+    email: user.email,
+    role: user.role,
+  },
+  config.jwt.secret,
+  { expiresIn: config.jwt.expire || '7d' }
+);
 
 /**
  * Auth Controller
@@ -274,6 +285,92 @@ export class AuthController {
               lockedUntil: error.lockedUntil,
             }
             : {}),
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  /**
+   * POST /auth/google
+   * Login or create a passenger account with Google Identity Services.
+   */
+  static async googleLogin(req, res, next) {
+    try {
+      const { credential } = req.body;
+
+      const validationErrors = GoogleLoginDTO.validate({ credential });
+
+      if (validationErrors) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+        });
+      }
+
+      const { user, authEvent } = await AuthService.loginWithGoogle(credential);
+      const token = generateAuthToken(user);
+
+      await createAuditLog({
+        req,
+        user,
+        action: 'LOGIN',
+        module: 'AUTH',
+        description: `Passenger Google login ${authEvent}.`,
+        status: 'SUCCESS',
+        riskLevel: 'LOW',
+      });
+
+      return res.json({
+        success: true,
+        message: 'Login successful',
+        ...AuthResponseDTO.format(user, token),
+      });
+    } catch (error) {
+      logger.error('Google login error:', {
+        message: error.message,
+        code: error.code,
+      });
+
+      await createAuditLog({
+        req,
+        user: { email: '' },
+        action: 'LOGIN',
+        module: 'AUTH',
+        description: 'Google login attempt failed.',
+        status: 'FAILED',
+        riskLevel: 'MEDIUM',
+        metadata: { reason: error.code || error.message },
+      });
+
+      if (
+        error.code === 'ACCOUNT_LOCKED'
+        || error.code === 'GOOGLE_CREDENTIAL_REQUIRED'
+        || error.code === 'INVALID_GOOGLE_CREDENTIAL'
+        || error.code === 'GOOGLE_EMAIL_NOT_VERIFIED'
+        || error.code === 'UNSUPPORTED_GOOGLE_ROLE'
+        || error.code === 'GOOGLE_AUTH_NOT_CONFIGURED'
+        || error.message.includes('inactive')
+      ) {
+        return res.status(error.statusCode || (error.code === 'ACCOUNT_LOCKED' ? 423 : 401)).json({
+          success: false,
+          message: error.message,
+          ...(error.code === 'ACCOUNT_LOCKED'
+            ? {
+              code: error.code,
+              reason: error.reason,
+              lockedUntil: error.lockedUntil,
+            }
+            : { code: error.code }),
+        });
+      }
+
+      if (error.code === 11000) {
+        return res.status(409).json({
+          success: false,
+          message: 'Google account could not be linked because the account already exists',
         });
       }
 

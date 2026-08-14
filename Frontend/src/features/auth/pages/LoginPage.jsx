@@ -1,4 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, {
+  useEffect,
+  useState,
+} from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AuthShell from '../components/AuthShell';
 import authService from '../services/authService.js';
@@ -39,6 +42,40 @@ const getErrorMessage = (error) => {
   return 'Unable to complete sign in.';
 };
 
+const DEMO_ACCOUNTS = [
+  {
+    role: 'Admin',
+    icon: 'admin_panel_settings',
+    accounts: [
+      { email: 'hoangvu1212004@gmail.com', password: 'Vu@1212004' },
+      { email: 'nguyennhatminhnau@gmail.com', password: '@Minh123' },
+    ],
+  },
+  {
+    role: 'Khách hàng',
+    icon: 'person',
+    accounts: [
+      { email: 'vuker1212004@gmail.com', password: 'Vu@1212004' },
+      { email: 'huhuhichic64@gmail.com', password: '@Minh123' },
+    ],
+  },
+  {
+    role: 'Phụ xe',
+    icon: 'confirmation_number',
+    accounts: [
+      { email: 'vunthde180740@fpt.edu.vn', password: 'Vu@1212004' },
+      { email: 'trinhminhhai1112@gmail.com', password: 'Tuyettnhy1403@' },
+    ],
+  },
+  {
+    role: 'Tài xế',
+    icon: 'directions_bus',
+    accounts: [
+      { email: 'haitmde180679@fpt.edu.vn', password: 'Tuyettnhy1403@' },
+    ],
+  },
+];
+
 const LoginPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -55,6 +92,7 @@ const LoginPage = () => {
   const [message, setMessage] = useState('');
   const [submitError, setSubmitError] = useState('');
   const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
+  const [showDemoAccounts, setShowDemoAccounts] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [resetIdentifier, setResetIdentifier] = useState('');
   const [resetToken, setResetToken] = useState('');
@@ -179,6 +217,14 @@ const LoginPage = () => {
   };
 
   const visibleError = submitError || getErrorMessage(error);
+
+  const selectDemoAccount = (account) => {
+    setIdentifier(account.email);
+    setPassword(account.password);
+    setSubmitError('');
+    clearError();
+    setShowDemoAccounts(false);
+  };
 
   return (
     <AuthShell
@@ -311,6 +357,58 @@ const LoginPage = () => {
                 {isSubmittingLogin ? 'Signing In...' : 'Sign In'}
               </button>
             </form>
+
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => setShowDemoAccounts((value) => !value)}
+                aria-expanded={showDemoAccounts}
+                className="flex w-full items-center justify-between rounded-full border border-primary/20 bg-primary/5 px-6 py-3.5 text-sm font-bold text-primary transition hover:border-primary/40 hover:bg-primary/10"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[20px]">key</span>
+                  Tài khoản demo
+                </span>
+                <span className="material-symbols-outlined text-[20px] transition-transform duration-200" style={{ transform: showDemoAccounts ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                  expand_more
+                </span>
+              </button>
+
+              {showDemoAccounts && (
+                <div className="overflow-hidden rounded-3xl border border-outline-variant/60 bg-surface-container-lowest p-3 shadow-lg shadow-primary/5">
+                  <div className="mb-3 px-2">
+                    <p className="text-sm font-bold text-primary">Đăng nhập nhanh để trải nghiệm</p>
+                    <p className="mt-0.5 text-xs text-on-surface-variant">Chọn một tài khoản để tự động điền thông tin.</p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {DEMO_ACCOUNTS.map((group) => (
+                      <section key={group.role} className="rounded-2xl border border-outline-variant/40 bg-white p-3">
+                        <div className="mb-2 flex items-center gap-2 text-sm font-extrabold text-primary">
+                          <span className="material-symbols-outlined rounded-full bg-primary/5 p-1 text-[18px]">{group.icon}</span>
+                          {group.role}
+                        </div>
+                        <div className="space-y-2">
+                          {group.accounts.map((account) => (
+                            <button
+                              key={account.email}
+                              type="button"
+                              onClick={() => selectDemoAccount(account)}
+                              className="group w-full rounded-xl border border-transparent bg-surface-container-low px-3 py-2.5 text-left transition hover:border-on-tertiary-container/30 hover:bg-on-tertiary-container/10"
+                            >
+                              <span className="block break-all text-xs font-bold text-on-surface">{account.email}</span>
+                              <span className="mt-1 flex items-center justify-between gap-2 text-xs text-on-surface-variant">
+                                <span className="font-mono">{account.password}</span>
+                                <span className="font-bold text-on-tertiary-fixed-variant opacity-0 transition group-hover:opacity-100">Dùng</span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
 
             <p className="text-center text-body-md text-on-surface-variant">
               New to Veridian Transit?{' '}

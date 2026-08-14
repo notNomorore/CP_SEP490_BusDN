@@ -78,6 +78,140 @@ Semantic types such as `INCIDENT_ALERT`, `FEEDBACK_RESPONSE`, `VEHICLE_REASSIGNE
 
 Email failure is logged and reflected in `deliverySummary.failedCount`; it does not roll back the notification or fail unrelated business work.
 
+## Email Notifications
+
+Transactional email is handled only by the centralized notification pipeline:
+
+```text
+Business event -> notificationService.send(...) -> NotificationService -> EmailNotificationDispatcher -> template -> emailService/Nodemailer
+```
+
+Business modules must not call `nodemailer.sendMail(...)` for notification emails. They should create one normalized notification and let `NotificationService` handle persistence, recipient resolution, in-app delivery, email rendering, SMTP delivery, failure isolation, and deduplication.
+
+### Channel Policy
+
+Default channels live in `Backend/src/modules/systemNotifications/notificationChannelPolicy.js`.
+
+Important transactional events default to both in-app and email:
+
+- `TICKET_PURCHASED`
+- `PAYMENT_SUCCESS`
+- `TICKET_EXPIRING`
+- `MONTHLY_PASS_EXPIRING`
+- `INCIDENT_ALERT`
+- `TRIP_DELAYED`
+- `TRIP_CANCELLED`
+- `FEEDBACK_RESPONSE`
+- `VEHICLE_REASSIGNED`
+
+Realtime events intentionally remain in-app only by default:
+
+- `BUS_APPROACHING`
+- `ETA_UPDATE`
+
+`PROMOTION` defaults to in-app only because promotional email should be explicitly enabled by an admin or future preference-aware campaign flow.
+
+Explicit channel values always win. For example, `{ channels: { inApp: true, email: false } }` prevents email even for a transactional type.
+
+### Supported Email Templates
+
+Templates are in `Backend/src/modules/systemNotifications/templates/` and return `{ subject, html, text }`.
+
+Current templates:
+
+- `ticket-purchased.template.js`
+- `payment-success.template.js`
+- `feedback-response.template.js`
+- `incident-alert.template.js`
+- `trip-delayed.template.js`
+- `vehicle-reassigned.template.js`
+- `promotion.template.js`
+- `generic-notification.template.js` for admin broadcasts or unsupported custom types when email is explicitly enabled
+
+No template was added for `TRIP_CANCELLED`, `TICKET_EXPIRING`, or `MONTHLY_PASS_EXPIRING` because this repository does not currently have an implemented event path for those notifications. If those events are added later, add a template and register it in `templates/index.js`.
+
+### Recipient Resolution
+
+For `target.type = USER`, `USERS`, roles, route passengers, and staff targets, email addresses are resolved from the existing `User` model through `notificationRecipientResolver.js`. The dispatcher sends only to resolved users with valid email addresses and enabled email preferences. Random email addresses supplied by public frontend requests are not trusted as notification email recipients.
+
+If a user has no email, the in-app notification still works. The dispatcher logs the skipped recipient and continues with other recipients.
+
+### Ticket Purchase Confirmation
+
+Successful one-way PayOS completion sends `TICKET_PURCHASED` with dedupe key `ticket-purchased:{ticketId}`. The ticket confirmation email is Vietnamese, concise, and includes only fields available on the ticket/payment records:
+
+- passenger name
+- ticket code
+- route
+- boarding stop
+- destination stop
+- departure time
+- amount
+- payment status
+- payment method
+
+Example:
+
+```js
+await notificationService.send({
+  type: 'TICKET_PURCHASED',
+  title: 'Mua vé thành công',
+  message: 'Vé của bạn đã được mua thành công.',
+  target: {
+    type: 'USER',
+    userId,
+  },
+  data: {
+    ticketId,
+    ticketCode,
+    passengerName,
+    routeName,
+    boardingStop,
+    destinationStop,
+    departureTime,
+    amount,
+    paymentStatus,
+    paymentMethod,
+  },
+  source: {
+    module: 'ticket',
+    entityId: ticketId,
+  },
+  deduplicationKey: `ticket-purchased:${ticketId}`,
+});
+```
+
+The channel policy adds `{ inApp: true, email: true, push: false }` unless explicitly overridden.
+
+### Failure Handling And Deduplication
+
+Email failure never fails the primary business operation. The notification document remains created/sent, in-app delivery continues, and email results are stored under `metadata.emailDelivery` when email was attempted or skipped.
+
+Use deterministic deduplication keys:
+
+- `ticket-purchased:{ticketId}`
+- `payment-success:monthly-pass:{monthlyPassId}`
+- `feedback:{feedbackId}:response`
+- `incident:{incidentId}`
+- `trip-delay:{tripId}`
+- `vehicle-reassignment:{tripId}:{vehicleId}:staff`
+- `vehicle-reassignment:{tripId}:{vehicleId}:passengers`
+
+If `NotificationService.send()` sees an existing notification with the same key, it returns the existing document and does not dispatch another email.
+
+### SMTP Configuration
+
+Notification email reuses the existing backend SMTP/Nodemailer configuration:
+
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASSWORD`
+- `EMAIL_FROM`
+- `EMAIL_FROM_NAME`
+
+Credentials stay backend-only. Do not add SMTP variables to frontend or mobile code. Frontend and mobile clients continue to use their existing public backend API and Socket.IO configuration.
+
 ## Examples
 
 Send to one user:
@@ -166,7 +300,7 @@ Implemented now:
 - Maintenance required: emergency breakdown and standby-bus flows send `MAINTENANCE_REQUIRED` to admins, trip staff, and affected passengers where existing relationships provide recipients.
 - Incident created: fleet incident creation sends `INCIDENT_ALERT` to `ROUTE_PASSENGERS` when the incident has a route ID.
 - Trip delayed: existing fleet GPS delay detection sends `TRIP_DELAYED` to `ROUTE_PASSENGERS` with key `trip-delay:{tripId}`. No new delay algorithm was added.
-- Ticket/payment success: PayOS completion sends `PAYMENT_SUCCESS` to the passenger for one-way tickets and monthly passes with keys `payment-success:ticket:{ticketId}` and `payment-success:monthly-pass:{passId}`.
+- Ticket purchase/payment success: PayOS completion sends `TICKET_PURCHASED` to the passenger for one-way tickets with key `ticket-purchased:{ticketId}`. Monthly-pass PayOS completion sends `PAYMENT_SUCCESS` with key `payment-success:monthly-pass:{passId}`.
 - Promotion: the existing promotion scheduler sends `PROMOTION` to `ALL_PASSENGERS` with key `promotion:{promotionId}`.
 
 Future integration points:

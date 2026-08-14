@@ -6,7 +6,6 @@ import OperationNotification from '../scheduleOperations/OperationNotification.j
 import Notification from './Notification.js';
 import {
   LEGACY_NOTIFICATION_TYPES,
-  NOTIFICATION_CHANNELS,
   NOTIFICATION_PRIORITIES,
   SEMANTIC_TYPE_TO_LEGACY_TYPE,
   TARGET_TYPE_TO_LEGACY_AUDIENCE,
@@ -18,16 +17,13 @@ import {
 } from './notificationRecipientResolver.js';
 import WebSocketNotificationDispatcher from './dispatchers/websocketNotification.dispatcher.js';
 import EmailNotificationDispatcher from './dispatchers/emailNotification.dispatcher.js';
+import { resolveNotificationChannels } from './notificationChannelPolicy.js';
 
 const IMMEDIATE_SKEW_MS = 30 * 1000;
 
 const normalizeId = (value) => (value ? String(value) : '');
 
-const normalizeChannels = (channels = {}) => ({
-  [NOTIFICATION_CHANNELS.IN_APP]: channels.inApp !== false,
-  [NOTIFICATION_CHANNELS.EMAIL]: channels.email === true,
-  [NOTIFICATION_CHANNELS.PUSH]: channels.push === true,
-});
+const normalizeChannels = (channels = {}, notificationType = '') => resolveNotificationChannels(notificationType, channels);
 
 const normalizePriority = (priority) => (
   NOTIFICATION_PRIORITIES.includes(priority) ? priority : 'normal'
@@ -64,13 +60,7 @@ const getTargetUserIds = (target) => {
 };
 
 const normalizeEmailRecipients = (recipients = []) => recipients
-  .map((recipient) => {
-    if (typeof recipient === 'string') {
-      return { email: recipient };
-    }
-    return recipient;
-  })
-  .filter((recipient) => recipient?.email);
+  .filter((recipient) => recipient?.trusted === true && recipient?.email && recipient?._id);
 
 const buildSource = (payload = {}) => ({
   module: payload.source?.module || payload.sourceType || '',
@@ -97,9 +87,9 @@ export class NotificationService {
   static async send(payload = {}, options = {}) {
     const io = options.io || payload.io || null;
     const createdBy = options.createdBy || payload.createdBy || null;
-    const channels = normalizeChannels(payload.channels);
     const priority = normalizePriority(payload.priority);
     const { storedType, notificationType } = normalizeNotificationType(payload.type, priority);
+    const channels = normalizeChannels(payload.channels, notificationType);
     const target = normalizeNotificationTarget(payload);
     const targetAudience = payload.targetAudience || TARGET_TYPE_TO_LEGACY_AUDIENCE[target.type];
     const scheduledAt = dateOrNull(payload.scheduledAt);
@@ -184,9 +174,9 @@ export class NotificationService {
 
   static async dispatchPersisted(notification, recipients = null, io = null) {
     const resolvedRecipients = recipients || await resolveNotificationRecipients(normalizeNotificationTarget(notification));
-    const channels = normalizeChannels(notification.channels);
+    const channels = normalizeChannels(notification.channels, notification.notificationType);
     let websocketFailed = false;
-    let emailResult = { attemptedCount: 0, sentCount: 0, failedCount: 0, results: [] };
+    let emailResult = { attemptedCount: 0, sentCount: 0, failedCount: 0, skippedCount: 0, results: [] };
 
     notification.recipientUserIds = resolvedRecipients.map((user) => user._id).filter(Boolean);
     notification.status = 'sent';
@@ -228,10 +218,11 @@ export class NotificationService {
     };
     notification.metadata = {
       ...(notification.metadata || {}),
-      emailDelivery: emailResult.attemptedCount ? {
+      emailDelivery: channels.email && (emailResult.attemptedCount || emailResult.skippedCount) ? {
         attemptedCount: emailResult.attemptedCount,
         sentCount: emailResult.sentCount,
         failedCount: emailResult.failedCount,
+        skippedCount: emailResult.skippedCount || 0,
       } : undefined,
     };
     await notification.save();

@@ -49,10 +49,6 @@ export function useLogin() {
     Alert.alert('Forgot Password', 'Password recovery is not available in the mobile app yet.');
   }, []);
 
-  const showGoogleLoginUnavailable = useCallback(() => {
-    Alert.alert('Google Sign-In', 'Google sign-in is not available in the mobile app yet.');
-  }, []);
-
   return {
     identifier,
     setIdentifier,
@@ -64,7 +60,6 @@ export function useLogin() {
     login,
     openRegister,
     showForgotPasswordUnavailable,
-    showGoogleLoginUnavailable,
   };
 }
 

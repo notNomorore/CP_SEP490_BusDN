@@ -150,6 +150,8 @@ export default function BuyOneWayTicketScreen() {
   const [priceQuote, setPriceQuote] = useState<TicketPriceQuote | null>(null);
   const [payment, setPayment] = useState<PaymentOrder | null>(null);
   const pendingOrderRef = useRef<PaymentOrder | null>(null);
+  const paymentCheckInFlightRef = useRef(false);
+  const paymentSuccessNotifiedRef = useRef('');
   const [routeSelectorOpen, setRouteSelectorOpen] = useState(false);
   const [dateSelectorOpen, setDateSelectorOpen] = useState<null | 'ONE_WAY' | 'MONTHLY_PASS'>(null);
   const [routeQuery, setRouteQuery] = useState('');
@@ -196,6 +198,7 @@ export default function BuyOneWayTicketScreen() {
     () => departureSchedules.find((schedule) => schedule.departureTime === departureTime),
     [departureSchedules, departureTime],
   );
+  const selectedTripIsFull = Boolean(selectedDepartureSchedule?.isFull) || Number(selectedDepartureSchedule?.remainingSeats) <= 0;
   const directionOptions = useMemo(() => getDirectionOptions(selectedRoute), [selectedRoute]);
   const selectedDirection = useMemo(
     () => directionOptions.find((item) => item.id === direction) || directionOptions[0],
@@ -244,7 +247,7 @@ export default function BuyOneWayTicketScreen() {
   }, [selectedRoute]);
 
   useEffect(() => {
-    if (departureTime && !departureSchedules.some((schedule) => schedule.departureTime === departureTime)) {
+    if (departureTime && !departureSchedules.some((schedule) => schedule.departureTime === departureTime && !schedule.isFull)) {
       setDepartureTime('');
     }
   }, [departureSchedules, departureTime]);
@@ -386,6 +389,8 @@ export default function BuyOneWayTicketScreen() {
         nextErrors.departureTime = 'Đang tải lịch chuyến hợp lệ, vui lòng chờ.';
       } else if (departureTime && !selectedDepartureSchedule) {
         nextErrors.departureTime = 'Chuyến đã chọn không còn mở bán. Vui lòng chọn chuyến khác.';
+      } else if (selectedTripIsFull) {
+        nextErrors.departureTime = 'Chuyến xe đã hết chỗ (25/25). Vui lòng chọn giờ khác.';
       }
     }
     if (ticketType === 'MONTHLY_PASS') {
@@ -463,34 +468,61 @@ export default function BuyOneWayTicketScreen() {
     }
   };
 
-  const checkPayment = useCallback(async (orderCode?: number | string) => {
+  const checkPayment = useCallback(async (orderCode?: number | string, silent = false) => {
     const code = orderCode || pendingOrderRef.current?.orderCode;
-    if (!code) return;
-    setCheckingPayment(true);
+    if (!code || paymentCheckInFlightRef.current) return;
+    paymentCheckInFlightRef.current = true;
+    if (!silent) {
+      setError('');
+      setCheckingPayment(true);
+    }
     try {
       const status = await passengerApi.getPaymentStatus(code);
       setPayment((current) => ({ ...(current || {}), ...status }));
       pendingOrderRef.current = { ...(pendingOrderRef.current || {}), ...status };
       if (status.status === 'PAID') {
-        Alert.alert('Thanh toán thành công', 'Vé đã được kích hoạt và sẽ hiển thị trong Vé của tôi.', [
-          { text: 'Xem vé', onPress: () => router.replace('/my-tickets') },
-        ]);
+        setError('');
+        if (paymentSuccessNotifiedRef.current !== String(code)) {
+          paymentSuccessNotifiedRef.current = String(code);
+          Alert.alert('Thanh toán thành công', 'Vé đã được kích hoạt. Thông tin vé và mã QR đang được gửi đến Gmail của tài khoản.', [
+            { text: 'Xem vé', onPress: () => router.replace('/my-tickets') },
+          ]);
+        }
       } else if (status.status === 'CANCELLED' || status.status === 'FAILED') {
         setError('Thanh toán chưa hoàn tất hoặc đã bị hủy.');
       }
-    } catch (err) {
-      setError((err as { message?: string })?.message || 'Không thể kiểm tra trạng thái thanh toán.');
+    } catch {
+      // Render may briefly be unavailable or waking from a cold start. Keep the
+      // order pending and let the background poll retry without exposing a
+      // technical network error to the passenger.
     } finally {
-      setCheckingPayment(false);
+      paymentCheckInFlightRef.current = false;
+      if (!silent) setCheckingPayment(false);
     }
   }, []);
 
   useEffect(() => {
+    const orderCode = payment?.orderCode;
+    if (!orderCode || String(payment.status || 'PENDING').toUpperCase() !== 'PENDING') return undefined;
+
+    void checkPayment(orderCode, true);
+    const interval = setInterval(() => {
+      void checkPayment(orderCode, true);
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [checkPayment, payment?.orderCode, payment?.status]);
+
+  useEffect(() => {
     const appSubscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && pendingOrderRef.current?.orderCode) void checkPayment(pendingOrderRef.current.orderCode);
+      if (state === 'active' && pendingOrderRef.current?.orderCode) {
+        void checkPayment(pendingOrderRef.current.orderCode, true);
+      }
     });
     const linkSubscription = Linking.addEventListener('url', () => {
-      if (pendingOrderRef.current?.orderCode) void checkPayment(pendingOrderRef.current.orderCode);
+      if (pendingOrderRef.current?.orderCode) {
+        void checkPayment(pendingOrderRef.current.orderCode, true);
+      }
     });
     return () => {
       appSubscription.remove();
@@ -510,8 +542,9 @@ export default function BuyOneWayTicketScreen() {
       const nextPayment = await passengerApi.createPayment(payload);
       setPayment(nextPayment);
       pendingOrderRef.current = nextPayment;
+      paymentSuccessNotifiedRef.current = '';
       if (nextPayment.status === 'PAID') {
-        Alert.alert('Thanh toán thành công', nextPayment.message || 'Vé đã được kích hoạt.', [
+        Alert.alert('Thanh toán thành công', 'Vé đã được kích hoạt. Thông tin vé và mã QR đang được gửi đến Gmail của tài khoản.', [
           { text: 'Xem vé', onPress: () => router.replace('/my-tickets') },
         ]);
         return;
@@ -530,7 +563,7 @@ export default function BuyOneWayTicketScreen() {
     }
   };
 
-  const payDisabled = loadingRoutes || loadingSchedules || loadingQuote || applyingPromotion || checkingPayment || creatingOrder || payosOpening || priceUnavailable;
+  const payDisabled = loadingRoutes || loadingSchedules || loadingQuote || applyingPromotion || checkingPayment || creatingOrder || payosOpening || priceUnavailable || selectedTripIsFull;
 
   return (
     <PassengerLayout active="tickets" subtitle="Chọn tuyến, chiều và thanh toán PayOS" title="Mua vé xe buýt">
@@ -625,6 +658,7 @@ export default function BuyOneWayTicketScreen() {
                 )}
                 {scheduleError ? <FieldError message={scheduleError} /> : null}
                 {errors.departureTime ? <FieldError message={errors.departureTime} /> : null}
+                {selectedDepartureSchedule && !errors.departureTime ? <Text style={[styles.capacityHint, selectedTripIsFull && styles.capacityHintFull]}>{selectedTripIsFull ? 'Chuyến xe đã hết chỗ (25/25). Vui lòng chọn giờ khác.' : `Chuyến này còn ${selectedDepartureSchedule.remainingSeats ?? 25}/25 chỗ.`}</Text> : null}
               </View>
             </>
           ) : (
@@ -718,7 +752,7 @@ export default function BuyOneWayTicketScreen() {
                 <Text style={styles.paymentTitle}>Đơn PayOS #{payment.orderCode}</Text>
                 <StatusPill label={payment.status || 'PENDING'} tone={payment.status === 'PAID' ? 'success' : payment.status === 'CANCELLED' || payment.status === 'FAILED' ? 'danger' : 'warning'} />
               </View>
-              <Text style={styles.paymentText}>Ứng dụng sẽ kiểm tra trạng thái từ backend trước khi hiển thị vé.</Text>
+              <Text style={styles.paymentText}>Đang tự động xác nhận thanh toán. Bạn có thể tiếp tục sử dụng ứng dụng.</Text>
               <AppButton disabled={checkingPayment} loading={checkingPayment} onPress={() => void checkPayment(payment.orderCode)} title="Kiểm tra lại trạng thái" variant="secondary" />
             </View>
           ) : null}
@@ -960,7 +994,7 @@ function DepartureTimeDropdown({
           <Text style={styles.dropdownValue}>
             {selected ? `${selected.departureTime}${selected.expectedArrivalTime ? ` - ${selected.expectedArrivalTime}` : ''}` : 'Chọn chuyến khởi hành'}
           </Text>
-          {selected?.scheduleCode ? <Text style={styles.dropdownMeta}>{selected.scheduleCode}</Text> : null}
+          {selected?.scheduleCode ? <Text style={styles.dropdownMeta}>{selected.scheduleCode} · {selected.isFull ? 'HẾT CHỖ 25/25' : `Còn ${selected.remainingSeats ?? 25}/25 chỗ`}</Text> : null}
         </View>
         <MaterialCommunityIcons color={colors.secondary} name="chevron-down" size={20} />
       </Pressable>
@@ -968,23 +1002,30 @@ function DepartureTimeDropdown({
         <Pressable style={styles.modalScrim} onPress={onClose}>
           <View style={styles.monthMenu}>
             <Text style={styles.monthMenuTitle}>Chọn chuyến khởi hành</Text>
-            {schedules.map((schedule) => {
-              const key = schedule.scheduleId || schedule.id || `${schedule.departureTime}-${schedule.scheduleCode}`;
-              const active = schedule.departureTime === selected?.departureTime;
-              return (
-                <Pressable key={key} onPress={() => onSelect(schedule)} style={[styles.monthOption, active && styles.monthOptionActive]}>
-                  <View style={styles.dropdownCopy}>
-                    <Text style={[styles.monthOptionText, active && styles.monthOptionTextActive]}>
-                      {schedule.departureTime}{schedule.expectedArrivalTime ? ` - ${schedule.expectedArrivalTime}` : ''}
-                    </Text>
-                    <Text style={[styles.dropdownMeta, active && styles.dropdownMetaActive]}>
-                      {[schedule.scheduleCode, schedule.statusLabel || schedule.status].filter(Boolean).join(' - ')}
-                    </Text>
-                  </View>
-                  {active ? <MaterialCommunityIcons color={colors.white} name="check" size={18} /> : null}
-                </Pressable>
-              );
-            })}
+            <ScrollView
+              contentContainerStyle={styles.scheduleListContent}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+              style={styles.scheduleList}
+            >
+              {schedules.map((schedule) => {
+                const key = schedule.scheduleId || schedule.id || `${schedule.departureTime}-${schedule.scheduleCode}`;
+                const active = schedule.departureTime === selected?.departureTime;
+                return (
+                  <Pressable key={key} disabled={schedule.isFull} onPress={() => onSelect(schedule)} style={[styles.monthOption, active && styles.monthOptionActive, schedule.isFull && styles.monthOptionDisabled]}>
+                    <View style={styles.dropdownCopy}>
+                      <Text style={[styles.monthOptionText, active && styles.monthOptionTextActive]}>
+                        {schedule.departureTime}{schedule.expectedArrivalTime ? ` - ${schedule.expectedArrivalTime}` : ''}
+                      </Text>
+                      <Text style={[styles.dropdownMeta, active && styles.dropdownMetaActive]}>
+                        {[schedule.scheduleCode, schedule.isFull ? 'HẾT CHỖ 25/25' : `Còn ${schedule.remainingSeats ?? 25}/25 chỗ`].filter(Boolean).join(' · ')}
+                      </Text>
+                    </View>
+                    {active ? <MaterialCommunityIcons color={colors.white} name="check" size={18} /> : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </View>
         </Pressable>
       </Modal>
@@ -1118,12 +1159,17 @@ const styles = StyleSheet.create({
   dateField: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderRadius: 16, backgroundColor: colors.card, paddingHorizontal: 14 },
   dateValue: { flex: 1, color: colors.text, fontSize: 14, fontWeight: '900' },
   modalScrim: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.24)', padding: 22 },
-  monthMenu: { gap: 8, borderRadius: 20, backgroundColor: colors.card, padding: 16 },
+  monthMenu: { maxHeight: '78%', borderRadius: 20, backgroundColor: colors.card, padding: 16 },
   monthMenuTitle: { marginBottom: 4, color: colors.primary, fontSize: 15, fontWeight: '900' },
+  scheduleList: { marginTop: 8 },
+  scheduleListContent: { gap: 8, paddingBottom: 4 },
   monthOption: { minHeight: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 14, backgroundColor: colors.surfaceLow, paddingHorizontal: 14 },
   monthOptionActive: { backgroundColor: colors.primaryContainer },
+  monthOptionDisabled: { opacity: .55, backgroundColor: '#fff1f1' },
   monthOptionText: { color: colors.primary, fontSize: 13, fontWeight: '900' },
   monthOptionTextActive: { color: colors.white },
+  capacityHint: { marginTop: 8, borderRadius: 10, backgroundColor: '#e9f8f1', paddingHorizontal: 12, paddingVertical: 8, color: colors.primary, fontSize: 12, fontWeight: '900' },
+  capacityHintFull: { backgroundColor: '#fff1f1', color: '#b42318' },
   promoRow: { flexDirection: 'row', gap: 8 },
   promoInput: { minHeight: 48, flex: 1, borderRadius: 14, backgroundColor: colors.surfaceLow, paddingHorizontal: 13, color: colors.text, fontSize: 14, fontWeight: '900' },
   applyButton: { minWidth: 88, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: colors.primaryContainer, paddingHorizontal: 10 },

@@ -206,12 +206,14 @@ export const OperationNotificationResponseDTO = {
 export const ShiftAssignmentResponseDTO = {
   format: (assignment, actorId, actorRole) => {
     const trip = assignment.trip || {};
-    const scheduledStart = buildDateTime(trip.serviceDate, trip.departureTime);
-    const scheduledEnd = buildScheduleEndTime(
+    const originalScheduledStart = buildDateTime(trip.serviceDate, trip.departureTime);
+    const originalScheduledEnd = buildScheduleEndTime(
       trip.serviceDate,
       trip.departureTime,
       trip.expectedArrivalTime
     );
+    const scheduledStart = trip.adjustedStartAt || originalScheduledStart;
+    const scheduledEnd = trip.adjustedEndAt || originalScheduledEnd;
     const inspection = formatInspection(assignment.inspectionRecord);
     const resolvedActorRole = actorRole || (
       String(assignment.driver?._id || assignment.driver) === String(actorId)
@@ -232,6 +234,11 @@ export const ShiftAssignmentResponseDTO = {
     busAssistant: formatStaff(assignment.busAssistant),
     scheduledStart,
     scheduledEnd,
+    originalScheduledStart,
+    originalScheduledEnd,
+    incidentDelayMinutes: Number(trip.incidentDelayMinutes) || 0,
+    propagatedDelayMinutes: Number(trip.propagatedDelayMinutes) || 0,
+    delayReason: trip.delayReason || '',
     actualStartAt: trip.actualStartAt,
     actualEndAt: trip.actualEndAt,
     startLocation: trip.startLocation || null,
@@ -239,6 +246,7 @@ export const ShiftAssignmentResponseDTO = {
     dutyStart: addMinutes(scheduledStart, -30),
     checkInDeadline: addMinutes(scheduledStart, -15),
     dutyEnd: addMinutes(scheduledEnd, 15),
+    capacity: assignment.capacity || null,
     reportLocation: trip.routeName || '',
     dutyInstructions: resolvedActorRole === 'DRIVER'
       ? [

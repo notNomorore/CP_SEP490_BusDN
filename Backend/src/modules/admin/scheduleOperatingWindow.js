@@ -1,11 +1,8 @@
-export const FIRST_OPERATION_MINUTES = 5 * 60 + 30;
-export const LAST_OPERATION_MINUTES = 18 * 60 + 30;
+const toNumberOrNull = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
 
-/**
- * The route window is the departure window at the route origin (outbound).
- * An inbound departure is generated from its outbound arrival and turnaround,
- * so it only has to remain inside the system-wide operating window.
- */
 export const isTripOutsideOperatingWindow = ({
   direction,
   departure,
@@ -13,10 +10,20 @@ export const isTripOutsideOperatingWindow = ({
   routeFirst,
   routeLast,
   enforceRouteDepartureWindow = true,
-}) => {
-  if (departure < FIRST_OPERATION_MINUTES || departure > LAST_OPERATION_MINUTES) return true;
-  if (arrival > LAST_OPERATION_MINUTES) return true;
-  return enforceRouteDepartureWindow
-    && direction !== 'INBOUND'
-    && (departure < routeFirst || departure > routeLast);
+} = {}) => {
+  const departureMinutes = toNumberOrNull(departure);
+  const arrivalMinutes = toNumberOrNull(arrival);
+  const firstMinutes = toNumberOrNull(routeFirst);
+  const lastMinutes = toNumberOrNull(routeLast);
+
+  if (departureMinutes === null || arrivalMinutes === null || firstMinutes === null || lastMinutes === null) {
+    return true;
+  }
+  if (arrivalMinutes <= departureMinutes) return true;
+
+  const normalizedDirection = direction === 'INBOUND' ? 'INBOUND' : 'OUTBOUND';
+  if (normalizedDirection === 'OUTBOUND' && departureMinutes < firstMinutes) return true;
+  if (enforceRouteDepartureWindow && departureMinutes > lastMinutes) return true;
+
+  return arrivalMinutes > lastMinutes;
 };

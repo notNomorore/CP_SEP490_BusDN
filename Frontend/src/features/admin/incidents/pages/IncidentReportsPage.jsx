@@ -112,6 +112,12 @@ const statusLabel = {
   REJECTED: 'Closed',
 };
 
+const getDisplayStatus = (incident) => (
+  ['TRAFFIC_CONGESTION', 'ACCIDENT'].includes(incident?.incidentType)
+    ? (incident?.status === 'RESOLVED' ? 'RESOLVED' : 'PENDING')
+    : incident?.status
+);
+
 const incidentTableColumns = [
   { label: 'Incident ID', className: 'w-[6%]' },
   { label: 'Type', className: 'w-[9%]' },
@@ -191,17 +197,22 @@ const IncidentDetailModal = ({
   onClose,
   onUpdateStatus,
   onReassignStaff,
+  onSendNotification,
 }) => {
   const { tp } = useAdminI18n();
   const [status, setStatus] = useState(incident?.status || 'PENDING');
-  const [adminNote, setAdminNote] = useState(incident?.adminNote || '');
   const [handlingAction, setHandlingAction] = useState(incident?.handlingAction || 'TRIAGE_ONLY');
   const [resolutionSummary, setResolutionSummary] = useState(incident?.resolutionSummary || '');
   const [viewerFile, setViewerFile] = useState(null);
   const [staffOptions, setStaffOptions] = useState([]);
   const [replacementStaffId, setReplacementStaffId] = useState('');
   const [isLoadingStaff, setIsLoadingStaff] = useState(false);
+  const [staffNotification, setStaffNotification] = useState('');
+  const [passengerNotification, setPassengerNotification] = useState('');
+  const [sendingAudience, setSendingAudience] = useState('');
   const isPendingIncident = incident?.status === 'PENDING';
+  const isSimpleDelayIncident = ['TRAFFIC_CONGESTION', 'ACCIDENT'].includes(incident?.incidentType);
+  const displayStatus = getDisplayStatus(incident);
   const isClosedIncident = ['RESOLVED', 'REJECTED'].includes(incident?.status);
   const isStaffTripRejection = (
     incident?.incidentType === 'TRIP_REJECTION'
@@ -219,7 +230,6 @@ const IncidentDetailModal = ({
 
   useEffect(() => {
     setStatus(incident?.status || 'PENDING');
-    setAdminNote(incident?.adminNote || '');
     setHandlingAction(incident?.handlingAction || 'TRIAGE_ONLY');
     setResolutionSummary(incident?.resolutionSummary || '');
     setReplacementStaffId('');
@@ -276,13 +286,13 @@ const IncidentDetailModal = ({
       return;
     }
 
-    if (['RESOLVED', 'REJECTED'].includes(nextStatus) && !resolutionSummary.trim()) {
+    if (!isSimpleDelayIncident && ['RESOLVED', 'REJECTED'].includes(nextStatus) && !resolutionSummary.trim()) {
       toast.error(tp('Resolution result is required before completing or closing the report'));
       return;
     }
     onUpdateStatus({
       status: nextStatus,
-      adminNote: adminNote.trim(),
+      skipResolution: isSimpleDelayIncident,
       handlingAction: overrides.handlingAction || handlingAction,
       resolutionSummary: resolutionSummary.trim(),
     });
@@ -296,8 +306,18 @@ const IncidentDetailModal = ({
 
     onReassignStaff({
       staffId: replacementStaffId,
-      adminNote: adminNote.trim(),
     });
+  };
+
+  const sendManualNotification = async (audience, message, clearMessage) => {
+    if (message.trim().length < 5) {
+      toast.error(tp('Please enter a notification message of at least 5 characters'));
+      return;
+    }
+    setSendingAudience(audience);
+    const sent = await onSendNotification({ audience, message: message.trim() });
+    if (sent) clearMessage('');
+    setSendingAudience('');
   };
 
   return (
@@ -334,7 +354,7 @@ const IncidentDetailModal = ({
                   ['Reporter', incident?.reporter?.fullName || tp('Unknown')],
                   ['Reporter role', incident?.reporterRole || incident?.reporter?.role || 'N/A'],
                   ['Route', incident?.route?.name || incident?.routeId || 'N/A'],
-                  ['Trip', incident?.trip?._id || incident?.tripId || 'N/A'],
+                  ['Trip', incident?.trip?.scheduleCode || incident?.trip?._id || incident?.tripId || 'N/A'],
                   ['Vehicle', incident?.vehicle?.label || incident?.vehicleId || 'N/A'],
                   ['Location', incident?.location || 'N/A'],
                   ['Coordinates', incident?.latitude != null ? `${incident.latitude}, ${incident.longitude}` : 'N/A'],
@@ -384,7 +404,7 @@ const IncidentDetailModal = ({
                 </div>
               </div>
 
-              <div>
+              {!isSimpleDelayIncident && <div>
                 <h3 className="text-lg font-bold text-primary">{tp('Status history')}</h3>
                 <div className="mt-3 space-y-3">
                   {incident?.statusHistory?.length ? [...incident.statusHistory].reverse().map((entry, index) => (
@@ -395,7 +415,6 @@ const IncidentDetailModal = ({
                       <p className="mt-1 text-xs text-on-surface-variant">
                         {entry.changedBy?.fullName || 'Admin'} - {formatDateTime(entry.changedAt)}
                       </p>
-                      {entry.adminNote ? <p className="mt-2 text-sm text-on-surface">{entry.adminNote}</p> : null}
                       {entry.handlingAction ? (
                         <p className="mt-2 text-xs text-on-surface-variant">
                           {tp(handlingActionOptions.find((item) => item.value === entry.handlingAction)?.label || entry.handlingAction || 'No action selected')}
@@ -409,7 +428,7 @@ const IncidentDetailModal = ({
                     </div>
                   )) : <p className="text-sm text-on-surface-variant">{tp('No status changes recorded.')}</p>}
                 </div>
-              </div>
+              </div>}
             </div>
 
             <aside className="h-fit rounded-[24px] border border-outline-variant/35 bg-surface-container-low p-5">
@@ -417,8 +436,10 @@ const IncidentDetailModal = ({
                 <span className={`rounded-full px-3 py-1 text-xs font-bold ${severityClassName[incident?.severity]}`}>
                   {tp(incident?.severity)}
                 </span>
-                <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusClassName[incident?.status]}`}>
-                  {tp(statusLabel[incident?.status] || incident?.status)}
+                <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusClassName[displayStatus]}`}>
+                  {isSimpleDelayIncident
+                    ? (displayStatus === 'RESOLVED' ? 'Hoàn tất xử lý' : 'Chưa xử lý')
+                    : tp(statusLabel[displayStatus] || displayStatus)}
                 </span>
               </div>
 
@@ -439,7 +460,7 @@ const IncidentDetailModal = ({
                 )}
               </div>
 
-              {isPendingIncident ? (
+              {isPendingIncident && !isSimpleDelayIncident ? (
                 <div className="mt-5 grid gap-2">
                   <button
                     type="button"
@@ -453,12 +474,34 @@ const IncidentDetailModal = ({
                 </div>
               ) : (
                 <>
-                  <label className="mt-5 block space-y-2">
+                  {isSimpleDelayIncident && !isClosedIncident ? (
+                    <div className="mt-5 space-y-4">
+                      <div className="rounded-[20px] border border-outline-variant/40 bg-white p-4">
+                        <label className="block space-y-2">
+                          <span className="text-sm font-bold text-primary">Thông báo cho tài xế và phụ xe</span>
+                          <textarea value={staffNotification} onChange={(event) => setStaffNotification(event.target.value)} className={`${fieldClassName} min-h-[90px] resize-none`} placeholder="Admin nhập nội dung gửi cho nhân viên của chuyến..." />
+                        </label>
+                        <button type="button" onClick={() => sendManualNotification('TRIP_STAFF', staffNotification, setStaffNotification)} disabled={sendingAudience === 'TRIP_STAFF'} className="mt-3 w-full rounded-full bg-blue-700 px-4 py-3 text-sm font-bold text-white disabled:opacity-60">
+                          {sendingAudience === 'TRIP_STAFF' ? 'Đang gửi...' : 'Gửi cho tài xế và phụ xe'}
+                        </button>
+                      </div>
+                      <div className="rounded-[20px] border border-outline-variant/40 bg-white p-4">
+                        <label className="block space-y-2">
+                          <span className="text-sm font-bold text-primary">Thông báo cho hành khách bị ảnh hưởng</span>
+                          <textarea value={passengerNotification} onChange={(event) => setPassengerNotification(event.target.value)} className={`${fieldClassName} min-h-[110px] resize-none`} placeholder="Admin nhập nội dung gửi cho khách đang trên xe và khách mua vé đang đợi ở trạm chưa đi qua..." />
+                        </label>
+                        <button type="button" onClick={() => sendManualNotification('PASSENGERS', passengerNotification, setPassengerNotification)} disabled={sendingAudience === 'PASSENGERS'} className="mt-3 w-full rounded-full bg-green-700 px-4 py-3 text-sm font-bold text-white disabled:opacity-60">
+                          {sendingAudience === 'PASSENGERS' ? 'Đang gửi...' : 'Gửi cho hành khách bị ảnh hưởng'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                  {!isSimpleDelayIncident && <label className="mt-5 block space-y-2">
                     <span className="text-sm font-semibold text-on-surface">{tp('Handling action')}</span>
                     <select value={handlingAction} onChange={(event) => setHandlingAction(event.target.value)} disabled={isClosedIncident} className={fieldClassName}>
                       {handlingActionOptions.map((option) => <option key={option.value} value={option.value}>{tp(option.label)}</option>)}
                     </select>
-                  </label>
+                  </label>}
 
                   {isStaffTripRejection && !isClosedIncident ? (
                     <div className="mt-4 rounded-[20px] border border-outline-variant/40 bg-white p-4">
@@ -499,18 +542,7 @@ const IncidentDetailModal = ({
                     </div>
                   ) : null}
 
-                  <label className="mt-4 block space-y-2">
-                    <span className="text-sm font-semibold text-on-surface">{tp('Admin note / coordination note')}</span>
-                    <textarea
-                      value={adminNote}
-                      onChange={(event) => setAdminNote(event.target.value)}
-                      disabled={isClosedIncident}
-                      className={`${fieldClassName} min-h-[96px] resize-none`}
-                      placeholder={tp('Example: called the driver to verify, asked the assistant to support passengers, dispatched technical team...')}
-                    />
-                  </label>
-
-                  <label className="mt-4 block space-y-2">
+                  {!isSimpleDelayIncident && <label className="mt-4 block space-y-2">
                     <span className="text-sm font-semibold text-on-surface">{tp('Resolution result')}</span>
                     <textarea
                       value={resolutionSummary}
@@ -524,10 +556,10 @@ const IncidentDetailModal = ({
                         {tp('The resolution result will be recorded automatically when replacement staff accepts the trip.')}
                       </span>
                     ) : null}
-                  </label>
+                  </label>}
 
                   <div className="mt-5 grid gap-2">
-                    {incident?.status === 'IN_PROGRESS' && (
+                    {incident?.status === 'IN_PROGRESS' && !isSimpleDelayIncident && (
                       <button
                         type="button"
                         onClick={() => submitStatus('IN_PROGRESS')}
@@ -546,7 +578,7 @@ const IncidentDetailModal = ({
                     {isSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
                     {tp('Complete processing')}
                   </button>
-                  <button
+                  {!isSimpleDelayIncident && <button
                     type="button"
                     onClick={() => {
                       setHandlingAction('MARK_INVALID');
@@ -556,7 +588,7 @@ const IncidentDetailModal = ({
                     className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-error/40 px-5 py-3 text-sm font-bold text-error hover:bg-error-container disabled:opacity-60"
                   >
                     {tp('Reject report')}
-                  </button>
+                  </button>}
                   </div>
                 </>
               )}
@@ -663,6 +695,24 @@ const IncidentReportsPage = () => {
     }
   };
 
+  const sendNotification = async (payload) => {
+    try {
+      const response = await incidentReportService.sendNotification(selectedId, payload);
+      const recipientCount = response?.data?.recipientCount || 0;
+      if (recipientCount === 0) {
+        toast.error(payload.audience === 'PASSENGERS'
+          ? 'Không tìm thấy hành khách trên xe hoặc hành khách đã thanh toán đang chờ ở trạm chưa đi qua.'
+          : 'Không tìm thấy tài xế hoặc phụ xe đang được phân công cho chuyến.');
+        return false;
+      }
+      toast.success(`Đã gửi thông báo đến ${recipientCount} người nhận.`);
+      return true;
+    } catch (error) {
+      toast.error(error.message || 'Không thể gửi thông báo');
+      return false;
+    }
+  };
+
   return (
     <AdminPromotionShell
       title={tp('Handle Incident Reports')}
@@ -752,7 +802,7 @@ const IncidentReportsPage = () => {
                     ) : null}
                   </td>
                   <td className="w-[7%] px-4 py-4 text-center"><span className={`inline-flex justify-center rounded-full px-3 py-1 text-xs font-bold ${severityClassName[incident.severity]}`}>{tp(incident.severity)}</span></td>
-                  <td className="w-[7%] px-4 py-4 text-center"><span className={`inline-flex justify-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-bold ${statusClassName[incident.status]}`}>{tp(statusLabel[incident.status] || incident.status)}</span></td>
+                  <td className="w-[7%] px-4 py-4 text-center"><span className={`inline-flex justify-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-bold ${statusClassName[getDisplayStatus(incident)]}`}>{['TRAFFIC_CONGESTION', 'ACCIDENT'].includes(incident.incidentType) ? (getDisplayStatus(incident) === 'RESOLVED' ? 'Hoàn tất xử lý' : 'Chưa xử lý') : tp(statusLabel[incident.status] || incident.status)}</span></td>
                   <td className="w-[7%] px-4 py-4">{formatDateTime(incident.createdAt)}</td>
                   <td className="w-[5%] px-4 py-4 text-center">
                     <button type="button" title={tp('View and handle report')} onClick={() => openDetail(incident._id)} className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-bold text-white hover:bg-primary-container">
@@ -800,6 +850,7 @@ const IncidentReportsPage = () => {
           }}
           onUpdateStatus={updateStatus}
           onReassignStaff={reassignStaff}
+          onSendNotification={sendNotification}
         />
       ) : null}
     </AdminPromotionShell>

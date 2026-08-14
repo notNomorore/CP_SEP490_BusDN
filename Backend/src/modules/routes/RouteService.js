@@ -944,7 +944,7 @@ export class RouteService {
     return `${route.routeNumber}-${stop.order}-${normalizedName}`;
   }
 
-  static calculateStopEtas(route, progress, status) {
+  static calculateStopEtas(route, progress, status, delayMinutes = 0) {
     const duration = route.estimatedDurationMinutes || 30;
     const trafficMultiplier = status === 'Delayed' ? 1.25 : 1;
 
@@ -952,7 +952,7 @@ export class RouteService {
       const stopProgress = Math.min((stop.estimatedOffsetMinutes || 0) / duration, 1);
       const minutesUntilArrival = Math.round((stopProgress - progress) * duration * trafficMultiplier);
       const hasPassed = minutesUntilArrival < 0;
-      const etaMinutes = hasPassed ? null : Math.max(minutesUntilArrival, 1);
+      const etaMinutes = hasPassed ? null : Math.max(minutesUntilArrival + Math.max(0, Number(delayMinutes) || 0), 1);
 
       return {
         stopId: this.buildStopId(route, stop),
@@ -1101,6 +1101,13 @@ export class RouteService {
         const busId = vehicle?.vehicleCode || vehicle?.plateNumber || trip.vehicleId?.toString() || trip._id?.toString();
         const tripProgress = this.buildTripStopProgress(route, trip, busId);
         const status = this.normalizeTripStatus(trip.status);
+        const delayMinutes = Math.max(0, Number(trip.delayMinutes) || 0);
+        const updatedArrivalDate = trip.plannedEndTime
+          ? new Date(new Date(trip.plannedEndTime).getTime() + delayMinutes * 60 * 1000)
+          : null;
+        const updatedEta = updatedArrivalDate && !Number.isNaN(updatedArrivalDate.getTime())
+          ? updatedArrivalDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+          : tripProgress.estimatedRemainingTime || '';
         const currentLocation = typeof vehicle?.currentLocation?.lat === 'number' && typeof vehicle?.currentLocation?.lng === 'number'
           ? {
             latitude: vehicle.currentLocation.lat,
@@ -1118,14 +1125,15 @@ export class RouteService {
           routeId: String(route._id || route.id),
           routeNumber: route.routeNumber,
           currentLocation,
-          estimatedArrivalTime: tripProgress.estimatedRemainingTime || '',
+          estimatedArrivalTime: updatedEta,
           nextStop: tripProgress.nextStop,
-          stopEtas: this.calculateStopEtas(route, (tripProgress.progressPercent || 0) / 100, status),
+          stopEtas: this.calculateStopEtas(route, (tripProgress.progressPercent || 0) / 100, status, delayMinutes),
           tripProgress,
           status,
-          delay: Number(trip.delayMinutes || 0) > 0 ? {
-            delayDurationMinutes: trip.delayMinutes,
+          delay: delayMinutes > 0 ? {
+            delayDurationMinutes: delayMinutes,
             delayReason: trip.delayReason || 'Trip delayed',
+            updatedEta,
           } : null,
           lastUpdated: trip.lastGpsAt || vehicle?.currentLocation?.updatedAt || new Date().toISOString(),
         };

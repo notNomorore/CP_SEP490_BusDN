@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { OAuth2Client } from 'google-auth-library';
 import User from './User.js';
 import logger from '../../utils/logger.js';
 import emailService from '../../utils/emailService.js';
@@ -8,6 +9,8 @@ import { config } from '../../config/environment.js';
  * Auth Service - Handles authentication business logic
  */
 export class AuthService {
+  static googleClient = null;
+
   static isAllowedAvatarValue(value) {
     if (value === '') return true;
     if (typeof value !== 'string') return false;
@@ -45,6 +48,108 @@ export class AuthService {
     }
 
     return conditions;
+  }
+
+  static getGoogleClient() {
+    if (!this.googleClient) {
+      this.googleClient = new OAuth2Client(config.googleAuth.clientId);
+    }
+
+    return this.googleClient;
+  }
+
+  static async verifyGoogleCredential(credential) {
+    if (!config.googleAuth.clientId) {
+      const error = new Error('Google authentication is not configured');
+      error.code = 'GOOGLE_AUTH_NOT_CONFIGURED';
+      error.statusCode = 500;
+      throw error;
+    }
+
+    if (!credential || typeof credential !== 'string') {
+      const error = new Error('Google credential is required');
+      error.code = 'GOOGLE_CREDENTIAL_REQUIRED';
+      error.statusCode = 400;
+      throw error;
+    }
+
+    try {
+      const ticket = await this.getGoogleClient().verifyIdToken({
+        idToken: credential,
+        audience: config.googleAuth.clientId,
+      });
+      const payload = ticket.getPayload();
+      const issuer = payload?.iss;
+
+      if (!['accounts.google.com', 'https://accounts.google.com'].includes(issuer)) {
+        const error = new Error('Invalid Google credential issuer');
+        error.code = 'INVALID_GOOGLE_CREDENTIAL';
+        error.statusCode = 401;
+        throw error;
+      }
+
+      if (!payload?.sub || !payload?.email) {
+        const error = new Error('Google credential is missing required account information');
+        error.code = 'INVALID_GOOGLE_CREDENTIAL';
+        error.statusCode = 401;
+        throw error;
+      }
+
+      if (payload.email_verified !== true) {
+        const error = new Error('Google account email is not verified');
+        error.code = 'GOOGLE_EMAIL_NOT_VERIFIED';
+        error.statusCode = 401;
+        throw error;
+      }
+
+      return {
+        googleId: payload.sub,
+        email: payload.email.toLowerCase(),
+        fullName: payload.name?.trim() || payload.email.split('@')[0] || 'Passenger',
+        avatar: payload.picture || '',
+      };
+    } catch (error) {
+      if (error.statusCode) {
+        throw error;
+      }
+
+      const authError = new Error('Invalid Google credential');
+      authError.code = 'INVALID_GOOGLE_CREDENTIAL';
+      authError.statusCode = 401;
+      throw authError;
+    }
+  }
+
+  static async ensureGooglePassengerCanLogin(user) {
+    if (user.role !== 'PASSENGER') {
+      const error = new Error('Google login is only available for Passenger accounts');
+      error.code = 'UNSUPPORTED_GOOGLE_ROLE';
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (user.status === 'INACTIVE') {
+      const error = new Error('User account is inactive');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    if (user.accountLock?.isLocked || user.status === 'LOCKED') {
+      const hasExpiry = Boolean(user.accountLock?.lockedUntil);
+      const lockExpired = hasExpiry && new Date() >= user.accountLock.lockedUntil;
+
+      if (lockExpired) {
+        user.status = 'ACTIVE';
+        user.accountLock = {
+          isLocked: false,
+          reason: '',
+          lockedUntil: null,
+        };
+        await user.save();
+      } else {
+        throw this.createLockedLoginError(user);
+      }
+    }
   }
 
   /**
@@ -258,6 +363,10 @@ export class AuthService {
     }
 
     // Verify password
+    if (!user.password) {
+      throw new Error('Invalid email/phone or password');
+    }
+
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
       throw new Error('Invalid email/phone or password');
@@ -271,6 +380,54 @@ export class AuthService {
     logger.info(`User logged in: ${identifier}`);
 
     return user;
+  }
+
+  /**
+   * Login or create a passenger account with a verified Google ID token.
+   */
+  static async loginWithGoogle(credential) {
+    const googleAccount = await this.verifyGoogleCredential(credential);
+
+    let user = await User.findOne({ googleId: googleAccount.googleId });
+    let authEvent = 'login';
+
+    if (user) {
+      await this.ensureGooglePassengerCanLogin(user);
+    } else {
+      user = await User.findOne({ email: googleAccount.email });
+
+      if (user) {
+        await this.ensureGooglePassengerCanLogin(user);
+        user.googleId = googleAccount.googleId;
+        user.isVerified = true;
+        if (!user.avatar && googleAccount.avatar) {
+          user.avatar = googleAccount.avatar;
+        }
+        authEvent = 'link';
+        logger.info(`Google account linked to passenger user: ${user._id}`);
+      } else {
+        user = new User({
+          fullName: googleAccount.fullName,
+          email: googleAccount.email,
+          avatar: googleAccount.avatar,
+          role: 'PASSENGER',
+          status: 'ACTIVE',
+          isVerified: true,
+          isFirstLogin: false,
+          googleId: googleAccount.googleId,
+        });
+        authEvent = 'create';
+        logger.info('Passenger account created through Google login');
+      }
+    }
+
+    user.lastLoginAt = new Date();
+    user.lastLoginIp = process.env.CLIENT_IP || '0.0.0.0';
+    await user.save();
+
+    logger.info(`Google login success for passenger user: ${user._id}`);
+
+    return { user, authEvent };
   }
 
   /**

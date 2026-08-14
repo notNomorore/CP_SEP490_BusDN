@@ -129,5 +129,39 @@ describe('NotificationService', () => {
     expect(result).toEqual({ _id: 'existing' });
     expect(NotificationMock.create).not.toHaveBeenCalled();
   });
+
+  it('applies email defaults for transactional notification types', async () => {
+    const result = await notificationService.send({
+      type: 'TICKET_PURCHASED',
+      title: 'Mua vé thành công',
+      message: 'Vé đã được mua thành công.',
+      target: { type: 'USER', userId: '64f0f0f0f0f0f0f0f0f0f0f0' },
+      data: { ticketCode: 'TKT-1' },
+      deduplicationKey: 'ticket-purchased:1',
+    });
+
+    expect(NotificationMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      notificationType: 'TICKET_PURCHASED',
+      channels: { inApp: true, email: true, push: false },
+    }));
+    expect(EmailNotificationDispatcher.dispatch).toHaveBeenCalledWith(result, recipients);
+  });
+
+  it('keeps realtime notifications in-app only by default', async () => {
+    await notificationService.send({
+      type: 'BUS_APPROACHING',
+      title: 'Xe buýt sắp đến',
+      message: 'Xe buýt của bạn sắp đến điểm dừng.',
+      target: { type: 'USER', userId: '64f0f0f0f0f0f0f0f0f0f0f0' },
+      data: { etaMinutes: 5 },
+      deduplicationKey: 'bus-approaching:1',
+    });
+
+    expect(NotificationMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      notificationType: 'BUS_APPROACHING',
+      channels: { inApp: true, email: false, push: false },
+    }));
+    expect(EmailNotificationDispatcher.dispatch).not.toHaveBeenCalled();
+  });
 });
 

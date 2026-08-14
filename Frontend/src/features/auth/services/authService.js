@@ -117,6 +117,28 @@ export const authService = {
     return response;
   },
 
+  loginWithGoogle: async (credential) => {
+    let response;
+    try {
+      response = await apiClient.post('/auth/google', {
+        credential,
+      });
+    } catch (error) {
+      const isLocked = error?.code === 'ACCOUNT_LOCKED' || error?.statusCode === 423 || error?.response?.status === 423;
+      const message = isLocked
+        ? error?.message || 'Tai khoan da bi khoa. Vui long lien he quan tri vien de duoc ho tro.'
+        : error?.message || 'Google login failed. Please try again.';
+      const normalizedError = new Error(message);
+      normalizedError.code = isLocked ? 'ACCOUNT_LOCKED' : error?.code;
+      normalizedError.reason = error?.reason;
+      normalizedError.lockedUntil = error?.lockedUntil;
+      throw normalizedError;
+    }
+
+    persistSession(response.token, response.user);
+    return response;
+  },
+
   requestPasswordReset: async (data) =>
     apiClient.post('/auth/forgot-password', {
       email: data.email || undefined,

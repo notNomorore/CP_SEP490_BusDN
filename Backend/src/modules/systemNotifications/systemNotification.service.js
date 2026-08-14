@@ -111,7 +111,7 @@ export const createBroadcastNotification = async (payload, adminId, io = null) =
       entityId: payload.sourceId || null,
     },
     data: payload.data || payload.metadata || {},
-    channels: payload.channels || { inApp: true, email: false, push: false },
+    channels: payload.channels,
     createdBy: adminId,
   }, { createdBy: adminId, io });
 };

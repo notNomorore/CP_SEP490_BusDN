@@ -332,7 +332,14 @@ const UserSchema = new mongoose.Schema(
     },
     password: {
       type: String,
-      required: true,
+      required() {
+        return !this.googleId;
+      },
+      select: false,
+    },
+    googleId: {
+      type: String,
+      trim: true,
       select: false,
     },
     avatar: {
@@ -603,5 +610,6 @@ UserSchema.methods.toPublicJSON = function toPublicJSON() {
 UserSchema.index({ createdAt: -1 });
 UserSchema.index({ role: 1, createdAt: -1 });
 UserSchema.index({ monthlyPassStatus: 1 });
+UserSchema.index({ googleId: 1 }, { unique: true, sparse: true });
 
 export default mongoose.model('User', UserSchema);

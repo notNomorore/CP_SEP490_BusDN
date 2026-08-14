@@ -525,16 +525,21 @@ export class LostAndFoundMatchingService {
         },
       }),
       createLostFoundNotification({
-        title: 'Matching item found',
-        message: `An administrator confirmed a matching item for case ${lostUpdate.referenceNumber}. Return arrangements will follow.`,
+        title: 'Đã tìm thấy món đồ phù hợp',
+        message: `BusDN đã xác nhận món đồ phù hợp với hồ sơ ${lostUpdate.referenceNumber}. Chúng tôi sẽ tiếp tục sắp xếp trả đồ.`,
         type: 'general',
         priority: 'normal',
         targetAudience: 'specific_users',
         userIds: [lostUpdate.passenger],
-        actionUrl: '/lost-item-cases',
-        sourceType: 'LostFoundMatch',
-        sourceId: match._id,
-        metadata: { matchId: String(match._id), lostItemCase: lostUpdate.referenceNumber },
+        actionUrl: `/lost-items/${lostUpdate._id}`,
+        sourceType: 'SupportCase',
+        sourceId: lostUpdate._id,
+        metadata: {
+          matchId: String(match._id),
+          caseId: String(lostUpdate._id),
+          supportCaseType: 'LOST_ITEM',
+          referenceNumber: lostUpdate.referenceNumber,
+        },
       }),
     ]);
 
@@ -666,16 +671,21 @@ export class LostAndFoundMatchingService {
         metadata: data,
       }),
       lostCase?.passenger ? createLostFoundNotification({
-        title: 'Lost item return started',
-        message: `Return arrangements have started for case ${lostCase.referenceNumber}.`,
+        title: 'Đang sắp xếp trả đồ thất lạc',
+        message: `BusDN đang sắp xếp trả đồ cho hồ sơ ${lostCase.referenceNumber}. Vui lòng mở ứng dụng để xem chi tiết.`,
         type: 'general',
         priority: 'normal',
         targetAudience: 'specific_users',
         userIds: [lostCase.passenger],
-        actionUrl: '/lost-item-cases',
-        sourceType: 'LostFoundMatch',
-        sourceId: match._id,
-        metadata: { matchId: String(match._id) },
+        actionUrl: `/lost-items/${lostCase._id}`,
+        sourceType: 'SupportCase',
+        sourceId: lostCase._id,
+        metadata: {
+          matchId: String(match._id),
+          caseId: String(lostCase._id),
+          supportCaseType: 'LOST_ITEM',
+          referenceNumber: lostCase.referenceNumber,
+        },
       }) : null,
     ]);
 
@@ -751,16 +761,21 @@ export class LostAndFoundMatchingService {
         metadata: data,
       }),
       lostCase?.passenger ? createLostFoundNotification({
-        title: 'Lost item case resolved',
-        message: `Your lost item case ${lostCase.referenceNumber} has been resolved.`,
+        title: 'Hồ sơ đồ thất lạc đã xử lý',
+        message: `Hồ sơ đồ thất lạc ${lostCase.referenceNumber} đã được xử lý.`,
         type: 'general',
         priority: 'normal',
         targetAudience: 'specific_users',
         userIds: [lostCase.passenger],
-        actionUrl: '/lost-item-cases',
-        sourceType: 'LostFoundMatch',
-        sourceId: match._id,
-        metadata: { matchId: String(match._id) },
+        actionUrl: `/lost-items/${lostCase._id}`,
+        sourceType: 'SupportCase',
+        sourceId: lostCase._id,
+        metadata: {
+          matchId: String(match._id),
+          caseId: String(lostCase._id),
+          supportCaseType: 'LOST_ITEM',
+          referenceNumber: lostCase.referenceNumber,
+        },
       }) : null,
     ]);
 
@@ -791,16 +806,22 @@ export class LostAndFoundMatchingService {
 
     if (passengerId) {
       notifications.push(createLostFoundNotification({
-        title: 'Lost item report submitted',
-        message: `Your lost item report ${report.referenceNumber} was submitted and is waiting for matching.`,
+        title: 'Đã gửi báo mất đồ',
+        message: `Hồ sơ báo mất đồ ${report.referenceNumber} đã được gửi và đang chờ đối chiếu.`,
         type: 'general',
         priority: 'normal',
         targetAudience: 'specific_users',
         userIds: [passengerId],
-        actionUrl: '/lost-item-cases',
+        actionUrl: `/lost-items/${report._id}`,
         sourceType: 'SupportCase',
         sourceId: report._id,
-        metadata: { reportType: type, reportId: String(report._id) },
+        metadata: {
+          reportType: type,
+          reportId: String(report._id),
+          caseId: String(report._id),
+          supportCaseType: type,
+          referenceNumber: report.referenceNumber,
+        },
       }));
     }
 

@@ -104,6 +104,36 @@ export const useAuthStore = create((set, get) => ({
   },
 
   /**
+   * Login passenger with Google
+   */
+  loginWithGoogle: async (credential) => {
+    set({ isLoading: true, error: null });
+    try {
+      const result = await authService.loginWithGoogle(credential);
+
+      set({
+        user: result.user,
+        token: result.token,
+        isAuthenticated: true,
+        error: null,
+      });
+
+      return result;
+    } catch (error) {
+      const errorMsg = error.message || 'Google login failed. Please try again.';
+      set({
+        user: null,
+        token: null,
+        isAuthenticated: false,
+        error: errorMsg,
+      });
+      throw error;
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  /**
    * Request password reset
    */
   requestPasswordReset: async (data) => {

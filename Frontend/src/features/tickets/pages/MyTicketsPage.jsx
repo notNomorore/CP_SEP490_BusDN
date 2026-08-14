@@ -96,11 +96,9 @@ const getTicketDisplayStatus = (ticket) => {
     return ticket.status;
   }
 
-  const serviceDate = String(ticket?.serviceDate || '').slice(0, 10);
-  const departureTime = String(ticket?.departureTime || '23:59');
-  const journeyTime = new Date(`${serviceDate}T${departureTime}:00+07:00`).getTime();
+  const journeyEndTime = new Date(ticket?.validUntil || ticket?.expiresAt || '').getTime();
 
-  return Number.isFinite(journeyTime) && journeyTime <= Date.now()
+  return Number.isFinite(journeyEndTime) && journeyEndTime <= Date.now()
     ? 'EXPIRED'
     : ticket?.status;
 };

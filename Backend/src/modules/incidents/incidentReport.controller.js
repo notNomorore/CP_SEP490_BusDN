@@ -29,9 +29,20 @@ export class IncidentReportController {
     const incident = await IncidentReportService.updateIncidentStatus(
       req.params.id,
       req.body,
-      req.user
+      req.user,
+      req.app.io
     );
     return res.success(incident, 'Incident status updated successfully');
+  }
+
+  static async sendTrafficNotification(req, res) {
+    const result = await IncidentReportService.sendTrafficNotification(
+      req.params.id,
+      req.body,
+      req.user,
+      req.app.io
+    );
+    return res.success(result, 'Trip notification sent successfully');
   }
 
   static async reassignTripAssistant(req, res) {

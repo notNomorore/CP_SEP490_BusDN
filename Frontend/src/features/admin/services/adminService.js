@@ -1,4 +1,4 @@
-import { apiClient } from '../../auth/services/authService.js';
+﻿import { apiClient } from '../../auth/services/authService.js';
 
 export const adminService = {
   createUser: async (data) => {
@@ -103,6 +103,9 @@ export const adminService = {
   },
   getShifts: async (params = {}) => {
     return apiClient.get('/admin/shifts', { params });
+  },
+  getShiftStaffPriorities: async (params = {}) => {
+    return apiClient.get('/admin/shifts/staff-priorities', { params });
   },
   getWeeklyRoster: async (weekStartDate) => apiClient.get('/admin/rosters/weekly', { params: { weekStartDate } }),
   getRosterAvailableStaff: async (params) => apiClient.get('/admin/rosters/available-staff', { params }),

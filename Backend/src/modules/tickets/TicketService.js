@@ -23,6 +23,7 @@ import {
   getMonthlyPassSettings,
 } from '../fareOperations/fareOperations.service.js';
 import { config } from '../../config/environment.js';
+import { assertTripHasCapacity, getTripCapacity } from './tripCapacity.service.js';
 
 const getFrontendUrl = () => {
   if (!config.frontend.url) {
@@ -125,6 +126,24 @@ const getTicketDepartureDate = (ticket) => {
   ].join('-');
 
   return buildVietnamDepartureDate(dateValue, ticket.departureTime || '23:59') || serviceDate;
+};
+
+const getScheduledTripEndDate = (schedule, departureDate, fallbackDurationMinutes = 0) => {
+  if (schedule?.adjustedEndAt) {
+    const adjustedEnd = new Date(schedule.adjustedEndAt);
+    if (!Number.isNaN(adjustedEnd.getTime())) return adjustedEnd;
+  }
+
+  const serviceDate = getVietnamDateString(schedule?.serviceDate || departureDate);
+  const arrivalTime = schedule?.expectedArrivalTime || schedule?.turnaroundEndTime;
+  let scheduledEnd = arrivalTime ? buildVietnamDepartureDate(serviceDate, arrivalTime) : null;
+  if (scheduledEnd && scheduledEnd <= departureDate) {
+    scheduledEnd = new Date(scheduledEnd.getTime() + (24 * 60 * 60 * 1000));
+  }
+  if (scheduledEnd) return scheduledEnd;
+
+  const durationMinutes = Math.max(Number(fallbackDurationMinutes) || 0, 1);
+  return new Date(departureDate.getTime() + (durationMinutes * 60 * 1000));
 };
 
 const normalizeDate = (value) => {
@@ -449,8 +468,19 @@ export class TicketService {
       return serviceDateText > todayText || String(schedule.departureTime || '') >= serverTime;
     });
 
+    const schedulesWithCapacity = await Promise.all(purchasable.map(async (schedule) => ({
+      ...formatPurchasableSchedule(schedule),
+      ...await getTripCapacity({
+        scheduleId: schedule._id,
+        routeId: schedule.routeId,
+        serviceDate: schedule.serviceDate,
+        departureTime: schedule.departureTime,
+        direction: schedule.direction,
+      }),
+    })));
+
     return {
-      schedules: purchasable.map(formatPurchasableSchedule),
+      schedules: schedulesWithCapacity,
       count: purchasable.length,
       serverTime: now.toISOString(),
       serverClock: serverTime,
@@ -978,12 +1008,11 @@ export class TicketService {
     }
 
     const departureTime = String(payload.departureTime).trim();
-    const { departureDate, serviceDateText } = await this.findPurchasableTripSchedule(route, {
+    const { schedule, departureDate, serviceDateText } = await this.findPurchasableTripSchedule(route, {
       serviceDate: payload.serviceDate,
       departureTime,
       direction,
     });
-
     const serviceDate = buildStoredServiceDate(payload.serviceDate);
     if (!serviceDate) {
       throw new CustomError('Ngày đi không hợp lệ', HTTP_STATUS.BAD_REQUEST);
@@ -1045,6 +1074,8 @@ export class TicketService {
       return existingPendingTicket;
     }
 
+    await assertTripHasCapacity(schedule, 1);
+
     const ticketCode = await this.generateUniqueTicketCode();
     const ticket = new Ticket({
       ticketCode,
@@ -1075,7 +1106,11 @@ export class TicketService {
     });
 
     const validFrom = departureDate;
-    const validUntil = addHours(validFrom, 2);
+    const validUntil = getScheduledTripEndDate(
+      schedule,
+      validFrom,
+      directionalRoute.estimatedDurationMinutes || route.estimatedDurationMinutes || 60
+    );
     const digitalTicket = await QRCodeService.buildTicketQRCode({
       type: 'BUS_TICKET',
       ticketCode,
@@ -1134,9 +1169,10 @@ export class TicketService {
       return 'USED';
     }
 
-    // Expiration is based on the scheduled departure time, even when the
-    // reservation has not been paid yet. Keep this before the PENDING check.
-    if (getTicketDepartureDate(ticket) <= new Date()) {
+    // A one-way ticket remains valid for the entire scheduled trip and only
+    // expires once the bus reaches the planned end time.
+    const expiry = ticket.validUntil || ticket.expiresAt || ticket.digitalTicket?.expiresAt;
+    if (expiry && new Date(expiry) <= new Date()) {
       return 'EXPIRED';
     }
 
@@ -1185,11 +1221,35 @@ export class TicketService {
     const passenger = ticket.passenger && typeof ticket.passenger === 'object'
       ? ticket.passenger
       : await User.findById(ticket.passenger).select('fullName email phoneNumber').lean();
-    const status = this.getCurrentTicketStatus(ticket);
+    const serviceDateText = ticket.serviceDate ? getVietnamDateString(ticket.serviceDate) : '';
+    const routeObjectId = ticket.routeId?._id || ticket.routeId;
+    let scheduledValidUntil = null;
+    if (serviceDateText && routeObjectId && ticket.departureTime) {
+      const { start, end } = toVietnamDayBounds(serviceDateText);
+      const schedule = await TripSchedule.findOne({
+        routeId: routeObjectId,
+        serviceDate: { $gte: start, $lte: end },
+        departureTime: ticket.departureTime,
+        direction: ticket.direction,
+      }).lean();
+      if (schedule) {
+        scheduledValidUntil = getScheduledTripEndDate(
+          schedule,
+          getTicketDepartureDate(ticket),
+          route?.estimatedDurationMinutes || 60
+        );
+      }
+    }
+    const effectiveTicket = scheduledValidUntil
+      ? { ...ticket, validUntil: scheduledValidUntil, expiresAt: scheduledValidUntil }
+      : ticket;
+    const status = this.getCurrentTicketStatus(effectiveTicket);
     const isCancelable = status === 'ACTIVE' || status === 'PENDING';
 
     return {
       ...ticket,
+      validUntil: effectiveTicket.validUntil,
+      expiresAt: effectiveTicket.expiresAt,
       id: String(ticket._id),
       ticketId: ticket.ticketCode,
       ticketType: 'ONE_WAY',
@@ -1204,15 +1264,15 @@ export class TicketService {
           ticketType: ticket.ticketType || 'ONE_WAY',
           routeCode: ticket.routeCode || ticket.routeNumber,
           validFrom: ticket.validFrom ? formatVietnamOffsetDateTime(new Date(ticket.validFrom)) : undefined,
-          validUntil: ticket.validUntil ? formatVietnamOffsetDateTime(new Date(ticket.validUntil)) : undefined,
+          validUntil: effectiveTicket.validUntil ? formatVietnamOffsetDateTime(new Date(effectiveTicket.validUntil)) : undefined,
         }),
         data: ticket.digitalTicket?.qrCodeData || '',
         image: ticket.digitalTicket?.qrCodeImage || '',
         signature: ticket.digitalTicket?.qrSignature || '',
         issuedAt: ticket.digitalTicket?.issuedAt,
         validFrom: ticket.validFrom,
-        validUntil: ticket.validUntil || ticket.expiresAt || ticket.digitalTicket?.expiresAt,
-        expiresAt: ticket.validUntil || ticket.expiresAt || ticket.digitalTicket?.expiresAt,
+        validUntil: effectiveTicket.validUntil || effectiveTicket.expiresAt || ticket.digitalTicket?.expiresAt,
+        expiresAt: effectiveTicket.validUntil || effectiveTicket.expiresAt || ticket.digitalTicket?.expiresAt,
       },
       passengerInfo: {
         fullName: passenger?.fullName || 'Passenger',
@@ -1978,6 +2038,21 @@ export class TicketService {
         return;
       }
 
+      if (ticket.paymentStatus !== 'PAID' || ticket.bookingStatus !== 'SUCCESS') {
+        const ticketServiceDate = getVietnamDateString(ticket.serviceDate);
+        const { start, end } = toVietnamDayBounds(ticketServiceDate);
+        const schedule = await TripSchedule.findOne({
+          routeId: ticket.routeId,
+          direction: ticket.direction,
+          serviceDate: { $gte: start, $lte: end },
+          departureTime: ticket.departureTime,
+        }).lean();
+        if (!schedule) {
+          throw new CustomError('Không tìm thấy lịch chuyến để xác nhận chỗ.', HTTP_STATUS.NOT_FOUND);
+        }
+        await assertTripHasCapacity(schedule, 1);
+      }
+
       ticket.paymentMethod = 'PAYOS';
       ticket.paymentStatus = 'PAID';
       ticket.bookingStatus = 'SUCCESS';
@@ -2022,6 +2097,8 @@ export class TicketService {
       await notifyTicketPaymentSuccess({
         ticket,
         paymentOrder,
+        passenger: user,
+        route,
       });
     }
 
@@ -2052,9 +2129,16 @@ export class TicketService {
         monthlyPassExpireDate: monthlyPass.expiryDate,
       });
 
+      const [passenger, route] = await Promise.all([
+        User.findById(monthlyPass.passenger),
+        monthlyPass.routeId ? this.findRoute(monthlyPass.routeId) : null,
+      ]);
+
       await notifyMonthlyPassPaymentSuccess({
         monthlyPass,
         paymentOrder,
+        passenger,
+        route,
       });
     }
 
@@ -2367,8 +2451,70 @@ export class TicketService {
       });
     }
 
-    if ((payload.tripId || payload.scheduleId) && String(payload.tripId || payload.scheduleId) !== ticket.tripId) {
-      return buildValidationResult('WRONG_ROUTE', 'Ticket is not valid for this trip.', {
+    const requestedTripId = payload.tripId || payload.scheduleId;
+    const selectedSchedule = requestedTripId && mongoose.isValidObjectId(requestedTripId)
+      ? await TripSchedule.findById(requestedTripId).lean()
+      : null;
+    const selectedServiceDate = selectedSchedule
+      ? getVietnamDateString(selectedSchedule.serviceDate)
+      : String(payload.serviceDate || '').slice(0, 10);
+    const selectedDepartureTime = String(
+      selectedSchedule?.departureTime || payload.departureTime || ''
+    ).slice(0, 5);
+    const selectedDirection = String(
+      selectedSchedule?.direction || payload.direction || ''
+    ).toUpperCase();
+    const ticketServiceDate = getVietnamDateString(ticket.serviceDate);
+    const ticketDepartureTime = String(ticket.departureTime || '').slice(0, 5);
+    const ticketDirection = String(ticket.direction || '').toUpperCase();
+    const directTripMatch = requestedTripId && String(requestedTripId) === String(ticket.tripId);
+    const scheduleTripMatch = Boolean(
+      selectedServiceDate
+      && selectedDepartureTime
+      && ticketServiceDate === selectedServiceDate
+      && ticketDepartureTime === selectedDepartureTime
+      && (!selectedDirection || !ticketDirection || selectedDirection === ticketDirection)
+    );
+
+    if (requestedTripId && !directTripMatch && !scheduleTripMatch) {
+      return buildValidationResult('WRONG_ROUTE', 'Vé này không có giá trị cho chuyến đã chọn.', {
+        ticketCode: ticket.ticketCode,
+        tripId: ticket.tripId,
+        ...validationInfo,
+      });
+    }
+
+    const validationNow = new Date();
+    const validationToday = getVietnamDateString(validationNow);
+    if (!ticketServiceDate || ticketServiceDate !== validationToday) {
+      return buildValidationResult('EXPIRED', 'Chỉ được quét vé có hiệu lực trong ngày hôm nay.', {
+        ticketCode: ticket.ticketCode,
+        tripId: ticket.tripId,
+        ...validationInfo,
+      });
+    }
+
+    const scheduleStart = selectedSchedule?.adjustedStartAt
+      ? new Date(selectedSchedule.adjustedStartAt)
+      : buildVietnamDepartureDate(selectedServiceDate, selectedDepartureTime);
+    if (scheduleStart && validationNow < new Date(scheduleStart.getTime() - (15 * 60 * 1000))) {
+      return buildValidationResult('TOO_EARLY', 'Chỉ được quét vé từ 15 phút trước giờ khởi hành.', {
+        ticketCode: ticket.ticketCode,
+        tripId: ticket.tripId,
+        ...validationInfo,
+      });
+    }
+    let scheduleEnd = selectedSchedule?.adjustedEndAt
+      ? new Date(selectedSchedule.adjustedEndAt)
+      : buildVietnamDepartureDate(
+        selectedServiceDate,
+        selectedSchedule?.expectedArrivalTime || selectedSchedule?.turnaroundEndTime
+      );
+    if (scheduleStart && scheduleEnd && scheduleEnd <= scheduleStart) {
+      scheduleEnd = new Date(scheduleEnd.getTime() + (24 * 60 * 60 * 1000));
+    }
+    if (scheduleEnd && validationNow >= scheduleEnd) {
+      return buildValidationResult('EXPIRED', 'Chuyến đã kết thúc, không thể quét vé.', {
         ticketCode: ticket.ticketCode,
         tripId: ticket.tripId,
         ...validationInfo,
@@ -2421,7 +2567,7 @@ export class TicketService {
     });
   }
 
-  static async validateMonthlyPassQR(validatorUserId, { signedPayload, passCode, routeId, routeCode }) {
+  static async validateMonthlyPassQR(validatorUserId, { signedPayload, passCode, routeCode }) {
     if (!passCode) {
       return buildValidationResult('INVALID_QR', 'QR payload is invalid.');
     }
@@ -2449,30 +2595,6 @@ export class TicketService {
       if (hasMismatch) {
         return buildValidationResult('INVALID_QR', 'QR content does not match monthly pass record.');
       }
-    }
-
-    if (routeId) {
-      const route = await this.findRoute(routeId);
-      if (monthlyPass.routeId && String(monthlyPass.routeId) !== String(route?._id)) {
-        return buildValidationResult('WRONG_ROUTE', 'Monthly pass is not valid for this route.', {
-          passCode: monthlyPass.passCode,
-          routeCode: monthlyPass.routeCode || 'ALL',
-          ...validationInfo,
-        });
-      }
-    }
-
-    if (
-      routeCode
-      && monthlyPass.routeCode
-      && monthlyPass.routeCode !== 'ALL'
-      && String(routeCode).toUpperCase() !== String(monthlyPass.routeCode).toUpperCase()
-    ) {
-      return buildValidationResult('WRONG_ROUTE', 'Monthly pass is not valid for this route.', {
-        passCode: monthlyPass.passCode,
-        routeCode: monthlyPass.routeCode,
-        ...validationInfo,
-      });
     }
 
     const now = new Date();

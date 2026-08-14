@@ -22,7 +22,8 @@ const operationSections = [
   { key: 'routes', label: 'Vận hành tuyến', hint: 'Tạo, cập nhật, tạm dừng và dựng lộ trình' },
   { key: 'stops', label: 'Quản lý trạm dừng', hint: 'Tạo, cập nhật và gán trạm vào tuyến' },
   { key: 'trip-planning', label: 'Phân chuyến', hint: 'Quyết định số chuyến sáng, trưa và chiều' },
-    { key: 'trip-assignment', label: 'Phân bổ chuyến', hint: 'Gán ca nhân sự và xe vào các chuyến đã lập' },
+  { key: 'trip-assignment', label: 'Phân bổ chuyến', hint: 'Gán ca nhân sự và xe vào các chuyến đã lập' },
+  { key: 'scheduling', label: 'Lịch chuyến', hint: 'Tạo và chỉnh sửa chuyến đã lập' },
 ];
 
 const busStatusLabels = {
@@ -797,13 +798,14 @@ const toAssignedVehicle = (busId, buses) => {
   } : {};
 };
 
-const toAssignedPerson = (userId, people) => {
+const toAssignedPerson = (userId, people, fallbackPerson = null) => {
   const user = people.find((item) => String(item._id) === String(userId));
-  return user ? {
-    userId: user._id,
-    fullName: user.fullName,
-    role: user.role,
-    phone: user.phone || user.phoneNumber || '',
+  const person = user || (String(fallbackPerson?._id || '') === String(userId || '') ? fallbackPerson : null);
+  return person ? {
+    userId: person._id,
+    fullName: person.fullName,
+    role: person.role,
+    phone: person.phone || person.phoneNumber || '',
   } : {};
 };
 
@@ -1635,9 +1637,9 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
       && isSameDateInputValue(schedule.serviceDate, form.serviceDate)
       && scheduleTimeRangesOverlap(form, schedule)
       && (
-        (form.busId && String(schedule.vehicle?.busId || '') === String(form.busId))
-        || (form.driverId && String(schedule.driver?.userId || '') === String(form.driverId))
-        || (form.assistantId && String(schedule.assistant?.userId || '') === String(form.assistantId))
+        (form.busId && String(entityId(schedule.vehicle?.busId) || '') === String(form.busId))
+        || (form.driverId && String(entityId(schedule.driver?.userId) || '') === String(form.driverId))
+        || (form.assistantId && String(entityId(schedule.assistant?.userId) || '') === String(form.assistantId))
       )
     ));
   }, [editingScheduleId, form, schedules]);
@@ -1657,6 +1659,44 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
       && hasEligibleShiftAssignment(assistant._id, assistantShiftAssignments, form, 'assistantId')
     ));
   }, [assistantShiftAssignments, assistantStaff, editingScheduleId, form, isResourceBusy, schedules]);
+  const editingScheduleRecord = useMemo(() => (
+    schedules.find((schedule) => String(schedule._id || '') === String(editingScheduleId || ''))
+    || (String(editingSchedule?._id || '') === String(editingScheduleId || '') ? editingSchedule : null)
+  ), [editingSchedule, editingScheduleId, schedules]);
+  const currentDriverOption = useMemo(() => {
+    const currentDriverId = entityId(editingScheduleRecord?.driver?.userId);
+    if (!currentDriverId || String(currentDriverId) !== String(form.driverId || '')) return null;
+    const driver = drivers.find((item) => String(item._id || '') === String(currentDriverId));
+    return driver || {
+      _id: currentDriverId,
+      fullName: editingScheduleRecord?.driver?.fullName || 'Tài xế đã gán',
+      phone: editingScheduleRecord?.driver?.phone || '',
+      role: editingScheduleRecord?.driver?.role || 'DRIVER',
+    };
+  }, [drivers, editingScheduleRecord, form.driverId]);
+  const currentAssistantOption = useMemo(() => {
+    const currentAssistantId = entityId(editingScheduleRecord?.assistant?.userId);
+    if (!currentAssistantId || String(currentAssistantId) !== String(form.assistantId || '')) return null;
+    const assistant = assistantStaff.find((item) => String(item._id || '') === String(currentAssistantId));
+    return assistant || {
+      _id: currentAssistantId,
+      fullName: editingScheduleRecord?.assistant?.fullName || 'Phụ xe đã gán',
+      phone: editingScheduleRecord?.assistant?.phone || '',
+      role: editingScheduleRecord?.assistant?.role || 'BUS_ASSISTANT',
+    };
+  }, [assistantStaff, editingScheduleRecord, form.assistantId]);
+  const driverOptions = useMemo(() => (
+    currentDriverOption && !availableDrivers.some((driver) => String(driver._id || '') === String(currentDriverOption._id || ''))
+      ? [currentDriverOption, ...availableDrivers]
+      : availableDrivers
+  ), [availableDrivers, currentDriverOption]);
+  const assistantOptions = useMemo(() => (
+    currentAssistantOption && !availableAssistants.some((assistant) => String(assistant._id || '') === String(currentAssistantOption._id || ''))
+      ? [currentAssistantOption, ...availableAssistants]
+      : availableAssistants
+  ), [availableAssistants, currentAssistantOption]);
+  const isCurrentDriverSelection = Boolean(currentDriverOption && String(currentDriverOption._id || '') === String(form.driverId || ''));
+  const isCurrentAssistantSelection = Boolean(currentAssistantOption && String(currentAssistantOption._id || '') === String(form.assistantId || ''));
 
   useEffect(() => {
     if (!estimatedDurationMinutes || !form.departureTime) return;
@@ -1673,16 +1713,16 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
   useEffect(() => {
     if (!form.driverId) return;
     const isStillAvailable = availableDrivers.some((driver) => String(driver._id || '') === String(form.driverId));
-    if (!isStillAvailable) {
+    if (!isStillAvailable && !isCurrentDriverSelection) {
       setForm((current) => ({ ...current, driverId: '' }));
     }
-  }, [availableDrivers, form.driverId]);
+  }, [availableDrivers, form.driverId, isCurrentDriverSelection]);
 
   useEffect(() => {
     if (!form.assistantId) return;
     const isStillAvailable = availableAssistants.some((assistant) => String(assistant._id || '') === String(form.assistantId));
-    if (!isStillAvailable) setForm((current) => ({ ...current, assistantId: '' }));
-  }, [availableAssistants, form.assistantId]);
+    if (!isStillAvailable && !isCurrentAssistantSelection) setForm((current) => ({ ...current, assistantId: '' }));
+  }, [availableAssistants, form.assistantId, isCurrentAssistantSelection]);
 
   const resetForm = () => {
     setEditingScheduleId('');
@@ -1719,15 +1759,15 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
     setForm({
       scheduleCode: schedule.scheduleCode || '',
       serviceDate: schedule.serviceDate ? toDateInputValue(schedule.serviceDate) : createEmptyScheduleForm().serviceDate,
-      routeId: schedule.routeId || '',
+      routeId: entityId(schedule.routeId) || '',
       direction: schedule.direction || 'OUTBOUND',
       departureTime: schedule.departureTime || '05:30',
       expectedArrivalTime: schedule.expectedArrivalTime || '',
       shiftLabel: schedule.shiftLabel || '',
       status: schedule.status || 'PLANNED',
-      busId: schedule.vehicle?.busId || '',
-      driverId: schedule.driver?.userId || '',
-      assistantId: schedule.assistant?.userId || '',
+      busId: entityId(schedule.vehicle?.busId) || '',
+      driverId: entityId(schedule.driver?.userId) || '',
+      assistantId: entityId(schedule.assistant?.userId) || '',
       isScheduleException: Boolean(schedule.isScheduleException),
       exceptionReason: schedule.exceptionReason || '',
     });
@@ -1758,11 +1798,11 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
       setMessage('Xe đã có lịch trùng giờ hoặc không khả dụng.');
       return;
     }
-    if (form.driverId && !availableDrivers.some((driver) => String(driver._id) === String(form.driverId))) {
+    if (form.driverId && !availableDrivers.some((driver) => String(driver._id) === String(form.driverId)) && !isCurrentDriverSelection) {
       setMessage('Tài xế không có ca làm phù hợp hoặc đã bận trong thời gian chuyến.');
       return;
     }
-    if (form.assistantId && !availableAssistants.some((assistant) => String(assistant._id) === String(form.assistantId))) {
+    if (form.assistantId && !availableAssistants.some((assistant) => String(assistant._id) === String(form.assistantId)) && !isCurrentAssistantSelection) {
       setMessage('Phụ xe không có ca làm phù hợp hoặc đã bận trong thời gian chuyến.');
       return;
     }
@@ -1784,8 +1824,8 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
       shiftLabel: form.shiftLabel,
       status: determineScheduleStatus(form, form.status),
       vehicle: toAssignedVehicle(form.busId, availableBuses),
-      driver: toAssignedPerson(form.driverId, drivers),
-      assistant: toAssignedPerson(form.assistantId, assistantStaff),
+      driver: toAssignedPerson(form.driverId, drivers, currentDriverOption),
+      assistant: toAssignedPerson(form.assistantId, assistantStaff, currentAssistantOption),
       isScheduleException: Boolean(routeScheduleMismatch && form.isScheduleException),
       exceptionReason: routeScheduleMismatch ? form.exceptionReason.trim() : '',
     };
@@ -1875,9 +1915,15 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
             <span className={labelClassName}>Tài xế</span>
             <select className={inputClassName} value={form.driverId} onChange={(event) => updateForm({ driverId: event.target.value })}>
               <option value="">Chưa gán tài xế</option>
-              {availableDrivers.map((driver) => <option key={driver._id} value={driver._id}>{driver.fullName}{driver.phone ? ` - ${driver.phone}` : ''}</option>)}
+              {driverOptions.map((driver) => {
+                const isCurrent = currentDriverOption && String(driver._id || '') === String(currentDriverOption._id || '');
+                return <option key={driver._id} value={driver._id}>{driver.fullName}{driver.phone ? ` - ${driver.phone}` : ''}{isCurrent ? ' (đang gán)' : ''}</option>;
+              })}
             </select>
-            {form.serviceDate && form.departureTime && form.expectedArrivalTime && !availableDrivers.length ? (
+            {form.serviceDate && form.departureTime && form.expectedArrivalTime && !availableDrivers.length && currentDriverOption ? (
+              <span className="mt-1 block text-xs font-semibold text-amber-600">Đang hiển thị tài xế đã gán hiện tại; chưa có tài xế thay thế hợp lệ trong khung giờ này.</span>
+            ) : null}
+            {form.serviceDate && form.departureTime && form.expectedArrivalTime && !availableDrivers.length && !currentDriverOption ? (
               <span className="mt-1 block text-xs font-semibold text-amber-600">Không có tài xế có ca đã công bố/phê duyệt bao phủ chuyến hoặc tài xế đã bận trong khung giờ này.</span>
             ) : null}
           </label>
@@ -1885,9 +1931,15 @@ const SchedulingOperationsPanel = ({ assistantShiftAssignments, assistantStaff, 
             <span className={labelClassName}>Phụ xe</span>
             <select className={inputClassName} value={form.assistantId} onChange={(event) => updateForm({ assistantId: event.target.value })}>
               <option value="">Chưa gán phụ xe</option>
-              {availableAssistants.map((staff) => <option key={staff._id} value={staff._id}>{staff.fullName}{staff.phone ? ` - ${staff.phone}` : ''}</option>)}
+              {assistantOptions.map((staff) => {
+                const isCurrent = currentAssistantOption && String(staff._id || '') === String(currentAssistantOption._id || '');
+                return <option key={staff._id} value={staff._id}>{staff.fullName}{staff.phone ? ` - ${staff.phone}` : ''}{isCurrent ? ' (đang gán)' : ''}</option>;
+              })}
             </select>
-            {form.serviceDate && form.departureTime && form.expectedArrivalTime && !availableAssistants.length ? (
+            {form.serviceDate && form.departureTime && form.expectedArrivalTime && !availableAssistants.length && currentAssistantOption ? (
+              <span className="mt-1 block text-xs font-semibold text-amber-600">Đang hiển thị phụ xe đã gán hiện tại; chưa có phụ xe thay thế hợp lệ trong khung giờ này.</span>
+            ) : null}
+            {form.serviceDate && form.departureTime && form.expectedArrivalTime && !availableAssistants.length && !currentAssistantOption ? (
               <span className="mt-1 block text-xs font-semibold text-amber-600">Không có phụ xe có ca đã công bố/phê duyệt bao phủ chuyến hoặc phụ xe đã bận trong khung giờ này.</span>
             ) : null}
           </label>
@@ -2618,6 +2670,16 @@ const RouteWorkflowPage = () => {
     }
   };
 
+  const openScheduleEditor = useCallback((schedule) => {
+    if (!schedule?._id) return;
+    const freshSchedule = schedules.find((item) => String(item._id || '') === String(schedule._id));
+    const targetSchedule = freshSchedule || schedule;
+    setScheduleForEditing({ ...targetSchedule });
+    setSelectedSchedule(targetSchedule);
+    setActiveOperationSection('scheduling');
+    window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0);
+  }, [schedules]);
+
   const openRoute = async (routeId) => {
     try {
       const response = await adminService.getRouteDetail(routeId);
@@ -2696,7 +2758,7 @@ const RouteWorkflowPage = () => {
           </div>
 
           <div className={`mb-4 rounded-2xl border p-2 ${panelClassName}`}>
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
               {operationSections.map((section) => (
                 <button
                   key={section.key}
@@ -2794,7 +2856,7 @@ const RouteWorkflowPage = () => {
 
           {activeOperationSection === 'trip-assignment' ? (
             <section className="mb-5">
-              <TripAllocationPanel onSaved={loadData} routes={routes} />
+              <TripAllocationPanel onEditSchedule={openScheduleEditor} onSaved={loadData} routes={routes} />
             </section>
           ) : null}
 

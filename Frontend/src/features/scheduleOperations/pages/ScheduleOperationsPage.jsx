@@ -277,6 +277,46 @@ const addInputDays = (value, days) => {
   return getDateInputValue(date);
 };
 
+const OPERATING_TIME_ZONE = 'Asia/Ho_Chi_Minh';
+const getOperatingDateToken = (value = new Date()) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: OPERATING_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date).reduce((result, part) => {
+    result[part.type] = part.value;
+    return result;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
+
+const isPastAssignment = (assignment) => {
+  const tripDate = getOperatingDateToken(assignment?.scheduledStart);
+  return Boolean(tripDate && tripDate < getOperatingDateToken());
+};
+
+const isDeparturePassed = (assignment) => {
+  const departureAt = new Date(assignment?.scheduledStart);
+  return !Number.isNaN(departureAt.getTime()) && departureAt.getTime() < Date.now();
+};
+
+const findEarlierUnfinishedTrip = (assignment, assignments = []) => {
+  const currentStart = new Date(assignment?.scheduledStart).getTime();
+  if (!Number.isFinite(currentStart)) return null;
+  return assignments.find((candidate) => {
+    if (candidate.id === assignment.id || candidate.acceptanceStatus !== 'ACCEPTED') return false;
+    if (!['SCHEDULED', 'IN_PROGRESS'].includes(candidate.tripStatus)) return false;
+    if (getOperatingDateToken(candidate.scheduledStart) < getOperatingDateToken()) return false;
+    const candidateEnd = new Date(candidate.scheduledEnd).getTime();
+    if (Number.isFinite(candidateEnd) && candidateEnd < Date.now()) return false;
+    const candidateStart = new Date(candidate.scheduledStart).getTime();
+    return Number.isFinite(candidateStart) && candidateStart <= currentStart;
+  }) || null;
+};
+
 const isWorkShiftSchedule = (shift = {}) => {
   const source = String(shift.source || '').toUpperCase();
   const code = String(shift.shiftCode || '').toUpperCase();
@@ -679,6 +719,7 @@ const VehicleOperationsPanel = ({
   onStartInspection,
   onConfirmReady,
   onReportIssue,
+  inspectionBlockedBy,
 }) => {
   const inspection = assignment.inspection || { status: 'NOT_STARTED' };
   const [checklist, setChecklist] = useState(() => buildDefaultChecklist(inspection));
@@ -696,7 +737,7 @@ const VehicleOperationsPanel = ({
   const isIssueReported = inspection.status === 'ISSUE_REPORTED';
   const tripAllowsInspection = assignment.tripStatus === 'SCHEDULED';
   const canEdit = canOperateVehicle && tripAllowsInspection && !isReady && !isIssueReported;
-  const canStart = canEdit && isNotStarted;
+  const canStart = canEdit && isNotStarted && !inspectionBlockedBy && !isDeparturePassed(assignment);
   const canInspect = canEdit && isInProgress;
   const canConfirm = canInspect && allChecked;
   const canReport = canInspect && issueDescription.trim().length >= 5;
@@ -733,6 +774,18 @@ const VehicleOperationsPanel = ({
         {canOperateVehicle && !tripAllowsInspection && (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             Trạng thái chuyến này không còn cho phép bắt đầu kiểm tra xe trước chuyến.
+          </div>
+        )}
+
+        {inspectionBlockedBy && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Phải hoàn tất chuyến {inspectionBlockedBy.tripCode} trước khi bắt đầu kiểm tra xe cho chuyến này.
+          </div>
+        )}
+
+        {canOperateVehicle && isDeparturePassed(assignment) && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Chuyến đã qua giờ khởi hành nên không thể bắt đầu kiểm tra xe.
           </div>
         )}
 
@@ -981,7 +1034,6 @@ const IncidentReportingPanel = ({
     trafficCategory: 'HEAVY_TRAFFIC',
     affectedDirection: 'CURRENT_DIRECTION',
     severity: 'MEDIUM',
-    locationText: '',
     estimatedDelayMinutes: 10,
     description: '',
     injuriesReported: false,
@@ -1022,6 +1074,7 @@ const IncidentReportingPanel = ({
     }
   }, [allowedIncidentTypes, selectedIncidentType]);
   const activeIncidentType = selectedIncidentType || form.type;
+  const requiresDelayEstimate = ['TRAFFIC_CONGESTION', 'ACCIDENT'].includes(form.type);
   const incidentTitle = {
     TRAFFIC_CONGESTION: 'Traffic congestion report',
     ACCIDENT: 'Accident report',
@@ -1033,15 +1086,14 @@ const IncidentReportingPanel = ({
   const canSubmit = canReportIncident
     && canUseIncidentForm
     && selectedIncidentType
-    && (form.type === 'VEHICLE_BREAKDOWN' || form.locationText.trim().length >= 3)
     && form.description.trim().length >= 10
     && (form.type !== 'ACCIDENT' || form.severity !== 'LOW')
+    && (!requiresDelayEstimate || Number(form.estimatedDelayMinutes) >= 1)
     && (
       form.type !== 'TRAFFIC_CONGESTION'
       || (
         form.trafficCategory
         && form.affectedDirection
-        && Number(form.estimatedDelayMinutes) >= 1
       )
     );
   const hasPassengerViolationDetail = form.type !== 'PASSENGER_VIOLATION'
@@ -1064,18 +1116,15 @@ const IncidentReportingPanel = ({
   };
 
   const submitIncidentReport = async () => {
-    const autoLocationText = form.locationText.trim()
-      || assignment.currentLocation?.name
-      || assignment.route?.name
-      || assignment.tripCode
-      || 'Current GPS location';
-    await onReportIncident(assignment.id, {
+    const submitted = await onReportIncident(assignment.id, {
       ...form,
-      locationText: form.type === 'VEHICLE_BREAKDOWN' ? autoLocationText : form.locationText,
       canContinue: form.type === 'VEHICLE_BREAKDOWN' ? false : form.canContinue,
       requiresReplacementVehicle: form.type === 'VEHICLE_BREAKDOWN' ? true : form.requiresReplacementVehicle,
       evidenceFiles,
     });
+
+    if (!submitted) return;
+
     setSelectedIncidentType(null);
     setShowIncidentChoices(false);
     setEvidenceFiles([]);
@@ -1088,7 +1137,6 @@ const IncidentReportingPanel = ({
       ...current,
       type,
       severity: type === 'ACCIDENT' && current.severity === 'LOW' ? 'MEDIUM' : current.severity,
-      foundLocation: type === 'FOUND_ITEM' ? current.locationText : current.foundLocation,
     }));
   };
 
@@ -1201,16 +1249,6 @@ const IncidentReportingPanel = ({
             ))}
           </select>
         </label>
-        <label className="space-y-1">
-          <span className="text-xs font-bold uppercase text-slate-500">Vị trí</span>
-          <input
-            value={form.locationText}
-            onChange={(event) => updateForm('locationText', event.target.value)}
-            disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
-            placeholder="Ví dụ: gần cầu Rồng"
-            className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
-          />
-        </label>
       </div>
 
       {form.type === 'TRAFFIC_CONGESTION' && (
@@ -1228,18 +1266,24 @@ const IncidentReportingPanel = ({
               ))}
             </select>
           </label>
-          <label className="space-y-1">
-            <span className="text-xs font-bold uppercase text-slate-500">Ước tính trễ phút</span>
-            <input
-              type="number"
-              min="1"
-              value={form.estimatedDelayMinutes}
-              onChange={(event) => updateForm('estimatedDelayMinutes', event.target.value)}
-              disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
-              className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
-            />
-          </label>
         </div>
+      )}
+
+      {requiresDelayEstimate && (
+        <label className="mt-3 block space-y-1">
+          <span className="text-xs font-bold uppercase text-slate-500">Ước tính chuyến trễ (phút)</span>
+          <input
+            type="number"
+            min="1"
+            max="1440"
+            required
+            value={form.estimatedDelayMinutes}
+            onChange={(event) => updateForm('estimatedDelayMinutes', event.target.value)}
+            disabled={!canReportIncident || !canUseIncidentForm || isProcessing}
+            className="w-full rounded-lg border-slate-300 text-sm focus:border-red-500 focus:ring-red-500"
+          />
+          <span className="block text-xs text-slate-500">Thời gian này sẽ cập nhật ETA để hành khách biết xe dự kiến đến muộn bao lâu.</span>
+        </label>
       )}
 
       {form.type === 'ACCIDENT' && (
@@ -1283,7 +1327,7 @@ const IncidentReportingPanel = ({
             </select>
           </label>
           <div className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">
-            Current trip, vehicle, driver, GPS location, and timestamp will be attached automatically.
+            Chuyến, xe, tài xế, GPS hiện tại và thời điểm báo cáo sẽ được đính kèm tự động.
           </div>
         </div>
       )}
@@ -1488,14 +1532,19 @@ const AssignmentCard = ({
   onCompleteTrip,
   onSyncTripGps,
   onReportIncident,
+  inspectionBlockedBy,
 }) => {
   const isAccepted = assignment.acceptanceStatus === 'ACCEPTED';
   const isRejected = assignment.acceptanceStatus === 'REJECTED';
-  const canRespond = canOperateVehicle
+  const isPast = isPastAssignment(assignment);
+  const departurePassed = isDeparturePassed(assignment);
+  const canOperateCurrentTrip = canOperateVehicle && !isPast;
+  const canRespond = canOperateCurrentTrip
     && assignment.actorRole === 'DRIVER'
     && assignment.acceptanceStatus !== 'ACCEPTED'
     && assignment.acceptanceStatus !== 'REJECTED'
     && !['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(assignment.tripStatus);
+  const canAccept = canRespond && !departurePassed;
   const showVehicleStep = isAccepted && !isRejected;
   const showVehiclePanel = showVehicleStep && assignment.inspection?.status !== 'READY';
   const showLifecycleStep = showVehicleStep && (
@@ -1528,7 +1577,7 @@ const AssignmentCard = ({
         {showLifecycleStep && (
           <TripLifecyclePanel
             assignment={assignment}
-            canStartTrip={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+            canStartTrip={canOperateCurrentTrip && assignment.actorRole === 'DRIVER'}
             isProcessing={isProcessing}
             onStartTrip={onStartTrip}
             onCompleteTrip={onCompleteTrip}
@@ -1626,6 +1675,13 @@ const AssignmentCard = ({
             <p className="mt-1 text-sm text-slate-600">
               {assignment.route.origin} - {assignment.route.destination} | {formatTime(assignment.scheduledStart)} - {formatTime(assignment.scheduledEnd)}
             </p>
+            {(assignment.incidentDelayMinutes > 0 || assignment.propagatedDelayMinutes > 0) && (
+              <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">
+                Giờ đã điều chỉnh do sự cố: {formatTime(assignment.scheduledStart)} - {formatTime(assignment.scheduledEnd)}.
+                {' '}Trễ trực tiếp {assignment.incidentDelayMinutes || 0} phút,
+                {' '}dời lịch kế tiếp {assignment.propagatedDelayMinutes || 0} phút.
+              </p>
+            )}
             <p className="mt-2 text-sm font-bold text-slate-800">
               Xe hiện tại: {assignment.vehicle?.plateNumber || 'Chưa có biển số'}
             </p>
@@ -1637,14 +1693,22 @@ const AssignmentCard = ({
           </div>
         </div>
 
+        {isPast && (
+          <div className="mt-5 rounded-lg border border-slate-300 bg-slate-100 px-4 py-3 text-sm text-slate-700">
+            <p className="font-black">Chuyến đã qua ngày vận hành và đã được khóa.</p>
+            <p className="mt-1">Không thể tiếp tục kiểm tra xe hoặc vận hành chuyến trong quá khứ.</p>
+          </div>
+        )}
+
         {showVehiclePanel && (
           <VehicleOperationsPanel
             assignment={assignment}
-            canOperateVehicle={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+            canOperateVehicle={canOperateCurrentTrip && assignment.actorRole === 'DRIVER'}
             isProcessing={isProcessing}
             onStartInspection={onStartInspection}
             onConfirmReady={onConfirmReady}
             onReportIssue={onReportIssue}
+            inspectionBlockedBy={inspectionBlockedBy}
           />
         )}
         {assignmentFlow}
@@ -1675,12 +1739,36 @@ const AssignmentCard = ({
       </div>
     </div>
 
+    {isPast && (
+      <div className="mt-5 rounded-lg border border-slate-300 bg-slate-100 px-4 py-3 text-sm text-slate-700">
+        <p className="font-black">Chuyến đã qua ngày vận hành và đã được khóa.</p>
+        <p className="mt-1">Tài xế và phụ xe chỉ có thể tiếp nhận, từ chối hoặc vận hành chuyến từ ngày hiện tại trở đi.</p>
+      </div>
+    )}
+
+    {!isPast && departurePassed && !isAccepted && (
+      <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        Chuyến đã qua giờ khởi hành. Tài xế không thể tiếp nhận chuyến này.
+      </div>
+    )}
+
     <div className="mt-5 grid gap-4 border-t border-slate-100 pt-5 md:grid-cols-4">
       <InfoItem icon={CalendarDays} label="Ngày vận hành" value={formatDate(assignment.scheduledStart)} />
       <InfoItem icon={Clock3} label="Thời gian chuyến" value={`${formatTime(assignment.scheduledStart)} - ${formatTime(assignment.scheduledEnd)}`} />
       <InfoItem icon={BusFront} label="Phương tiện" value={`${assignment.vehicle.plateNumber} (${assignment.vehicle.code})`} />
       <InfoItem icon={UserRound} label="Vai trò của bạn" value={assignment.actorRole === 'DRIVER' ? 'Tài xế' : 'Phụ xe'} />
     </div>
+
+    {(assignment.incidentDelayMinutes > 0 || assignment.propagatedDelayMinutes > 0) && (
+      <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <p className="font-black">Lịch đã được điều chỉnh để không trùng chuyến.</p>
+        <p className="mt-1">
+          Giờ gốc: {formatTime(assignment.originalScheduledStart)} - {formatTime(assignment.originalScheduledEnd)}.
+          {' '}Giờ mới: {formatTime(assignment.scheduledStart)} - {formatTime(assignment.scheduledEnd)}.
+          {' '}Mức dời: {assignment.propagatedDelayMinutes || 0} phút.
+        </p>
+      </div>
+    )}
 
     <div className="mt-5 grid gap-3 rounded-lg bg-slate-50 p-4 text-sm md:grid-cols-2">
       <div>
@@ -1714,7 +1802,7 @@ const AssignmentCard = ({
             <button
               type="button"
               onClick={() => onAcceptTrip(assignment.id)}
-              disabled={!canRespond || isProcessing}
+              disabled={!canAccept || isProcessing}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <CheckCircle2 className="h-4 w-4" />
@@ -1744,11 +1832,12 @@ const AssignmentCard = ({
     {showVehicleStep && (
       <VehicleOperationsPanel
         assignment={assignment}
-        canOperateVehicle={canOperateVehicle && assignment.actorRole === 'DRIVER'}
+            canOperateVehicle={canOperateCurrentTrip && assignment.actorRole === 'DRIVER'}
         isProcessing={isProcessing}
         onStartInspection={onStartInspection}
         onConfirmReady={onConfirmReady}
         onReportIssue={onReportIssue}
+        inspectionBlockedBy={inspectionBlockedBy}
       />
     )}
     {assignmentFlow}
@@ -1828,7 +1917,18 @@ const ShiftScheduleCard = ({ shift }) => {
   );
 };
 
-const OperationNotificationsPanel = ({ notifications = [] }) => (
+const getNotificationTime = (notification) => {
+  const value = notification.updatedAt || notification.activeFrom || notification.createdAt;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const OperationNotificationsPanel = ({ notifications = [] }) => {
+  const sortedNotifications = [...notifications].sort(
+    (left, right) => getNotificationTime(right) - getNotificationTime(left)
+  );
+
+  return (
     <section className="mt-6 rounded-lg border border-cyan-200 bg-cyan-50/70 p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -1841,12 +1941,12 @@ const OperationNotificationsPanel = ({ notifications = [] }) => (
           </p>
         </div>
         <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-cyan-800">
-          {notifications.length} thông báo
+          {sortedNotifications.length} thông báo
         </span>
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        {notifications.length ? notifications.map((notification) => (
+        {sortedNotifications.length ? sortedNotifications.map((notification) => (
           <article key={notification.id} className="rounded-lg border border-cyan-100 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-center gap-2">
               <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${NOTIFICATION_PRIORITY_META[notification.priority] || NOTIFICATION_PRIORITY_META.NORMAL}`}>
@@ -1855,9 +1955,9 @@ const OperationNotificationsPanel = ({ notifications = [] }) => (
             </div>
             <h3 className="mt-3 text-base font-black text-slate-950">{notification.title}</h3>
             <p className="mt-2 text-sm leading-6 text-slate-700">{notification.message}</p>
-            {notification.createdAt ? (
+            {notification.updatedAt || notification.createdAt ? (
               <p className="mt-3 text-xs font-semibold text-slate-500">
-                Gửi lúc {formatShortDate(notification.createdAt)} {formatTime(notification.createdAt)}
+                Gửi lúc {formatShortDate(notification.updatedAt || notification.createdAt)} {formatTime(notification.updatedAt || notification.createdAt)}
               </p>
             ) : null}
           </article>
@@ -1867,8 +1967,9 @@ const OperationNotificationsPanel = ({ notifications = [] }) => (
           </div>
         )}
       </div>
-    </section>
+  </section>
   );
+};
 
 const EmptyState = ({ message }) => (
   <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">
@@ -1926,7 +2027,7 @@ const ScheduleOperationsPage = () => {
       } catch {
         // Giữ dữ liệu thông báo gần nhất nếu refresh nền lỗi tạm thời.
       }
-    }, 10000);
+    }, 3000);
 
     return () => window.clearInterval(intervalId);
   }, [filters]);
@@ -1940,8 +2041,10 @@ const ScheduleOperationsPage = () => {
       await action();
       setSuccessMessage(successText);
       await loadData();
+      return true;
     } catch (requestError) {
       setError(getErrorMessage(requestError));
+      return false;
     } finally {
       setProcessingAssignmentId('');
     }
@@ -2008,7 +2111,16 @@ const ScheduleOperationsPage = () => {
 
   const handleReportIncident = (assignmentId, incidentPayload) => runVehicleAction(
     assignmentId,
-    () => scheduleOperationsService.reportOperationIncident(assignmentId, incidentPayload),
+    async () => {
+      const gpsPayload = user?.role === 'DRIVER' ? await captureStartGpsPayload() : {};
+      const gps = gpsPayload?.gps || gpsPayload;
+      return scheduleOperationsService.reportOperationIncident(assignmentId, {
+        ...incidentPayload,
+        latitude: gps?.latitude,
+        longitude: gps?.longitude,
+        gpsCapturedAt: gps?.capturedAt,
+      });
+    },
     'Đã gửi báo cáo sự cố vận hành.'
   );
 
@@ -2280,6 +2392,7 @@ const ScheduleOperationsPage = () => {
                   onCompleteTrip={handleCompleteTrip}
                   onSyncTripGps={handleSyncTripGps}
                   onReportIncident={handleReportIncident}
+                  inspectionBlockedBy={findEarlierUnfinishedTrip(trip, assignedTrips)}
                 />
               )) : (
                 <EmptyState message="Không có chuyến xe nào được phân công trong khoảng thời gian này." />

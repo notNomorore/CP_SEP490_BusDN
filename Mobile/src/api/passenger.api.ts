@@ -180,6 +180,7 @@ export type TicketRecord = {
   departureTime?: string;
   validFrom?: string;
   validUntil?: string;
+  expiresAt?: string;
   ticketPrice?: number;
   paymentStatus?: string;
   bookingStatus?: string;
@@ -255,6 +256,10 @@ export type PurchasableTripSchedule = {
   expectedArrivalTime?: string;
   status?: string;
   statusLabel?: string;
+  capacity?: number;
+  soldSeats?: number;
+  remainingSeats?: number;
+  isFull?: boolean;
   vehicle?: {
     busId?: string;
     busCode?: string;
@@ -276,6 +281,8 @@ export type NotificationRecord = {
   readAt?: string | null;
   isRead?: boolean;
   actionUrl?: string;
+  sourceType?: string;
+  sourceId?: string | null;
   routeId?: string | null;
   tripId?: string | null;
   deliverySummary?: { sentAt?: string };
@@ -668,7 +675,10 @@ export const passengerApi = {
   },
 
   getPaymentStatus: async (orderCode: number | string) => {
-    const response = await apiClient.get(`/tickets/payments/${encodeURIComponent(String(orderCode))}`) as unknown;
+    const response = await apiClient.get(
+      `/tickets/payments/${encodeURIComponent(String(orderCode))}`,
+      { timeout: 10000 },
+    ) as unknown;
     return unwrap<PaymentOrder>(response);
   },
 

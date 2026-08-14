@@ -477,6 +477,19 @@ export default function TripDetailScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>{t.detail.schedule}</Text>
+        {(trip.incidentDelayMinutes || trip.propagatedDelayMinutes) ? (
+          <View style={styles.delayNotice}>
+            <MaterialCommunityIcons color="#9a6700" name="clock-alert-outline" size={22} />
+            <View style={styles.replacementTextWrap}>
+              <Text style={styles.delayTitle}>Lịch đã điều chỉnh do sự cố</Text>
+              <Text style={styles.delayText}>
+                Giờ gốc: {formatTime(trip.originalScheduledStart)} - {formatTime(trip.originalScheduledEnd)}.{`\n`}
+                Giờ mới: {getTripDepartureTimeLabel(trip)} - {getTripArrivalTimeLabel(trip)}.{`\n`}
+                Trễ trực tiếp: {trip.incidentDelayMinutes || 0} phút; dời do chuyến trước: {trip.propagatedDelayMinutes || 0} phút.
+              </Text>
+            </View>
+          </View>
+        ) : null}
         <View style={styles.detailsGrid}>
           <DetailRow fallback={t.common.notAvailable} label={t.common.direction} value={trip.route?.direction} />
           <DetailRow fallback={t.common.notAvailable} label={t.common.departure} value={getTripDepartureTimeLabel(trip)} />
@@ -545,6 +558,9 @@ const styles = StyleSheet.create({
   replacementTextWrap: { flex: 1, gap: 3 },
   replacementTitle: { color: colors.primary, fontSize: 13, fontWeight: '900' },
   replacementText: { color: colors.muted, fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  delayNotice: { flexDirection: 'row', gap: 10, borderRadius: 16, borderWidth: 1, borderColor: '#f1d58a', backgroundColor: '#fff8df', padding: 12 },
+  delayTitle: { color: '#805500', fontSize: 13, fontWeight: '900' },
+  delayText: { color: '#725a24', fontSize: 12, lineHeight: 18, fontWeight: '700' },
   detailRow: { width: '47%', gap: 4 },
   detailLabel: { color: colors.muted, fontSize: 10, fontWeight: '900' },
   detailValue: { color: colors.text, fontSize: 13, fontWeight: '800' },
