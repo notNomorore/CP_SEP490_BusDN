@@ -180,6 +180,7 @@ export type TicketRecord = {
   departureTime?: string;
   validFrom?: string;
   validUntil?: string;
+  expiresAt?: string;
   ticketPrice?: number;
   paymentStatus?: string;
   bookingStatus?: string;

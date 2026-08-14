@@ -140,11 +140,9 @@ export default function ValidateTicketScreen() {
 
   const trips = useMemo(() => assignedTrips.filter((trip) => {
     const status = String(getTripStatus(trip)).toUpperCase();
-    const acceptanceStatus = String(trip.acceptanceStatus || '').toUpperCase();
     const plannedEnd = getTripPlannedEndDate(trip);
 
     return isTripToday(trip)
-      && (!acceptanceStatus || acceptanceStatus === 'ACCEPTED')
       && !['COMPLETED', 'DONE', 'CANCELLED'].includes(status)
       && Boolean(plannedEnd && !Number.isNaN(plannedEnd.getTime()) && plannedEnd.getTime() > nowMs);
   }), [assignedTrips, nowMs]);
@@ -235,6 +233,9 @@ export default function ValidateTicketScreen() {
         tripId: tripIdOf(selectedTrip) || undefined,
         routeId: selectedTrip?.route?.id || undefined,
         routeCode: selectedTrip?.route?.routeNumber || undefined,
+        serviceDate: toDateInput(),
+        departureTime: getTripDepartureTimeLabel(selectedTrip),
+        direction: selectedTrip?.route?.direction,
       });
       setResult(data);
       if (isValidResult(data)) {

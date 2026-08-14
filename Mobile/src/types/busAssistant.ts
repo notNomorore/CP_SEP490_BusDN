@@ -13,6 +13,9 @@ export type ValidateTicketPayload = {
   routeId?: string;
   routeCode?: string;
   vehicleId?: string;
+  serviceDate?: string;
+  departureTime?: string;
+  direction?: string;
 };
 
 export type TicketValidationResult = {

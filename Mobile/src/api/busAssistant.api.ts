@@ -87,6 +87,9 @@ export const busAssistantApi = {
       tripId: payload.tripId,
       routeId: payload.routeId,
       routeCode: payload.routeCode,
+      serviceDate: payload.serviceDate,
+      departureTime: payload.departureTime,
+      direction: payload.direction,
     })) as unknown as ApiEnvelope<TicketValidationResult>;
     return response.data;
   },
