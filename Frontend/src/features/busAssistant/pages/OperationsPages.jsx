@@ -299,6 +299,7 @@ const BusAssistantIncidentPanel = ({ assignment, isProcessing, onReportIncident 
     foundLocation: '',
     handedTo: '',
     description: '',
+    evidenceFiles: [],
   });
 
   const mutedText = isDarkMode ? 'text-slate-400' : 'text-slate-500';
@@ -360,6 +361,7 @@ const BusAssistantIncidentPanel = ({ assignment, isProcessing, onReportIncident 
       foundLocation: '',
       handedTo: '',
       description: '',
+      evidenceFiles: [],
     }));
   };
 
@@ -482,6 +484,32 @@ const BusAssistantIncidentPanel = ({ assignment, isProcessing, onReportIncident 
               placeholder="Describe the situation clearly and include the action taken."
             />
           </label>
+
+          {form.type === 'FOUND_ITEM' ? (
+            <label className="block space-y-1">
+              <span className={`text-xs font-bold uppercase ${mutedText}`}>Ảnh đồ vật để Admin xác minh</span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                capture="environment"
+                multiple
+                disabled={isProcessing}
+                onChange={(event) => updateForm('evidenceFiles', Array.from(event.target.files || []).slice(0, 5))}
+                className={inputClass}
+              />
+              <p className={`text-xs ${mutedText}`}>Chụp hoặc chọn tối đa 5 ảnh JPG, PNG, WEBP. Ảnh được gửi cùng báo cáo đến Admin.</p>
+              {form.evidenceFiles.length ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {form.evidenceFiles.map((file) => (
+                    <div key={`${file.name}-${file.size}`} className="rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                      <p className="truncate font-bold">{file.name}</p>
+                      <p>{Math.max(1, Math.round(file.size / 1024))} KB</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </label>
+          ) : null}
 
           <button
             type="button"

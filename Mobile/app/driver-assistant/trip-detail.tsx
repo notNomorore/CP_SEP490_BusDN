@@ -16,6 +16,7 @@ import {
   formatCoordinate,
   formatTime,
   getTripArrivalTimeLabel,
+  getTripScheduleAdjustmentMinutes,
   getTripDepartureTimeLabel,
   getAssignedTripsRange,
   getRoutePathPoints,
@@ -24,6 +25,7 @@ import {
   getTripVehicleLabel,
   getVehicleLabel,
   hasVehicleReplacement,
+  hasTripScheduleAdjustment,
 } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
@@ -477,7 +479,7 @@ export default function TripDetailScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>{t.detail.schedule}</Text>
-        {(trip.incidentDelayMinutes || trip.propagatedDelayMinutes) ? (
+        {hasTripScheduleAdjustment(trip) ? (
           <View style={styles.delayNotice}>
             <MaterialCommunityIcons color="#9a6700" name="clock-alert-outline" size={22} />
             <View style={styles.replacementTextWrap}>
@@ -485,7 +487,7 @@ export default function TripDetailScreen() {
               <Text style={styles.delayText}>
                 Giờ gốc: {formatTime(trip.originalScheduledStart)} - {formatTime(trip.originalScheduledEnd)}.{`\n`}
                 Giờ mới: {getTripDepartureTimeLabel(trip)} - {getTripArrivalTimeLabel(trip)}.{`\n`}
-                Trễ trực tiếp: {trip.incidentDelayMinutes || 0} phút; dời do chuyến trước: {trip.propagatedDelayMinutes || 0} phút.
+                Trễ trực tiếp: {trip.incidentDelayMinutes || 0} phút; dời do chuyến trước: {trip.propagatedDelayMinutes || 0} phút; tổng điều chỉnh: {getTripScheduleAdjustmentMinutes(trip)} phút.
               </Text>
             </View>
           </View>

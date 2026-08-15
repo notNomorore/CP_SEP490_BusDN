@@ -1,5 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, type Href } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import { router, type Href, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -20,10 +21,13 @@ import {
   getTripArrivalTimeLabel,
   getTripDepartureTimeLabel,
   getTripServiceDateLabel,
+  getTripScheduleAdjustmentMinutes,
   getTripVehicleLabel,
   getVehicleLabel,
   hasVehicleReplacement,
+  hasTripScheduleAdjustment,
   getTripStatus,
+  getTripWorkflowStep,
   isTripCompleted,
   isTripDeparturePassed,
   isTripDelayed,
@@ -37,6 +41,7 @@ type FilterKey = 'ALL' | 'TODAY' | 'HISTORY' | 'UPCOMING' | 'COMPLETED' | 'DELAY
 type ActorKind = 'DRIVER' | 'BUS_ASSISTANT';
 type BusAssistantIncidentType = 'PASSENGER_VIOLATION' | 'PASSENGER_CONFLICT' | 'FOUND_ITEM';
 type IncidentSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+type IncidentEvidenceFile = { uri: string; name?: string; type?: string };
 
 type BusAssistantIncidentForm = {
   type: BusAssistantIncidentType;
@@ -51,6 +56,7 @@ type BusAssistantIncidentForm = {
   foundLocation: string;
   handedTo: string;
   description: string;
+  evidenceFiles: IncidentEvidenceFile[];
 };
 
 const matchesFilter = (trip: AssignedTrip, filter: FilterKey) => {
@@ -128,6 +134,7 @@ const getDefaultIncidentForm = (tripStatus?: string): BusAssistantIncidentForm =
   foundLocation: '',
   handedTo: '',
   description: '',
+  evidenceFiles: [],
 });
 
 function ChoiceChip({
@@ -242,6 +249,31 @@ function BusAssistantIncidentPanel({
 
   const updateForm = <Key extends keyof BusAssistantIncidentForm,>(key: Key, value: BusAssistantIncidentForm[Key]) => {
     setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const chooseEvidenceFiles = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Không thể chọn ảnh', 'Vui lòng cho phép ứng dụng truy cập thư viện ảnh.');
+      return;
+    }
+
+    const remaining = Math.max(0, 5 - form.evidenceFiles.length);
+    if (!remaining) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsMultipleSelection: true,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.75,
+      selectionLimit: remaining,
+    });
+    if (result.canceled) return;
+
+    const selected = result.assets.slice(0, remaining).map((asset, index) => ({
+      uri: asset.uri,
+      name: asset.fileName || `found-item-${Date.now()}-${index + 1}.jpg`,
+      type: asset.mimeType || 'image/jpeg',
+    }));
+    updateForm('evidenceFiles', [...form.evidenceFiles, ...selected].slice(0, 5));
   };
 
   const validate = () => {
@@ -448,6 +480,40 @@ function BusAssistantIncidentPanel({
             />
           </View>
 
+          {form.type === 'FOUND_ITEM' ? (
+            <View style={styles.fieldBlock}>
+              <FieldLabel>Ảnh đồ vật để Admin xác minh</FieldLabel>
+              <Pressable
+                accessibilityRole="button"
+                disabled={isProcessing || form.evidenceFiles.length >= 5}
+                onPress={chooseEvidenceFiles}
+                style={[styles.evidencePicker, (isProcessing || form.evidenceFiles.length >= 5) && styles.disabledChip]}
+              >
+                <MaterialCommunityIcons color={colors.primary} name="camera-plus-outline" size={20} />
+                <Text style={styles.evidencePickerText}>
+                  {form.evidenceFiles.length ? `Đã chọn ${form.evidenceFiles.length}/5 ảnh` : 'Chụp hoặc chọn ảnh'}
+                </Text>
+              </Pressable>
+              {form.evidenceFiles.length ? (
+                <View style={styles.evidenceList}>
+                  {form.evidenceFiles.map((file, index) => (
+                    <View key={`${file.uri}-${index}`} style={styles.evidenceItem}>
+                      <Text numberOfLines={1} style={styles.evidenceName}>{file.name || `Ảnh ${index + 1}`}</Text>
+                      <Pressable
+                        accessibilityLabel="Xóa ảnh"
+                        hitSlop={8}
+                        onPress={() => updateForm('evidenceFiles', form.evidenceFiles.filter((_, fileIndex) => fileIndex !== index))}
+                      >
+                        <MaterialCommunityIcons color={colors.error} name="close-circle" size={20} />
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              <Text style={styles.evidenceHint}>Tối đa 5 ảnh JPG, PNG hoặc WEBP. Ảnh sẽ được gửi cùng báo cáo cho Admin.</Text>
+            </View>
+          ) : null}
+
           <Pressable
             accessibilityRole="button"
             disabled={isProcessing}
@@ -569,6 +635,10 @@ export default function AssignedTripsScreen() {
 
     void loadTrips();
   }, [isAuthenticated, isHydrated, loadTrips]);
+
+  useFocusEffect(useCallback(() => {
+    if (isHydrated && isAuthenticated) void loadTrips();
+  }, [isAuthenticated, isHydrated, loadTrips]));
 
   const actorTrips = useMemo(() => (
     trips.filter((trip) => {
@@ -775,8 +845,9 @@ export default function AssignedTripsScreen() {
               (isDriver ? t.common.unknownRoute : t.assistant.trips.routeUnnamed);
             const routeSubtitle = [trip.route?.origin, trip.route?.destination].filter(Boolean).join(' - ');
             const isCompleted = isTripCompleted(trip);
-            const isAccepted = getAcceptanceStatus(trip) === 'ACCEPTED';
-            const isVehicleReady = trip.inspection?.status === 'READY';
+            const workflowStep = getTripWorkflowStep(trip);
+            const isAccepted = workflowStep !== 'ACCEPTANCE' && workflowStep !== 'COMPLETED';
+            const shouldOpenLifecycle = workflowStep === 'LIFECYCLE';
             const showDecisionActions = canDecideTrip(trip);
             const departurePassed = isTripDeparturePassed(trip);
             const inspectionBlockedBy = isDriver && isAccepted
@@ -809,13 +880,13 @@ export default function AssignedTripsScreen() {
                   <InfoLine label={t.common.assistantName} value={trip.busAssistant?.fullName} />
                 </View>
 
-                {(trip.incidentDelayMinutes || trip.propagatedDelayMinutes) ? (
+                {hasTripScheduleAdjustment(trip) ? (
                   <View style={styles.delayNotice}>
                     <MaterialCommunityIcons color="#9a6700" name="clock-alert-outline" size={20} />
                     <View style={styles.replacementTextWrap}>
                       <Text style={styles.delayTitle}>Lịch đã điều chỉnh do sự cố</Text>
                       <Text style={styles.delayText}>
-                        Giờ gốc {formatTime(trip.originalScheduledStart)} - {formatTime(trip.originalScheduledEnd)}; giờ mới {getTripDepartureTimeLabel(trip)} - {getTripArrivalTimeLabel(trip)}. Dời {trip.propagatedDelayMinutes || 0} phút.
+                        Giờ gốc {formatTime(trip.originalScheduledStart)} - {formatTime(trip.originalScheduledEnd)}; giờ mới {getTripDepartureTimeLabel(trip)} - {getTripArrivalTimeLabel(trip)}. Trễ trực tiếp {trip.incidentDelayMinutes || 0} phút; dời lịch kế tiếp {trip.propagatedDelayMinutes || 0} phút; tổng điều chỉnh {getTripScheduleAdjustmentMinutes(trip)} phút.
                       </Text>
                     </View>
                   </View>
@@ -872,12 +943,12 @@ export default function AssignedTripsScreen() {
                         style={styles.actionButton}
                       />
                     </>
-                  ) : isDriver && isAccepted && !isCompleted && !departurePassed ? (
+                  ) : isDriver && isAccepted && !isCompleted ? (
                     <AppButton
-                      title={isVehicleReady ? copy.startAction : copy.prepareAction}
-                      disabled={!isVehicleReady && Boolean(inspectionBlockedBy)}
+                      title={shouldOpenLifecycle ? 'Tiếp tục chuyến' : copy.prepareAction}
+                      disabled={!shouldOpenLifecycle && Boolean(inspectionBlockedBy)}
                       loading={processingId === trip.id}
-                      onPress={() => void (isVehicleReady ? openFreshLifecycle(trip) : openFreshInspection(trip))}
+                      onPress={() => void (shouldOpenLifecycle ? openFreshLifecycle(trip) : openFreshInspection(trip))}
                       style={styles.actionButton}
                     />
                   ) : null}
@@ -1060,6 +1131,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   incidentTextArea: { minHeight: 92 },
+  evidencePicker: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, borderRadius: 14, borderWidth: 1, borderColor: colors.outline, backgroundColor: colors.surface, paddingHorizontal: 14 },
+  evidencePickerText: { color: colors.primary, fontSize: 13, fontWeight: '900' },
+  evidenceList: { gap: 7 },
+  evidenceItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderRadius: 12, backgroundColor: colors.surface, paddingHorizontal: 12, paddingVertical: 10 },
+  evidenceName: { flex: 1, color: colors.primary, fontSize: 12, fontWeight: '800' },
+  evidenceHint: { color: colors.muted, fontSize: 11, lineHeight: 16, fontWeight: '600' },
   reportSubmit: {
     minHeight: 50,
     flexDirection: 'row',

@@ -3,6 +3,17 @@ import OperationNotification from './OperationNotification.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
+const VIETNAM_UTC_OFFSET_HOURS = 7;
+
+const operatingDateToken = (value) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(value)).reduce((result, part) => {
+    result[part.type] = part.value;
+    return result;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
 
 const dayBounds = (value) => {
   const start = new Date(value);
@@ -11,11 +22,15 @@ const dayBounds = (value) => {
 };
 
 const clockAt = (serviceDate, value) => {
-  const date = new Date(serviceDate);
   const [hours, minutes] = String(value || '').split(':').map(Number);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-  date.setHours(hours, minutes, 0, 0);
-  return date;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(operatingDateToken(serviceDate));
+  if (!match) return null;
+  const [, year, month, day] = match;
+  return new Date(Date.UTC(
+    Number(year), Number(month) - 1, Number(day),
+    hours - VIETNAM_UTC_OFFSET_HOURS, minutes, 0, 0
+  ));
 };
 
 const plannedWindow = (schedule) => {
