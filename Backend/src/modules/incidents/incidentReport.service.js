@@ -3,6 +3,7 @@ import { HTTP_STATUS, PAGINATION } from '../../constants/index.js';
 import { CustomError } from '../../middleware/errorHandler.js';
 import IncidentReport from './IncidentReport.js';
 import OperationIncident from '../scheduleOperations/OperationIncident.js';
+import OperationNotification from '../scheduleOperations/OperationNotification.js';
 import notificationService from '../systemNotifications/notification.service.js';
 import TripSchedule from '../admin/TripSchedule.js';
 import FleetBus from '../admin/FleetBus.js';

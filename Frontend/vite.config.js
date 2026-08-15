@@ -7,10 +7,7 @@ const frontendRunId = Date.now().toString()
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const apiBaseUrl = env.VITE_API_URL || env.VITE_API_BASE_URL
-  if (!apiBaseUrl) {
-    throw new Error('VITE_API_URL is required for the Vite API proxy.')
-  }
+  const apiBaseUrl = env.VITE_API_URL || env.VITE_API_BASE_URL || 'https://cp-sep490-busdn.onrender.com'
   const apiOrigin = apiBaseUrl.replace(/\/api\/?$/, '')
 
   return {
