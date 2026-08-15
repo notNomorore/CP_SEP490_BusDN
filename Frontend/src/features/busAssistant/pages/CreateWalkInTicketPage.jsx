@@ -11,7 +11,41 @@ const initialForm = {
   passengerQuantity: 1, ticketType: 'SINGLE_RIDE', paymentMethod: 'CASH', amount: 0, cashReceived: '',
 };
 
-const formatAssignedTripTime = (start, end, language) => {
+const parseTripCodeStart = (tripCode) => {
+  const match = String(tripCode || '').match(/-(\d{6})-(\d{4})(?:-|$)/);
+  if (!match) return null;
+
+  const [, dateToken, timeToken] = match;
+  const date = new Date(
+    2000 + Number(dateToken.slice(0, 2)),
+    Number(dateToken.slice(2, 4)) - 1,
+    Number(dateToken.slice(4, 6)),
+    Number(timeToken.slice(0, 2)),
+    Number(timeToken.slice(2, 4)),
+  );
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const getAssignedTripDates = (trip) => {
+  const codedStart = parseTripCodeStart(trip?.tripCode);
+  const rawStart = trip?.scheduledStart ? new Date(trip.scheduledStart) : null;
+  const rawEnd = trip?.scheduledEnd ? new Date(trip.scheduledEnd) : null;
+  const rawDuration = rawStart && rawEnd
+    ? rawEnd.getTime() - rawStart.getTime()
+    : NaN;
+
+  if (codedStart) {
+    const duration = Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : 60 * 60 * 1000;
+    return { start: codedStart, end: new Date(codedStart.getTime() + duration) };
+  }
+
+  return {
+    start: rawStart && !Number.isNaN(rawStart.getTime()) ? rawStart : null,
+    end: rawEnd && !Number.isNaN(rawEnd.getTime()) ? rawEnd : rawStart,
+  };
+};
+
+const formatAssignedTripTime = (trip, language) => {
   const formatTime = (value) => {
     if (!value) return '';
     const date = new Date(value);
@@ -24,6 +58,7 @@ const formatAssignedTripTime = (start, end, language) => {
     });
   };
 
+  const { start, end } = getAssignedTripDates(trip);
   const startTime = formatTime(start);
   const endTime = formatTime(end);
   if (!startTime) return '';
@@ -38,10 +73,8 @@ const getVietnamDate = (value = new Date()) => new Intl.DateTimeFormat('en-CA', 
 }).format(value);
 
 const isTripTodayAndUpcoming = (trip, now = new Date()) => {
-  if (!trip?.scheduledStart) return false;
-  const scheduledStart = new Date(trip.scheduledStart);
-  const scheduledEnd = new Date(trip.scheduledEnd || trip.scheduledStart);
-  if (Number.isNaN(scheduledStart.getTime()) || Number.isNaN(scheduledEnd.getTime())) return false;
+  const { start: scheduledStart, end: scheduledEnd } = getAssignedTripDates(trip);
+  if (!scheduledStart || !scheduledEnd) return false;
 
   return getVietnamDate(scheduledStart) === getVietnamDate(now) && scheduledEnd > now;
 };
@@ -222,7 +255,7 @@ const CreateWalkInTicketPage = () => {
             <select className={inputClass} value={form.tripId} onChange={(event) => selectTrip(event.target.value)} disabled={loadingTrips}>
               <option value="">{loadingTrips ? t.loading : t.chooseTrip}</option>
               {assignments.map((item) => {
-                const assignedTime = formatAssignedTripTime(item.scheduledStart, item.scheduledEnd, language);
+                const assignedTime = formatAssignedTripTime(item, language);
                 return (
                   <option key={item.id} value={item.tripId} disabled={item.capacity?.isFull}>
                     {assignedTime ? `${assignedTime} · ` : ''}{item.tripCode} · {item.route?.routeNumber} · {item.route?.origin} → {item.route?.destination} · {item.capacity?.isFull ? 'HẾT CHỖ 25/25' : `Còn ${item.capacity?.remainingSeats ?? 25}/25 chỗ`}
