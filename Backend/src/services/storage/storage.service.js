@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import path from 'path';
+import fs from 'fs/promises';
 
 import { CustomError } from '../../middleware/errorHandler.js';
 import { HTTP_STATUS } from '../../constants/index.js';
@@ -8,6 +9,7 @@ import logger from '../../utils/logger.js';
 import CloudinaryStorage from './cloudinary.storage.js';
 
 const PROVIDER = 'cloudinary';
+const LOCAL_PROVIDER = 'local';
 
 const folderBySupportType = {
   COMPLAINT: 'busdn/complaints',
@@ -39,6 +41,28 @@ const normalizeUploadResult = (file, result) => ({
   uploadedAt: new Date(),
 });
 
+const saveLocalUpload = async (file, options = {}) => {
+  const extension = getExtension(file) || '.bin';
+  const fileName = `${options.publicId || buildPublicId(options.prefix || 'asset')}${extension}`
+    .replace(/[^a-zA-Z0-9._-]/g, '-');
+  await fs.mkdir(config.paths.uploads, { recursive: true });
+  await fs.writeFile(path.join(config.paths.uploads, fileName), file.buffer);
+
+  return {
+    provider: LOCAL_PROVIDER,
+    publicId: fileName,
+    url: `/uploads/${fileName}`,
+    secureUrl: `/uploads/${fileName}`,
+    resourceType: String(file.mimetype || '').startsWith('image/') ? 'image' : 'raw',
+    originalName: getOriginalName(file),
+    fileName,
+    filename: fileName,
+    mimeType: file.mimetype || file.type || '',
+    size: file.size || file.buffer.length || 0,
+    uploadedAt: new Date(),
+  };
+};
+
 export class StorageService {
   static async upload(file, options = {}) {
     if (!file?.buffer) {
@@ -62,6 +86,14 @@ export class StorageService {
         name: error.name,
         folder: options.folder,
       });
+
+      if (config.nodeEnv === 'development') {
+        logger.warn('Using local upload storage because Cloudinary is unavailable', {
+          originalName: getOriginalName(file),
+          folder: options.folder,
+        });
+        return saveLocalUpload(file, options);
+      }
       throw new CustomError('File upload failed', HTTP_STATUS.SERVICE_UNAVAILABLE);
     }
   }
@@ -126,6 +158,20 @@ export class StorageService {
   }
 
   static async cleanupUploads(uploads = []) {
+    await Promise.all(
+      uploads
+        .filter((upload) => upload?.provider === LOCAL_PROVIDER && upload.publicId)
+        .map(async (upload) => {
+          const fileName = path.basename(String(upload.publicId));
+          try {
+            await fs.unlink(path.join(config.paths.uploads, fileName));
+          } catch (error) {
+            if (error?.code !== 'ENOENT') {
+              logger.error('Local upload cleanup failed', { message: error.message, fileName });
+            }
+          }
+        })
+    );
     await Promise.all(
       uploads
         .filter((upload) => upload?.provider === PROVIDER && upload.publicId)

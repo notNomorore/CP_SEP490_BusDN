@@ -88,14 +88,39 @@ const addMinutes = (value, minutes) => {
   return date;
 };
 
+const VIETNAM_UTC_OFFSET_HOURS = 7;
+const operatingDateToken = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date).reduce((result, part) => {
+    result[part.type] = part.value;
+    return result;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
+
 const buildDateTime = (serviceDate, timeValue) => {
   if (!serviceDate || !/^\d{2}:\d{2}$/.test(String(timeValue || ''))) {
     return null;
   }
   const [hours, minutes] = String(timeValue).split(':').map(Number);
-  const date = new Date(serviceDate);
-  date.setHours(hours, minutes, 0, 0);
-  return date;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(operatingDateToken(serviceDate));
+  if (!match) return null;
+  const [, year, month, day] = match;
+  return new Date(Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    hours - VIETNAM_UTC_OFFSET_HOURS,
+    minutes,
+    0,
+    0
+  ));
 };
 
 const buildScheduleEndTime = (serviceDate, departureTime, expectedArrivalTime) => {

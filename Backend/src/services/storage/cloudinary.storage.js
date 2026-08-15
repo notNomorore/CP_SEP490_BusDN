@@ -1,5 +1,4 @@
 import cloudinary from '../../config/cloudinary.js';
-import { config } from '../../config/environment.js';
 
 export class CloudinaryStorage {
   static uploadBuffer(file, options = {}) {
@@ -9,7 +8,6 @@ export class CloudinaryStorage {
           folder: options.folder,
           public_id: options.publicId,
           resource_type: options.resourceType || 'auto',
-          upload_preset: config.cloudinary.uploadPreset,
           overwrite: false,
         },
         (error, result) => {

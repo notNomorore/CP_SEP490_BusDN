@@ -57,7 +57,12 @@ export const formatTime = (value?: string | null) => {
   if (!value) return 'N/A';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit' }).format(date);
+  return new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
 };
 
 export const formatDate = (value?: string | null) => {
@@ -93,13 +98,6 @@ const parseTripCodeSchedule = (tripCode?: string | null) => {
   };
 };
 
-const formatUtcClock = (value?: string | null) => {
-  if (!value) return 'N/A';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;
-};
-
 export const getTripServiceDateLabel = (trip?: AssignedTrip | null) => {
   const parsed = parseTripCodeSchedule(trip?.tripCode);
   return formatDate(parsed?.date || trip?.scheduledStart);
@@ -115,13 +113,32 @@ export const getTripDepartureTimeLabel = (trip?: AssignedTrip | null) => {
     return formatTime(trip.scheduledStart);
   }
   const parsed = parseTripCodeSchedule(trip?.tripCode);
-  return parsed?.time || formatUtcClock(trip?.scheduledStart) || formatTime(trip?.scheduledStart);
+  return parsed?.time || formatTime(trip?.scheduledStart);
 };
 
 export const getTripArrivalTimeLabel = (trip?: AssignedTrip | null) => (
   (trip?.incidentDelayMinutes || trip?.propagatedDelayMinutes)
     ? formatTime(trip?.scheduledEnd)
-    : parseTripCodeSchedule(trip?.tripCode) ? formatUtcClock(trip?.scheduledEnd) : formatTime(trip?.scheduledEnd)
+    : formatTime(trip?.scheduledEnd)
+);
+
+const differenceInMinutes = (first?: string | null, second?: string | null) => {
+  if (!first || !second) return 0;
+  const firstTime = new Date(first).getTime();
+  const secondTime = new Date(second).getTime();
+  if (!Number.isFinite(firstTime) || !Number.isFinite(secondTime)) return 0;
+  return Math.max(0, Math.round((secondTime - firstTime) / 60000));
+};
+
+export const getTripScheduleAdjustmentMinutes = (trip?: AssignedTrip | null) => Math.max(
+  Number(trip?.incidentDelayMinutes) || 0,
+  Number(trip?.propagatedDelayMinutes) || 0,
+  differenceInMinutes(trip?.originalScheduledStart, trip?.scheduledStart),
+  differenceInMinutes(trip?.originalScheduledEnd, trip?.scheduledEnd),
+);
+
+export const hasTripScheduleAdjustment = (trip?: AssignedTrip | null) => (
+  getTripScheduleAdjustmentMinutes(trip) > 0
 );
 
 export const getTripPlannedStartDate = (trip?: AssignedTrip | null) => {
@@ -227,6 +244,26 @@ export const isTripHistory = (trip: AssignedTrip) => {
 
 export const isTripCompleted = (trip: AssignedTrip) => Boolean(trip.actualEndAt)
   || ['COMPLETED', 'DONE'].includes(getTripStatus(trip));
+
+export type TripWorkflowStep = 'ACCEPTANCE' | 'INSPECTION' | 'LIFECYCLE' | 'COMPLETED';
+
+export const isTripRunning = (trip: AssignedTrip) => Boolean(trip.actualStartAt && !trip.actualEndAt)
+  || ['IN_PROGRESS', 'ACTIVE', 'DELAYED', 'INCIDENT'].includes(String(getTripStatus(trip)).toUpperCase());
+
+export const getTripWorkflowStep = (trip: AssignedTrip): TripWorkflowStep => {
+  if (isTripCompleted(trip)) return 'COMPLETED';
+  if (isTripRunning(trip) || String(trip.inspection?.status || '').toUpperCase() === 'READY') {
+    return 'LIFECYCLE';
+  }
+
+  const acceptanceStatus = String(trip.acceptanceStatus || '').toUpperCase();
+  const inspectionStatus = String(trip.inspection?.status || '').toUpperCase();
+  if (acceptanceStatus === 'ACCEPTED' || ['IN_PROGRESS', 'ISSUE_REPORTED'].includes(inspectionStatus)) {
+    return 'INSPECTION';
+  }
+
+  return 'ACCEPTANCE';
+};
 
 export const isTripDelayed = (trip: AssignedTrip) => Boolean(
   Number(trip.incidentDelayMinutes) > 0

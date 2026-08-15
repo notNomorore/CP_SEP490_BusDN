@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, type Href } from 'expo-router';
+import { router, type Href, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,7 +14,7 @@ import { useAuthStore } from '@/store/auth.store';
 import type { ShiftRevenue } from '@/types/busAssistant';
 import type { AssignedTrip, ShiftSchedule } from '@/types/scheduleOperations';
 import { isDriverAssistantRole, normalizeRole } from '@/utils/roleNavigation';
-import { getTodayRange, getTripDepartureTimeLabel, getTripStatus, getTripVehicleLabel, isTripCompleted, isTripDeparturePassed, isTripToday } from '@/utils/scheduleOperations';
+import { getTodayRange, getTripArrivalTimeLabel, getTripDepartureTimeLabel, getTripScheduleAdjustmentMinutes, getTripStatus, getTripVehicleLabel, getTripWorkflowStep, hasTripScheduleAdjustment, isTripCompleted, isTripDeparturePassed, isTripToday } from '@/utils/scheduleOperations';
 import { getErrorMessage, getErrorStatusCode, isPermissionError } from '@/utils/validation';
 
 const assignedTripsRoute = '/driver-assistant/assigned-trips' as Href;
@@ -148,8 +148,18 @@ export default function DriverBusAssistantHomeScreen() {
     }
   }, [isAuthenticated, isHydrated, loadDashboard, user?.role]);
 
+  useFocusEffect(useCallback(() => {
+    if (isHydrated && isAuthenticated && isDriverAssistantRole(user?.role)) {
+      void loadDashboard();
+    }
+  }, [isAuthenticated, isHydrated, loadDashboard, user?.role]));
+
   const todaysTrips = useMemo(() => trips.filter(isTripToday), [trips]);
-  const nextTrip = todaysTrips.find((trip) => !isTripCompleted(trip)) || todaysTrips[0] || null;
+  const nextTrip = todaysTrips.find((trip) => getTripWorkflowStep(trip) === 'LIFECYCLE')
+    || todaysTrips.find((trip) => getTripWorkflowStep(trip) === 'INSPECTION')
+    || todaysTrips.find((trip) => !isTripCompleted(trip))
+    || todaysTrips[0]
+    || null;
   const upcomingShift = shifts[0] || null;
   const displayName = user?.fullName || (isDriver ? t.common.driver : t.common.busAssistant);
   const homeDate = useMemo(() => (
@@ -172,6 +182,19 @@ export default function DriverBusAssistantHomeScreen() {
       pathname: lifecycleRoute,
       params: { trip: JSON.stringify(trip), assignmentId: trip.id },
     } as unknown as Href);
+  };
+
+  const openCurrentTripStep = (trip: AssignedTrip) => {
+    const step = getTripWorkflowStep(trip);
+    if (step === 'LIFECYCLE') {
+      openLifecycle(trip);
+      return;
+    }
+    if (step === 'INSPECTION') {
+      openInspection(trip);
+      return;
+    }
+    router.push({ pathname: tripDetailRoute, params: { trip: JSON.stringify(trip), assignmentId: trip.id } } as unknown as Href);
   };
 
   const acceptTrip = async (trip: AssignedTrip) => {
@@ -237,7 +260,7 @@ export default function DriverBusAssistantHomeScreen() {
             {nextTrip ? (
               <Pressable
                 accessibilityRole="button"
-                onPress={() => router.push({ pathname: '/driver-assistant/trip-detail', params: { trip: JSON.stringify(nextTrip), assignmentId: nextTrip.id } } as unknown as Href)}
+                onPress={() => openCurrentTripStep(nextTrip)}
                 style={({ pressed }) => [styles.nextRow, pressed && styles.pressed]}
               >
                 <View style={styles.nextIcon}>
@@ -247,6 +270,11 @@ export default function DriverBusAssistantHomeScreen() {
                   <Text style={styles.routeBadge}>{nextTrip.route?.routeNumber || nextTrip.tripCode || t.nav.trips}</Text>
                   <Text style={styles.nextTitle}>{nextTrip.route?.origin || t.detail.origin} - {nextTrip.route?.destination || t.detail.destination}</Text>
                   <Text style={styles.nextMeta}>{getTripDepartureTimeLabel(nextTrip)} - {getTripVehicleLabel(nextTrip)} - {formatDriverStatus(getTripStatus(nextTrip), t)}</Text>
+                  {hasTripScheduleAdjustment(nextTrip) ? (
+                    <Text style={styles.nextDelay}>
+                      Giờ mới {getTripDepartureTimeLabel(nextTrip)} - {getTripArrivalTimeLabel(nextTrip)} · điều chỉnh {getTripScheduleAdjustmentMinutes(nextTrip)} phút
+                    </Text>
+                  ) : null}
                 </View>
                 {isDriver && canAcceptTrip(nextTrip) ? (
                   <Pressable
@@ -268,12 +296,12 @@ export default function DriverBusAssistantHomeScreen() {
                       <Text style={styles.startButtonText}>{t.home.acceptTrip}</Text>
                     )}
                   </Pressable>
-                ) : isDriver && getAcceptanceStatus(nextTrip) === 'ACCEPTED' && !isTripCompleted(nextTrip) ? (
+                ) : isDriver && ['INSPECTION', 'LIFECYCLE'].includes(getTripWorkflowStep(nextTrip)) && !isTripCompleted(nextTrip) ? (
                   <Pressable
                     accessibilityRole="button"
                     onPress={(event) => {
                       event.stopPropagation();
-                      if (nextTrip.inspection?.status === 'READY') {
+                      if (getTripWorkflowStep(nextTrip) === 'LIFECYCLE') {
                         openLifecycle(nextTrip);
                         return;
                       }
@@ -282,7 +310,7 @@ export default function DriverBusAssistantHomeScreen() {
                     style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}
                   >
                     <Text style={styles.startButtonText}>
-                      {nextTrip.inspection?.status === 'READY' ? t.home.startTrip : t.home.inspectVehicle}
+                      {getTripWorkflowStep(nextTrip) === 'LIFECYCLE' ? 'Tiếp tục chuyến' : t.home.inspectVehicle}
                     </Text>
                   </Pressable>
                 ) : canAcceptTrip(nextTrip) ? (
@@ -389,6 +417,7 @@ const styles = StyleSheet.create({
   routeBadge: { color: colors.accent, fontSize: 11, fontWeight: '900' },
   nextTitle: { marginTop: 3, color: colors.text, fontSize: 15, fontWeight: '900' },
   nextMeta: { marginTop: 3, color: colors.muted, fontSize: 12, fontWeight: '700' },
+  nextDelay: { marginTop: 6, color: '#805500', fontSize: 11, lineHeight: 16, fontWeight: '800' },
   startButton: { minWidth: 72, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: colors.accent, paddingHorizontal: 14 },
   disabledButton: { opacity: 0.55 },
   startButtonText: { color: colors.white, fontSize: 12, fontWeight: '900' },

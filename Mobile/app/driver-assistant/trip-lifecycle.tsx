@@ -18,11 +18,15 @@ import { goBackOrReplace } from '@/utils/navigation';
 import {
   formatCoordinate,
   formatTime,
+  getTripArrivalTimeLabel,
+  getTripDepartureTimeLabel,
+  getTripScheduleAdjustmentMinutes,
   getRoutePathPoints,
   getRouteStops,
   getTripStatus,
   getVehicleLabel,
   hasVehicleReplacement,
+  hasTripScheduleAdjustment,
 } from '@/utils/scheduleOperations';
 import { getErrorMessage } from '@/utils/validation';
 
@@ -932,7 +936,7 @@ export default function TripLifecycleScreen() {
       setIncidentDescription('');
       setEvidenceFiles([]);
       setIncidentType(null);
-      Alert.alert(t.lifecycle.reportIncident, t.lifecycle.incidentHint);
+      Alert.alert(t.lifecycle.reportIncident, t.lifecycle.incidentSubmitted);
     } catch (error) {
       Alert.alert(t.lifecycle.reportIncident, getErrorMessage(error, t.lifecycle.reportIncident));
     } finally {
@@ -955,6 +959,19 @@ export default function TripLifecycleScreen() {
             <Text style={styles.gpsPillText}>{formatDriverStatus(gpsStatus, t)}</Text>
           </View>
         </View>
+
+        {hasTripScheduleAdjustment(trip) ? (
+          <View style={styles.delayNotice}>
+            <MaterialCommunityIcons color="#9a6700" name="clock-alert-outline" size={20} />
+            <View style={styles.delayTextWrap}>
+              <Text style={styles.delayTitle}>Giờ đã điều chỉnh do sự cố</Text>
+              <Text style={styles.delayText}>
+                Giờ gốc {formatTime(trip?.originalScheduledStart)} - {formatTime(trip?.originalScheduledEnd)}; giờ mới {getTripDepartureTimeLabel(trip)} - {getTripArrivalTimeLabel(trip)}.{`\n`}
+                Trễ trực tiếp {trip?.incidentDelayMinutes || 0} phút; dời lịch kế tiếp {trip?.propagatedDelayMinutes || 0} phút; tổng điều chỉnh {getTripScheduleAdjustmentMinutes(trip)} phút.
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         <View style={[styles.navigationCard, { height: navigationHeight }]}>
           <NavigationMap
@@ -1323,6 +1340,10 @@ const styles = StyleSheet.create({
   sheetHandleTouch: { alignItems: 'center', justifyContent: 'center', minHeight: 30, marginBottom: 2 },
   sheetHandle: { width: 48, height: 5, borderRadius: 999, backgroundColor: colors.outline },
   routeTitle: { color: colors.primary, fontSize: 15, fontWeight: '900' },
+  delayNotice: { flexDirection: 'row', gap: 10, borderRadius: 16, borderWidth: 1, borderColor: '#f1d58a', backgroundColor: '#fff8df', padding: 12 },
+  delayTextWrap: { flex: 1, gap: 3 },
+  delayTitle: { color: '#805500', fontSize: 13, fontWeight: '900' },
+  delayText: { color: '#725a24', fontSize: 12, lineHeight: 18, fontWeight: '700' },
   replacementNotice: {
     flexDirection: 'row',
     alignItems: 'center',

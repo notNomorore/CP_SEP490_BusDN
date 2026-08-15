@@ -241,9 +241,19 @@ const addDays = (date, days) => {
 };
 
 const withTime = (date, hours, minutes) => {
-  const value = startOfDay(date);
-  value.setHours(hours, minutes, 0, 0);
-  return value;
+  const dateToken = operatingDateToken(date);
+  const match = DATE_ONLY_PATTERN.exec(dateToken);
+  if (!match) return null;
+  const [, year, month, day] = match;
+  return new Date(Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hours) - VIETNAM_UTC_OFFSET_HOURS,
+    Number(minutes),
+    0,
+    0
+  ));
 };
 
 const parseDate = (value, fallback) => {
@@ -436,11 +446,8 @@ const normalizeStartGpsPayload = (payload = {}, startedAt = new Date()) => {
 };
 
 const scheduleDateTime = (serviceDate, clock, fallback) => {
-  const date = new Date(serviceDate || fallback || Date.now());
-  const [hours, minutes] = String(clock || '').split(':').map(Number);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return new Date(fallback || date);
-  date.setHours(hours, minutes, 0, 0);
-  return date;
+  return buildTimeOnServiceDate(serviceDate || fallback, clock)
+    || new Date(fallback || serviceDate || Date.now());
 };
 
 const syncLiveFleetGps = async ({ schedule, gpsPayload, driverId, io, incidentType = '', estimatedDelayMinutes = 0 }) => {
@@ -1324,7 +1331,7 @@ export class ScheduleOperationsService {
         });
       }
     } else {
-      const adminIncidentReport = await this.syncToAdminIncidentReport({
+      await this.syncToAdminIncidentReport({
         sourceType: 'OPERATION_TRIP_REJECTION',
         sourceId: incident._id,
         reporterId: userId,
@@ -2227,7 +2234,7 @@ export class ScheduleOperationsService {
         FOUND_ITEM: 'Báo đồ tìm thấy',
       }[type];
 
-      await this.syncToAdminIncidentReport({
+      const adminIncidentReport = await this.syncToAdminIncidentReport({
         sourceType: `OPERATION_${type}`,
         sourceId: incident._id,
         reporterId: userId,
