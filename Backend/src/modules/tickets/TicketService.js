@@ -334,8 +334,8 @@ const deriveStoredPassengerType = (priorityType) => {
   return priorityType ? 'PRIORITY' : 'STANDARD';
 };
 
-const SCHEDULE_STATUSES_ALLOWED_FOR_PURCHASE = ['PLANNED', 'ASSIGNED', 'SCHEDULED', 'BOARDING'];
-const SCHEDULE_STATUSES_BLOCKED_FOR_PURCHASE = ['COMPLETED', 'DEPARTED', 'CANCELLED', 'IN_PROGRESS'];
+const SCHEDULE_STATUSES_ALLOWED_FOR_PURCHASE = ['PLANNED', 'ASSIGNED', 'SCHEDULED', 'BOARDING', 'IN_PROGRESS', 'DEPARTED', 'ACTIVE'];
+const SCHEDULE_STATUSES_BLOCKED_FOR_PURCHASE = ['COMPLETED', 'CANCELLED'];
 
 const getVietnamDateString = (date = new Date()) => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Ho_Chi_Minh',
@@ -465,7 +465,16 @@ export class TicketService {
 
     const purchasable = schedules.filter((schedule) => {
       if (!isScheduleStatusPurchasable(schedule.status)) return false;
-      return serviceDateText > todayText || String(schedule.departureTime || '') >= serverTime;
+      if (serviceDateText > todayText) return true;
+
+      const departureDate = buildVietnamDepartureDate(serviceDateText, schedule.departureTime);
+      if (!departureDate) return false;
+      const tripEnd = getScheduledTripEndDate(
+        schedule,
+        departureDate,
+        route.estimatedDurationMinutes || 60
+      );
+      return tripEnd > now;
     });
 
     const schedulesWithCapacity = await Promise.all(purchasable.map(async (schedule) => ({
@@ -495,15 +504,14 @@ export class TicketService {
     }
 
     const todayText = getVietnamDateString();
-    const serverTime = getVietnamTimeString();
     const departureDate = buildVietnamDepartureDate(serviceDateText, departureTime);
     if (!departureDate) {
       throw new CustomError('Ngay di hoac gio khoi hanh khong hop le', HTTP_STATUS.BAD_REQUEST);
     }
 
-    if (serviceDateText < todayText || (serviceDateText === todayText && String(departureTime || '') < serverTime)) {
+    if (serviceDateText < todayText) {
       throw new CustomError(
-        'Khong the mua ve cho chuyen xe da khoi hanh. Vui long chon chuyen hop le.',
+        'Khong the mua ve cho chuyen xe da ket thuc. Vui long chon chuyen hop le.',
         HTTP_STATUS.BAD_REQUEST
       );
     }
@@ -520,6 +528,18 @@ export class TicketService {
     if (!schedule || !isScheduleStatusPurchasable(schedule.status)) {
       throw new CustomError(
         'Chuyen xe da chon khong con mo ban ve. Vui long chon chuyen khac.',
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    const tripEnd = getScheduledTripEndDate(
+      schedule,
+      departureDate,
+      route.estimatedDurationMinutes || 60
+    );
+    if (tripEnd <= new Date()) {
+      throw new CustomError(
+        'Chuyen xe da ket thuc. Vui long chon chuyen khac.',
         HTTP_STATUS.BAD_REQUEST
       );
     }
