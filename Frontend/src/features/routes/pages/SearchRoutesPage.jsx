@@ -36,22 +36,43 @@ const DEFAULT_CENTER = {
   longitude: DA_NANG_CENTER[1],
 };
 const DA_NANG_CENTRAL = { name: 'Da Nang Central', latitude: 16.0667, longitude: 108.1690 };
-const ROUTE_PREFERENCES = [
-  { id: 'fastest', label: 'Fastest Route', icon: 'bolt' },
-  { id: 'shortest', label: 'Shortest', icon: 'straighten' },
-  { id: 'lowest-cost', label: 'Lowest Cost', icon: 'payments' },
-  { id: 'least-traffic', label: 'Least Traffic', icon: 'traffic' },
-];
 
 const formatDuration = (minutes) => {
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
+  const normalizedMinutes = Math.max(Math.round(Number(minutes) || 0), 0);
+  const hours = Math.floor(normalizedMinutes / 60);
+  const remainder = normalizedMinutes % 60;
 
   if (!hours) {
     return `${remainder} min`;
   }
 
   return `${hours}h ${remainder}m`;
+};
+
+const formatVietnameseDuration = (minutes) => {
+  const normalizedMinutes = Math.max(Math.round(Number(minutes) || 0), 0);
+  const hours = Math.floor(normalizedMinutes / 60);
+  const remainder = normalizedMinutes % 60;
+
+  if (!hours) {
+    return `${remainder} phút`;
+  }
+
+  return remainder ? `${hours} giờ ${remainder} phút` : `${hours} giờ`;
+};
+
+const formatMeters = (meters) => {
+  const value = Math.max(Math.round(Number(meters) || 0), 0);
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)} km`;
+  }
+
+  return `${value} m`;
+};
+
+const formatTimeFromOffset = (offsetMinutes = 0, baseDate = new Date()) => {
+  const nextTime = new Date(baseDate.getTime() + Math.round(Number(offsetMinutes) || 0) * 60 * 1000);
+  return nextTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 };
 
 const formatFare = (fare) => new Intl.NumberFormat('vi-VN', {
@@ -124,25 +145,100 @@ const normalizeStopLocation = (stop) => {
   return stop;
 };
 
-const createBusIcon = (isSelected) => L.divIcon({
-  className: '',
-  iconAnchor: [18, 46],
-  popupAnchor: [0, -44],
-  html: `
-    <div class="relative flex flex-col items-center">
-      <div class="flex h-9 w-9 items-center justify-center rounded-full border-[3px] bg-white shadow-lg ${
-        isSelected
-          ? 'border-emerald-700 text-emerald-700 ring-[6px] ring-emerald-300/55'
-          : 'border-emerald-500 text-emerald-600 ring-2 ring-white/80'
-      }">
-        <span class="material-symbols-outlined text-[20px]">directions_bus</span>
-      </div>
-      <div class="h-0 w-0 border-x-[7px] border-x-transparent ${
-        isSelected ? 'border-t-emerald-700' : 'border-t-emerald-500'
-      } border-t-[10px]"></div>
-    </div>
-  `,
+const stationToLocation = (station) => ({
+  latitude: Number(station?.latitude),
+  longitude: Number(station?.longitude),
+  name: station?.stationName || station?.stopName || station?.address || '',
 });
+
+const geometryToLatLngs = (geometry) => {
+  if (!geometry?.coordinates?.length) {
+    return [];
+  }
+
+  if (geometry.type === 'LineString') {
+    return geometry.coordinates
+      .map(([longitude, latitude]) => ({ latitude: Number(latitude), longitude: Number(longitude) }))
+      .filter(isValidLocation)
+      .map(toLatLng);
+  }
+
+  return [];
+};
+
+const getLegGeometryPositions = (leg) => geometryToLatLngs(leg?.geometry);
+
+const getItineraryBoundsPositions = (itinerary) => {
+  if (!itinerary?.legs?.length) {
+    return [];
+  }
+
+  const geometryPositions = itinerary.legs
+    .flatMap((leg) => getLegGeometryPositions(leg).map(([latitude, longitude]) => ({ latitude, longitude })));
+
+  const stopPositions = itinerary.legs.flatMap((leg) => {
+    if (leg.type === 'BUS') {
+      return [stationToLocation(leg.fromStation), stationToLocation(leg.toStation)];
+    }
+
+    if (leg.type === 'WALK') {
+      return [stationToLocation(leg.from), stationToLocation(leg.to)];
+    }
+
+    if (leg.type === 'TRANSFER') {
+      return [stationToLocation(leg.fromStation), stationToLocation(leg.toStation)];
+    }
+
+    return [];
+  }).filter(isValidLocation);
+
+  return [
+    stationToLocation(itinerary.mapOrigin),
+    ...geometryPositions,
+    ...stopPositions,
+    stationToLocation(itinerary.mapDestination),
+  ].filter(isValidLocation);
+};
+
+const getItineraryStopMarkers = (itinerary) => {
+  if (!itinerary?.legs?.length) {
+    return [];
+  }
+
+  const markers = [
+    {
+      key: 'origin',
+      type: 'ORIGIN',
+      label: 'Điểm đón',
+      point: stationToLocation(itinerary.mapOrigin),
+    },
+    {
+      key: 'destination',
+      type: 'DESTINATION',
+      label: 'Điểm đến',
+      point: stationToLocation(itinerary.mapDestination),
+    },
+  ];
+
+  itinerary.legs.forEach((leg, index) => {
+    if (leg.type === 'BUS') {
+      markers.push({
+        key: `board-${index}-${leg.fromStation?.stationId}`,
+        type: 'BOARD',
+        label: `Lên xe ${leg.routeCode}`,
+        point: stationToLocation(leg.fromStation),
+      });
+      markers.push({
+        key: `alight-${index}-${leg.toStation?.stationId}`,
+        type: 'ALIGHT',
+        label: `Xuống xe ${leg.routeCode}`,
+        point: stationToLocation(leg.toStation),
+      });
+    }
+  });
+
+  return markers.filter((marker) => isValidLocation(marker.point));
+};
 
 const currentLocationIcon = L.divIcon({
   className: '',
@@ -187,10 +283,21 @@ const RouteLabelIcon = (routeNumber) => L.divIcon({
   html: `<span class="rounded-full bg-emerald-700 px-2 py-0.5 text-[11px] font-bold text-white shadow">${routeNumber}</span>`,
 });
 
-const MapAutoFocus = ({ selectedRoute, currentLocation }) => {
+const MapAutoFocus = ({ selectedRoute, selectedItinerary, currentLocation }) => {
   const map = useMap();
 
   useEffect(() => {
+    const itineraryPath = getItineraryBoundsPositions(selectedItinerary);
+    if (itineraryPath.length > 1) {
+      map.fitBounds(itineraryPath.map(toLatLng), {
+        animate: true,
+        maxZoom: ROUTE_FIT_MAX_ZOOM,
+        paddingTopLeft: [60, 60],
+        paddingBottomRight: [400, 60],
+      });
+      return;
+    }
+
     const routePath = selectedRoute?.pathPoints?.length
       ? selectedRoute.pathPoints
       : selectedRoute?.stops || [];
@@ -217,13 +324,14 @@ const MapAutoFocus = ({ selectedRoute, currentLocation }) => {
     }
 
     map.setView(toLatLng(DEFAULT_CENTER), INITIAL_MAP_ZOOM, { animate: true });
-  }, [currentLocation, map, selectedRoute]);
+  }, [currentLocation, map, selectedItinerary, selectedRoute]);
 
   return null;
 };
 
 const MapCanvas = ({
   selectedRoute,
+  selectedItinerary,
   currentLocation,
   liveBusData,
   liveError,
@@ -231,10 +339,11 @@ const MapCanvas = ({
   onDismissArrivalAlert,
   onUseCurrentLocation,
 }) => {
+  const itineraryMarkers = getItineraryStopMarkers(selectedItinerary);
   const routePath = selectedRoute?.pathPoints?.length
     ? selectedRoute.pathPoints
     : selectedRoute?.stops || [];
-  const routePositions = routePath.filter(isValidLocation).map(toLatLng);
+  const routePositions = selectedItinerary ? [] : routePath.filter(isValidLocation).map(toLatLng);
   const stops = (selectedRoute?.stops || [])
     .map(normalizeStopLocation)
     .filter(isValidLocation);
@@ -260,7 +369,7 @@ const MapCanvas = ({
           url={MAP_TILE_URL}
         />
 
-        <MapAutoFocus selectedRoute={selectedRoute} currentLocation={currentLocation} />
+        <MapAutoFocus selectedRoute={selectedRoute} selectedItinerary={selectedItinerary} currentLocation={currentLocation} />
         <ZoomControl position="bottomright" />
 
         {routePositions.length > 1 && (
@@ -306,7 +415,61 @@ const MapCanvas = ({
           </>
         )}
 
-        {stops.map((stop, index) => {
+        {selectedItinerary && (selectedItinerary.legs || []).map((leg, index) => {
+          const legPositions = getLegGeometryPositions(leg);
+
+          if (legPositions.length < 2) {
+            return null;
+          }
+
+          if (leg.type === 'BUS') {
+            const color = leg.routeColor || '#047857';
+
+            return (
+              <React.Fragment key={`bus-geometry-${index}-${leg.routeId}`}>
+                <Polyline
+                  positions={legPositions}
+                  pathOptions={{
+                    color: '#0f172a',
+                    weight: 12,
+                    opacity: 0.78,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  }}
+                />
+                <Polyline
+                  positions={legPositions}
+                  pathOptions={{
+                    color,
+                    weight: 7,
+                    opacity: 0.98,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  }}
+                />
+              </React.Fragment>
+            );
+          }
+
+          const isTransfer = leg.type === 'TRANSFER';
+
+          return (
+            <Polyline
+              key={`walk-geometry-${index}`}
+              positions={legPositions}
+              pathOptions={{
+                color: isTransfer ? '#f59e0b' : '#2563eb',
+                weight: isTransfer ? 5 : 4,
+                opacity: 0.9,
+                dashArray: isTransfer ? '4 7' : '2 8',
+                lineCap: 'round',
+                lineJoin: 'round',
+              }}
+            />
+          );
+        })}
+
+        {!selectedItinerary && stops.map((stop, index) => {
           const isOrigin = index === 0;
           const isEndpoint = isOrigin || index === stops.length - 1;
 
@@ -332,6 +495,33 @@ const MapCanvas = ({
                 {stop.name}
               </Tooltip>
             </CircleMarker>
+          );
+        })}
+
+        {selectedItinerary && itineraryMarkers.map((marker) => {
+          const markerStyle = {
+            ORIGIN: { fillColor: '#0ea5e9', radius: 10, label: 'Điểm đón' },
+            DESTINATION: { fillColor: '#ef4444', radius: 10, label: 'Điểm đến' },
+            BOARD: { fillColor: '#10b981', radius: 7, label: marker.label },
+            ALIGHT: { fillColor: '#f97316', radius: 7, label: marker.label },
+          }[marker.type] || { fillColor: '#0f766e', radius: 6, label: marker.label };
+
+          return (
+          <CircleMarker
+            key={marker.key}
+            center={toLatLng(marker.point)}
+            radius={markerStyle.radius}
+            pathOptions={{
+              color: '#0f172a',
+              fillColor: markerStyle.fillColor,
+              fillOpacity: 1,
+              weight: 3,
+            }}
+          >
+            <Tooltip permanent={marker.type === 'ORIGIN' || marker.type === 'DESTINATION'} direction="top" offset={[0, -8]} opacity={0.98}>
+              {markerStyle.label}
+            </Tooltip>
+          </CircleMarker>
           );
         })}
 
@@ -363,23 +553,25 @@ const MapCanvas = ({
         ))}
       </MapContainer>
 
-      {!selectedRoute && (
+      {!selectedRoute && !selectedItinerary && (
         <div className="pointer-events-none absolute left-1/2 top-6 z-[1000] -translate-x-1/2 rounded-full border border-slate-200 bg-white/95 px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm backdrop-blur">
-          Select “View details” to display a route
+          Chọn “Xem chi tiết” để hiển thị lộ trình
         </div>
       )}
 
-      {selectedRoute && (
+      {(selectedRoute || selectedItinerary) && (
         <div className="pointer-events-none absolute left-5 top-5 z-[1000] rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
           <div className="flex items-center gap-2">
             <span className="rounded-full bg-emerald-600 px-2 py-1 text-xs font-black text-white">
-              {selectedRoute.routeNumber}
+              {selectedItinerary ? `${selectedItinerary.transferCount} đổi tuyến` : selectedRoute.routeNumber}
             </span>
-            <span className="text-sm font-black text-slate-900">Selected route</span>
+            <span className="text-sm font-black text-slate-900">{selectedItinerary ? 'Lộ trình đã chọn' : 'Selected route'}</span>
           </div>
           <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-600">
-            <span className="h-1.5 w-10 rounded-full bg-emerald-400 ring-2 ring-slate-900" />
-            Route path
+            <span className="h-1.5 w-10 rounded-full bg-emerald-500 ring-2 ring-slate-900" />
+            Xe buýt
+            <span className="ml-2 h-0 w-10 border-t-2 border-dashed border-blue-600" />
+            Đi bộ
           </div>
         </div>
       )}
@@ -1338,63 +1530,298 @@ const FavoriteStopsPanel = ({ favoriteStops, onRemove }) => (
   </section>
 );
 
-const PlannerResultCard = ({ result, isRecommended = false, isSelected = false, onSelect }) => (
-  <button
-    type="button"
-    onClick={onSelect}
-    className={`w-full rounded-lg border bg-white p-3 text-left shadow-sm transition hover:border-emerald-500 ${
-      isSelected || isRecommended ? 'border-emerald-600 ring-1 ring-emerald-600' : 'border-slate-200'
-    }`}
-  >
-    {isRecommended && (
-      <span className="-mt-5 mb-2 inline-flex rounded bg-slate-950 px-2 py-0.5 text-[10px] font-black uppercase text-white">
-        Recommended
-      </span>
-    )}
-    <div className="flex items-start justify-between gap-3">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-black text-white">
-            {result.route.routeNumber}
-          </span>
-          <h3 className="truncate text-sm font-black text-slate-950">{result.route.name}</h3>
-        </div>
-        <p className="mt-1 text-xs text-slate-500">
-          {formatDuration(result.estimatedDurationMinutes)} · {result.estimatedDistanceKm} km
-        </p>
-      </div>
-      <div className="shrink-0 text-right">
-        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-black uppercase text-emerald-700">
-          <span className="material-symbols-outlined text-[14px]">directions_bus</span>
-          Bus
-        </span>
-        <div className="mt-1 text-sm font-black text-slate-950">
-          {formatFare(result.estimatedFare || result.route.fare)}
-        </div>
-      </div>
-    </div>
-    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-      <div className="rounded bg-slate-50 px-2 py-1.5">
-        <div className="font-bold uppercase text-slate-400">Board</div>
-        <div className="truncate font-semibold text-slate-700">{result.startStop.name}</div>
-      </div>
-      <div className="rounded bg-slate-50 px-2 py-1.5">
-        <div className="font-bold uppercase text-slate-400">Get off</div>
-        <div className="truncate font-semibold text-slate-700">{result.endStop.name}</div>
-      </div>
-    </div>
-    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-      <div className="rounded bg-slate-50 px-2 py-1.5">
-        <div className="font-bold uppercase text-slate-400">Trip duration</div>
-        <div className="font-semibold text-slate-700">{formatDuration(result.estimatedDurationMinutes)}</div>
-      </div>
-      <div className="rounded bg-slate-50 px-2 py-1.5">
-        <div className="font-bold uppercase text-slate-400">Distance</div>
-        <div className="font-semibold text-slate-700">{result.estimatedDistanceKm} km</div>
-      </div>
-    </div>
-  </button>
+const getStationName = (station) => (
+  station?.stationName || station?.stopName || station?.address || ''
 );
+
+const getBusLegs = (itinerary) => (itinerary?.legs || []).filter((leg) => leg.type === 'BUS');
+
+const getDepartureTime = () => formatTimeFromOffset(0);
+
+const getArrivalTime = (itinerary) => formatTimeFromOffset(itinerary?.totalDurationMinutes || itinerary?.totalDuration || 0);
+
+const ItineraryResultCard = ({
+  itinerary,
+  isRecommended = false,
+  isSelected = false,
+  onPreview,
+  onOpenDetails,
+}) => {
+  const busLegs = getBusLegs(itinerary);
+  const routeCodes = busLegs.map((leg) => leg.routeCode).filter(Boolean);
+
+  return (
+    <article
+      className={`rounded-lg border bg-white p-3 shadow-sm transition ${
+        isSelected || isRecommended ? 'border-emerald-600 ring-1 ring-emerald-600' : 'border-slate-200'
+      }`}
+    >
+      <button type="button" onClick={onPreview} className="w-full text-left">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-black text-slate-950">
+              <span className="material-symbols-outlined text-[18px] text-slate-700">directions_bus</span>
+              {getDepartureTime()} - {getArrivalTime(itinerary)}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+              <span className="material-symbols-outlined text-[14px]">directions_walk</span>
+              {routeCodes.map((code) => (
+                <React.Fragment key={code}>
+                  <span className="text-slate-400">›</span>
+                  <span className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-black text-slate-950">
+                    {code}
+                  </span>
+                </React.Fragment>
+              ))}
+              <span className="text-slate-400">›</span>
+              <span className="material-symbols-outlined text-[14px]">directions_walk</span>
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <div className="text-sm font-black text-slate-950">
+              {formatVietnameseDuration(itinerary.totalDurationMinutes || itinerary.totalDuration)}
+            </div>
+            <div className="mt-1 text-[11px] font-semibold text-slate-500">
+              {itinerary.transferCount} đổi tuyến
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
+          <span className="inline-flex items-center gap-1">
+            <span className="material-symbols-outlined text-[15px]">directions_walk</span>
+            {formatMeters(itinerary.totalWalkingDistance)}
+          </span>
+          <span>·</span>
+          <span>Chờ {formatVietnameseDuration(itinerary.totalWaitingDuration)}</span>
+          {isRecommended && (
+            <>
+              <span>·</span>
+              <span className="font-black text-emerald-700">{itinerary.label || 'Nhanh nhất'}</span>
+            </>
+          )}
+        </div>
+      </button>
+
+      <button
+        type="button"
+        onClick={onOpenDetails}
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded bg-slate-950 px-3 py-2 text-xs font-black text-white hover:bg-emerald-700"
+      >
+        Xem chi tiết lộ trình
+        <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+      </button>
+    </article>
+  );
+};
+
+const ItineraryDetailsPanel = ({
+  itinerary,
+  originPlace,
+  destinationPlace,
+  onClose,
+}) => {
+  const startTime = new Date();
+  let accumulatedMinutes = 0;
+  const resolvePointName = (point) => {
+    if (point?.type === 'ORIGIN') {
+      return originPlace?.displayName || originPlace?.address || 'Điểm đón';
+    }
+
+    if (point?.type === 'DESTINATION') {
+      return destinationPlace?.displayName || destinationPlace?.address || 'Điểm đến';
+    }
+
+    return getStationName(point) || 'Vị trí';
+  };
+
+  const legTime = (leg) => {
+    const time = formatTimeFromOffset(accumulatedMinutes, startTime);
+    if (leg.type === 'WALK') {
+      accumulatedMinutes += (Number(leg.durationSeconds) || 0) / 60;
+    } else if (leg.type === 'WAIT') {
+      accumulatedMinutes += Number(leg.durationMinutes) || 0;
+    } else if (leg.type === 'BUS') {
+      accumulatedMinutes += Number(leg.durationMinutes) || 0;
+    } else if (leg.type === 'TRANSFER') {
+      accumulatedMinutes += (Number(leg.walkingDurationSeconds) || 0) / 60 + (Number(leg.transferPenaltyMinutes) || 0);
+    }
+    return time;
+  };
+
+  return (
+    <aside className="fixed bottom-0 right-0 top-[80px] z-[1200] flex w-[360px] max-w-[calc(100vw-24px)] flex-col border-l border-slate-200 bg-white shadow-2xl">
+      <div className="border-b border-slate-200 px-5 py-4">
+        <div className="flex items-start gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="mt-0.5 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Đóng chi tiết lộ trình"
+          >
+            <span className="material-symbols-outlined text-[21px]">arrow_back</span>
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-xs text-slate-600">từ {originPlace?.displayName || originPlace?.address || 'Điểm đón'}</div>
+            <div className="truncate text-xs text-slate-600">đến {destinationPlace?.displayName || destinationPlace?.address || 'Điểm đến'}</div>
+            <div className="mt-3 text-xl font-black text-slate-950">
+              {getDepartureTime()} - {getArrivalTime(itinerary)}
+              <span className="ml-1 text-base font-semibold text-slate-500">
+                ({formatVietnameseDuration(itinerary.totalDurationMinutes || itinerary.totalDuration)})
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+              <span className="material-symbols-outlined text-[14px]">directions_walk</span>
+              {getBusLegs(itinerary).map((leg) => (
+                <React.Fragment key={`${leg.routeId}-${leg.routeCode}-${leg.direction}`}>
+                  <span>›</span>
+                  <span className="rounded border border-slate-300 px-1.5 py-0.5 text-[11px] font-black text-slate-950">{leg.routeCode}</span>
+                </React.Fragment>
+              ))}
+              <span>›</span>
+              <span className="material-symbols-outlined text-[14px]">directions_walk</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="relative">
+          <div className="absolute left-[58px] top-2 bottom-2 w-0.5 bg-sky-300" />
+          <div className="space-y-4">
+            <div className="grid grid-cols-[46px_24px_1fr] gap-3">
+              <div className="text-xs font-semibold text-slate-700">{getDepartureTime()}</div>
+              <span className="relative z-10 mt-1 h-3 w-3 rounded-full border-2 border-slate-900 bg-white" />
+              <div className="font-black text-slate-950">{originPlace?.displayName || originPlace?.address || 'Điểm đón'}</div>
+            </div>
+
+            {(itinerary.legs || []).map((leg, index) => {
+              const time = legTime(leg);
+
+              if (leg.type === 'WAIT') {
+                return (
+                  <div key={`${leg.type}-${index}`} className="grid grid-cols-[46px_24px_1fr] gap-3">
+                    <div className="text-xs font-semibold text-slate-700">{time}</div>
+                    <span className="relative z-10 flex h-4 w-4 items-center justify-center rounded-full bg-white text-amber-600">
+                      <span className="material-symbols-outlined text-[15px]">schedule</span>
+                    </span>
+                    <div className="border-b border-slate-200 pb-4">
+                      <div className="font-semibold text-slate-900">Chờ xe</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Khoảng {formatVietnameseDuration(leg.durationMinutes)}
+                        {leg.reason ? ` · ${leg.reason}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (leg.type === 'WALK') {
+                return (
+                  <div key={`${leg.type}-${index}`} className="grid grid-cols-[46px_24px_1fr] gap-3">
+                    <div className="text-xs font-semibold text-slate-700">{time}</div>
+                    <span className="relative z-10 flex h-4 w-4 items-center justify-center rounded-full bg-white text-slate-600">
+                      <span className="material-symbols-outlined text-[15px]">directions_walk</span>
+                    </span>
+                    <div className="border-b border-slate-200 pb-4">
+                      <div className="font-semibold text-slate-900">Đi bộ</div>
+                      <div className="mt-2 grid grid-cols-[42px_1fr] gap-x-2 gap-y-1 text-xs">
+                        <span className="font-black uppercase text-slate-400">Từ</span>
+                        <span className="font-semibold text-slate-800">{resolvePointName(leg.from)}</span>
+                        <span className="font-black uppercase text-slate-400">Đến</span>
+                        <span className="font-semibold text-slate-800">{resolvePointName(leg.to)}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Khoảng {formatVietnameseDuration(leg.durationMinutes)} · {formatMeters(leg.distanceMeters)}
+                        {leg.isFallback ? ' · chưa có hình học đường đi bộ' : ''}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (leg.type === 'TRANSFER') {
+                return (
+                  <div key={`${leg.type}-${index}`} className="grid grid-cols-[46px_24px_1fr] gap-3">
+                    <div className="text-xs font-semibold text-slate-700">{time}</div>
+                    <span className="relative z-10 flex h-4 w-4 items-center justify-center rounded-full bg-white text-slate-600">
+                      <span className="material-symbols-outlined text-[15px]">directions_walk</span>
+                    </span>
+                    <div className="border-b border-slate-200 pb-4">
+                      <div className="font-semibold text-slate-900">
+                        {leg.sameStation ? 'Chuyển tuyến cùng trạm' : 'Đi bộ chuyển tuyến'}
+                      </div>
+                      <div className="mt-2 grid grid-cols-[42px_1fr] gap-x-2 gap-y-1 text-xs">
+                        <span className="font-black uppercase text-slate-400">Từ</span>
+                        <span className="font-semibold text-slate-800">{getStationName(leg.fromStation)}</span>
+                        <span className="font-black uppercase text-slate-400">Đến</span>
+                        <span className="font-semibold text-slate-800">{getStationName(leg.toStation)}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Khoảng {formatVietnameseDuration(leg.walkingDurationMinutes)} · {formatMeters(leg.walkingDistanceMeters)}
+                        {leg.walkingIsFallback ? ' · chưa có hình học đường đi bộ' : ''}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (leg.type === 'BUS') {
+                return (
+                  <div key={`${leg.type}-${leg.routeId}-${index}`} className="grid grid-cols-[46px_24px_1fr] gap-3">
+                    <div className="text-xs font-semibold text-slate-700">{time}</div>
+                    <span className="relative z-10 flex h-4 w-4 items-center justify-center rounded-full bg-white text-slate-700">
+                      <span className="material-symbols-outlined text-[15px]">directions_bus</span>
+                    </span>
+                    <div className="border-b border-slate-200 pb-4">
+                      <div className="font-black text-slate-950">{getStationName(leg.fromStation)}</div>
+                      <div className="mt-1 text-xs font-semibold text-emerald-700">Lên xe tại đây</div>
+                      <div className="mt-3 rounded border border-slate-200 bg-white px-3 py-2 text-sm">
+                        <div>
+                          <span className="mr-2 rounded border border-slate-300 px-1.5 py-0.5 text-xs font-black">{leg.routeCode}</span>
+                          <span className="font-black text-slate-950">{leg.routeName}</span>
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          Hướng {leg.direction === 'INBOUND' ? 'lượt về' : 'lượt đi'}
+                        </div>
+                        <div className="mt-3 grid grid-cols-[64px_1fr] gap-x-2 gap-y-1 text-xs">
+                          <span className="font-black uppercase text-slate-400">Lên</span>
+                          <span className="font-semibold text-slate-800">{getStationName(leg.fromStation)}</span>
+                          <span className="font-black uppercase text-slate-400">Xuống</span>
+                          <span className="font-semibold text-slate-800">{getStationName(leg.toStation)}</span>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-xs text-slate-500">
+                        {Math.max((leg.stops || []).length - 1, 0)} trạm dừng · {formatVietnameseDuration(leg.durationMinutes)}
+                        {leg.geometry ? '' : ' · chưa có hình học tuyến xe'}
+                      </div>
+                      <div className="mt-3 font-black text-slate-950">{getStationName(leg.toStation)}</div>
+                      <div className="mt-1 text-xs font-semibold text-orange-600">Xuống xe tại đây</div>
+                    </div>
+                  </div>
+                );
+              }
+
+              return null;
+            })}
+
+            <div className="grid grid-cols-[46px_24px_1fr] gap-3">
+              <div className="text-xs font-semibold text-slate-700">{getArrivalTime(itinerary)}</div>
+              <span className="relative z-10 mt-1 h-3 w-3 rounded-full border-2 border-slate-900 bg-white" />
+              <div className="font-black text-slate-950">{destinationPlace?.displayName || destinationPlace?.address || 'Điểm đến'}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 border-t border-slate-200 pt-4 text-xs text-slate-600">
+          <div>Chi phí: ước tính theo từng tuyến xe buýt</div>
+          <div className="mt-4 font-black text-slate-950">Vé và thông tin</div>
+          <div className="mt-1 text-emerald-700">BusDN · thông tin lộ trình theo dữ liệu tuyến hiện có</div>
+        </div>
+      </div>
+    </aside>
+  );
+};
 
 const NearbyStopCard = ({ stop, onSelect }) => {
   const routeMinutes = stop.route.estimatedDurationMinutes;
@@ -1435,16 +1862,14 @@ const SearchRoutesPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('lookup');
-  const [query, setQuery] = useState(searchParams.get('q') || '');
-  const [from, setFrom] = useState(searchParams.get('from') || '');
-  const [to, setTo] = useState(searchParams.get('to') || '');
   const [bestFrom, setBestFrom] = useState(searchParams.get('from') || '');
   const [bestTo, setBestTo] = useState(searchParams.get('to') || '');
   const [routes, setRoutes] = useState([]);
   const [nearbyStops, setNearbyStops] = useState([]);
   const [bestRouteResult, setBestRouteResult] = useState(null);
-  const [routePreference, setRoutePreference] = useState('fastest');
   const [selectedRoute, setSelectedRoute] = useState(null);
+  const [selectedItinerary, setSelectedItinerary] = useState(null);
+  const [selectedItineraryDetails, setSelectedItineraryDetails] = useState(null);
   const [currentLocation, setCurrentLocation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
@@ -1498,22 +1923,12 @@ const SearchRoutesPage = () => {
       .map((subscription) => String(subscription.subscriptionId))
   ), [routeChangeNotifications]);
 
-  const suggestedRouteOptions = useMemo(() => {
-    if (!bestRouteResult) {
+  const itineraryRecommendations = useMemo(() => {
+    if (!bestRouteResult?.recommendations) {
       return [];
     }
 
-    if (Array.isArray(bestRouteResult.suggestions)) {
-      return bestRouteResult.suggestions;
-    }
-
-    return [
-      ...(bestRouteResult.bestRoute ? [{ ...bestRouteResult.bestRoute, isRecommended: true }] : []),
-      ...(bestRouteResult.alternatives || []).map((alternative) => ({
-        ...alternative,
-        isRecommended: false,
-      })),
-    ];
+    return bestRouteResult.recommendations;
   }, [bestRouteResult]);
 
   const isRouteFavorite = (route) => (
@@ -1556,6 +1971,8 @@ const SearchRoutesPage = () => {
           const nextRoutes = result.routes || [];
           setRoutes(nextRoutes);
           setSelectedRoute(null);
+          setSelectedItinerary(null);
+          setSelectedItineraryDetails(null);
           setNearbyStops([]);
         }
       } catch (err) {
@@ -1844,43 +2261,16 @@ const SearchRoutesPage = () => {
     }
   };
 
-  const handleSearch = (event) => {
-    event.preventDefault();
-
-    if (!query.trim() && !from.trim() && !to.trim()) {
-      setError('Please enter a route number, stop, origin, or destination.');
-      setRoutes([]);
-      return;
-    }
-
-    const nextParams = {};
-
-    if (query.trim()) {
-      nextParams.q = query.trim();
-    }
-
-    if (from.trim()) {
-      nextParams.from = from.trim();
-    }
-
-    if (to.trim()) {
-      nextParams.to = to.trim();
-    }
-
-    setSearchParams(nextParams);
-  };
-
   const handleBackToAllRoutes = () => {
     clearError();
     setSearchParams({});
-    setQuery('');
-    setFrom('');
-    setTo('');
     setBestFrom('');
     setBestTo('');
     setBestRouteResult(null);
     setNearbyStops([]);
     setSelectedRoute(null);
+    setSelectedItinerary(null);
+    setSelectedItineraryDetails(null);
     setLiveRouteId(null);
     setLiveBusData(null);
     setLiveError('');
@@ -1911,6 +2301,8 @@ const SearchRoutesPage = () => {
           setCurrentLocation(nextLocation);
           setRoutes(result.routes || []);
           setSelectedRoute(null);
+          setSelectedItinerary(null);
+          setSelectedItineraryDetails(null);
           setNearbyStops(result.nearbyStops || []);
           setActiveTab('lookup');
         } catch (err) {
@@ -1947,6 +2339,8 @@ const SearchRoutesPage = () => {
 
     if (matchingRoute) {
       setSelectedRoute(matchingRoute);
+      setSelectedItinerary(null);
+      setSelectedItineraryDetails(null);
     }
   };
 
@@ -1997,6 +2391,8 @@ const SearchRoutesPage = () => {
 
     if (matchingRoute) {
       setSelectedRoute(matchingRoute);
+      setSelectedItinerary(null);
+      setSelectedItineraryDetails(null);
       return;
     }
 
@@ -2005,6 +2401,8 @@ const SearchRoutesPage = () => {
       const nextRoutes = result.routes || [];
       setRoutes(nextRoutes);
       setSelectedRoute(nextRoutes.find((route) => route.routeNumber === favoriteRoute.routeNumber) || nextRoutes[0] || null);
+      setSelectedItinerary(null);
+      setSelectedItineraryDetails(null);
       setActiveTab('lookup');
     } catch (err) {
       setError(err.message || 'Unable to open favorite route.');
@@ -2272,6 +2670,8 @@ const SearchRoutesPage = () => {
     }
 
     setSelectedRoute(route);
+    setSelectedItinerary(null);
+    setSelectedItineraryDetails(null);
     setLiveRouteId(route.id);
     setLiveBusData(null);
     setLiveError('');
@@ -2291,39 +2691,57 @@ const SearchRoutesPage = () => {
     event.preventDefault();
     setError('');
     setBestRouteResult(null);
+    setSelectedRoute(null);
+    setSelectedItinerary(null);
+    setSelectedItineraryDetails(null);
 
     if (!bestFrom.trim() || !bestTo.trim()) {
-      setError('Please enter both departure and destination.');
+      setError('Vui lòng nhập cả điểm đón và điểm đến.');
       return;
     }
 
     setIsFindingBest(true);
 
     try {
-      const result = await routeService.suggestRouteOptions({
-        from: bestFrom.trim(),
-        to: bestTo.trim(),
-        preference: routePreference,
+      const [originSearch, destinationSearch] = await Promise.all([
+        routeService.geocodePlace(bestFrom.trim()),
+        routeService.geocodePlace(bestTo.trim()),
+      ]);
+      const originPlace = originSearch.results?.[0];
+      const destinationPlace = destinationSearch.results?.[0];
+
+      if (!originPlace || !destinationPlace) {
+        setError('Không tìm thấy tọa độ cho điểm đón hoặc điểm đến. Vui lòng nhập địa chỉ cụ thể hơn.');
+        return;
+      }
+
+      const result = await routeService.recommendItineraries({
+        fromLat: originPlace.latitude,
+        fromLng: originPlace.longitude,
+        toLat: destinationPlace.latitude,
+        toLng: destinationPlace.longitude,
+        maxTransfers: 1,
+        preference: 'FASTEST',
       });
 
-      setBestRouteResult(result);
+      const decoratedRecommendations = (result.recommendations || []).map((itinerary) => ({
+        ...itinerary,
+        mapOrigin: originPlace,
+        mapDestination: destinationPlace,
+      }));
+      const nextResult = {
+        ...result,
+        recommendations: decoratedRecommendations,
+        originPlace,
+        destinationPlace,
+      };
 
-      const nextSuggestions = Array.isArray(result.suggestions)
-        ? result.suggestions
-        : [
-          ...(result.bestRoute ? [{ ...result.bestRoute, isRecommended: true }] : []),
-          ...(result.alternatives || []),
-        ];
-
-      if (nextSuggestions.length) {
-        const nextRoutes = nextSuggestions.map((item) => item.route);
-        setRoutes(nextRoutes);
-        setSelectedRoute(nextSuggestions[0].route);
-      } else {
-        setSelectedRoute(null);
+      setBestRouteResult(nextResult);
+      if (decoratedRecommendations.length) {
+        setSelectedItinerary(decoratedRecommendations[0]);
       }
     } catch (err) {
-      setError(err.message || 'Unable to suggest route options.');
+      setError(err.message || 'Không thể tìm lộ trình phù hợp.');
     } finally {
       setIsFindingBest(false);
     }
@@ -2346,7 +2764,7 @@ const SearchRoutesPage = () => {
               }`}
             >
               <span className="material-symbols-outlined">search</span>
-              LOOKUP
+              TÌM KIẾM
             </button>
             <button
               type="button"
@@ -2358,7 +2776,7 @@ const SearchRoutesPage = () => {
               }`}
             >
               <span className="material-symbols-outlined">conversion_path</span>
-              DIRECTIONS
+              LỘ TRÌNH
             </button>
           </div>
 
@@ -2426,59 +2844,20 @@ const SearchRoutesPage = () => {
                   )}
                 </div>
 
-                <form onSubmit={handleSearch} className="mt-5 space-y-3 border-t border-slate-200 pt-4">
-                  <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Manual search</div>
-                  <input
-                    type="text"
-                    value={query}
-                    onChange={(event) => {
-                      setQuery(event.target.value);
-                      clearError();
-                    }}
-                    placeholder="Search routes or stops..."
-                    className="w-full rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
-                  />
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      value={from}
-                      onChange={(event) => {
-                        setFrom(event.target.value);
-                        clearError();
-                      }}
-                      placeholder="From"
-                      className="w-full rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
+                {user && (
+                  <>
+                    <FavoriteRoutesPanel
+                      favoriteRoutes={favoriteRoutes}
+                      routes={routes}
+                      onSelect={handleSelectFavoriteRoute}
+                      onRemove={handleRemoveFavoriteRoute}
                     />
-                    <input
-                      type="text"
-                      value={to}
-                      onChange={(event) => {
-                        setTo(event.target.value);
-                        clearError();
-                      }}
-                      placeholder="To"
-                      className="w-full rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
+                    <FavoriteStopsPanel
+                      favoriteStops={favoriteStops}
+                      onRemove={handleRemoveFavoriteStop}
                     />
-                  </div>
-                  <button
-                    type="submit"
-                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 font-bold text-white hover:bg-emerald-700"
-                  >
-                    <span className="material-symbols-outlined">search</span>
-                    Search routes
-                  </button>
-                </form>
-
-                <FavoriteRoutesPanel
-                  favoriteRoutes={favoriteRoutes}
-                  routes={routes}
-                  onSelect={handleSelectFavoriteRoute}
-                  onRemove={handleRemoveFavoriteRoute}
-                />
-                <FavoriteStopsPanel
-                  favoriteStops={favoriteStops}
-                  onRemove={handleRemoveFavoriteStop}
-                />
+                  </>
+                )}
               </>
             ) : (
               <form onSubmit={handleFindBestRoute} className="space-y-3">
@@ -2489,7 +2868,7 @@ const SearchRoutesPage = () => {
                     setBestFrom(event.target.value);
                     clearError();
                   }}
-                  placeholder="Enter departure"
+                  placeholder="Nhập điểm đón"
                   className="w-full rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
                 />
                 <input
@@ -2499,36 +2878,9 @@ const SearchRoutesPage = () => {
                     setBestTo(event.target.value);
                     clearError();
                   }}
-                  placeholder="Enter destination"
+                  placeholder="Nhập điểm đến"
                   className="w-full rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
                 />
-                <div className="space-y-2">
-                  <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Route preference</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {ROUTE_PREFERENCES.map((preference) => {
-                      const isActive = routePreference === preference.id;
-
-                      return (
-                        <button
-                          key={preference.id}
-                          type="button"
-                          onClick={() => {
-                            setRoutePreference(preference.id);
-                            clearError();
-                          }}
-                          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs font-bold transition ${
-                            isActive
-                              ? 'border-slate-950 bg-slate-950 text-white'
-                              : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-500'
-                          }`}
-                        >
-                          <span className="material-symbols-outlined text-[17px]">{preference.icon}</span>
-                          <span>{preference.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
                 <button
                   type="submit"
                   disabled={isFindingBest}
@@ -2537,38 +2889,47 @@ const SearchRoutesPage = () => {
                   <span className="material-symbols-outlined">
                     {isFindingBest ? 'progress_activity' : 'route'}
                   </span>
-                  {isFindingBest ? 'Calculating...' : 'Find best route'}
+                  {isFindingBest ? 'Đang tìm lộ trình...' : 'Tìm lộ trình'}
                 </button>
 
                 {bestRouteResult && (
                   <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-sm font-black text-emerald-900">Suggested route options</div>
+                        <div className="text-sm font-black text-emerald-900">Lộ trình được đề xuất</div>
                         <p className="mt-1 text-xs text-emerald-800">
-                          Compare bus routes by trip duration, distance, fare, and selected preference.
+                          Hệ thống tự chuyển địa điểm sang tọa độ và đề xuất lộ trình đi bộ, chờ xe, xe buýt, chuyển tuyến.
                         </p>
                       </div>
                       <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[11px] font-black text-emerald-700">
-                        {suggestedRouteOptions.length} found
+                        {itineraryRecommendations.length} found
                       </span>
                     </div>
 
-                    {suggestedRouteOptions.length ? (
+                    {itineraryRecommendations.length ? (
                       <div className="mt-3 space-y-3">
-                        {suggestedRouteOptions.map((suggestion, index) => (
-                          <PlannerResultCard
-                            key={`${suggestion.route.id}-${suggestion.startStop.name}-${suggestion.endStop.name}`}
-                            result={suggestion}
-                            isRecommended={suggestion.isRecommended || index === 0}
-                            isSelected={selectedRoute?.routeNumber === suggestion.route.routeNumber}
-                            onSelect={() => setSelectedRoute(suggestion.route)}
+                        {itineraryRecommendations.map((itinerary, index) => (
+                          <ItineraryResultCard
+                            key={`${itinerary.rank}-${itinerary.totalDurationMinutes}-${itinerary.transferCount}`}
+                            itinerary={itinerary}
+                            isRecommended={index === 0}
+                            isSelected={selectedItinerary?.rank === itinerary.rank}
+                            onPreview={() => {
+                              setSelectedRoute(null);
+                              setSelectedItinerary(itinerary);
+                              setSelectedItineraryDetails(null);
+                            }}
+                            onOpenDetails={() => {
+                              setSelectedRoute(null);
+                              setSelectedItinerary(itinerary);
+                              setSelectedItineraryDetails(itinerary);
+                            }}
                           />
                         ))}
                       </div>
                     ) : (
                       <div className="mt-3 rounded-lg bg-white p-3 text-sm text-slate-700">
-                        No route options found. Try another departure, destination, or route preference.
+                        Không tìm thấy lộ trình xe buýt phù hợp. Hãy thử điểm đón hoặc điểm đến khác.
                       </div>
                     )}
                   </div>
@@ -2594,7 +2955,7 @@ const SearchRoutesPage = () => {
               </div>
             )}
 
-            {(activeTab === 'lookup' || !bestRouteResult) && (
+            {activeTab === 'lookup' && (
               <div className="mt-5 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-bold text-slate-700">
@@ -2621,7 +2982,11 @@ const SearchRoutesPage = () => {
                         compact={activeTab === 'directions'}
                         isHighlighted={isSelected}
                         isFavorite={isRouteFavorite(route)}
-                        onSelect={() => setSelectedRoute(route)}
+                        onSelect={() => {
+                          setSelectedRoute(route);
+                          setSelectedItinerary(null);
+                          setSelectedItineraryDetails(null);
+                        }}
                         onToggleFavorite={handleToggleFavoriteRoute}
                       />
                     </div>
@@ -2634,6 +2999,7 @@ const SearchRoutesPage = () => {
 
         <MapCanvas
           selectedRoute={selectedRoute}
+          selectedItinerary={selectedItinerary}
           currentLocation={currentLocation}
           liveBusData={liveBusData}
           liveError={liveError}
@@ -2641,7 +3007,15 @@ const SearchRoutesPage = () => {
           onDismissArrivalAlert={handleDismissArrivalAlert}
           onUseCurrentLocation={handleUseCurrentLocation}
         />
-        {selectedRoute && (
+        {selectedItineraryDetails && (
+          <ItineraryDetailsPanel
+            itinerary={selectedItineraryDetails}
+            originPlace={bestRouteResult?.originPlace}
+            destinationPlace={bestRouteResult?.destinationPlace}
+            onClose={() => setSelectedItineraryDetails(null)}
+          />
+        )}
+        {selectedRoute && !selectedItineraryDetails && (
           <RouteDetailsPanel
             route={selectedRoute}
             currentLocation={currentLocation}

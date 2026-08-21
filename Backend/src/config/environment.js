@@ -205,6 +205,13 @@ export const config = {
     apiKey: getEnv('SERPAPI_KEY'),
   },
 
+  gemini: {
+    apiKey: getEnv('GEMINI_API_KEY'),
+    model: getEnv('GEMINI_MODEL', 'gemini-flash-latest'),
+    apiBaseUrl: getEnv('GEMINI_API_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
+    requestTimeoutMs: toNumber(getEnv('GEMINI_REQUEST_TIMEOUT_MS', '15000'), 15000),
+  },
+
   // Da Nang public bus data
   danabus: {
     stopApiUrl: getEnv(

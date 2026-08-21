@@ -1,9 +1,11 @@
 import express from 'express';
+import { optionalAuthMiddleware } from '../../middleware/authMiddleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import validateRequest from '../../middleware/validateRequest.js';
 import AiController from './ai.controller.js';
 import {
   validateNearbyRoutesQuery,
+  validateChatBody,
   validateRouteIdParam,
   validateRouteSearchQuery,
   validateRouteSuggestionsQuery,
@@ -12,6 +14,13 @@ import {
 const router = express.Router();
 
 router.get('/openapi.json', AiController.getOpenApiSpec);
+
+router.post(
+  '/chat',
+  optionalAuthMiddleware,
+  validateRequest(validateChatBody, 'body'),
+  asyncHandler(AiController.chat)
+);
 
 router.get(
   '/routes/search',
