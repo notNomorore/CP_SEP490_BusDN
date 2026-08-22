@@ -11,6 +11,11 @@ export class AiController {
     return res.success(result, 'AI route search completed successfully');
   }
 
+  static async chat(req, res) {
+    const result = await AiService.chat(req.body, { user: req.user });
+    return res.success(result, 'AI chat response generated successfully');
+  }
+
   static async suggestRoutes(req, res) {
     const result = await AiService.suggestRoutes(req.query);
     return res.success(result, 'AI route suggestions completed successfully');

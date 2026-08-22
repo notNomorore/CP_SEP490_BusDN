@@ -1,6 +1,9 @@
 const MAX_TEXT_LENGTH = 120;
 const MAX_ROUTE_ID_LENGTH = 64;
+const MAX_CHAT_MESSAGE_LENGTH = 1000;
+const MAX_CHAT_MESSAGES = 20;
 const ALLOWED_PREFERENCES = ['fastest', 'shortest', 'lowest-cost', 'least-traffic'];
+const ALLOWED_CHAT_ROLES = ['user', 'model'];
 
 const isPlainString = (value) => value === undefined || typeof value === 'string';
 
@@ -101,9 +104,69 @@ export const validateRouteIdParam = (params = {}) => {
   return errors;
 };
 
+export const validateChatBody = (body = {}) => {
+  const errors = {};
+
+  if (!Array.isArray(body.messages)) {
+    errors.messages = 'messages must be an array';
+    return errors;
+  }
+
+  if (body.messages.length === 0) {
+    errors.messages = 'messages must contain at least one message';
+    return errors;
+  }
+
+  if (body.messages.length > MAX_CHAT_MESSAGES) {
+    errors.messages = `messages must not exceed ${MAX_CHAT_MESSAGES} items`;
+    return errors;
+  }
+
+  body.messages.forEach((message, index) => {
+    const path = `messages.${index}`;
+
+    if (!message || typeof message !== 'object' || Array.isArray(message)) {
+      errors[path] = 'message must be an object';
+      return;
+    }
+
+    if (!ALLOWED_CHAT_ROLES.includes(message.role)) {
+      errors[`${path}.role`] = `role must be one of: ${ALLOWED_CHAT_ROLES.join(', ')}`;
+    }
+
+    if (typeof message.text !== 'string') {
+      errors[`${path}.text`] = 'text must be a string';
+      return;
+    }
+
+    const text = message.text.trim();
+    if (!text) {
+      errors[`${path}.text`] = 'text is required';
+      return;
+    }
+
+    if (text.length > MAX_CHAT_MESSAGE_LENGTH) {
+      errors[`${path}.text`] = `text must not exceed ${MAX_CHAT_MESSAGE_LENGTH} characters`;
+      return;
+    }
+
+    if (hasControlCharacters(text)) {
+      errors[`${path}.text`] = 'text contains invalid characters';
+    }
+  });
+
+  const latestMessage = body.messages[body.messages.length - 1];
+  if (latestMessage?.role !== 'user') {
+    errors.messages = 'latest message must be from user';
+  }
+
+  return errors;
+};
+
 export default {
   validateRouteSearchQuery,
   validateRouteSuggestionsQuery,
   validateNearbyRoutesQuery,
   validateRouteIdParam,
+  validateChatBody,
 };
