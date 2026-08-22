@@ -1,0 +1,50 @@
+[
+  {
+    "id": "ticket-purchase",
+    "category": "ticket purchase",
+    "keywords": ["mua ve", "dat ve", "ticket", "buy ticket"],
+    "answer": "Bạn có thể mua vé trong khu vực vé của BusDN bằng cách chọn tuyến/chuyến, kiểm tra thông tin và tiếp tục thanh toán. Chatbot chỉ hướng dẫn thao tác, không tự mua vé thay bạn."
+  },
+  {
+    "id": "ticket-lookup",
+    "category": "ticket lookup",
+    "keywords": ["xem ve", "ve cua toi", "my ticket", "ticket status"],
+    "answer": "Thông tin vé của bạn là dữ liệu cá nhân và cần đăng nhập. Chatbot chỉ có thể hướng dẫn hoặc tóm tắt dữ liệu khi backend xác thực và trả về thông tin hợp lệ."
+  },
+  {
+    "id": "monthly-pass",
+    "category": "monthly pass",
+    "keywords": ["the thang", "monthly pass", "ve thang"],
+    "answer": "BusDN có luồng mua vé tháng trong hệ thống vé. Giá, điều kiện áp dụng và trạng thái thanh toán phải lấy từ backend, chatbot không tự suy đoán."
+  },
+  {
+    "id": "lost-item",
+    "category": "lost item",
+    "keywords": ["that lac", "mat do", "lost item", "lost property"],
+    "answer": "Bạn có thể tạo hồ sơ thất lạc bằng cách mô tả vật phẩm, tuyến/chuyến nếu nhớ, thời gian và thông tin liên hệ. Trạng thái hồ sơ thất lạc cần đăng nhập để tra cứu từ backend."
+  },
+  {
+    "id": "feedback",
+    "category": "feedback",
+    "keywords": ["phan hoi", "khieu nai", "feedback", "gop y"],
+    "answer": "Bạn có thể gửi phản hồi về chất lượng dịch vụ trong hệ thống hỗ trợ của BusDN. Nên cung cấp tuyến, thời gian, nội dung phản hồi và thông tin liên quan nếu có."
+  },
+  {
+    "id": "passenger-rules",
+    "category": "passenger rules",
+    "keywords": ["quy dinh", "hanh khach", "passenger rules", "an toan"],
+    "answer": "Khi đi xe buýt, bạn nên giữ vé hoặc mã QR, lên xuống đúng điểm dừng, giữ gìn tài sản cá nhân và tuân thủ hướng dẫn an toàn của nhân viên vận hành."
+  },
+  {
+    "id": "service-hours",
+    "category": "service hours",
+    "keywords": ["gio hoat dong", "chuyen cuoi", "service hours", "last bus"],
+    "answer": "Giờ hoạt động phụ thuộc từng tuyến và phải lấy từ dữ liệu tuyến hiện tại. Hãy cung cấp số tuyến hoặc điểm đi/điểm đến để BusDN tra cứu dữ liệu phù hợp."
+  },
+  {
+    "id": "general-support",
+    "category": "general support",
+    "keywords": ["ho tro", "support", "tai khoan", "account"],
+    "answer": "Với vấn đề tài khoản hoặc hỗ trợ chung, bạn nên đăng nhập và dùng các màn hình hỗ trợ tương ứng trong BusDN để hệ thống ghi nhận đúng hồ sơ."
+  }
+]
