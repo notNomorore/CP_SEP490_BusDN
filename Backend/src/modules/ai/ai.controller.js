@@ -1,9 +1,10 @@
 import AiService from './ai.service.js';
-import aiOpenApiSpec from './ai.openapi.js';
+import { createAiOpenApiSpec } from './ai.openapi.js';
 
 export class AiController {
   static async getOpenApiSpec(req, res) {
-    return res.json(aiOpenApiSpec);
+    const serverOrigin = `${req.protocol}://${req.get('host')}`;
+    return res.json(createAiOpenApiSpec(serverOrigin));
   }
 
   static async searchRoutes(req, res) {

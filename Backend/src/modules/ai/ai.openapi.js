@@ -381,8 +381,8 @@ export const aiOpenApiSpec = {
   },
   servers: [
     {
-      url: 'https://cp-sep490-busdn.onrender.com/api/ai',
-      description: 'BusDN Render production backend',
+      url: '/api/ai',
+      description: 'BusDN backend',
     },
   ],
   tags: [
@@ -535,5 +535,17 @@ export const aiOpenApiSpec = {
     },
   },
 };
+
+const normalizeServerOrigin = (origin) => String(origin || '').trim().replace(/\/+$/, '');
+
+export const createAiOpenApiSpec = (serverOrigin) => ({
+  ...aiOpenApiSpec,
+  servers: [
+    {
+      url: `${normalizeServerOrigin(serverOrigin)}/api/ai`,
+      description: 'BusDN backend',
+    },
+  ],
+});
 
 export default aiOpenApiSpec;
