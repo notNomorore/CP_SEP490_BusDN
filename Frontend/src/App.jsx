@@ -76,6 +76,7 @@ import OperationalPlanningPage from './features/admin/pages/OperationalPlanningP
 import { PassengerCompliancePage } from './features/admin/passengerCompliance';
 import NotFoundPage from './shared/components/common/NotFoundPage.jsx';
 import I18nBoundary from './shared/components/I18nBoundary.jsx';
+import { BusDNAssistant } from './features/aiChatbot';
 
 function App() {
   return (
@@ -367,6 +368,7 @@ function App() {
           />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
+        <BusDNAssistant />
         </AppInitializer>
       </I18nBoundary>
     </Router>

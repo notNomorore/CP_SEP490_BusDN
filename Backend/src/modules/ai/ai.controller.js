@@ -1,14 +1,20 @@
 import AiService from './ai.service.js';
-import aiOpenApiSpec from './ai.openapi.js';
+import { createAiOpenApiSpec } from './ai.openapi.js';
 
 export class AiController {
   static async getOpenApiSpec(req, res) {
-    return res.json(aiOpenApiSpec);
+    const serverOrigin = `${req.protocol}://${req.get('host')}`;
+    return res.json(createAiOpenApiSpec(serverOrigin));
   }
 
   static async searchRoutes(req, res) {
     const result = await AiService.searchRoutes(req.query);
     return res.success(result, 'AI route search completed successfully');
+  }
+
+  static async chat(req, res) {
+    const result = await AiService.chat(req.body, { user: req.user });
+    return res.success(result, 'AI chat response generated successfully');
   }
 
   static async suggestRoutes(req, res) {

@@ -38,6 +38,36 @@ export const routeService = {
     return response.data;
   },
 
+  geocodePlace: async (query) => {
+    const response = await apiClient.get('/routes/recommend/geocode', {
+      params: { q: query },
+    });
+
+    return response.data;
+  },
+
+  recommendItineraries: async ({
+    fromLat,
+    fromLng,
+    toLat,
+    toLng,
+    maxTransfers = 1,
+    preference = 'FASTEST',
+  }) => {
+    const response = await apiClient.get('/routes/recommend', {
+      params: {
+        fromLat,
+        fromLng,
+        toLat,
+        toLng,
+        maxTransfers,
+        preference,
+      },
+    });
+
+    return response.data;
+  },
+
   getLiveBusLocations: async (routeId) => {
     const response = await apiClient.get(`/routes/${routeId}/live`);
     return response.data;

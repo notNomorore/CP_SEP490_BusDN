@@ -1,5 +1,5 @@
 const API_PATH = '/api';
-const PUBLIC_API_ORIGIN = 'https://cp-sep490-busdn.onrender.com';
+const LOCAL_API_ORIGIN = 'http://localhost:3000';
 
 const trimTrailingSlash = (value) => String(value || '').trim().replace(/\/+$/, '');
 
@@ -21,16 +21,14 @@ const withApiPath = (value) => {
 export const API_BASE_URL = withApiPath(
   requiredEnv(
     'VITE_API_URL',
-    import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || PUBLIC_API_ORIGIN
+    import.meta.env.VITE_API_URL
+      || (import.meta.env.DEV ? LOCAL_API_ORIGIN : undefined)
   )
 );
 
 export const API_ORIGIN = API_BASE_URL.replace(/\/api$/i, '');
 
-export const SOCKET_URL = requiredEnv(
-  'VITE_SOCKET_URL',
-  import.meta.env.VITE_SOCKET_URL || PUBLIC_API_ORIGIN
-);
+export const SOCKET_URL = API_ORIGIN;
 
 export const resolveBackendUrl = (path) => {
   if (!path) return '';

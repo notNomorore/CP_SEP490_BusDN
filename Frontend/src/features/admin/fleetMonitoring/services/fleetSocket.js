@@ -7,12 +7,6 @@ let fleetSocket = null;
 let subscriberCount = 0;
 let disconnectTimer = null;
 
-const getApiOrigin = () => {
-  const configured = import.meta.env.VITE_API_URL?.trim();
-  if (configured) return configured.replace(/\/$/, '');
-  return import.meta.env.VITE_SOCKET_URL?.trim().replace(/\/$/, '') || 'https://cp-sep490-busdn.onrender.com';
-};
-
 const getToken = () => (
   localStorage.getItem('authToken')
   || localStorage.getItem('token')
