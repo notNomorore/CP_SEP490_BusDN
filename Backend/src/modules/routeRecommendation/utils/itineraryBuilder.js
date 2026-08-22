@@ -29,6 +29,7 @@ const waitLeg = (wait) => ({
   type: 'WAIT',
   durationMinutes: wait.durationMinutes,
   reason: wait.reason,
+  estimatedArrivalTime: wait.estimatedArrivalTime || null,
 });
 
 const busLeg = (leg) => {

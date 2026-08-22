@@ -6,6 +6,7 @@ import {
   Marker,
   Polyline,
   CircleMarker,
+  Popup,
   Tooltip,
   TileLayer,
   useMap,
@@ -36,6 +37,19 @@ const DEFAULT_CENTER = {
   longitude: DA_NANG_CENTER[1],
 };
 const DA_NANG_CENTRAL = { name: 'Da Nang Central', latitude: 16.0667, longitude: 108.1690 };
+const MAP_UI = {
+  bus: '#059669',
+  busDark: '#047857',
+  busHalo: '#ffffff',
+  walk: '#2563eb',
+  transfer: '#f59e0b',
+  origin: '#0284c7',
+  destination: '#dc2626',
+  board: '#059669',
+  alight: '#ea580c',
+  ink: '#0f172a',
+  muted: '#64748b',
+};
 
 const formatDuration = (minutes) => {
   const normalizedMinutes = Math.max(Math.round(Number(minutes) || 0), 0);
@@ -168,6 +182,100 @@ const geometryToLatLngs = (geometry) => {
 
 const getLegGeometryPositions = (leg) => geometryToLatLngs(leg?.geometry);
 
+const toDegrees = (radians) => radians * (180 / Math.PI);
+
+const distanceBetweenLatLngs = ([latA, lngA], [latB, lngB]) => {
+  const earthRadiusMeters = 6371000;
+  const deltaLat = toRadians(latB - latA);
+  const deltaLng = toRadians(lngB - lngA);
+  const a = Math.sin(deltaLat / 2) ** 2
+    + Math.cos(toRadians(latA)) * Math.cos(toRadians(latB)) * Math.sin(deltaLng / 2) ** 2;
+
+  return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const bearingBetweenLatLngs = ([latA, lngA], [latB, lngB]) => {
+  const startLat = toRadians(latA);
+  const endLat = toRadians(latB);
+  const deltaLng = toRadians(lngB - lngA);
+  const y = Math.sin(deltaLng) * Math.cos(endLat);
+  const x = Math.cos(startLat) * Math.sin(endLat)
+    - Math.sin(startLat) * Math.cos(endLat) * Math.cos(deltaLng);
+
+  return (toDegrees(Math.atan2(y, x)) + 360) % 360;
+};
+
+const interpolateLatLng = ([latA, lngA], [latB, lngB], ratio) => [
+  latA + (latB - latA) * ratio,
+  lngA + (lngB - lngA) * ratio,
+];
+
+const createDirectionArrowIcon = (color = '#047857', bearing = 0) => L.divIcon({
+  className: '',
+  iconSize: [22, 22],
+  iconAnchor: [11, 11],
+  html: `
+    <div class="flex h-[22px] w-[22px] items-center justify-center rounded-full border border-white/90 bg-white/90 shadow-sm">
+      <span style="
+        display:block;
+        width:0;
+        height:0;
+        border-top:5px solid transparent;
+        border-bottom:5px solid transparent;
+        border-left:9px solid ${color};
+        transform:rotate(${bearing - 90}deg);
+        transform-origin:center;
+      "></span>
+    </div>
+  `,
+});
+
+const getRouteDirectionMarkers = (positions, { intervalMeters = 850 } = {}) => {
+  if (!positions?.length || positions.length < 2) {
+    return [];
+  }
+
+  const segmentLengths = [];
+  let totalMeters = 0;
+  for (let index = 1; index < positions.length; index += 1) {
+    const length = distanceBetweenLatLngs(positions[index - 1], positions[index]);
+    segmentLengths.push(length);
+    totalMeters += length;
+  }
+
+  if (totalMeters < 120) {
+    return [];
+  }
+
+  const markerCount = Math.max(1, Math.min(8, Math.floor(totalMeters / intervalMeters)));
+  const targetDistances = Array.from({ length: markerCount }, (_, index) => (
+    ((index + 1) * totalMeters) / (markerCount + 1)
+  ));
+
+  const markers = [];
+  let traversed = 0;
+  let targetIndex = 0;
+
+  for (let segmentIndex = 0; segmentIndex < segmentLengths.length && targetIndex < targetDistances.length; segmentIndex += 1) {
+    const segmentLength = segmentLengths[segmentIndex];
+    const segmentStart = positions[segmentIndex];
+    const segmentEnd = positions[segmentIndex + 1];
+
+    while (targetIndex < targetDistances.length && traversed + segmentLength >= targetDistances[targetIndex]) {
+      const ratio = segmentLength ? (targetDistances[targetIndex] - traversed) / segmentLength : 0;
+      markers.push({
+        position: interpolateLatLng(segmentStart, segmentEnd, ratio),
+        bearing: bearingBetweenLatLngs(segmentStart, segmentEnd),
+      });
+      targetIndex += 1;
+    }
+
+    traversed += segmentLength;
+  }
+
+  return markers;
+};
+
 const getItineraryBoundsPositions = (itinerary) => {
   if (!itinerary?.legs?.length) {
     return [];
@@ -252,27 +360,36 @@ const currentLocationIcon = L.divIcon({
   `,
 });
 
-const liveBusIcon = (status) => {
+const liveBusIcon = (status, heading = null) => {
   const isDelayed = status === 'Delayed';
+  const rotation = Number.isFinite(Number(heading)) ? Number(heading) : 0;
 
   return L.divIcon({
     className: '',
-    iconAnchor: [22, 45],
-    popupAnchor: [0, -44],
+    iconAnchor: [19, 19],
+    popupAnchor: [0, -18],
     html: `
-      <div class="relative flex flex-col items-center">
-        <span class="absolute h-12 w-12 rounded-full ${
+      <div class="relative flex h-[38px] w-[38px] items-center justify-center">
+        <span class="absolute h-10 w-10 rounded-full ${
           isDelayed ? 'bg-amber-300/35' : 'bg-emerald-300/35'
         } animate-ping"></span>
-        <div class="relative flex h-11 w-11 items-center justify-center rounded-full border-[3px] border-white ${
+        <div class="relative flex h-9 w-9 items-center justify-center rounded-full border-[3px] border-white ${
           isDelayed ? 'bg-amber-500' : 'bg-emerald-600'
         } text-white shadow-xl">
-          <span class="material-symbols-outlined text-[23px]">directions_bus</span>
+          <span class="material-symbols-outlined text-[21px]">directions_bus</span>
         </div>
-        <div class="h-0 w-0 border-x-[7px] border-x-transparent ${
-          isDelayed ? 'border-t-amber-500' : 'border-t-emerald-600'
-        } border-t-[10px]"></div>
-      </div>
+        <span style="
+          position:absolute;
+          top:-3px;
+          width:0;
+          height:0;
+          border-left:5px solid transparent;
+          border-right:5px solid transparent;
+          border-bottom:8px solid ${isDelayed ? '#f59e0b' : '#059669'};
+          transform:rotate(${rotation}deg);
+          transform-origin:50% 22px;
+        "></span>
+        </div>
     `,
   });
 };
@@ -283,10 +400,20 @@ const RouteLabelIcon = (routeNumber) => L.divIcon({
   html: `<span class="rounded-full bg-emerald-700 px-2 py-0.5 text-[11px] font-bold text-white shadow">${routeNumber}</span>`,
 });
 
-const MapAutoFocus = ({ selectedRoute, selectedItinerary, currentLocation }) => {
+const MapAutoFocus = ({ selectedRoute, selectedItinerary, currentLocation, focusedPositions = [] }) => {
   const map = useMap();
 
   useEffect(() => {
+    if (focusedPositions.length > 1) {
+      map.fitBounds(focusedPositions, {
+        animate: true,
+        maxZoom: 17,
+        paddingTopLeft: [60, 80],
+        paddingBottomRight: [420, 80],
+      });
+      return;
+    }
+
     const itineraryPath = getItineraryBoundsPositions(selectedItinerary);
     if (itineraryPath.length > 1) {
       map.fitBounds(itineraryPath.map(toLatLng), {
@@ -324,7 +451,7 @@ const MapAutoFocus = ({ selectedRoute, selectedItinerary, currentLocation }) => 
     }
 
     map.setView(toLatLng(DEFAULT_CENTER), INITIAL_MAP_ZOOM, { animate: true });
-  }, [currentLocation, map, selectedItinerary, selectedRoute]);
+  }, [currentLocation, focusedPositions, map, selectedItinerary, selectedRoute]);
 
   return null;
 };
@@ -332,11 +459,13 @@ const MapAutoFocus = ({ selectedRoute, selectedItinerary, currentLocation }) => 
 const MapCanvas = ({
   selectedRoute,
   selectedItinerary,
+  focusedItineraryLegIndex = null,
   currentLocation,
   liveBusData,
   liveError,
   arrivalAlerts,
   onDismissArrivalAlert,
+  onSelectItineraryLeg,
   onUseCurrentLocation,
 }) => {
   const itineraryMarkers = getItineraryStopMarkers(selectedItinerary);
@@ -344,6 +473,11 @@ const MapCanvas = ({
     ? selectedRoute.pathPoints
     : selectedRoute?.stops || [];
   const routePositions = selectedItinerary ? [] : routePath.filter(isValidLocation).map(toLatLng);
+  const routeDirectionMarkers = getRouteDirectionMarkers(routePositions);
+  const focusedLeg = Number.isInteger(focusedItineraryLegIndex)
+    ? selectedItinerary?.legs?.[focusedItineraryLegIndex]
+    : null;
+  const focusedPositions = useMemo(() => getLegGeometryPositions(focusedLeg), [focusedLeg]);
   const stops = (selectedRoute?.stops || [])
     .map(normalizeStopLocation)
     .filter(isValidLocation);
@@ -369,7 +503,12 @@ const MapCanvas = ({
           url={MAP_TILE_URL}
         />
 
-        <MapAutoFocus selectedRoute={selectedRoute} selectedItinerary={selectedItinerary} currentLocation={currentLocation} />
+        <MapAutoFocus
+          selectedRoute={selectedRoute}
+          selectedItinerary={selectedItinerary}
+          currentLocation={currentLocation}
+          focusedPositions={focusedPositions}
+        />
         <ZoomControl position="bottomright" />
 
         {routePositions.length > 1 && (
@@ -378,8 +517,8 @@ const MapCanvas = ({
               positions={routePositions}
               pathOptions={{
                 color: '#0f172a',
-                weight: 13,
-                opacity: 0.82,
+                weight: 10,
+                opacity: 0.34,
                 lineCap: 'round',
                 lineJoin: 'round',
               }}
@@ -387,8 +526,8 @@ const MapCanvas = ({
             <Polyline
               positions={routePositions}
               pathOptions={{
-                color: '#34d399',
-                weight: 8,
+                color: '#ffffff',
+                weight: 7,
                 opacity: 1,
                 lineCap: 'round',
                 lineJoin: 'round',
@@ -396,20 +535,15 @@ const MapCanvas = ({
             />
             <Polyline
               positions={routePositions}
-              pathOptions={{ color: '#047857', weight: 2, opacity: 0.9, lineCap: 'round', lineJoin: 'round' }}
+              pathOptions={{ color: MAP_UI.bus, weight: 5, opacity: 0.98, lineCap: 'round', lineJoin: 'round' }}
             />
-            {routePositions.map((position) => (
-              <CircleMarker
-                key={`${position[0]}-${position[1]}`}
-                center={position}
-                radius={3}
-                pathOptions={{
-                  color: '#ffffff',
-                  fillColor: '#ffffff',
-                  fillOpacity: 1,
-                  weight: 1,
-                }}
+            {routeDirectionMarkers.map((marker, markerIndex) => (
+              <Marker
+                key={`route-direction-${markerIndex}`}
+                position={marker.position}
+                icon={createDirectionArrowIcon('#047857', marker.bearing)}
                 interactive={false}
+                zIndexOffset={500}
               />
             ))}
           </>
@@ -417,6 +551,9 @@ const MapCanvas = ({
 
         {selectedItinerary && (selectedItinerary.legs || []).map((leg, index) => {
           const legPositions = getLegGeometryPositions(leg);
+          const hasFocusedLeg = Number.isInteger(focusedItineraryLegIndex);
+          const isFocusedLeg = focusedItineraryLegIndex === index;
+          const layerOpacity = hasFocusedLeg && !isFocusedLeg ? 0.28 : 0.96;
 
           if (legPositions.length < 2) {
             return null;
@@ -424,48 +561,86 @@ const MapCanvas = ({
 
           if (leg.type === 'BUS') {
             const color = leg.routeColor || '#047857';
+            const directionMarkers = getRouteDirectionMarkers(legPositions);
 
             return (
               <React.Fragment key={`bus-geometry-${index}-${leg.routeId}`}>
                 <Polyline
                   positions={legPositions}
                   pathOptions={{
-                    color: '#0f172a',
-                    weight: 12,
-                    opacity: 0.78,
+                    color: MAP_UI.ink,
+                    weight: isFocusedLeg ? 13 : 10,
+                    opacity: hasFocusedLeg && !isFocusedLeg ? 0.16 : 0.32,
                     lineCap: 'round',
                     lineJoin: 'round',
                   }}
+                  eventHandlers={{ click: () => onSelectItineraryLeg?.(index) }}
+                />
+                <Polyline
+                  positions={legPositions}
+                  pathOptions={{
+                    color: MAP_UI.busHalo,
+                    weight: isFocusedLeg ? 10 : 8,
+                    opacity: layerOpacity,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  }}
+                  eventHandlers={{ click: () => onSelectItineraryLeg?.(index) }}
                 />
                 <Polyline
                   positions={legPositions}
                   pathOptions={{
                     color,
-                    weight: 7,
-                    opacity: 0.98,
+                    weight: isFocusedLeg ? 6 : 5,
+                    opacity: layerOpacity,
                     lineCap: 'round',
                     lineJoin: 'round',
                   }}
+                  eventHandlers={{ click: () => onSelectItineraryLeg?.(index) }}
                 />
+                {directionMarkers.map((marker, markerIndex) => (
+                  <Marker
+                    key={`bus-direction-${index}-${markerIndex}`}
+                    position={marker.position}
+                    icon={createDirectionArrowIcon(color, marker.bearing)}
+                    interactive={false}
+                    zIndexOffset={650}
+                  />
+                ))}
               </React.Fragment>
             );
           }
 
           const isTransfer = leg.type === 'TRANSFER';
+          const walkColor = isTransfer ? MAP_UI.transfer : MAP_UI.walk;
 
           return (
-            <Polyline
-              key={`walk-geometry-${index}`}
-              positions={legPositions}
-              pathOptions={{
-                color: isTransfer ? '#f59e0b' : '#2563eb',
-                weight: isTransfer ? 5 : 4,
-                opacity: 0.9,
-                dashArray: isTransfer ? '4 7' : '2 8',
-                lineCap: 'round',
-                lineJoin: 'round',
-              }}
-            />
+            <React.Fragment key={`walk-geometry-${index}`}>
+              <Polyline
+                positions={legPositions}
+                pathOptions={{
+                  color: '#ffffff',
+                  weight: isFocusedLeg ? 8 : 6,
+                  opacity: hasFocusedLeg && !isFocusedLeg ? 0.2 : 0.86,
+                  dashArray: isTransfer ? '4 7' : '2 8',
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                }}
+                eventHandlers={{ click: () => onSelectItineraryLeg?.(index) }}
+              />
+              <Polyline
+                positions={legPositions}
+                pathOptions={{
+                  color: walkColor,
+                  weight: isFocusedLeg ? 5 : 4,
+                  opacity: layerOpacity,
+                  dashArray: isTransfer ? '4 7' : '2 8',
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                }}
+                eventHandlers={{ click: () => onSelectItineraryLeg?.(index) }}
+              />
+            </React.Fragment>
           );
         })}
 
@@ -480,7 +655,7 @@ const MapCanvas = ({
               radius={isEndpoint ? 10 : 4}
               pathOptions={{
                 color: isEndpoint ? '#0f172a' : '#ffffff',
-                fillColor: isEndpoint ? (isOrigin ? '#22c55e' : '#f97316') : '#10b981',
+                fillColor: isEndpoint ? (isOrigin ? MAP_UI.board : MAP_UI.alight) : MAP_UI.bus,
                 fillOpacity: 1,
                 weight: isEndpoint ? 4 : 2,
               }}
@@ -491,19 +666,28 @@ const MapCanvas = ({
                 offset={[0, isEndpoint ? -10 : -6]}
                 opacity={0.98}
               >
-                {isEndpoint ? `${isOrigin ? 'Start' : 'End'}: ` : `${index + 1}. `}
+                {isEndpoint ? `${isOrigin ? 'Bắt đầu' : 'Kết thúc'}: ` : `${index + 1}. `}
                 {stop.name}
               </Tooltip>
+              <Popup>
+                <div className="min-w-[180px]">
+                  <div className="text-sm font-black text-slate-950">{stop.name}</div>
+                  <div className="mt-1 text-xs text-slate-500">{selectedRoute.routeNumber} · {selectedRoute.name}</div>
+                  <div className="mt-2 text-xs font-semibold text-emerald-700">
+                    {isOrigin ? 'Điểm đầu tuyến' : isEndpoint ? 'Điểm cuối tuyến' : `Trạm số ${index + 1}`}
+                  </div>
+                </div>
+              </Popup>
             </CircleMarker>
           );
         })}
 
         {selectedItinerary && itineraryMarkers.map((marker) => {
           const markerStyle = {
-            ORIGIN: { fillColor: '#0ea5e9', radius: 10, label: 'Điểm đón' },
-            DESTINATION: { fillColor: '#ef4444', radius: 10, label: 'Điểm đến' },
-            BOARD: { fillColor: '#10b981', radius: 7, label: marker.label },
-            ALIGHT: { fillColor: '#f97316', radius: 7, label: marker.label },
+            ORIGIN: { fillColor: MAP_UI.origin, radius: 10, label: 'Điểm đón' },
+            DESTINATION: { fillColor: MAP_UI.destination, radius: 10, label: 'Điểm đến' },
+            BOARD: { fillColor: MAP_UI.board, radius: 7, label: marker.label },
+            ALIGHT: { fillColor: MAP_UI.alight, radius: 7, label: marker.label },
           }[marker.type] || { fillColor: '#0f766e', radius: 6, label: marker.label };
 
           return (
@@ -521,6 +705,12 @@ const MapCanvas = ({
             <Tooltip permanent={marker.type === 'ORIGIN' || marker.type === 'DESTINATION'} direction="top" offset={[0, -8]} opacity={0.98}>
               {markerStyle.label}
             </Tooltip>
+            <Popup>
+              <div className="min-w-[180px]">
+                <div className="text-sm font-black text-slate-950">{markerStyle.label}</div>
+                <div className="mt-1 text-xs text-slate-500">{marker.point.name || marker.label}</div>
+              </div>
+            </Popup>
           </CircleMarker>
           );
         })}
@@ -537,7 +727,7 @@ const MapCanvas = ({
           <Marker
             position={toLatLng(currentLocation)}
             icon={currentLocationIcon}
-            title="Current location"
+            title="Vị trí hiện tại"
             interactive={false}
           />
         )}
@@ -546,32 +736,28 @@ const MapCanvas = ({
           <Marker
             key={bus.busId}
             position={toLatLng(bus.currentLocation)}
-            icon={liveBusIcon(bus.status)}
+            icon={liveBusIcon(bus.status, bus.heading ?? bus.bearing)}
             title={`${bus.busId} - ${bus.status}`}
             interactive={false}
           />
         ))}
       </MapContainer>
 
-      {!selectedRoute && !selectedItinerary && (
-        <div className="pointer-events-none absolute left-1/2 top-6 z-[1000] -translate-x-1/2 rounded-full border border-slate-200 bg-white/95 px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm backdrop-blur">
-          Chọn “Xem chi tiết” để hiển thị lộ trình
-        </div>
-      )}
-
       {(selectedRoute || selectedItinerary) && (
-        <div className="pointer-events-none absolute left-5 top-5 z-[1000] rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
+        <div className="pointer-events-none absolute left-4 top-4 z-[1000] rounded-2xl bg-white/95 px-4 py-3 shadow-[0_10px_30px_rgba(15,23,42,0.14)] backdrop-blur">
           <div className="flex items-center gap-2">
-            <span className="rounded-full bg-emerald-600 px-2 py-1 text-xs font-black text-white">
+            <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-black text-white">
               {selectedItinerary ? `${selectedItinerary.transferCount} đổi tuyến` : selectedRoute.routeNumber}
             </span>
-            <span className="text-sm font-black text-slate-900">{selectedItinerary ? 'Lộ trình đã chọn' : 'Selected route'}</span>
+            <span className="text-sm font-black text-slate-900">{selectedItinerary ? 'Lộ trình đang xem' : 'Tuyến đang xem'}</span>
           </div>
           <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-600">
-            <span className="h-1.5 w-10 rounded-full bg-emerald-500 ring-2 ring-slate-900" />
+            <span className="h-1.5 w-10 rounded-full bg-emerald-600 ring-2 ring-white shadow-sm" />
             Xe buýt
             <span className="ml-2 h-0 w-10 border-t-2 border-dashed border-blue-600" />
             Đi bộ
+            <span className="material-symbols-outlined ml-1 text-[15px] text-emerald-700">arrow_forward</span>
+            Chiều đi
           </div>
         </div>
       )}
@@ -579,36 +765,25 @@ const MapCanvas = ({
       <button
         type="button"
         onClick={onUseCurrentLocation}
-        className="absolute right-5 top-5 z-[1000] flex items-center gap-3 rounded-lg bg-white px-4 py-3 text-sm font-semibold shadow-lg hover:bg-emerald-50"
+        className="absolute right-4 top-4 z-[1000] flex h-11 w-11 items-center justify-center rounded-xl bg-white text-emerald-700 shadow-[0_10px_30px_rgba(15,23,42,0.16)] hover:bg-emerald-50"
+        aria-label="Dùng vị trí hiện tại"
+        title="Dùng vị trí hiện tại"
       >
-        <span className="material-symbols-outlined text-emerald-600">location_on</span>
-        Nearby places
+        <span className="material-symbols-outlined text-[22px]">my_location</span>
       </button>
 
-      {currentLocation && (
-        <div className="absolute right-5 top-24 z-[1000] w-56 rounded-lg bg-white px-4 py-3 text-xs shadow-lg">
-          <div className="flex items-center gap-2 font-black uppercase tracking-wide text-slate-950">
-            <span className="h-2 w-2 rounded-full bg-red-500" />
-            Traffic status
-          </div>
-          <p className="mt-2 leading-5 text-slate-500">
-            Nearby routes are being checked from your current GPS position.
-          </p>
-        </div>
-      )}
-
-      <div className="pointer-events-none absolute bottom-5 right-5 z-[1000] rounded-lg bg-white px-3 py-2 text-xs text-slate-500 shadow">
-        Leaflet map © OpenStreetMap
+      <div className="pointer-events-none absolute bottom-4 right-4 z-[1000] rounded-xl bg-white/90 px-3 py-2 text-[11px] font-semibold text-slate-500 shadow-sm backdrop-blur">
+        © OpenStreetMap
       </div>
 
       {(liveBusData || liveError) && (
-        <div className="absolute right-5 top-24 z-[1000] w-72 rounded-xl bg-white p-4 shadow-xl">
+        <div className="absolute right-4 top-20 z-[1000] w-72 rounded-2xl bg-white/95 p-4 shadow-[0_14px_40px_rgba(15,23,42,0.16)] backdrop-blur">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-xs font-black uppercase tracking-wide text-slate-500">Live Bus Location</div>
+            <div className="text-xs font-black uppercase tracking-wide text-slate-500">Xe đang chạy</div>
             <span className={`rounded px-2 py-0.5 text-[10px] font-black uppercase ${
               liveError ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-700'
             }`}>
-              {liveError ? 'Unavailable' : 'Live'}
+              {liveError ? 'Lỗi' : 'Live'}
             </span>
           </div>
           {liveError ? (
@@ -624,12 +799,12 @@ const MapCanvas = ({
                     </span>
                   </div>
                   <div className="mt-1 text-xs text-slate-500">
-                    Next stop: {bus.nextStop} • ETA {bus.estimatedArrivalTime}
+                    Trạm kế: {bus.nextStop} • ETA {bus.estimatedArrivalTime}
                   </div>
                   {bus.tripProgress && (
                     <div className="mt-2">
                       <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
-                        <span>Trip progress</span>
+                        <span>Tiến độ</span>
                         <span>{bus.tripProgress.progressPercent}%</span>
                       </div>
                       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-200">
@@ -639,7 +814,7 @@ const MapCanvas = ({
                         />
                       </div>
                       <div className="mt-1 text-[11px] text-slate-500">
-                        {bus.tripProgress.completedStops.length} completed • {bus.tripProgress.remainingStops.length} remaining • {bus.tripProgress.estimatedRemainingTime} left
+                        {bus.tripProgress.completedStops.length} đã qua • {bus.tripProgress.remainingStops.length} còn lại • {bus.tripProgress.estimatedRemainingTime}
                       </div>
                     </div>
                   )}
@@ -651,7 +826,7 @@ const MapCanvas = ({
       )}
 
       {arrivalAlerts.length > 0 && (
-        <div className="absolute left-5 top-5 z-[1000] w-80 space-y-2">
+        <div className="absolute left-4 top-24 z-[1000] w-80 space-y-2">
           {arrivalAlerts.map((alert) => (
             <div key={alert.id} className="rounded-xl border border-emerald-100 bg-white p-4 shadow-xl">
               <div className="flex items-start justify-between gap-3">
@@ -666,7 +841,7 @@ const MapCanvas = ({
                   type="button"
                   onClick={() => onDismissArrivalAlert?.(alert.id)}
                   className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                  aria-label="Dismiss arrival notification"
+                  aria-label="Đóng thông báo"
                 >
                   <span className="material-symbols-outlined text-[18px]">close</span>
                 </button>
@@ -711,8 +886,8 @@ const RouteCard = ({
         onSelect?.();
       }
     }}
-    className={`relative block w-full rounded-xl border bg-white p-4 pr-14 text-left shadow-sm transition hover:border-emerald-500 hover:shadow-md ${
-      isHighlighted ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-slate-200'
+    className={`relative block w-full rounded-2xl bg-white p-4 pr-14 text-left shadow-sm transition hover:shadow-md ${
+      isHighlighted ? 'ring-2 ring-emerald-200' : ''
     }`}
   >
     <button
@@ -726,7 +901,7 @@ const RouteCard = ({
           ? 'border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100'
           : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
       }`}
-      aria-label={isFavorite ? 'Remove favorite route' : 'Save to favorites'}
+      aria-label={isFavorite ? 'Bỏ lưu tuyến' : 'Lưu tuyến'}
     >
       <span className="material-symbols-outlined text-[20px] leading-none">{isFavorite ? 'star' : 'star_border'}</span>
     </button>
@@ -750,22 +925,22 @@ const RouteCard = ({
 
     <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
       <div className="rounded-lg bg-slate-50 px-2 py-2">
-        <div className="text-[11px] font-semibold uppercase text-slate-500">Trip duration</div>
+        <div className="text-[11px] font-semibold uppercase text-slate-500">Thời gian</div>
         <div className="font-semibold text-slate-950">{formatDuration(route.estimatedDurationMinutes)}</div>
       </div>
       <div className="rounded-lg bg-slate-50 px-2 py-2">
-        <div className="text-[11px] font-semibold uppercase text-slate-500">Fare</div>
+        <div className="text-[11px] font-semibold uppercase text-slate-500">Giá vé</div>
         <div className="font-semibold text-slate-950">{formatFare(route.fare)}</div>
       </div>
       <div className="rounded-lg bg-slate-50 px-2 py-2">
-        <div className="text-[11px] font-semibold uppercase text-slate-500">Distance</div>
+        <div className="text-[11px] font-semibold uppercase text-slate-500">Quãng đường</div>
         <div className="font-semibold text-slate-950">{route.distanceKm} km</div>
       </div>
     </div>
 
     {!compact && (
       <div className="mt-3">
-        <div className="mb-2 text-xs font-bold uppercase text-slate-500">Stops</div>
+        <div className="mb-2 text-xs font-bold uppercase text-slate-500">Điểm dừng</div>
         <div className="flex flex-wrap gap-1.5">
           {route.stops.map((stop) => (
             <span
@@ -847,7 +1022,7 @@ const RouteDetailsPanel = ({
     { id: 'stops', label: 'Trạm' },
     { id: 'arrival', label: 'Lịch chạy' },
     { id: 'progress', label: 'Tiến độ' },
-    { id: 'feedback', label: 'Feedback' },
+    { id: 'feedback', label: 'Phản hồi' },
   ];
   const stopEtaSummary = liveBusData?.stopEtaSummary || [];
   const getStopEta = (stop) => (
@@ -855,8 +1030,8 @@ const RouteDetailsPanel = ({
   );
 
   return (
-    <aside className="fixed bottom-0 right-0 top-[80px] z-[1200] flex w-[360px] max-w-[calc(100vw-24px)] flex-col border-l border-slate-200 bg-white shadow-2xl">
-      <div className="border-b border-slate-200 px-5 py-4">
+    <aside className="fixed inset-x-3 bottom-3 top-auto z-[1200] flex max-h-[74vh] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_24px_70px_rgba(15,23,42,0.24)] md:inset-x-auto md:bottom-4 md:right-4 md:top-[96px] md:max-h-none md:w-[390px]">
+      <div className="border-b border-slate-100 px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -876,7 +1051,7 @@ const RouteDetailsPanel = ({
             type="button"
             onClick={onClose}
             className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-            aria-label="Close route details"
+            aria-label="Đóng chi tiết tuyến"
           >
             <span className="material-symbols-outlined text-[22px]">close</span>
           </button>
@@ -902,17 +1077,17 @@ const RouteDetailsPanel = ({
           ))}
         </div>
 
-        <div className="mt-3 grid grid-cols-5 gap-1">
+        <div className="mt-3 grid grid-cols-5 gap-1 rounded-xl bg-slate-100 p-1">
           {detailTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setDetailTab(tab.id)}
               title={tab.label}
-              className={`min-w-0 truncate rounded-lg border px-1 py-2 text-[10px] font-black ${
+              className={`min-w-0 truncate rounded-lg px-1 py-2 text-[10px] font-black ${
                 detailTab === tab.id
-                  ? 'border-emerald-600 bg-emerald-50 text-emerald-700'
-                  : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                  ? 'bg-white text-emerald-700 shadow-sm'
+                  : 'text-slate-500 hover:bg-white/60'
               }`}
             >
               {tab.label}
@@ -921,7 +1096,7 @@ const RouteDetailsPanel = ({
         </div>
 
         {panelMessage && (
-          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold leading-5 text-emerald-800">
+          <div className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold leading-5 text-emerald-800">
             {panelMessage}
           </div>
         )}
@@ -932,48 +1107,48 @@ const RouteDetailsPanel = ({
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-lg bg-slate-50 px-3 py-3">
-                <div className="text-[11px] font-black uppercase text-slate-400">Fare</div>
+                <div className="text-[11px] font-black uppercase text-slate-400">Giá vé</div>
                 <div className="mt-1 font-black text-slate-950">{formatFare(route.fare)}</div>
               </div>
               <div className="rounded-lg bg-slate-50 px-3 py-3">
-                <div className="text-[11px] font-black uppercase text-slate-400">Trip duration</div>
+                <div className="text-[11px] font-black uppercase text-slate-400">Thời gian</div>
                 <div className="mt-1 font-black text-slate-950">{formatDuration(route.estimatedDurationMinutes)}</div>
               </div>
               <div className="rounded-lg bg-slate-50 px-3 py-3">
-                <div className="text-[11px] font-black uppercase text-slate-400">Distance</div>
+                <div className="text-[11px] font-black uppercase text-slate-400">Quãng đường</div>
                 <div className="mt-1 font-black text-slate-950">{route.distanceKm} km</div>
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
+            <div className="rounded-xl bg-slate-50 p-4 text-sm">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <div className="text-[11px] font-black uppercase text-slate-400">Operating hours</div>
+                  <div className="text-[11px] font-black uppercase text-slate-400">Hoạt động</div>
                   <div className="font-semibold text-slate-700">{firstDeparture} - {lastDeparture}</div>
                 </div>
                 <div>
-                  <div className="text-[11px] font-black uppercase text-slate-400">Departure</div>
+                  <div className="text-[11px] font-black uppercase text-slate-400">Xuất phát</div>
                   <div className="font-semibold text-slate-950">{directionOrigin}</div>
                 </div>
                 <div>
-                  <div className="text-[11px] font-black uppercase text-slate-400">Destination</div>
+                  <div className="text-[11px] font-black uppercase text-slate-400">Điểm đến</div>
                   <div className="font-semibold text-slate-950">{directionDestination}</div>
                 </div>
               </div>
             </div>
 
             <div className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-slate-700">
-              <div className="mb-1 text-[11px] font-black uppercase text-emerald-700">Route Description</div>
-              Optimized route from {directionOrigin} to {directionDestination}, including key stops,
-              operating hours, estimated minimum trip duration, fare, and nearby stop support.
+              <div className="mb-1 text-[11px] font-black uppercase text-emerald-700">Mô tả tuyến</div>
+              Tuyến từ {directionOrigin} đến {directionDestination}, gồm điểm dừng chính, giờ hoạt động,
+              thời gian dự kiến, giá vé và hỗ trợ tìm trạm gần bạn.
             </div>
 
             <div className="rounded-lg border border-emerald-200 bg-white p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm font-black text-slate-950">Bus tickets</div>
+                  <div className="text-sm font-black text-slate-950">Vé xe buýt</div>
                   <p className="mt-1 text-sm leading-5 text-slate-600">
-                    Buy a one-way ticket or monthly pass for this route.
+                    Mua vé một chiều hoặc vé tháng cho tuyến này.
                   </p>
                 </div>
                 <span className="shrink-0 rounded bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase text-emerald-700">
@@ -986,7 +1161,7 @@ const RouteDetailsPanel = ({
                 className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-black text-white hover:bg-emerald-700"
               >
                 <span className="material-symbols-outlined text-[19px]">confirmation_number</span>
-                Buy ticket
+                Mua vé
               </button>
             </div>
 
@@ -994,26 +1169,26 @@ const RouteDetailsPanel = ({
               <div className="border-b border-slate-100 px-4 py-3">
                 <div className="flex items-center gap-2 text-sm font-black text-slate-950">
                   <span className="material-symbols-outlined text-[18px] text-emerald-600">notifications</span>
-                  Trip notification settings
+                  Cài đặt thông báo chuyến đi
                 </div>
               </div>
               <div className="divide-y divide-slate-100">
                 <div className="flex items-center justify-between gap-3 px-4 py-3">
                   <div>
-                    <div className="text-sm font-black text-slate-900">Bus arrival alerts</div>
+                    <div className="text-sm font-black text-slate-900">Thông báo xe đến</div>
                     <p className="mt-1 text-xs leading-5 text-slate-500">
-                      Enable the bell beside a stop to receive approaching and arriving alerts.
+                      Bật chuông cạnh điểm dừng để nhận thông báo khi xe sắp đến.
                     </p>
                   </div>
                   <span className="rounded bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase text-emerald-700">
-                    Stops
+                    Trạm
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3 px-4 py-3">
                   <div>
-                    <div className="text-sm font-black text-slate-900">Delay alerts</div>
+                    <div className="text-sm font-black text-slate-900">Thông báo trễ chuyến</div>
                     <p className="mt-1 text-xs leading-5 text-slate-500">
-                      Notify when a bus on this route is delayed beyond the expected schedule.
+                      Nhận thông báo khi xe trên tuyến bị trễ so với lịch dự kiến.
                     </p>
                   </div>
                   <button
@@ -1033,9 +1208,9 @@ const RouteDetailsPanel = ({
                 </div>
                 <div className="flex items-center justify-between gap-3 px-4 py-3">
                   <div>
-                    <div className="text-sm font-black text-slate-900">Route change alerts</div>
+                    <div className="text-sm font-black text-slate-900">Thông báo đổi tuyến</div>
                     <p className="mt-1 text-xs leading-5 text-slate-500">
-                      Notify when this route has detours, stop changes, or temporary path updates.
+                      Nhận thông báo khi tuyến có thay đổi điểm dừng hoặc lộ trình tạm thời.
                     </p>
                   </div>
                   <button
@@ -1060,16 +1235,16 @@ const RouteDetailsPanel = ({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">
-                    Live Bus Location
+                    Vị trí xe trực tiếp
                   </div>
                   <p className="mt-1 text-sm text-slate-600">
-                    Track active buses on this route with GPS position, status, and next-stop ETA.
+                    Theo dõi xe đang chạy trên tuyến bằng vị trí GPS, trạng thái và ETA trạm kế tiếp.
                   </p>
                 </div>
                 <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-black uppercase ${
                   isLiveTracking ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
                 }`}>
-                  {isLiveTracking ? 'Live' : 'Off'}
+                  {isLiveTracking ? 'Live' : 'Tắt'}
                 </span>
               </div>
               <button
@@ -1085,7 +1260,7 @@ const RouteDetailsPanel = ({
                 <span className="material-symbols-outlined text-[20px]">
                   {isLiveLoading ? 'progress_activity' : 'gps_fixed'}
                 </span>
-                {isLiveTracking ? 'Stop live location' : 'View live location'}
+                {isLiveTracking ? 'Tắt theo dõi' : 'Xem xe trực tiếp'}
               </button>
               {liveError && (
                 <div className="mt-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -1103,7 +1278,7 @@ const RouteDetailsPanel = ({
                         </span>
                       </div>
                       <div className="mt-1 text-xs text-slate-500">
-                        Next stop: {bus.nextStop} - ETA {bus.estimatedArrivalTime}
+                        Trạm kế: {bus.nextStop} - ETA {bus.estimatedArrivalTime}
                       </div>
                       {bus.delay && (
                         <div className="mt-2 rounded border border-amber-100 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
@@ -1117,14 +1292,14 @@ const RouteDetailsPanel = ({
               {isLiveTracking && stopEtaSummary.length > 0 && (
                 <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3">
                   <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-emerald-700">
-                    Estimated Arrival Time (ETA)
+                    Thời gian xe đến dự kiến
                   </div>
                   <div className="space-y-2">
                     {stopEtaSummary.slice(0, 4).map((eta) => (
                       <div key={eta.stopId} className="flex items-center justify-between gap-3 rounded bg-white px-3 py-2 text-xs">
                         <div className="min-w-0">
                           <div className="truncate font-black text-slate-900">{eta.stopName}</div>
-                          <div className="text-slate-500">{eta.nextBusId || 'No active bus'}</div>
+                          <div className="text-slate-500">{eta.nextBusId || 'Chưa có xe hoạt động'}</div>
                         </div>
                         <div className="shrink-0 text-right">
                           <div className="font-black text-emerald-700">{eta.estimatedArrivalTime}</div>
@@ -1139,7 +1314,7 @@ const RouteDetailsPanel = ({
                 <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm text-amber-900">
                   <div className="mb-1 flex items-center gap-2 text-[11px] font-black uppercase tracking-wide text-amber-700">
                     <span className="material-symbols-outlined text-[16px]">route</span>
-                    Route change
+                    Đổi tuyến
                   </div>
                   <div className="font-semibold">{liveBusData.routeChange.reasonForChange}</div>
                   <p className="mt-1 text-xs leading-5">{liveBusData.routeChange.updatedRoutePath}</p>
@@ -1149,7 +1324,7 @@ const RouteDetailsPanel = ({
 
             <div>
               <div className="mb-2 flex items-center justify-between">
-                <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Nearby Stop</div>
+                <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Trạm gần nhất</div>
                 <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-700">
                   Live
                 </span>
@@ -1158,12 +1333,12 @@ const RouteDetailsPanel = ({
                 <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
                   <div className="font-black text-slate-950">{nearestStop.name}</div>
                   <div className="mt-1 text-xs font-semibold text-slate-500">
-                    {nearestStop.distanceKm.toFixed(2)} km from your current location
+                    Cách vị trí hiện tại {nearestStop.distanceKm.toFixed(2)} km
                   </div>
                 </div>
               ) : (
                 <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
-                  Use current location to show the nearest stop for this route.
+                  Dùng vị trí hiện tại để hiển thị trạm gần nhất của tuyến này.
                 </div>
               )}
             </div>
@@ -1179,7 +1354,7 @@ const RouteDetailsPanel = ({
                 className="flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700 hover:bg-emerald-100"
               >
                 <span className="material-symbols-outlined text-[18px]">schedule</span>
-                View realtime ETA
+                Xem ETA thời gian thực
               </button>
             )}
             {directionStops.map((stop) => {
@@ -1193,12 +1368,12 @@ const RouteDetailsPanel = ({
                   <div className="min-w-0 flex-1">
                     <div className="font-black text-slate-900">{stop.name}</div>
                     <div className="text-xs text-slate-500">
-                      Minimum arrival: {addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}
+                      Dự kiến sớm nhất: {addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}
                     </div>
                     <div className={`mt-1 text-xs font-black ${
                       stopEta?.etaMinutes ? 'text-emerald-700' : 'text-slate-400'
                     }`}>
-                      ETA: {stopEta?.estimatedArrivalTime || 'ETA unavailable'}
+                      ETA: {stopEta?.estimatedArrivalTime || 'chưa có dữ liệu'}
                       {stopEta?.nextBusId ? ` • ${stopEta.nextBusId}` : ''}
                     </div>
                   </div>
@@ -1211,8 +1386,8 @@ const RouteDetailsPanel = ({
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                           : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
                       }`}
-                      aria-label={isArrivalNotificationEnabled?.(route, stop) ? 'Disable arrival notification' : 'Enable arrival notification'}
-                      title={isArrivalNotificationEnabled?.(route, stop) ? 'Disable arrival notification' : 'Enable arrival notification'}
+                      aria-label={isArrivalNotificationEnabled?.(route, stop) ? 'Tắt thông báo xe đến' : 'Bật thông báo xe đến'}
+                      title={isArrivalNotificationEnabled?.(route, stop) ? 'Tắt thông báo xe đến' : 'Bật thông báo xe đến'}
                     >
                       <span className="material-symbols-outlined text-[18px] leading-none">
                         {isArrivalNotificationEnabled?.(route, stop) ? 'notifications_active' : 'notifications'}
@@ -1226,8 +1401,8 @@ const RouteDetailsPanel = ({
                           ? 'border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100'
                           : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700'
                       }`}
-                      aria-label={isStopFavorite?.(route, stop) ? 'Remove favorite stop' : 'Save stop to favorites'}
-                      title={isStopFavorite?.(route, stop) ? 'Remove favorite stop' : 'Save stop to favorites'}
+                      aria-label={isStopFavorite?.(route, stop) ? 'Bỏ lưu điểm dừng' : 'Lưu điểm dừng'}
+                      title={isStopFavorite?.(route, stop) ? 'Bỏ lưu điểm dừng' : 'Lưu điểm dừng'}
                     >
                       <span className="material-symbols-outlined text-[18px] leading-none">
                         {isStopFavorite?.(route, stop) ? 'star' : 'star_border'}
@@ -1244,10 +1419,10 @@ const RouteDetailsPanel = ({
           <div>
             <div className="rounded-lg border border-slate-200 bg-white">
               <div className="grid grid-cols-4 border-b border-slate-100 px-3 py-2 text-xs font-black uppercase text-slate-400">
-                <span>Stop</span>
-                <span>Minimum arrival</span>
-                <span>Live ETA</span>
-                <span>Frequency</span>
+                <span>Trạm</span>
+                <span>Sớm nhất</span>
+                <span>ETA</span>
+                <span>Tần suất</span>
               </div>
               {directionStops.map((stop) => {
                 const stopEta = getStopEta(stop);
@@ -1260,16 +1435,16 @@ const RouteDetailsPanel = ({
                     <span className="font-semibold text-slate-800">{stop.name}</span>
                     <span className="text-slate-600">{addMinutesToTime(firstDeparture, stop.estimatedOffsetMinutes || 0)}</span>
                     <span className={stopEta?.etaMinutes ? 'font-black text-emerald-700' : 'text-slate-400'}>
-                      {stopEta?.estimatedArrivalTime || 'Unavailable'}
+                      {stopEta?.estimatedArrivalTime || 'Chưa có'}
                     </span>
-                    <span className="text-slate-600">Every {frequencyMinutes} min</span>
+                    <span className="text-slate-600">Mỗi {frequencyMinutes} phút</span>
                   </div>
                 );
               })}
             </div>
             <div className="mt-2 text-xs font-semibold text-slate-500">
-              Minimum arrival time is calculated from the first departure at {firstDeparture}.
-              Live ETA updates automatically when live tracking is enabled.
+              Thời gian sớm nhất được tính từ chuyến đầu lúc {firstDeparture}.
+              ETA trực tiếp tự cập nhật khi bật theo dõi xe.
             </div>
           </div>
         )}
@@ -1278,10 +1453,10 @@ const RouteDetailsPanel = ({
           <div className="space-y-3">
             {!isLiveTracking && (
               <div className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="text-sm font-black text-slate-950">Trip progress unavailable</div>
+                <div className="text-sm font-black text-slate-950">Chưa có tiến độ chuyến</div>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Start live location tracking to view completed stops, remaining stops, current bus position,
-                  trip status, and estimated remaining travel time.
+                  Bật theo dõi xe trực tiếp để xem trạm đã qua, trạm còn lại, vị trí xe,
+                  trạng thái chuyến và thời gian còn lại.
                 </p>
                 <button
                   type="button"
@@ -1289,7 +1464,7 @@ const RouteDetailsPanel = ({
                   className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white hover:bg-slate-800"
                 >
                   <span className="material-symbols-outlined text-[18px]">route</span>
-                  View trip progress
+                  Xem tiến độ chuyến
                 </button>
               </div>
             )}
@@ -1319,7 +1494,7 @@ const RouteDetailsPanel = ({
 
                   <div className="mt-4">
                     <div className="flex items-center justify-between text-xs font-black text-slate-500">
-                      <span>Progress toward destination</span>
+                      <span>Tiến độ tới điểm cuối</span>
                       <span>{progress.progressPercent}%</span>
                     </div>
                     <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
@@ -1332,25 +1507,25 @@ const RouteDetailsPanel = ({
 
                   <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
                     <div className="rounded-lg bg-slate-50 p-3">
-                      <div className="font-black uppercase text-slate-400">Current stop</div>
+                      <div className="font-black uppercase text-slate-400">Trạm hiện tại</div>
                       <div className="mt-1 font-semibold text-slate-900">{progress.currentStop}</div>
                     </div>
                     <div className="rounded-lg bg-slate-50 p-3">
-                      <div className="font-black uppercase text-slate-400">Next stop</div>
+                      <div className="font-black uppercase text-slate-400">Trạm kế</div>
                       <div className="mt-1 font-semibold text-slate-900">{progress.nextStop}</div>
                     </div>
                     <div className="rounded-lg bg-slate-50 p-3">
-                      <div className="font-black uppercase text-slate-400">Completed</div>
-                      <div className="mt-1 font-semibold text-slate-900">{progress.completedStops.length} stops</div>
+                      <div className="font-black uppercase text-slate-400">Đã qua</div>
+                      <div className="mt-1 font-semibold text-slate-900">{progress.completedStops.length} trạm</div>
                     </div>
                     <div className="rounded-lg bg-slate-50 p-3">
-                      <div className="font-black uppercase text-slate-400">Remaining time</div>
+                      <div className="font-black uppercase text-slate-400">Còn lại</div>
                       <div className="mt-1 font-semibold text-slate-900">{progress.estimatedRemainingTime}</div>
                     </div>
                   </div>
 
                   <div className="mt-4">
-                    <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Completed stops</div>
+                    <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Trạm đã qua</div>
                     <div className="space-y-1">
                       {progress.completedStops.length ? progress.completedStops.map((stop) => (
                         <div key={stop.stopId} className="flex items-center gap-2 text-xs text-slate-600">
@@ -1358,13 +1533,13 @@ const RouteDetailsPanel = ({
                           <span>{stop.stopName}</span>
                         </div>
                       )) : (
-                        <div className="text-xs text-slate-400">No stops completed yet.</div>
+                        <div className="text-xs text-slate-400">Chưa qua trạm nào.</div>
                       )}
                     </div>
                   </div>
 
                   <div className="mt-4">
-                    <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Remaining stops</div>
+                    <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Trạm còn lại</div>
                     <div className="space-y-1">
                       {progress.remainingStops.length ? progress.remainingStops.map((stop) => (
                         <div key={stop.stopId} className="flex items-center gap-2 text-xs text-slate-600">
@@ -1372,7 +1547,7 @@ const RouteDetailsPanel = ({
                           <span>{stop.stopName}</span>
                         </div>
                       )) : (
-                        <div className="text-xs text-emerald-700">Trip is near completion.</div>
+                        <div className="text-xs text-emerald-700">Chuyến sắp hoàn tất.</div>
                       )}
                     </div>
                   </div>
@@ -1383,16 +1558,15 @@ const RouteDetailsPanel = ({
         )}
 
         {detailTab === 'feedback' && (
-          <div className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="text-sm font-black text-slate-950">Passenger Feedback</div>
+          <div className="rounded-xl bg-slate-50 p-4">
+            <div className="text-sm font-black text-slate-950">Phản hồi hành khách</div>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              Feedback for this route will appear here after passengers submit reviews for schedule,
-              stop quality, and travel experience.
+              Phản hồi về lịch chạy, chất lượng điểm dừng và trải nghiệm chuyến đi sẽ hiển thị tại đây.
             </p>
             <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs font-black text-slate-500">
-              <div className="rounded-lg bg-slate-50 px-2 py-3">Schedule</div>
-              <div className="rounded-lg bg-slate-50 px-2 py-3">Stops</div>
-              <div className="rounded-lg bg-slate-50 px-2 py-3">Service</div>
+              <div className="rounded-lg bg-white px-2 py-3">Lịch chạy</div>
+              <div className="rounded-lg bg-white px-2 py-3">Trạm</div>
+              <div className="rounded-lg bg-white px-2 py-3">Dịch vụ</div>
             </div>
           </div>
         )}
@@ -1540,6 +1714,35 @@ const getDepartureTime = () => formatTimeFromOffset(0);
 
 const getArrivalTime = (itinerary) => formatTimeFromOffset(itinerary?.totalDurationMinutes || itinerary?.totalDuration || 0);
 
+const getWaitLegs = (itinerary) => (itinerary?.legs || []).filter((leg) => leg.type === 'WAIT');
+
+const formatExpectedArrivalTime = (value) => {
+  if (!value) {
+    return '';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+};
+
+const getWaitSummaryText = (durationMinutes) => {
+  const duration = Number(durationMinutes) || 0;
+  return duration > 0 ? `Chờ khoảng ${formatVietnameseDuration(duration)}` : 'Không cần chờ';
+};
+
+const getWaitDetailText = (leg) => {
+  const eta = formatExpectedArrivalTime(leg?.estimatedArrivalTime);
+  if (eta) {
+    return `${eta} · Dự kiến xe đến`;
+  }
+
+  return getWaitSummaryText(leg?.durationMinutes);
+};
+
 const ItineraryResultCard = ({
   itinerary,
   isRecommended = false,
@@ -1549,6 +1752,10 @@ const ItineraryResultCard = ({
 }) => {
   const busLegs = getBusLegs(itinerary);
   const routeCodes = busLegs.map((leg) => leg.routeCode).filter(Boolean);
+  const firstBusLeg = busLegs[0];
+  const lastBusLeg = busLegs[busLegs.length - 1];
+  const totalWaitMinutes = getWaitLegs(itinerary)
+    .reduce((total, leg) => total + (Number(leg.durationMinutes) || 0), 0);
 
   return (
     <article
@@ -1593,14 +1800,23 @@ const ItineraryResultCard = ({
             {formatMeters(itinerary.totalWalkingDistance)}
           </span>
           <span>·</span>
-          <span>Chờ {formatVietnameseDuration(itinerary.totalWaitingDuration)}</span>
+          <span>{getWaitSummaryText(totalWaitMinutes)}</span>
           {isRecommended && (
             <>
               <span>·</span>
-              <span className="font-black text-emerald-700">{itinerary.label || 'Nhanh nhất'}</span>
+              <span className="font-black text-emerald-700">Tốt nhất</span>
             </>
           )}
         </div>
+
+        {firstBusLeg && lastBusLeg && (
+          <div className="mt-2 grid grid-cols-[58px_1fr] gap-x-2 gap-y-1 text-xs text-slate-600">
+            <span className="font-black uppercase text-slate-400">Lên</span>
+            <span className="truncate font-semibold text-slate-800">{getStationName(firstBusLeg.fromStation)}</span>
+            <span className="font-black uppercase text-slate-400">Xuống</span>
+            <span className="truncate font-semibold text-slate-800">{getStationName(lastBusLeg.toStation)}</span>
+          </div>
+        )}
       </button>
 
       <button
@@ -1615,10 +1831,66 @@ const ItineraryResultCard = ({
   );
 };
 
+const TimelineRail = ({
+  children,
+  isFirst = false,
+  isLast = false,
+}) => {
+  const lineStyle = isFirst
+    ? { top: 12, bottom: 0 }
+    : isLast
+      ? { top: 0, height: 12 }
+      : { top: 0, bottom: 0 };
+
+  return (
+    <div className="relative flex w-6 self-stretch justify-center">
+      {!(isFirst && isLast) && (
+        <span
+          className="absolute left-1/2 w-0.5 -translate-x-1/2 bg-blue-300"
+          style={lineStyle}
+        />
+      )}
+      {children}
+    </div>
+  );
+};
+
+const StopTimelineIcon = ({ tone = 'emerald' }) => {
+  const colorClass = tone === 'red' ? 'border-red-500' : 'border-emerald-600';
+  const fillClass = tone === 'red' ? 'bg-red-500' : 'bg-emerald-600';
+
+  return (
+    <span className={`relative z-10 mt-1 flex h-4 w-4 items-center justify-center rounded-full border-2 bg-white ${colorClass}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${fillClass}`} />
+    </span>
+  );
+};
+
+const ModeTimelineIcon = ({ icon, tone = 'slate' }) => {
+  const toneClass = {
+    blue: 'text-blue-600',
+    amber: 'text-amber-600',
+    emerald: 'text-emerald-700',
+    slate: 'text-slate-600',
+  }[tone] || 'text-slate-600';
+
+  return (
+    <span className={`relative z-10 mt-2 flex h-5 w-5 items-center justify-center rounded-full bg-white ${toneClass}`}>
+      <span className="material-symbols-outlined text-[17px]">{icon}</span>
+    </span>
+  );
+};
+
+const TimelineTime = ({ children }) => (
+  <div className="pt-1 text-right text-xs font-semibold text-slate-500">{children}</div>
+);
+
 const ItineraryDetailsPanel = ({
   itinerary,
   originPlace,
   destinationPlace,
+  focusedLegIndex = null,
+  onFocusLeg,
   onClose,
 }) => {
   const startTime = new Date();
@@ -1649,174 +1921,179 @@ const ItineraryDetailsPanel = ({
     return time;
   };
 
+  const routeCodes = getBusLegs(itinerary).map((leg) => leg.routeCode).filter(Boolean).join(' · ');
+  const timelineGridClass = 'grid grid-cols-[44px_24px_minmax(0,1fr)] gap-3 items-stretch';
+
   return (
-    <aside className="fixed bottom-0 right-0 top-[80px] z-[1200] flex w-[360px] max-w-[calc(100vw-24px)] flex-col border-l border-slate-200 bg-white shadow-2xl">
-      <div className="border-b border-slate-200 px-5 py-4">
-        <div className="flex items-start gap-3">
+    <aside className="fixed inset-x-3 bottom-3 top-auto z-[1200] flex max-h-[78vh] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_24px_70px_rgba(15,23,42,0.24)] md:inset-x-auto md:bottom-4 md:right-4 md:top-[96px] md:max-h-none md:w-[392px]">
+      <div className="px-5 pb-4 pt-4">
+        <div className="flex items-center justify-between gap-3">
           <button
             type="button"
             onClick={onClose}
-            className="mt-0.5 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+            className="-ml-2 flex h-9 w-9 items-center justify-center rounded-full text-slate-600 hover:bg-slate-100 hover:text-slate-900"
             aria-label="Đóng chi tiết lộ trình"
           >
             <span className="material-symbols-outlined text-[21px]">arrow_back</span>
           </button>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-xs text-slate-600">từ {originPlace?.displayName || originPlace?.address || 'Điểm đón'}</div>
-            <div className="truncate text-xs text-slate-600">đến {destinationPlace?.displayName || destinationPlace?.address || 'Điểm đến'}</div>
-            <div className="mt-3 text-xl font-black text-slate-950">
-              {getDepartureTime()} - {getArrivalTime(itinerary)}
-              <span className="ml-1 text-base font-semibold text-slate-500">
-                ({formatVietnameseDuration(itinerary.totalDurationMinutes || itinerary.totalDuration)})
-              </span>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
-              <span className="material-symbols-outlined text-[14px]">directions_walk</span>
-              {getBusLegs(itinerary).map((leg) => (
-                <React.Fragment key={`${leg.routeId}-${leg.routeCode}-${leg.direction}`}>
-                  <span>›</span>
-                  <span className="rounded border border-slate-300 px-1.5 py-0.5 text-[11px] font-black text-slate-950">{leg.routeCode}</span>
-                </React.Fragment>
-              ))}
-              <span>›</span>
-              <span className="material-symbols-outlined text-[14px]">directions_walk</span>
-            </div>
+          <div className="min-w-0 flex-1 text-sm font-black text-slate-950">Chi tiết lộ trình</div>
+        </div>
+
+        <div className="mt-3">
+          <div className="text-xl font-black tracking-tight text-slate-950">
+            {getDepartureTime()} - {getArrivalTime(itinerary)}
+            <span className="ml-1 text-base font-semibold text-slate-500">
+              ({formatVietnameseDuration(itinerary.totalDurationMinutes || itinerary.totalDuration)})
+            </span>
+          </div>
+          <div className="mt-1 truncate text-xs font-semibold text-slate-500">
+            {itinerary.transferCount} chuyển tuyến · {formatMeters(itinerary.totalWalkingDistance)} đi bộ
+            {routeCodes ? ` · ${routeCodes}` : ''}
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-4">
-        <div className="relative">
-          <div className="absolute left-[58px] top-2 bottom-2 w-0.5 bg-sky-300" />
-          <div className="space-y-4">
-            <div className="grid grid-cols-[46px_24px_1fr] gap-3">
-              <div className="text-xs font-semibold text-slate-700">{getDepartureTime()}</div>
-              <span className="relative z-10 mt-1 h-3 w-3 rounded-full border-2 border-slate-900 bg-white" />
-              <div className="font-black text-slate-950">{originPlace?.displayName || originPlace?.address || 'Điểm đón'}</div>
+      <div className="flex-1 overflow-y-auto px-5 pb-5 pt-1">
+        <div>
+          <div>
+            <div className={`${timelineGridClass} py-1`}>
+              <TimelineTime>{getDepartureTime()}</TimelineTime>
+              <TimelineRail isFirst>
+                <StopTimelineIcon />
+              </TimelineRail>
+              <div>
+                <div className="text-sm font-black text-slate-950">{originPlace?.displayName || originPlace?.address || 'Điểm đón'}</div>
+              </div>
             </div>
 
             {(itinerary.legs || []).map((leg, index) => {
               const time = legTime(leg);
+              const endTime = formatTimeFromOffset(accumulatedMinutes, startTime);
+              const isFocused = focusedLegIndex === index;
+              const rowClassName = `${timelineGridClass} w-full rounded-xl py-1 text-left transition ${
+                isFocused ? 'bg-emerald-50/70 ring-1 ring-emerald-100' : 'hover:bg-slate-50'
+              }`;
 
               if (leg.type === 'WAIT') {
                 return (
-                  <div key={`${leg.type}-${index}`} className="grid grid-cols-[46px_24px_1fr] gap-3">
-                    <div className="text-xs font-semibold text-slate-700">{time}</div>
-                    <span className="relative z-10 flex h-4 w-4 items-center justify-center rounded-full bg-white text-amber-600">
-                      <span className="material-symbols-outlined text-[15px]">schedule</span>
-                    </span>
-                    <div className="border-b border-slate-200 pb-4">
-                      <div className="font-semibold text-slate-900">Chờ xe</div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        Khoảng {formatVietnameseDuration(leg.durationMinutes)}
-                        {leg.reason ? ` · ${leg.reason}` : ''}
+                  <button type="button" onClick={() => onFocusLeg?.(index)} key={`${leg.type}-${index}`} className={rowClassName}>
+                    <TimelineTime>{time}</TimelineTime>
+                    <TimelineRail>
+                      <ModeTimelineIcon icon="schedule" tone="amber" />
+                    </TimelineRail>
+                    <div className="py-1.5">
+                      <div className="text-sm font-semibold text-slate-800">
+                        Chờ xe
+                      </div>
+                      <div className="mt-1 text-xs font-medium text-slate-500">
+                        {getWaitDetailText(leg)}
                       </div>
                     </div>
-                  </div>
+                  </button>
                 );
               }
 
               if (leg.type === 'WALK') {
                 return (
-                  <div key={`${leg.type}-${index}`} className="grid grid-cols-[46px_24px_1fr] gap-3">
-                    <div className="text-xs font-semibold text-slate-700">{time}</div>
-                    <span className="relative z-10 flex h-4 w-4 items-center justify-center rounded-full bg-white text-slate-600">
-                      <span className="material-symbols-outlined text-[15px]">directions_walk</span>
-                    </span>
-                    <div className="border-b border-slate-200 pb-4">
-                      <div className="font-semibold text-slate-900">Đi bộ</div>
-                      <div className="mt-2 grid grid-cols-[42px_1fr] gap-x-2 gap-y-1 text-xs">
-                        <span className="font-black uppercase text-slate-400">Từ</span>
-                        <span className="font-semibold text-slate-800">{resolvePointName(leg.from)}</span>
-                        <span className="font-black uppercase text-slate-400">Đến</span>
-                        <span className="font-semibold text-slate-800">{resolvePointName(leg.to)}</span>
+                  <button type="button" onClick={() => onFocusLeg?.(index)} key={`${leg.type}-${index}`} className={rowClassName}>
+                    <div />
+                    <TimelineRail>
+                      <ModeTimelineIcon icon="directions_walk" tone="blue" />
+                    </TimelineRail>
+                    <div className="py-2">
+                      <div className="text-sm font-semibold text-slate-800">
+                        Đi bộ {formatVietnameseDuration(leg.durationMinutes)}
                       </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        Khoảng {formatVietnameseDuration(leg.durationMinutes)} · {formatMeters(leg.distanceMeters)}
+                      <div className="mt-1 text-xs font-medium text-slate-500">
+                        {formatMeters(leg.distanceMeters)} · đến {resolvePointName(leg.to)}
                         {leg.isFallback ? ' · chưa có hình học đường đi bộ' : ''}
                       </div>
                     </div>
-                  </div>
+                  </button>
                 );
               }
 
               if (leg.type === 'TRANSFER') {
                 return (
-                  <div key={`${leg.type}-${index}`} className="grid grid-cols-[46px_24px_1fr] gap-3">
-                    <div className="text-xs font-semibold text-slate-700">{time}</div>
-                    <span className="relative z-10 flex h-4 w-4 items-center justify-center rounded-full bg-white text-slate-600">
-                      <span className="material-symbols-outlined text-[15px]">directions_walk</span>
-                    </span>
-                    <div className="border-b border-slate-200 pb-4">
-                      <div className="font-semibold text-slate-900">
-                        {leg.sameStation ? 'Chuyển tuyến cùng trạm' : 'Đi bộ chuyển tuyến'}
+                  <button type="button" onClick={() => onFocusLeg?.(index)} key={`${leg.type}-${index}`} className={rowClassName}>
+                    <div />
+                    <TimelineRail>
+                      <ModeTimelineIcon icon="directions_walk" tone="blue" />
+                    </TimelineRail>
+                    <div className="py-2">
+                      <div className="text-sm font-semibold text-slate-800">
+                        {leg.sameStation ? 'Chuyển tuyến cùng trạm' : `Đi bộ ${formatVietnameseDuration(leg.walkingDurationMinutes)}`}
                       </div>
-                      <div className="mt-2 grid grid-cols-[42px_1fr] gap-x-2 gap-y-1 text-xs">
-                        <span className="font-black uppercase text-slate-400">Từ</span>
-                        <span className="font-semibold text-slate-800">{getStationName(leg.fromStation)}</span>
-                        <span className="font-black uppercase text-slate-400">Đến</span>
-                        <span className="font-semibold text-slate-800">{getStationName(leg.toStation)}</span>
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        Khoảng {formatVietnameseDuration(leg.walkingDurationMinutes)} · {formatMeters(leg.walkingDistanceMeters)}
+                      <div className="mt-1 text-xs font-medium text-slate-500">
+                        {getStationName(leg.fromStation)} → {getStationName(leg.toStation)} · {formatMeters(leg.walkingDistanceMeters)}
                         {leg.walkingIsFallback ? ' · chưa có hình học đường đi bộ' : ''}
                       </div>
                     </div>
-                  </div>
+                  </button>
                 );
               }
 
               if (leg.type === 'BUS') {
                 return (
-                  <div key={`${leg.type}-${leg.routeId}-${index}`} className="grid grid-cols-[46px_24px_1fr] gap-3">
-                    <div className="text-xs font-semibold text-slate-700">{time}</div>
-                    <span className="relative z-10 flex h-4 w-4 items-center justify-center rounded-full bg-white text-slate-700">
-                      <span className="material-symbols-outlined text-[15px]">directions_bus</span>
-                    </span>
-                    <div className="border-b border-slate-200 pb-4">
-                      <div className="font-black text-slate-950">{getStationName(leg.fromStation)}</div>
-                      <div className="mt-1 text-xs font-semibold text-emerald-700">Lên xe tại đây</div>
-                      <div className="mt-3 rounded border border-slate-200 bg-white px-3 py-2 text-sm">
-                        <div>
-                          <span className="mr-2 rounded border border-slate-300 px-1.5 py-0.5 text-xs font-black">{leg.routeCode}</span>
-                          <span className="font-black text-slate-950">{leg.routeName}</span>
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          Hướng {leg.direction === 'INBOUND' ? 'lượt về' : 'lượt đi'}
-                        </div>
-                        <div className="mt-3 grid grid-cols-[64px_1fr] gap-x-2 gap-y-1 text-xs">
-                          <span className="font-black uppercase text-slate-400">Lên</span>
-                          <span className="font-semibold text-slate-800">{getStationName(leg.fromStation)}</span>
-                          <span className="font-black uppercase text-slate-400">Xuống</span>
-                          <span className="font-semibold text-slate-800">{getStationName(leg.toStation)}</span>
-                        </div>
+                  <React.Fragment key={`${leg.type}-${leg.routeId}-${index}`}>
+                    <div className={`${timelineGridClass} py-1`}>
+                      <TimelineTime>{time}</TimelineTime>
+                      <TimelineRail>
+                        <StopTimelineIcon />
+                      </TimelineRail>
+                      <div>
+                        <div className="text-sm font-black text-slate-950">{getStationName(leg.fromStation)}</div>
                       </div>
-                      <div className="mt-2 text-xs text-slate-500">
-                        {Math.max((leg.stops || []).length - 1, 0)} trạm dừng · {formatVietnameseDuration(leg.durationMinutes)}
-                        {leg.geometry ? '' : ' · chưa có hình học tuyến xe'}
-                      </div>
-                      <div className="mt-3 font-black text-slate-950">{getStationName(leg.toStation)}</div>
-                      <div className="mt-1 text-xs font-semibold text-orange-600">Xuống xe tại đây</div>
                     </div>
-                  </div>
+
+                    <button type="button" onClick={() => onFocusLeg?.(index)} className={rowClassName}>
+                      <div />
+                      <TimelineRail>
+                        <ModeTimelineIcon icon="directions_bus" tone="emerald" />
+                      </TimelineRail>
+                      <div className={`rounded-xl px-3 py-2 ${
+                        isFocused ? 'bg-emerald-100' : 'bg-emerald-50'
+                      }`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="rounded border border-emerald-300 bg-white px-2 py-0.5 text-xs font-black text-emerald-700">
+                            {leg.routeCode}
+                          </span>
+                          <span className="shrink-0 text-xs font-semibold text-slate-500">
+                            {Math.max((leg.stops || []).length - 1, 0)} điểm dừng · {formatVietnameseDuration(leg.durationMinutes)}
+                          </span>
+                        </div>
+                        <div className="mt-2 text-xs font-medium text-slate-600">
+                          Hướng {leg.direction === 'INBOUND' ? 'về' : 'đi'}
+                        </div>
+                      </div>
+                    </button>
+
+                    <div className={`${timelineGridClass} py-1`}>
+                      <TimelineTime>{endTime}</TimelineTime>
+                      <TimelineRail>
+                        <StopTimelineIcon />
+                      </TimelineRail>
+                      <div>
+                        <div className="text-sm font-black text-slate-950">{getStationName(leg.toStation)}</div>
+                      </div>
+                    </div>
+                  </React.Fragment>
                 );
               }
 
               return null;
             })}
 
-            <div className="grid grid-cols-[46px_24px_1fr] gap-3">
-              <div className="text-xs font-semibold text-slate-700">{getArrivalTime(itinerary)}</div>
-              <span className="relative z-10 mt-1 h-3 w-3 rounded-full border-2 border-slate-900 bg-white" />
-              <div className="font-black text-slate-950">{destinationPlace?.displayName || destinationPlace?.address || 'Điểm đến'}</div>
+            <div className={`${timelineGridClass} py-1`}>
+              <TimelineTime>{getArrivalTime(itinerary)}</TimelineTime>
+              <TimelineRail isLast>
+                <StopTimelineIcon tone="red" />
+              </TimelineRail>
+              <div>
+                <div className="text-sm font-black text-slate-950">{destinationPlace?.displayName || destinationPlace?.address || 'Điểm đến'}</div>
+              </div>
             </div>
           </div>
-        </div>
-
-        <div className="mt-6 border-t border-slate-200 pt-4 text-xs text-slate-600">
-          <div>Chi phí: ước tính theo từng tuyến xe buýt</div>
-          <div className="mt-4 font-black text-slate-950">Vé và thông tin</div>
-          <div className="mt-1 text-emerald-700">BusDN · thông tin lộ trình theo dữ liệu tuyến hiện có</div>
         </div>
       </div>
     </aside>
@@ -1870,6 +2147,7 @@ const SearchRoutesPage = () => {
   const [selectedRoute, setSelectedRoute] = useState(null);
   const [selectedItinerary, setSelectedItinerary] = useState(null);
   const [selectedItineraryDetails, setSelectedItineraryDetails] = useState(null);
+  const [focusedItineraryLegIndex, setFocusedItineraryLegIndex] = useState(null);
   const [currentLocation, setCurrentLocation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
@@ -1956,6 +2234,10 @@ const SearchRoutesPage = () => {
   const isLiveTrackingSelectedRoute = Boolean(
     selectedRoute?.id && isSameRouteId(liveRouteId, selectedRoute.id)
   );
+
+  useEffect(() => {
+    setFocusedItineraryLegIndex(null);
+  }, [selectedItinerary?.rank, selectedRoute?.id]);
 
   useEffect(() => {
     let isMounted = true;
@@ -2281,7 +2563,7 @@ const SearchRoutesPage = () => {
     setError('');
 
     if (!navigator.geolocation) {
-      setError('Current location is not supported by this browser.');
+      setError('Trình duyệt chưa hỗ trợ lấy vị trí hiện tại.');
       return;
     }
 
@@ -2317,7 +2599,7 @@ const SearchRoutesPage = () => {
       (geoError) => {
         const messages = {
           1: 'Location permission was denied.',
-          2: 'Current location is unavailable.',
+          2: 'Không thể lấy vị trí hiện tại.',
           3: 'Location request timed out.',
         };
 
@@ -2414,7 +2696,7 @@ const SearchRoutesPage = () => {
       || routes.find((route) => route.routeNumber === favoriteRoute.routeNumber)?.id;
 
     if (!routeId) {
-      setError('Route not found.');
+      setError('Không tìm thấy tuyến.');
       return;
     }
 
@@ -2478,7 +2760,7 @@ const SearchRoutesPage = () => {
 
   const handleRemoveFavoriteStop = async (favoriteStop) => {
     if (!favoriteStop.stopId) {
-      setError('Stop not found.');
+      setError('Không tìm thấy điểm dừng.');
       return;
     }
 
@@ -2658,7 +2940,7 @@ const SearchRoutesPage = () => {
     clearError();
 
     if (!route?.id) {
-      setLiveError('Bus not found.');
+      setLiveError('Không tìm thấy xe.');
       return;
     }
 
@@ -2751,15 +3033,16 @@ const SearchRoutesPage = () => {
     <div className="h-screen overflow-hidden bg-slate-100 text-slate-950">
       <Header />
 
-      <main className="mt-[80px] flex h-[calc(100vh-80px)]">
-        <aside className="z-10 flex w-[420px] shrink-0 flex-col border-r border-slate-200 bg-white shadow-xl">
-          <div className="grid grid-cols-2 border-b border-slate-200">
+      <main className="relative mt-[80px] flex h-[calc(100vh-80px)]">
+        <aside className="absolute inset-x-3 bottom-3 z-[1100] flex max-h-[58vh] flex-col overflow-hidden rounded-2xl bg-white/95 shadow-[0_24px_70px_rgba(15,23,42,0.24)] backdrop-blur md:static md:inset-auto md:max-h-none md:w-[380px] md:shrink-0 md:rounded-none md:bg-white md:shadow-[8px_0_30px_rgba(15,23,42,0.08)]">
+          <div className="p-3">
+            <div className="grid grid-cols-2 rounded-xl bg-slate-100 p-1">
             <button
               type="button"
               onClick={() => setActiveTab('lookup')}
-              className={`flex items-center justify-center gap-2 px-4 py-4 text-sm font-bold ${
+              className={`flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-bold transition ${
                 activeTab === 'lookup'
-                  ? 'border-b-2 border-emerald-600 text-emerald-700'
+                  ? 'bg-white text-emerald-700 shadow-sm'
                   : 'text-slate-500 hover:bg-slate-50'
               }`}
             >
@@ -2769,40 +3052,41 @@ const SearchRoutesPage = () => {
             <button
               type="button"
               onClick={() => setActiveTab('directions')}
-              className={`flex items-center justify-center gap-2 px-4 py-4 text-sm font-bold ${
+              className={`flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-bold transition ${
                 activeTab === 'directions'
-                  ? 'border-b-2 border-emerald-600 text-emerald-700'
+                  ? 'bg-white text-emerald-700 shadow-sm'
                   : 'text-slate-500 hover:bg-slate-50'
               }`}
             >
               <span className="material-symbols-outlined">conversion_path</span>
               LỘ TRÌNH
             </button>
+            </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex-1 overflow-y-auto px-4 pb-4">
             {activeTab === 'lookup' ? (
               <>
                 <div>
-                  <div className="text-sm font-black uppercase tracking-wide text-slate-950">Route Planner</div>
+                  <div className="text-sm font-black uppercase tracking-wide text-slate-950">Khám phá tuyến xe</div>
                   <p className="mt-1 text-xs leading-5 text-slate-500">
-                    Manage your transit and discover local routes based on your precise current location.
+                    Tìm điểm dừng gần bạn và xem nhanh tuyến đang phục vụ.
                   </p>
 
                   <button
                     type="button"
                     onClick={handleUseCurrentLocation}
                     disabled={isLocating}
-                    className="mt-4 flex w-full items-center justify-center gap-2 rounded bg-slate-950 px-4 py-3 text-xs font-black uppercase text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-xs font-black uppercase text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
                   >
                     <span className="material-symbols-outlined text-[18px]">
                       {isLocating ? 'progress_activity' : 'my_location'}
                     </span>
-                    {isLocating ? 'Detecting location...' : 'Use current location'}
+                    {isLocating ? 'Đang lấy vị trí...' : 'Dùng vị trí hiện tại'}
                   </button>
                 </div>
 
-                <div className="mt-5 border-t border-slate-200 pt-4">
+                <div className="mt-5 border-t border-slate-100 pt-4">
                   <div className="mb-3 flex items-center justify-between">
                     <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Nearby stops</div>
                     <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-700">
@@ -2812,7 +3096,7 @@ const SearchRoutesPage = () => {
 
                   {currentLocation && (
                     <div className="mb-3 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-slate-600">
-                      <div className="font-bold text-slate-950">Current location detected</div>
+                      <div className="font-bold text-slate-950">Đã xác định vị trí</div>
                       <div>
                         {currentLocation.latitude.toFixed(5)}, {currentLocation.longitude.toFixed(5)}
                       </div>
@@ -2821,13 +3105,13 @@ const SearchRoutesPage = () => {
 
                   {isLocating && (
                     <div className="rounded-lg bg-slate-100 px-4 py-4 text-sm font-semibold text-slate-600">
-                      Detecting your GPS location...
+                      Đang lấy vị trí GPS...
                     </div>
                   )}
 
                   {!isLocating && currentLocation && nearbyStops.length === 0 && (
                     <div className="rounded-lg border border-slate-200 bg-white px-4 py-5 text-sm text-slate-600">
-                      No nearby results found. Please try again later or check location permission.
+                      Không tìm thấy điểm dừng gần bạn. Hãy kiểm tra quyền vị trí hoặc thử lại sau.
                     </div>
                   )}
 
@@ -2861,6 +3145,12 @@ const SearchRoutesPage = () => {
               </>
             ) : (
               <form onSubmit={handleFindBestRoute} className="space-y-3">
+                <div>
+                  <div className="text-sm font-black uppercase tracking-wide text-slate-950">Tìm lộ trình</div>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">
+                    Nhập điểm đón và điểm đến, BusDN sẽ tự chuyển sang tọa độ và chọn lộ trình tốt nhất.
+                  </p>
+                </div>
                 <input
                   type="text"
                   value={bestFrom}
@@ -2869,7 +3159,7 @@ const SearchRoutesPage = () => {
                     clearError();
                   }}
                   placeholder="Nhập điểm đón"
-                  className="w-full rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
+                  className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
                 />
                 <input
                   type="text"
@@ -2879,12 +3169,12 @@ const SearchRoutesPage = () => {
                     clearError();
                   }}
                   placeholder="Nhập điểm đến"
-                  className="w-full rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
+                  className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500"
                 />
                 <button
                   type="submit"
                   disabled={isFindingBest}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 font-bold text-white hover:bg-emerald-700 disabled:opacity-60"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
                 >
                   <span className="material-symbols-outlined">
                     {isFindingBest ? 'progress_activity' : 'route'}
@@ -2893,7 +3183,7 @@ const SearchRoutesPage = () => {
                 </button>
 
                 {bestRouteResult && (
-                  <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+                  <div className="rounded-2xl bg-emerald-50 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-sm font-black text-emerald-900">Lộ trình được đề xuất</div>
@@ -2902,7 +3192,9 @@ const SearchRoutesPage = () => {
                         </p>
                       </div>
                       <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[11px] font-black text-emerald-700">
-                        {itineraryRecommendations.length} found
+                        {itineraryRecommendations.length > 1
+                          ? `${itineraryRecommendations.length} lộ trình`
+                          : 'Tốt nhất'}
                       </span>
                     </div>
 
@@ -2951,7 +3243,7 @@ const SearchRoutesPage = () => {
 
             {isLoading && (
               <div className="mt-4 rounded-lg bg-slate-100 px-4 py-3 text-sm text-slate-600">
-                Loading routes...
+                Đang tải tuyến...
               </div>
             )}
 
@@ -2959,7 +3251,7 @@ const SearchRoutesPage = () => {
               <div className="mt-5 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-bold text-slate-700">
-                    {routes.length} route{routes.length === 1 ? '' : 's'} found
+                    {routes.length} tuyến phù hợp
                   </div>
                   {(activeFilters.q || activeFilters.from || activeFilters.to || selectedRoute || nearbyStops.length > 0 || bestRouteResult) && (
                     <button
@@ -2968,7 +3260,7 @@ const SearchRoutesPage = () => {
                       className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-black text-slate-600 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
                     >
                       <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-                      Back
+                      Quay lại
                     </button>
                   )}
                 </div>
@@ -3000,11 +3292,13 @@ const SearchRoutesPage = () => {
         <MapCanvas
           selectedRoute={selectedRoute}
           selectedItinerary={selectedItinerary}
+          focusedItineraryLegIndex={focusedItineraryLegIndex}
           currentLocation={currentLocation}
           liveBusData={liveBusData}
           liveError={liveError}
           arrivalAlerts={[...delayAlerts, ...arrivalAlerts]}
           onDismissArrivalAlert={handleDismissArrivalAlert}
+          onSelectItineraryLeg={setFocusedItineraryLegIndex}
           onUseCurrentLocation={handleUseCurrentLocation}
         />
         {selectedItineraryDetails && (
@@ -3012,6 +3306,8 @@ const SearchRoutesPage = () => {
             itinerary={selectedItineraryDetails}
             originPlace={bestRouteResult?.originPlace}
             destinationPlace={bestRouteResult?.destinationPlace}
+            focusedLegIndex={focusedItineraryLegIndex}
+            onFocusLeg={setFocusedItineraryLegIndex}
             onClose={() => setSelectedItineraryDetails(null)}
           />
         )}

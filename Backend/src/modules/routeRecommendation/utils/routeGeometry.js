@@ -49,9 +49,9 @@ export const extractBusRouteGeometry = ({ route, direction, fromStation, toStati
     };
   }
 
-  const startIndex = Math.min(fromIndex, toIndex);
-  const endIndex = Math.max(fromIndex, toIndex);
-  const coordinates = polyline.slice(startIndex, endIndex + 1);
+  const coordinates = fromIndex <= toIndex
+    ? polyline.slice(fromIndex, toIndex + 1)
+    : polyline.slice(toIndex, fromIndex + 1).reverse();
 
   if (coordinates.length < 2) {
     return {

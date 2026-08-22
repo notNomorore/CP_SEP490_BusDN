@@ -1,10 +1,16 @@
 import { haversineDistanceMeters } from '../../busStops/bus-stop.utils.js';
 import routeRecommendationConfig from '../routeRecommendation.config.js';
 
+const normalizeText = (value = '') => value
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase();
+
 export class WalkingRoutingService {
   constructor(config = routeRecommendationConfig) {
     this.config = config;
     this.cache = new Map();
+    this.unsafeStepKeywords = (config.WALKING_AVOID_STEP_KEYWORDS || []).map(normalizeText);
   }
 
   async route({ from, to, allowExternal = true }) {
@@ -23,7 +29,9 @@ export class WalkingRoutingService {
     const route = allowExternal
       ? await this.fetchOsrmWalkingRoute({ from, to }).catch(() => null)
       : null;
-    const result = route || this.buildFallbackWalkingRoute({ from, to });
+    const result = route?.isAccessible === false
+      ? route
+      : route || this.buildFallbackWalkingRoute({ from, to });
     this.cache.set(key, result);
     return result;
   }
@@ -37,7 +45,7 @@ export class WalkingRoutingService {
     const params = new URLSearchParams({
       overview: 'full',
       geometries: 'geojson',
-      steps: 'false',
+      steps: 'true',
     });
     const url = `${this.config.WALKING_OSRM_BASE_URL.replace(/\/$/, '')}/route/v1/${this.config.WALKING_OSRM_PROFILE}/${coordinates}?${params.toString()}`;
     const response = await fetch(url, {
@@ -54,13 +62,40 @@ export class WalkingRoutingService {
       return null;
     }
 
+    const unsafeStep = this.findUnsafeStep(route);
+    if (unsafeStep) {
+      return {
+        distanceMeters: route.distance,
+        durationSeconds: route.duration,
+        geometry: null,
+        source: 'OSRM_WALKING',
+        isFallback: false,
+        isAccessible: false,
+        blockedReason: 'UNSAFE_WALKING_SEGMENT',
+        blockedStepName: unsafeStep.name || '',
+      };
+    }
+
     return {
       distanceMeters: route.distance,
       durationSeconds: route.duration,
       geometry: route.geometry || null,
       source: 'OSRM_WALKING',
       isFallback: false,
+      isAccessible: true,
     };
+  }
+
+  findUnsafeStep(route) {
+    if (!this.unsafeStepKeywords.length) {
+      return null;
+    }
+
+    const steps = (route.legs || []).flatMap((leg) => leg.steps || []);
+    return steps.find((step) => {
+      const normalizedName = normalizeText(step.name || '');
+      return this.unsafeStepKeywords.some((keyword) => normalizedName.includes(keyword));
+    }) || null;
   }
 
   buildFallbackWalkingRoute({ from, to }) {
@@ -73,6 +108,7 @@ export class WalkingRoutingService {
       geometry: null,
       source: 'HAVERSINE_FALLBACK',
       isFallback: true,
+      isAccessible: true,
     };
   }
 }

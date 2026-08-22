@@ -31,6 +31,10 @@ export class PathFinder {
     const result = new Map();
     for (const candidate of candidates) {
       const walking = await this.walkToStation(point, candidate.station);
+      if (walking?.isAccessible === false) {
+        continue;
+      }
+
       result.set(candidate.stationId, {
         candidate,
         walking,

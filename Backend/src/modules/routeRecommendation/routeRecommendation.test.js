@@ -81,7 +81,14 @@ const walkingRouting = {
   },
 };
 
-const runRecommendations = async ({ routes, stations, origin, destination, maxTransfers = 1 }) => {
+const runRecommendations = async ({
+  routes,
+  stations,
+  origin,
+  destination,
+  maxTransfers = 1,
+  walkingRoutingService = walkingRouting,
+}) => {
   const transitGraph = buildTransitGraph({ routes, stations, config: testConfig });
   const originCandidates = findNearbyTransitStops({
     point: origin,
@@ -97,7 +104,7 @@ const runRecommendations = async ({ routes, stations, origin, destination, maxTr
   });
   const transferGraph = await buildTransferGraph({
     transitGraph,
-    walkingRouting,
+    walkingRouting: walkingRoutingService,
     config: testConfig,
   });
   const waitingTimeService = new WaitingTimeService({
@@ -108,7 +115,7 @@ const runRecommendations = async ({ routes, stations, origin, destination, maxTr
   const pathFinder = new PathFinder({
     transitGraph,
     transferGraph,
-    walkingRouting,
+    walkingRouting: walkingRoutingService,
     waitingTimeService,
     config: testConfig,
   });
@@ -143,9 +150,76 @@ describe('route recommendation', () => {
 
     expect(result.recommendations[0].legs.map((leg) => leg.type)).toEqual(['WALK', 'WAIT', 'BUS', 'WALK']);
     const busLeg = result.recommendations[0].legs.find((leg) => leg.type === 'BUS');
+    const waitLeg = result.recommendations[0].legs.find((leg) => leg.type === 'WAIT');
     expect(busLeg.routeCode).toBe('09');
     expect(busLeg.geometry.type).toBe('LineString');
     expect(busLeg.geometry.coordinates.length).toBeGreaterThan(1);
+    expect(waitLeg.reason).toBe('ESTIMATED_WAIT');
+  });
+
+  it('deduplicates near-identical candidates on the same route sequence', async () => {
+    const a = station('A', 16.0600, 108.2200, 'A');
+    const b = station('B', 16.0602, 108.2202, 'B');
+    const c = station('C', 16.0610, 108.2210, 'C');
+    const d = station('D', 16.0612, 108.2212, 'D');
+    const result = await runRecommendations({
+      routes: [route('R1', '09', [stop(a, 1, 0), stop(b, 2, 3), stop(c, 3, 8), stop(d, 4, 12)])],
+      stations: [a, b, c, d],
+      origin: { latitude: 16.0601, longitude: 108.2201 },
+      destination: { latitude: 16.0611, longitude: 108.2211 },
+      maxTransfers: 0,
+    });
+
+    expect(result.paths.length).toBeGreaterThan(1);
+    expect(result.recommendations).toHaveLength(1);
+    expect(result.recommendations[0].legs.find((leg) => leg.type === 'BUS').routeCode).toBe('09');
+  });
+
+  it('skips a stop candidate when walking routing marks it inaccessible', async () => {
+    const blocked = station('BLOCKED', 16.0600, 108.2200, 'Blocked stop');
+    const safe = station('SAFE', 16.0602, 108.2202, 'Safe stop');
+    const destinationStop = station('D', 16.0610, 108.2210, 'D');
+    const walkingRoutingWithBlockedStop = {
+      async route({ from, to }) {
+        const distanceMeters = haversineDistanceMeters(from, to);
+        if (to.stationId === 'BLOCKED') {
+          return {
+            distanceMeters,
+            durationSeconds: distanceMeters / testConfig.FALLBACK_WALKING_SPEED_METERS_PER_SECOND,
+            geometry: null,
+            source: 'TEST',
+            isFallback: false,
+            isAccessible: false,
+            blockedReason: 'UNSAFE_WALKING_SEGMENT',
+          };
+        }
+
+        return {
+          distanceMeters,
+          durationSeconds: distanceMeters / testConfig.FALLBACK_WALKING_SPEED_METERS_PER_SECOND,
+          geometry: null,
+          source: 'TEST',
+          isFallback: true,
+          isAccessible: true,
+        };
+      },
+    };
+
+    const result = await runRecommendations({
+      routes: [
+        route('R1', 'BLOCKED_ROUTE', [stop(blocked, 1, 0), stop(destinationStop, 2, 5)]),
+        route('R2', 'SAFE_ROUTE', [stop(safe, 1, 0), stop(destinationStop, 2, 8)]),
+      ],
+      stations: [blocked, safe, destinationStop],
+      origin: { latitude: 16.0601, longitude: 108.2201 },
+      destination: { latitude: 16.0611, longitude: 108.2211 },
+      maxTransfers: 0,
+      walkingRoutingService: walkingRoutingWithBlockedStop,
+    });
+
+    const busLeg = result.recommendations[0].legs.find((leg) => leg.type === 'BUS');
+    expect(busLeg.routeCode).toBe('SAFE_ROUTE');
+    expect(busLeg.fromStation.stationId).toBe('SAFE');
   });
 
   it('finds a one-transfer route when no direct route reaches the destination', async () => {

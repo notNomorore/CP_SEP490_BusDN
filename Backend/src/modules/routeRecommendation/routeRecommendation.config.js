@@ -3,6 +3,13 @@ const numberFromEnv = (key, fallback) => {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 };
 
+const listFromEnv = (key, fallback) => (
+  (process.env[key] || fallback.join(','))
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+);
+
 export const routeRecommendationConfig = {
   MAX_ORIGIN_STOPS: numberFromEnv('ROUTE_RECOMMENDATION_MAX_ORIGIN_STOPS', 8),
   MAX_DESTINATION_STOPS: numberFromEnv('ROUTE_RECOMMENDATION_MAX_DESTINATION_STOPS', 8),
@@ -19,6 +26,13 @@ export const routeRecommendationConfig = {
   WALKING_OSRM_BASE_URL: process.env.ROUTE_RECOMMENDATION_WALKING_OSRM_BASE_URL || 'https://router.project-osrm.org',
   WALKING_OSRM_PROFILE: process.env.ROUTE_RECOMMENDATION_WALKING_OSRM_PROFILE || 'foot',
   WALKING_OSRM_TIMEOUT_MS: numberFromEnv('ROUTE_RECOMMENDATION_WALKING_OSRM_TIMEOUT_MS', 3500),
+  WALKING_AVOID_STEP_KEYWORDS: listFromEnv('ROUTE_RECOMMENDATION_WALKING_AVOID_STEP_KEYWORDS', [
+    'cầu vượt',
+    'cau vuot',
+    'motorway',
+    'trunk',
+  ]),
+  SHOW_ALTERNATIVE_RECOMMENDATIONS: process.env.ROUTE_RECOMMENDATION_SHOW_ALTERNATIVES === 'true',
 };
 
 export default routeRecommendationConfig;

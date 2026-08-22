@@ -56,16 +56,18 @@ export class WaitingTimeService {
       .sort((left, right) => left - right);
 
     if (upcomingWaits.length) {
+      const durationMinutes = Math.round(upcomingWaits[0]);
       return {
-        durationMinutes: Math.round(upcomingWaits[0]),
+        durationMinutes,
         reason: 'SCHEDULE',
+        estimatedArrivalTime: new Date(this.now.getTime() + durationMinutes * 60 * 1000).toISOString(),
       };
     }
 
     const headway = this.resolveHeadwayMinutes(schedules, route);
     return {
       durationMinutes: Math.max(Math.round(headway / 2), 1),
-      reason: schedules.length ? 'HEADWAY' : 'DEFAULT_HEADWAY',
+      reason: 'ESTIMATED_WAIT',
     };
   }
 
